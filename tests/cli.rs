@@ -1,0 +1,298 @@
+//! End-to-end checks of `kyber check` and `kyber render` configuration handling.
+//!
+//! Every run starts in a working directory that is neither the fixture nor the document
+//! directory, so relative paths and origins are resolved for real.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde_json::{Value, json};
+
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+
+struct Run {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+/// A scratch directory holding generated documents and themes, with an empty `cwd` inside.
+struct Sandbox {
+    root: PathBuf,
+    cwd: PathBuf,
+}
+
+impl Sandbox {
+    fn new(name: &str) -> Self {
+        let root = std::env::temp_dir().join(format!("kyber-cli-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("cwd")).expect("create sandbox");
+        let root = root.canonicalize().expect("canonical sandbox path");
+        Self {
+            cwd: root.join("cwd"),
+            root,
+        }
+    }
+
+    /// Writes a file below the sandbox root and returns its absolute path.
+    fn write(&self, name: &str, content: &str) -> String {
+        let path = self.root.join(name);
+        fs::write(&path, content).expect("write sandbox file");
+        path.to_str().expect("utf-8 path").to_owned()
+    }
+
+    fn theme(&self, name: &str, theme: Value) -> String {
+        self.write(name, &theme.to_string())
+    }
+
+    fn run(&self, args: &[&str]) -> Run {
+        run_in(&self.cwd, args)
+    }
+
+    /// The resolved configuration of a document that must be valid.
+    fn config(&self, args: &[&str]) -> Value {
+        let run = self.run(&[&["check"], args, &["--print-config"]].concat());
+        assert_eq!(run.code, 0, "{}", run.stderr);
+        serde_json::from_str(&run.stdout).expect("print-config emits JSON")
+    }
+
+    /// The diagnostics of a document that must be rejected.
+    fn rejection(&self, args: &[&str]) -> String {
+        let run = self.run(&[&["check"], args].concat());
+        assert_eq!(run.code, 1, "expected a diagnostic, got stdout: {}", run.stdout);
+        run.stderr
+    }
+}
+
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn run_in(cwd: &Path, args: &[&str]) -> Run {
+    let output = Command::new(env!("CARGO_BIN_EXE_kyber"))
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("run kyber");
+    Run {
+        code: output.status.code().expect("exit code"),
+        stdout: String::from_utf8(output.stdout).expect("utf-8 stdout"),
+        stderr: String::from_utf8(output.stderr).expect("utf-8 stderr"),
+    }
+}
+
+fn assert_pt(config: &Value, pointer: &str, expected: f64) {
+    let actual = config.pointer(pointer).and_then(Value::as_f64).expect(pointer);
+    assert!((actual - expected).abs() < 1e-6, "{pointer}: {actual} != {expected}");
+}
+
+fn mm(value: f64) -> f64 {
+    value * 72.0 / 25.4
+}
+
+#[test]
+fn loads_a_document_with_a_partial_theme_and_tracks_resource_origins() {
+    let sandbox = Sandbox::new("valid");
+    let document = format!("{FIXTURES}/doc.md");
+    let config = sandbox.config(&[&document]);
+
+    let theme_dir = format!("{FIXTURES}/themes");
+    assert_eq!(
+        config["fonts"]["Fixture Serif"]["regular"],
+        json!({"origin": "theme", "dir": theme_dir, "path": "fonts/dummy.otf"})
+    );
+    assert_eq!(
+        config["bibliography-file"],
+        json!({"origin": "document", "dir": FIXTURES, "path": "refs.bib"})
+    );
+    assert_eq!(config["fonts"]["Libertinus Mono"]["regular"]["origin"], "bundled");
+    assert_eq!(config["styles"]["body"]["font"], "Fixture Serif");
+}
+
+#[test]
+fn later_layers_override_earlier_ones_and_the_theme_flag_beats_front_matter() {
+    let sandbox = Sandbox::new("precedence");
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({"version": 1, "page": {"margins": {"top": "24mm"}}}),
+    );
+    let other = sandbox.theme(
+        "other.json",
+        json!({"version": 1, "page": {"margins": {"top": "13mm"}}}),
+    );
+    let top = "/page/margin-top";
+
+    let plain = sandbox.write("plain.md", "# Plain\n");
+    assert_pt(&sandbox.config(&[&plain]), top, mm(27.0));
+
+    let themed = sandbox.write("themed.md", &format!("---\ntheme: {theme}\n---\n"));
+    assert_pt(&sandbox.config(&[&themed]), top, mm(24.0));
+
+    let front = sandbox.write(
+        "front.md",
+        &format!("---\ntheme: {theme}\nmargins:\n  top: 18mm\n---\n"),
+    );
+    assert_pt(&sandbox.config(&[&front]), top, mm(18.0));
+    assert_pt(&sandbox.config(&[&front, "--set", "margins.top=14mm"]), top, mm(14.0));
+
+    assert_pt(&sandbox.config(&[&themed, "--theme", &other]), top, mm(13.0));
+}
+
+#[test]
+fn objects_merge_by_field_arrays_replace_and_permitted_nulls_are_kept() {
+    let sandbox = Sandbox::new("merge");
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({
+            "version": 1,
+            "styles": {"heading-1": {"size": "2em"}},
+            "lists": {"bullets": ["*"]},
+            "pages": {"first": null},
+        }),
+    );
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let config = sandbox.config(&[&document, "--theme", &theme]);
+
+    assert_pt(&config, "/styles/heading-1/size", 21.0);
+    assert_eq!(config["styles"]["heading-1"]["weight"], "bold");
+    assert_eq!(config["lists"]["bullets"], json!(["*"]));
+    assert_eq!(config["pages"]["first"], Value::Null);
+}
+
+#[test]
+fn rejects_null_where_the_type_does_not_allow_it() {
+    let sandbox = Sandbox::new("null");
+    let theme = sandbox.theme("theme.json", json!({"version": 1, "styles": {"body": {"size": null}}}));
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let stderr = sandbox.rejection(&[&document, "--theme", &theme]);
+
+    assert!(stderr.contains(&format!("{theme}: styles.body.size:")), "{stderr}");
+}
+
+#[test]
+fn rejects_undefined_and_cyclic_token_references() {
+    let sandbox = Sandbox::new("tokens");
+    let document = sandbox.write("doc.md", "# Doc\n");
+
+    let undefined = sandbox.theme(
+        "undefined.json",
+        json!({"version": 1, "tokens": {"colors": {"x": "$colors.nope"}}}),
+    );
+    let stderr = sandbox.rejection(&[&document, "--theme", &undefined]);
+    assert!(
+        stderr.contains("tokens.colors.x: undefined token $colors.nope"),
+        "{stderr}"
+    );
+
+    let cyclic = sandbox.theme(
+        "cyclic.json",
+        json!({"version": 1, "tokens": {"colors": {"a": "$colors.b", "b": "$colors.a"}}}),
+    );
+    let stderr = sandbox.rejection(&[&document, "--theme", &cyclic]);
+    assert!(stderr.contains("tokens.colors.a: cyclic token reference"), "{stderr}");
+}
+
+#[test]
+fn resolves_em_against_the_body_size_and_rejects_other_units() {
+    let sandbox = Sandbox::new("units");
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let margin = |value: &str| {
+        let theme = json!({"version": 1, "page": {"margins": {"top": value}}});
+        sandbox.theme("theme.json", theme)
+    };
+
+    let theme = margin("4em");
+    assert_pt(
+        &sandbox.config(&[&document, "--theme", &theme]),
+        "/page/margin-top",
+        42.0,
+    );
+
+    for value in ["12px", "50%"] {
+        let theme = margin(value);
+        let stderr = sandbox.rejection(&[&document, "--theme", &theme]);
+        assert!(stderr.contains("page.margins.top: length"), "{stderr}");
+    }
+}
+
+#[test]
+fn rejects_wrong_or_missing_versions_and_unknown_fields() {
+    let sandbox = Sandbox::new("fields");
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let cases = [
+        (json!({"version": 2}), "version: unsupported theme version 2"),
+        (json!({}), "version: missing theme version"),
+        (json!({"version": 1, "bogus": 1}), "bogus: unknown field `bogus`"),
+    ];
+    for (theme, expected) in cases {
+        let theme = sandbox.theme("theme.json", theme);
+        let stderr = sandbox.rejection(&[&document, "--theme", &theme]);
+        assert!(stderr.contains(&format!("{theme}: {expected}")), "{stderr}");
+    }
+
+    let front = sandbox.write("front.md", "---\ncolour: red\n---\n");
+    let stderr = sandbox.rejection(&[&front]);
+    assert!(
+        stderr.contains(&format!("{front}:2:1: unknown field `colour`")),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reports_yaml_errors_at_the_document_line() {
+    let sandbox = Sandbox::new("yaml");
+    let document = sandbox.write("doc.md", "---\ntitle: ok\ntoc: [unclosed\n---\n# Doc\n");
+    let stderr = sandbox.rejection(&[&document]);
+
+    assert!(stderr.starts_with(&format!("error: {document}:3:")), "{stderr}");
+}
+
+#[test]
+fn reports_a_missing_theme_font_relative_to_the_theme() {
+    let sandbox = Sandbox::new("missing-font");
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({"version": 1, "fonts": {"Ghost": {"regular": "fonts/ghost.otf"}}}),
+    );
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let stderr = sandbox.rejection(&[&document, "--theme", &theme]);
+
+    let expected = format!(
+        "fonts.Ghost.regular: resource not found: \"fonts/ghost.otf\" relative to the theme in {}",
+        sandbox.root.display()
+    );
+    assert!(stderr.contains(&expected), "{stderr}");
+}
+
+#[test]
+fn render_fails_without_writing_a_pdf() {
+    let sandbox = Sandbox::new("render");
+    let document = sandbox.write("doc.md", "# Doc\n");
+    let run = sandbox.run(&["render", &document]);
+
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr.contains("PDF rendering is not implemented"),
+        "{}",
+        run.stderr
+    );
+    assert_eq!(fs::read_dir(&sandbox.cwd).unwrap().count(), 0);
+    assert!(!sandbox.root.join("doc.pdf").exists());
+}
+
+#[test]
+fn set_paths_resolve_against_the_working_directory() {
+    let sandbox = Sandbox::new("set-path");
+    let document = sandbox.write("doc.md", "---\nbibliography: refs.bib\n---\n");
+    sandbox.write("refs.bib", "");
+    fs::write(sandbox.cwd.join("refs.bib"), "").unwrap();
+    let config = sandbox.config(&[&document, "--set", "bibliography=refs.bib"]);
+
+    assert_eq!(
+        config["bibliography-file"],
+        json!({"origin": "working-dir", "dir": sandbox.cwd, "path": "refs.bib"})
+    );
+}

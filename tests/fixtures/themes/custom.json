@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "fonts": {
+    "Fixture Serif": {
+      "regular": "fonts/dummy.otf",
+      "italic": "fonts/dummy.otf",
+      "bold": "fonts/dummy.otf",
+      "bold-italic": "fonts/dummy.otf"
+    }
+  },
+  "tokens": {
+    "fonts": {
+      "body": "Fixture Serif"
+    }
+  }
+}

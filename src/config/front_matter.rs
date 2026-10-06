@@ -1,0 +1,361 @@
+//! YAML front matter: document metadata and the limited document settings surface.
+//!
+//! CLI `--set` overrides use the same keys. Settings map onto fixed theme paths, so a
+//! document can adjust the design but never redefine templates.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+use serde::Deserialize;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde_json::{Map, Value, json};
+
+use super::non_null;
+use super::theme::{CitationStyle, FontFamily, HeadingDepth, Lang, PageSize};
+use super::values::{FontName, LineHeight, Size, Spacing, Spec};
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct FrontMatter {
+    #[serde(default, deserialize_with = "non_null")]
+    pub title: Option<String>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub subtitle: Option<String>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub author: Option<Authors>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub date: Option<String>,
+    #[serde(default, deserialize_with = "non_null", rename = "abstract")]
+    pub abstract_: Option<String>,
+
+    /// Theme file, relative to the document.
+    #[serde(default, deserialize_with = "non_null")]
+    pub theme: Option<String>,
+    /// BibTeX file, relative to the document.
+    #[serde(default, deserialize_with = "non_null")]
+    pub bibliography: Option<String>,
+
+    #[serde(default, deserialize_with = "non_null")]
+    pub lang: Option<Lang>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub title_page: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub toc: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub numbered_headings: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub numbering_depth: Option<HeadingDepth>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub toc_depth: Option<HeadingDepth>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub citation_style: Option<CitationStyle>,
+
+    #[serde(default, deserialize_with = "non_null")]
+    pub page_size: Option<PageSize>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub margins: Option<MarginsSetting>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub column_gap: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub font_size: Option<Spec<Size>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub line_height: Option<LineHeight>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub paragraph_spacing: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub fonts: Option<FontsSetting>,
+    /// Local font families, relative to the document.
+    #[serde(default, deserialize_with = "non_null")]
+    pub font_files: Option<BTreeMap<String, FontFamily>>,
+}
+
+/// One author or a list of authors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Authors(pub Vec<String>);
+
+impl<'de> Deserialize<'de> for Authors {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct AuthorsVisitor;
+
+        impl<'de> Visitor<'de> for AuthorsVisitor {
+            type Value = Authors;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("an author name or a list of author names")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Authors, E> {
+                Ok(Authors(vec![value.to_owned()]))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Authors, A::Error> {
+                let mut names = Vec::new();
+                while let Some(name) = seq.next_element::<String>()? {
+                    names.push(name);
+                }
+                Ok(Authors(names))
+            }
+        }
+
+        deserializer.deserialize_any(AuthorsVisitor)
+    }
+}
+
+/// One length for all margins, or individual sides.
+#[derive(Debug, Clone)]
+pub enum MarginsSetting {
+    All(Spec<Spacing>),
+    Sides(MarginSides),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MarginSides {
+    #[serde(default, deserialize_with = "non_null")]
+    pub top: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub bottom: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub inner: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub outer: Option<Spec<Spacing>>,
+}
+
+impl<'de> Deserialize<'de> for MarginsSetting {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MarginsVisitor;
+
+        impl<'de> Visitor<'de> for MarginsVisitor {
+            type Value = MarginsSetting;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a length for all margins, or a map of top, bottom, inner, and outer")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<MarginsSetting, E> {
+                Spec::deserialize(de::value::StrDeserializer::new(value)).map(MarginsSetting::All)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<MarginsSetting, A::Error> {
+                MarginSides::deserialize(de::value::MapAccessDeserializer::new(map)).map(MarginsSetting::Sides)
+            }
+        }
+
+        deserializer.deserialize_any(MarginsVisitor)
+    }
+}
+
+/// Fonts for the well-known `body`, `heading`, and `mono` font tokens.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct FontsSetting {
+    #[serde(default, deserialize_with = "non_null")]
+    pub body: Option<Spec<FontName>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub heading: Option<Spec<FontName>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub mono: Option<Spec<FontName>>,
+}
+
+impl FrontMatter {
+    /// The settings as a partial theme value, merged after the selected theme.
+    pub fn theme_layer(&self) -> Value {
+        let mut layer = Map::new();
+        let mut set = |pointer: &[&str], value: Value| insert(&mut layer, pointer, value);
+
+        let document = [
+            ("lang", self.lang.as_ref().map(json)),
+            ("title-page", self.title_page.map(Value::Bool)),
+            ("toc", self.toc.map(Value::Bool)),
+            ("numbered-headings", self.numbered_headings.map(Value::Bool)),
+            ("numbering-depth", self.numbering_depth.as_ref().map(json)),
+            ("toc-depth", self.toc_depth.as_ref().map(json)),
+            ("citation-style", self.citation_style.as_ref().map(json)),
+        ];
+        for (key, value) in document {
+            if let Some(value) = value {
+                set(&["document", key], value);
+            }
+        }
+
+        if let Some(size) = &self.page_size {
+            set(&["page", "size"], json(size));
+        }
+        match &self.margins {
+            Some(MarginsSetting::All(length)) => {
+                for side in ["top", "bottom", "inner", "outer"] {
+                    set(&["page", "margins", side], json(length));
+                }
+            }
+            Some(MarginsSetting::Sides(sides)) => {
+                let sides = [
+                    ("top", &sides.top),
+                    ("bottom", &sides.bottom),
+                    ("inner", &sides.inner),
+                    ("outer", &sides.outer),
+                ];
+                for (side, length) in sides {
+                    if let Some(length) = length {
+                        set(&["page", "margins", side], json(length));
+                    }
+                }
+            }
+            None => {}
+        }
+        if let Some(gap) = &self.column_gap {
+            set(&["page", "column-gap"], json(gap));
+        }
+        if let Some(size) = &self.font_size {
+            set(&["styles", "body", "size"], json(size));
+        }
+        if let Some(line_height) = &self.line_height {
+            set(&["styles", "body", "line-height"], json(line_height));
+        }
+        if let Some(spacing) = &self.paragraph_spacing {
+            set(&["styles", "body", "space-after"], json(spacing));
+        }
+        if let Some(fonts) = &self.fonts {
+            for (token, font) in [
+                ("body", &fonts.body),
+                ("heading", &fonts.heading),
+                ("mono", &fonts.mono),
+            ] {
+                if let Some(font) = font {
+                    set(&["tokens", "fonts", token], json(font));
+                }
+            }
+        }
+        for (family, files) in self.font_files.iter().flatten() {
+            set(&["fonts", family], json(files));
+        }
+        Value::Object(layer)
+    }
+
+    /// Field-wise override: values set in `later` replace those in `self`.
+    pub fn metadata_overridden_by(&self, later: &Self) -> Metadata {
+        Metadata {
+            title: later.title.clone().or_else(|| self.title.clone()),
+            subtitle: later.subtitle.clone().or_else(|| self.subtitle.clone()),
+            authors: later
+                .author
+                .clone()
+                .or_else(|| self.author.clone())
+                .map(|a| a.0)
+                .unwrap_or_default(),
+            date: later.date.clone().or_else(|| self.date.clone()),
+            abstract_: later.abstract_.clone().or_else(|| self.abstract_.clone()),
+        }
+    }
+}
+
+/// Document metadata available to template slots. Values are plain text.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Metadata {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub authors: Vec<String>,
+    pub date: Option<String>,
+    #[serde(rename = "abstract")]
+    pub abstract_: Option<String>,
+}
+
+fn insert(object: &mut Map<String, Value>, pointer: &[&str], value: Value) {
+    let (last, parents) = pointer.split_last().expect("non-empty pointer");
+    let mut target = object;
+    for key in parents {
+        target = target
+            .entry(*key)
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .expect("settings paths only nest objects");
+    }
+    target.insert((*last).to_owned(), value);
+}
+
+fn json(value: &impl serde::Serialize) -> Value {
+    serde_json::to_value(value).expect("settings values serialize to JSON")
+}
+
+/// Front matter split from a Markdown source.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Split<'a> {
+    /// The YAML text between the fences.
+    pub yaml: &'a str,
+    /// 1-based line number of the first YAML line in the source.
+    pub first_line: u64,
+    /// The Markdown after the closing fence.
+    pub body: &'a str,
+}
+
+/// Splits leading `---` front matter, closed by `---` or `...`. Returns `None` without front matter.
+pub fn split(source: &str) -> Result<Option<Split<'_>>, String> {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let Some(rest) = source.strip_prefix("---\n").or_else(|| source.strip_prefix("---\r\n")) else {
+        return Ok(None);
+    };
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        let fence = line.trim_end_matches(['\n', '\r']);
+        if fence == "---" || fence == "..." {
+            return Ok(Some(Split {
+                yaml: &rest[..offset],
+                first_line: 2,
+                body: &rest[offset + line.len()..],
+            }));
+        }
+        offset += line.len();
+    }
+    Err("front matter starting on line 1 has no closing \"---\" line".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(yaml: &str) -> Result<FrontMatter, String> {
+        serde_saphyr::from_str(yaml).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn splits_front_matter_from_the_body() {
+        let split = split("---\ntitle: A\n---\n# Body\n").unwrap().unwrap();
+        assert_eq!(split.yaml, "title: A\n");
+        assert_eq!(split.body, "# Body\n");
+        assert_eq!(super::split("# No front matter\n").unwrap(), None);
+        assert!(super::split("---\ntitle: A\n").is_err());
+    }
+
+    #[test]
+    fn maps_settings_onto_fixed_theme_paths() {
+        let front = parse(
+            "margins: 2cm\nfont-size: 11pt\ntoc: true\nfonts:\n  body: My Serif\nfont-files:\n  My Serif:\n    regular: fonts/my.otf\n",
+        )
+        .unwrap();
+        let layer = front.theme_layer();
+        assert_eq!(layer["page"]["margins"]["inner"], "56.69291338582677pt");
+        assert_eq!(layer["styles"]["body"]["size"], "11pt");
+        assert_eq!(layer["document"]["toc"], true);
+        assert_eq!(layer["tokens"]["fonts"]["body"], "My Serif");
+        assert_eq!(layer["fonts"]["My Serif"]["regular"], "fonts/my.otf");
+        assert!(layer.get("lists").is_none());
+    }
+
+    #[test]
+    fn rejects_null_unknown_keys_and_template_fields() {
+        assert!(parse("toc: ~\n").is_err());
+        assert!(parse("title:\n").is_err());
+        assert!(parse("headers: {}\n").is_err());
+        assert!(parse("pages: {}\n").is_err());
+        assert!(parse("lang: fr\n").is_err());
+    }
+
+    #[test]
+    fn accepts_one_or_many_authors_and_yaml_1_2_scalars() {
+        let one = parse("author: Ada\n").unwrap();
+        let many = parse("author: [Ada, Grace]\ntitle: no\n").unwrap();
+        assert_eq!(one.author, Some(Authors(vec!["Ada".into()])));
+        assert_eq!(many.author, Some(Authors(vec!["Ada".into(), "Grace".into()])));
+        assert_eq!(many.title.as_deref(), Some("no"));
+    }
+}
