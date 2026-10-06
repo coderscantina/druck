@@ -91,7 +91,7 @@ Every Markdown construct that does not render yet is an error with its location,
 
 ### Temporary layout
 
-[Line filling](../src/layout/paragraph.rs) is greedy, word by word, with justified lines stretched evenly and no hyphenation. A word wider than its line is an error. Pages break at the first line that does not fit. Milestone 03 replaces line filling and milestone 04 pagination; neither is counted as completed typography.
+Line filling was greedy, word by word, with no hyphenation; [milestone 03](#2026-10-06-milestone-03-paragraph-composition) replaced it. Pages break at the first line that does not fit until milestone 04 replaces pagination.
 
 Settled layout rules that later milestones keep:
 
@@ -106,6 +106,55 @@ Settled layout rules that later milestones keep:
 ### PDF and CLI
 
 The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. `kyber render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
+
+## 2026-10-06: Milestone 03 paragraph composition
+
+### Line breaking
+
+[Breaking](../src/layout/paragraph/breaking.rs) follows Knuth and Plass: words are boxes, spaces are glue, hyphenation points and explicit hyphens are penalties, and the breaks with the least total demerits over the paragraph win. Widths are the shaped widths of milestone 02. Words are shaped once; a word split across lines is reshaped only at the break, so ligatures and kerning stay correct on both sides.
+
+Parameters, all internal constants for now:
+
+- Interword space stretches by 1/2 and shrinks by 1/3 of its natural width, in justified text only.
+- Badness is `100 × ratio³`, capped at 10 000. A first pass accepts lines up to badness 200. If no solution exists, a second pass accepts any line that is not overfull. A paragraph fails only if a single unbreakable piece is wider than its line.
+- Demerits per line are `(10 + badness)² + cost²`. A hyphen or explicit-hyphen break costs 50. Two hyphenated lines in a row add 10 000, a hyphen before the last line adds 5 000, and adjacent lines more than one spacing class apart (tight, decent, loose, very loose) add 10 000.
+- Ragged text (`left`, `center`, `right`) keeps natural spaces and is scored against a soft edge of 3 em, so lines are evened out without stretching.
+- Active breaks drop out as soon as a line from them would be overfull, so work grows with paragraph length times the breaks within one line, not quadratically. Ties go to the earlier candidate. Output is deterministic.
+
+Lines ending at a hard break or the paragraph end keep natural spacing. Spacing only changes between words; glyph widths are never adjusted.
+
+### Hyphenation
+
+`hypher` 0.1.8 (MIT or Apache-2.0) embeds the TeX patterns as compiled tries, about 230 KB for the two languages, so rendering needs no files and no system data. Only the `english` and `german` features are built, plus `alloc` so words over 45 bytes cannot panic. Pattern sources and licenses, checked on 2026-10-06 in the hypher repository:
+
+- `hyph-en-us`, American English, Gerard D. C. Kuiken, 1990 to 2005. Copying and distribution with or without modification are permitted provided the notice is preserved.
+- `hyph-de-1996`, German reformed orthography, Deutschsprachige Trennmustermannschaft, version 2024-02-28, MIT.
+
+[Rules](../src/layout/paragraph/hyphenation.rs): `document.lang` selects the patterns, and only blocks whose style has `hyphenate: true` get hyphenation points. Fragment limits are the patterns' own (English two letters before and three after, German two and two). Only runs of letters are hyphenated, so punctuation and digits stay whole. Runs with a capital after their first letter (acronyms, camel case), words that look like URLs or e-mail addresses, inline code, and link text that spells out its URL are never hyphenated. Hyphenation works across style changes inside a word, and the hyphen takes the style of the text before it.
+
+Words may also break after a hyphen or em dash that joins two words ("e-mail", "CommonMark-Spezifikation"), in every style except code. That adds no character.
+
+The drawn hyphen is part of its run's text, so extracted text reads "hyphen-" at the line end, as with other typesetters. Readers such as `pdftotext` rejoin hyphenated words; they also drop an explicit hyphen at a line end, which we cannot prevent without marked content.
+
+### Optical margin alignment
+
+In justified text, the [first and last glyph](../src/layout/paragraph/protrusion.rs) of a line hang into the margins by a share of their advance. Breaking accounts for the hang, so a protruding line is still exactly justified against the margin. Quotes have one value for both sides, because „ “ ‚ ‘ open or close depending on the language.
+
+| Characters | Share of advance |
+| --- | --- |
+| `.` `,` hyphen `'` `‘` `’` `‚` `‛` | 0.7 |
+| `:` `;` `"` `“` `”` `„` `‟` | 0.5 |
+| `–` `«` `»` `‹` `›` | 0.3 |
+| `!` `?` `—` | 0.2 |
+| Everything else | 0 |
+
+Only one glyph per edge protrudes; a comma after a closing quote hangs, the quote does not.
+
+### Consequences
+
+- The breaking constants are not theme settings. A theme can only switch `align` and `hyphenate` per block. Expose them only if review asks for it.
+- German compounds break at any pattern point, not preferably at compound boundaries ("Donaudampfschifffahrtsge-sellschaft"). Weighting compound boundaries needs data the patterns lack.
+- The breaker takes one line width for the first line and one for the rest. Milestone 05 columns and later shapes may need a width per line, which the node structure allows.
 
 ## Recording a decision
 

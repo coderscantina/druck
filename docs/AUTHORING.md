@@ -144,12 +144,14 @@ Emphasis switches between upright and italic, so it is upright inside an italic 
 
 A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, or code block does not.
 
+Line breaks are chosen for each whole paragraph. Words are hyphenated by the rules of `lang` where the block style allows it, which the default theme does for body text, abstracts, quotations, lists, and footnotes but not for headings. Inline code and link text that spells out its URL are never hyphenated. A word also breaks after a hyphen that joins two words, as in "e-mail".
+
 The following are reported as errors with their line and column, and no PDF is written:
 
 - Not supported yet: images, tables, footnotes, and layout directives. They arrive in later milestones.
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
-A character the selected font has no glyph for is an error, as is a word wider than the line. `kyber check` validates configuration only and does not read the Markdown body.
+A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
 
 ## Layout directives
 
