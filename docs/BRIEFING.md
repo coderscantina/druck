@@ -205,6 +205,8 @@ Tagged accessibility and PDF/A compliance are deferred.
 
 ## Phase 1 delivery stages
 
+The stages below describe product delivery. [The ten development milestones](PHASE_1_MILESTONES.md) divide them into bounded agent work with explicit completion gates. Current implementation state is tracked in [progress](PROGRESS.md).
+
 ### Stage 1: Core composition
 
 Implement the Markdown content model, versioned theme schema, typed configuration, validation, token resolution, override resolution, bundled default theme, text shaping, paragraph optimization, required typography, basic single-column page composition, and PDF text output. Establish reproducibility and useful source diagnostics early. Keep CLI input/output separate from rendering responsibilities.
