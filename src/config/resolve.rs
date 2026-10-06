@@ -679,7 +679,7 @@ mod tests {
                 value: theme,
             }),
             document: SettingsInput {
-                source: Source::FrontMatter("/fake/doc.md".into()),
+                source: Source::Document("/fake/doc.md".into()),
                 settings: FrontMatter::default(),
             },
             overrides: SettingsInput {

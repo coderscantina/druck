@@ -10,7 +10,7 @@ use serde::Serialize;
 pub enum Source {
     Bundled,
     Theme(PathBuf),
-    FrontMatter(PathBuf),
+    Document(PathBuf),
     Cli { working_dir: PathBuf },
 }
 
@@ -21,7 +21,7 @@ impl Source {
         match self {
             Self::Bundled => Origin::Bundled,
             Self::Theme(path) => Origin::Theme(parent(path)),
-            Self::FrontMatter(path) => Origin::Document(parent(path)),
+            Self::Document(path) => Origin::Document(parent(path)),
             Self::Cli { working_dir } => Origin::WorkingDir(working_dir.clone()),
         }
     }
@@ -32,7 +32,7 @@ impl fmt::Display for Source {
         match self {
             Self::Bundled => f.write_str("bundled default theme"),
             Self::Theme(path) => write!(f, "{}", path.display()),
-            Self::FrontMatter(path) => write!(f, "{}", path.display()),
+            Self::Document(path) => write!(f, "{}", path.display()),
             Self::Cli { .. } => f.write_str("command-line override"),
         }
     }

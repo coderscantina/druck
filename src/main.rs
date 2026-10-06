@@ -2,6 +2,12 @@
 
 mod config;
 mod diagnostic;
+mod document;
+mod layout;
+mod markdown;
+mod page;
+mod pdf;
+mod text;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -98,7 +104,7 @@ fn load(args: &InputArgs) -> Result<Config, Vec<Diagnostic>> {
         )]
     })?;
     let document_path = working_dir.join(&args.input);
-    let document_source = Source::FrontMatter(document_path.clone());
+    let document_source = Source::Document(document_path.clone());
     let cli_source = Source::Cli {
         working_dir: working_dir.clone(),
     };
