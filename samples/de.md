@@ -14,7 +14,7 @@ Dieses Beispiel prüft den ersten Darstellungsweg von *Kyber*: Überschriften, A
 
 Der klassische Buchabsatz beginnt nach einer Überschrift ohne Einzug und mit Einzug, wenn er auf einen anderen Absatz folgt. Der Einzug ist das einzige Zeichen für einen neuen Absatz, daher trennt kein zusätzlicher Abstand die Absätze. Leser verlassen sich seit Jahrhunderten auf diese Übereinkunft, und sie hält den Satzspiegel ruhig und gleichmäßig.
 
-Zeilenumbrüche werden in diesem Meilenstein noch Zeile für Zeile gewählt. Der nächste Meilenstein ersetzt das durch ein Verfahren, das den ganzen Absatz auf einmal betrachtet und deutsche Silbentrennung beherrscht. Bis dahin fallen manche Zeilen, besonders bei langen Zusammensetzungen wie „Donaudampfschifffahrtsgesellschaft“, deutlich lockerer aus als andere.
+Zeilenumbrüche werden für den ganzen Absatz auf einmal gewählt, nicht Zeile für Zeile. Die deutsche Silbentrennung hilft besonders bei langen Zusammensetzungen wie „Donaudampfschifffahrtsgesellschaft“, „Kraftfahrzeughaftpflichtversicherung“ oder „Rechtschreibreform“, die sonst ganze Zeilen auseinanderreißen. Satzzeichen am Rand einer Zeile im Blocksatz, etwa Trennstrich, Komma oder „Anführungszeichen“, ragen ein wenig in den Rand hinein, damit die Kante gerade wirkt.
 
 ### Aufzählungen
 

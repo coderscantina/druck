@@ -14,7 +14,7 @@ This sample exercises the first rendering path of *Kyber*: headings, paragraphs,
 
 The traditional book paragraph starts without an indent after a heading and with an indent when it follows another paragraph. The indent is the only signal of a new paragraph, so no extra space separates them. Readers have relied on this convention for centuries, and it keeps the text block calm and even.
 
-Line breaks in this milestone are still chosen one line at a time. The next milestone replaces that with a method that considers the whole paragraph at once, which avoids loose lines that a greedy method cannot foresee. Until then, some lines will be noticeably wider spaced than others, especially in narrow measures or around long words.
+Line breaks are chosen for the whole paragraph at once. A greedy method fills each line as far as it can and cannot foresee that this leaves the next line loose; weighing all breaks together avoids that. Hyphenation of long words such as *characteristically*, *incomprehensibility*, or *extraordinarily* gives the method more room in narrow measures. Punctuation at the edge of a justified line, like a hyphen, a comma, or a closing quotation mark, hangs slightly into the margin, so the edge looks straight.
 
 A line can also be broken by hand.\
 This line follows a hard break and starts at the left edge.
