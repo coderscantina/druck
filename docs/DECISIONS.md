@@ -45,7 +45,7 @@ Front matter and `--set KEY=VALUE` share one type ([front_matter.rs](../src/conf
 
 ### Default fonts
 
-The default theme names Libertinus Serif and Libertinus Mono (SIL OFL 1.1) as bundled resources. Milestone 02 must add the files, confirm their license and German coverage, and may still change the choice.
+The default theme names Libertinus Serif and Libertinus Mono (SIL OFL 1.1) as bundled resources. Milestone 02 added the files, see below.
 
 ### Templates and page variants
 
@@ -62,6 +62,50 @@ Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORI
 ### CLI
 
 `kyber check <doc>` validates and can `--print-config`; `kyber render <doc>` fails until milestone 02. Exit code 0 is success, 1 means diagnostics were reported, and 2 is a usage error.
+
+## 2026-10-06: Milestone 02 rendering path
+
+### Pipeline
+
+`main.rs` reads the file and calls four internal stages: [markdown](../src/markdown.rs) parses the body into [the document model](../src/document.rs), [text](../src/text/mod.rs) loads fonts and shapes, [layout](../src/layout/mod.rs) produces [positioned pages](../src/page.rs), and [pdf](../src/pdf.rs) writes them. Layout never reads files and PDF output never makes layout decisions, which keeps both usable by the phase 2 crate. The stages were built in parallel against these typed interfaces.
+
+### Dependencies
+
+- `pulldown-cmark` with default features off, for CommonMark with byte offsets. Tables, footnotes, strikethrough, and task lists are enabled only so they can be recognized and reported. Math is left off so `$` in prose stays text.
+- `krilla` for PDF output. It embeds and subsets fonts, writes ToUnicode maps from the glyph-to-text ranges we pass, and supports link annotations and, later, outlines and images. Its coordinates match ours: points from the top-left, y down.
+- `rustybuzz` 0.20 for shaping, the same version krilla already depends on, so there is one shaping engine and one font parser in the build.
+
+Licenses checked on 2026-10-06 with `cargo metadata`: all runtime crates are permissive (MIT, Apache-2.0, BSD-2/3-Clause, Zlib, Unicode-3.0, or alternatives offering one of these). Release notices are a milestone 10 task.
+
+### Fonts
+
+Libertinus v7.051 from the official release, SIL OFL 1.1, in [fonts/](../fonts) with [the license](../fonts/OFL.txt). Serif and Mono regular cover German and English punctuation (`äöüÄÖÜß „“ ‚‘ – — ’ “ ” …`), checked by shaping without missing glyphs. Bundled files are compiled in with `include_bytes!`; the default theme refers to them by path with the bundled origin.
+
+Font bytes read from disk are leaked once so the shaper and krilla share one `'static` copy. That is fine for a one-shot CLI. The phase 2 crate renders repeatedly in one process and must own the bytes instead, for example with `Arc` and a face parsed per use or a self-owning face.
+
+Shaping uses `kern` and `liga`, left-to-right, with the document language. Inline emphasis and strong text fall back to the closest available face (documented in [themes](THEMES.md)); block styles still require their face at validation. A glyph id 0 (no glyph) is an error naming the character.
+
+### Unsupported content
+
+Every Markdown construct that does not render yet is an error with its location, and `render` writes nothing. All such errors are reported in one run. Rendering a document while dropping content would hide the loss, which the briefing forbids. A paragraph starting with `:::` is reported as an unsupported layout directive until the directive parser arrives.
+
+### Temporary layout
+
+[Line filling](../src/layout/paragraph.rs) is greedy, word by word, with justified lines stretched evenly and no hyphenation. A word wider than its line is an error. Pages break at the first line that does not fit. Milestone 03 replaces line filling and milestone 04 pagination; neither is counted as completed typography.
+
+Settled layout rules that later milestones keep:
+
+- `indent` narrows a block on both sides. Quotations nest their indent.
+- `first-line-indent` applies only to a paragraph that follows a paragraph.
+- Adjacent vertical spaces collapse to the larger; space at a page top is dropped.
+- Lines in a block are `size × line-height` apart. The baseline sits where the font's ascender and descender are centered in that height.
+- Emphasis toggles italic, so it is upright in italic text. Strong sets bold.
+- List markers end half an em before the item text. Bullets repeat the last entry at deeper levels; numbered lists keep their start number.
+- Code lines are never wrapped. Tabs expand to four spaces. A code line wider than the text area is an error at its source line.
+
+### PDF and CLI
+
+The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. `kyber render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
 
 ## Recording a decision
 

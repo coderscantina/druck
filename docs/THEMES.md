@@ -2,7 +2,7 @@
 
 A theme is one JSON file plus any local assets (fonts, images) it references. It controls the design of a document: element styles, page geometry, title blocks, headers, footers, and generated labels. Document authors change a small subset of it from front matter, see [authoring](AUTHORING.md).
 
-Rendering is not available yet. `kyber check` loads and validates themes today, and `kyber check --print-config` shows the resolved result.
+`kyber check` loads and validates a theme, and `kyber check --print-config` shows the resolved result. `kyber render` uses it to typeset a document.
 
 References: the [JSON Schema](../schema/theme.v1.schema.json) and the [bundled default theme](../themes/default.json).
 
@@ -127,6 +127,8 @@ Font sizes must be greater than zero.
 
 Only `regular` is required. A style that requests a face its family lacks is an error. A style asks for the `bold` face with `"weight": "bold"`, the `italic` face with `"style": "italic"`, and `bold-italic` with both. Inline code uses the regular face.
 
+Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: bold-italic falls back to bold, then italic, then regular; italic and bold fall back to regular. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering never depends on system fonts.
+
 `images` maps a name to a file path. Title slots refer to images by that name.
 
 Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `kyber check` reports missing ones.
@@ -146,6 +148,8 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 | `align` | `justify`, `left`, `center`, `right`. |
 | `hyphenate` | `true`, `false`. |
 | `space-before`, `space-after`, `indent`, `first-line-indent` | Length or `$spacing.x`. |
+
+`indent` narrows the block on both sides, as for a quotation. `first-line-indent` applies to a paragraph that follows another paragraph. Vertical spacing between blocks collapses: the larger of one block's `space-after` and the next block's `space-before` applies, and space at the top of a page is dropped. Lines are `size × line-height` apart.
 
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`.
 

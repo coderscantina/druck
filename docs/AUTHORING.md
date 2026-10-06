@@ -2,7 +2,7 @@
 
 A Kyber document is a Markdown file with optional YAML front matter. Front matter holds metadata and a small set of design settings. Everything else about the design comes from a [theme](THEMES.md).
 
-Rendering is not available yet. `kyber check` validates a document's configuration today. Layout directives are documented here as the decided syntax; the Markdown parser that reads them arrives in a later milestone.
+`kyber render` turns a document into a PDF. Not every construct renders yet; see [Markdown content](#markdown-content). Layout directives are documented here as the decided syntax and are reported as not supported until their milestone.
 
 ## Front matter
 
@@ -95,7 +95,7 @@ kyber render <doc.md> [-o PATH]
 
 `check` loads the document, theme, and overrides, resolves the configuration, and reports problems. `--print-config` prints the resolved configuration as JSON.
 
-`render` validates the same way, then fails with "PDF rendering is not implemented yet". No PDF is written.
+`render` validates the same way, then parses the Markdown, lays it out, and writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
 `--theme PATH` selects a theme and overrides the `theme` key in front matter. The path is relative to the working directory.
 
@@ -130,9 +130,30 @@ The source is the document, the theme file, "bundled default theme", or "command
 error: theme.json: styles.body.size: length "12px" has unsupported unit "px" (use pt, mm, cm, in, or em)
 ```
 
+## Markdown content
+
+The body is CommonMark. These constructs render:
+
+- Paragraphs and headings (`#` to `######`, or underlined).
+- Bulleted and numbered lists, nested to any depth. Numbered lists keep their start number.
+- Block quotations.
+- Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
+- `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
+
+Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
+
+A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, or code block does not.
+
+The following are reported as errors with their line and column, and no PDF is written:
+
+- Not supported yet: images, tables, footnotes, and layout directives. They arrive in later milestones.
+- Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
+
+A character the selected font has no glyph for is an error, as is a word wider than the line. `kyber check` validates configuration only and does not read the Markdown body.
+
 ## Layout directives
 
-This syntax is decided. The parser arrives in a later milestone, so `kyber check` does not read directives yet.
+This syntax is decided. The parser arrives with the column and page milestones; until then `render` reports a directive as not supported yet.
 
 Directives are fenced containers that use three or more colons. They express layout intent only. There are no coordinates and no commands beyond the ones below.
 

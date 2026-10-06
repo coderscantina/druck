@@ -2,9 +2,10 @@
 
 A native Rust Markdown-to-PDF renderer for carefully typeset articles, reports, and short manuscripts.
 
-The CLI currently validates documents and themes. PDF rendering arrives in milestone 02.
+The CLI renders prose, headings, lists, quotations, and code to PDF. Line and page breaking are still simple; tables, images, footnotes, citations, and layout directives arrive in later milestones.
 
 ```sh
+cargo run -- render samples/en.md -o en.pdf
 cargo run -- check report.md --theme my-theme.json --set toc=true --print-config
 ```
 
