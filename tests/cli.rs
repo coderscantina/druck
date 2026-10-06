@@ -1,4 +1,4 @@
-//! End-to-end checks of `kyber check` and `kyber render` configuration handling.
+//! End-to-end checks of `kyber check` and `kyber render`.
 //!
 //! Every run starts in a working directory that is neither the fixture nor the document
 //! directory, so relative paths and origins are resolved for real.
@@ -267,19 +267,98 @@ fn reports_a_missing_theme_font_relative_to_the_theme() {
     assert!(stderr.contains(&expected), "{stderr}");
 }
 
+const REPO: &str = env!("CARGO_MANIFEST_DIR");
+
+/// Renders a document that must succeed and returns the PDF bytes.
+fn render(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
+    let run = sandbox.run(&[&["render"], args].concat());
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(run.stdout.contains("wrote"), "{}", run.stdout);
+    let pdf = fs::read(output).expect("PDF written");
+    assert!(pdf.starts_with(b"%PDF-"));
+    pdf
+}
+
 #[test]
-fn render_fails_without_writing_a_pdf() {
-    let sandbox = Sandbox::new("render");
-    let document = sandbox.write("doc.md", "# Doc\n");
+fn renders_the_english_and_german_samples() {
+    let sandbox = Sandbox::new("samples");
+    for lang in ["en", "de"] {
+        let output = sandbox.root.join(format!("{lang}.pdf"));
+        let document = format!("{REPO}/samples/{lang}.md");
+        let pdf = render(&sandbox, &[&document, "-o", output.to_str().unwrap()], &output);
+        let pdf = String::from_utf8_lossy(&pdf);
+        assert!(pdf.contains("/FontFile3"), "{lang}: fonts are embedded");
+        assert!(pdf.contains("/URI"), "{lang}: the link is clickable");
+    }
+}
+
+#[test]
+fn writes_next_to_the_document_by_default() {
+    let sandbox = Sandbox::new("default-output");
+    let document = sandbox.write("doc.md", "# Doc\n\nText.\n");
+    render(&sandbox, &[&document], &sandbox.root.join("doc.pdf"));
+    assert_eq!(fs::read_dir(&sandbox.cwd).unwrap().count(), 0);
+}
+
+#[test]
+fn uses_font_files_relative_to_the_document() {
+    let sandbox = Sandbox::new("font-files");
+    fs::create_dir(sandbox.root.join("fonts")).unwrap();
+    fs::copy(
+        format!("{REPO}/fonts/LibertinusMono-Regular.otf"),
+        sandbox.root.join("fonts/Body.otf"),
+    )
+    .unwrap();
+    let front_matter = "---\nfont-files:\n  Doc Mono:\n    regular: fonts/Body.otf\nfonts:\n  mono: Doc Mono\n---\n";
+    let document = sandbox.write("doc.md", &format!("{front_matter}Code in the document's own `font`.\n"));
+    render(&sandbox, &[&document], &sandbox.root.join("doc.pdf"));
+
+    sandbox.write("fonts/Body.otf", "not a font");
+    let run = sandbox.run(&["render", &document]);
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr
+            .contains("fonts.Doc Mono.regular: \"fonts/Body.otf\" relative to the document"),
+        "{}",
+        run.stderr
+    );
+}
+
+#[test]
+fn reports_unsupported_content_with_its_location_and_writes_nothing() {
+    let sandbox = Sandbox::new("unsupported");
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n![x](x.png)\n\n---\n");
     let run = sandbox.run(&["render", &document]);
 
     assert_eq!(run.code, 1);
     assert!(
-        run.stderr.contains("PDF rendering is not implemented"),
+        run.stderr
+            .contains(&format!("{document}:7:1: images are not supported yet")),
         "{}",
         run.stderr
     );
-    assert_eq!(fs::read_dir(&sandbox.cwd).unwrap().count(), 0);
+    assert!(
+        run.stderr
+            .contains(&format!("{document}:9:1: thematic breaks are not supported")),
+        "{}",
+        run.stderr
+    );
+    assert!(!sandbox.root.join("doc.pdf").exists());
+}
+
+#[test]
+fn rejects_code_lines_wider_than_the_text_area() {
+    let sandbox = Sandbox::new("wide-code");
+    let long = "x".repeat(200);
+    let document = sandbox.write("doc.md", &format!("Text.\n\n```\nshort\n{long}\n```\n"));
+    let run = sandbox.run(&["render", &document]);
+
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr.contains(&format!("{document}:5:1: code line is")),
+        "{}",
+        run.stderr
+    );
     assert!(!sandbox.root.join("doc.pdf").exists());
 }
 

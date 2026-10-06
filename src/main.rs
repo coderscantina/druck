@@ -20,6 +20,7 @@ use config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use config::resolved::Config;
 use config::source::Source;
 use diagnostic::Diagnostic;
+use text::Fonts;
 
 /// Typeset Markdown documents as PDF.
 #[derive(Parser)]
@@ -39,11 +40,11 @@ enum Command {
         #[arg(long)]
         print_config: bool,
     },
-    /// Render a document to PDF. Not available yet; configuration is still validated.
+    /// Render a document to PDF.
     Render {
         #[command(flatten)]
         input: InputArgs,
-        /// Output PDF path.
+        /// Output PDF path. Defaults to the document path with a `.pdf` extension.
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -76,7 +77,7 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
     match cli.command {
         Command::Check { input, print_config } => {
-            let config = load(&input)?;
+            let (config, _) = load(&input)?;
             if print_config {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
                 println!("{json}");
@@ -85,18 +86,48 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             }
             Ok(())
         }
-        Command::Render { input, .. } => {
-            load(&input)?;
-            Err(vec![Diagnostic::new(
-                None,
-                "PDF rendering is not implemented yet; the configuration is valid, but no PDF was written",
-            )])
+        Command::Render { input, output } => {
+            let (config, document) = load(&input)?;
+            let output = match output {
+                Some(path) => document.working_dir.join(path),
+                None => document.path.with_extension("pdf"),
+            };
+            let fonts = Fonts::load(&config)?;
+            let pages = render(&config, &fonts, &document)?;
+            let pdf = pdf::write(&pages, &fonts, &config.metadata, config.document.lang)
+                .map_err(|e| vec![Diagnostic::new(None, e)])?;
+            std::fs::write(&output, pdf)
+                .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", output.display()))])?;
+            let count = pages.len();
+            println!(
+                "{}: wrote {count} page{}",
+                output.display(),
+                if count == 1 { "" } else { "s" }
+            );
+            Ok(())
         }
     }
 }
 
+/// The document file as read, with where it came from.
+struct DocumentFile {
+    path: PathBuf,
+    working_dir: PathBuf,
+    source: Source,
+    text: String,
+}
+
+/// Parses the Markdown body and lays it out.
+fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<Vec<page::Page>, Vec<Diagnostic>> {
+    let split = front_matter::split(&document.text).ok().flatten();
+    let body = split.map_or(document.text.as_str(), |split| split.body);
+    let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
+    let content = markdown::parse(body, first_line, &document.source)?;
+    layout::layout(&content, config, fonts, &document.source)
+}
+
 /// Reads the document, theme, and overrides, then resolves and checks the configuration.
-fn load(args: &InputArgs) -> Result<Config, Vec<Diagnostic>> {
+fn load(args: &InputArgs) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let working_dir = std::env::current_dir().map_err(|e| {
         vec![Diagnostic::new(
             None,
@@ -123,7 +154,7 @@ fn load(args: &InputArgs) -> Result<Config, Vec<Diagnostic>> {
     let config = resolve(Inputs {
         theme,
         document: SettingsInput {
-            source: document_source,
+            source: document_source.clone(),
             settings: document,
         },
         overrides: SettingsInput {
@@ -132,7 +163,13 @@ fn load(args: &InputArgs) -> Result<Config, Vec<Diagnostic>> {
         },
     })?;
     check_resources(&config)?;
-    Ok(config)
+    let document = DocumentFile {
+        path: document_path,
+        working_dir,
+        source: document_source,
+        text,
+    };
+    Ok((config, document))
 }
 
 fn read(path: &Path, source: &Source) -> Result<String, Vec<Diagnostic>> {
