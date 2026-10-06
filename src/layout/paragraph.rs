@@ -1,10 +1,17 @@
-//! Paragraph composition: shapes inline content and breaks it into lines.
+//! Paragraph composition: shapes inline content, chooses line breaks for the whole paragraph, and
+//! positions the lines.
 //!
-//! Lines are filled greedily, one word at a time. Milestone 03 replaces this with
-//! paragraph-wide break optimization and hyphenation.
+//! Words are shaped once. A word that breaks across lines is reshaped only at the break, with a
+//! visible hyphen when hyphenated. Justified lines stretch or shrink their interword spaces, never
+//! the glyphs, and let punctuation at their edges hang into the margins.
+
+mod breaking;
+mod hyphenation;
+pub(super) mod protrusion;
 
 use std::collections::HashMap;
 
+use self::breaking::{Hang, Item as Element, Measure};
 use super::{Line, inline_face, text_item};
 use crate::config::resolved::{InlineStyles, Style};
 use crate::config::theme::{Align, FontStyle, Lang, Weight};
@@ -13,19 +20,28 @@ use crate::document::Inline;
 use crate::page::{Item, Rect};
 use crate::text::{FaceId, Fonts, Metrics, ShapedRun};
 
+/// Interword spaces may stretch by half and shrink by a third of their natural width.
+const STRETCH: f64 = 1.0 / 2.0;
+const SHRINK: f64 = 1.0 / 3.0;
+/// Ragged lines may fall short of the measure by about this many ems before they count as loose.
+const RAGGED: f64 = 3.0;
+/// Cost of a break at a hyphenation point or after an explicit hyphen.
+const HYPHEN_COST: f64 = 50.0;
+
 /// A piece of a word in one face and size.
 struct Fragment {
     run: ShapedRun,
     color: Color,
     link: Option<String>,
     metrics: Metrics,
+    /// Prose may break at hyphens. Code and link text that spells out its URL may not.
+    prose: bool,
 }
 
 /// Text between two spaces. Style changes inside a word split it into fragments.
 #[derive(Default)]
 struct Word {
     fragments: Vec<Fragment>,
-    width: f64,
 }
 
 enum Token {
@@ -35,17 +51,34 @@ enum Token {
     LineBreak,
 }
 
-/// The words of one line, each with the natural space before it.
-#[derive(Default)]
-struct Filled {
-    words: Vec<(f64, Word)>,
-    natural: f64,
-    /// Ends the paragraph or a hard break, so it is not justified.
-    last: bool,
+/// A place in the paragraph text: a byte offset in a fragment of a word.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Cursor {
+    word: usize,
+    fragment: usize,
+    offset: usize,
+}
+
+impl Cursor {
+    fn word(word: usize) -> Self {
+        Self {
+            word,
+            fragment: 0,
+            offset: 0,
+        }
+    }
+}
+
+/// Where a line ends: before `at`, with an added hyphen or at a hard break or the paragraph end.
+#[derive(Debug, Clone, Copy)]
+struct Mark {
+    at: Cursor,
+    hyphen: bool,
+    forced: bool,
 }
 
 /// Breaks inline content into positioned lines of `width`. The first line is indented by `first_indent`.
-/// Fails for a word wider than its line or a character the font cannot show.
+/// Fails for a word wider than its line even after hyphenation, or a character the font cannot show.
 pub fn lines(
     content: &[Inline],
     style: &Style,
@@ -56,108 +89,69 @@ pub fn lines(
     first_indent: f64,
 ) -> Result<Vec<Line>, String> {
     let tokens = tokens(content, style, inline, fonts, lang)?;
-    let available = |line: usize| if line == 0 { width - first_indent } else { width };
+    let justify = style.align == Align::Justify;
+    let mut builder = Builder {
+        fonts,
+        lang,
+        hyphenate: style.hyphenate,
+        justify,
+        hyphens: HashMap::new(),
+        words: Vec::new(),
+        spaces: Vec::new(),
+        excess: Vec::new(),
+        items: Vec::new(),
+    };
+    builder.build(tokens, width, first_indent);
+    let Builder {
+        words,
+        spaces,
+        excess,
+        items,
+        ..
+    } = builder;
 
-    let mut filled: Vec<Filled> = Vec::new();
-    let mut current = Filled::default();
-    let mut space = 0.0;
-    for token in tokens {
-        match token {
-            Token::Space(width) => space = width,
-            Token::LineBreak => {
-                current.last = true;
-                filled.push(std::mem::take(&mut current));
-            }
-            Token::Word(word) => {
-                let available = available(filled.len());
-                if word.width > available {
-                    let text: String = word.fragments.iter().map(|f| f.run.text.as_str()).collect();
-                    return Err(format!(
-                        "\"{text}\" is {:.1}pt wider than the line and cannot be broken",
-                        word.width - available
-                    ));
-                }
-                let mut before = if current.words.is_empty() { 0.0 } else { space };
-                if current.natural + before + word.width > available {
-                    filled.push(std::mem::take(&mut current));
-                    before = 0.0;
-                }
-                current.natural += before + word.width;
-                current.words.push((before, word));
-            }
-        }
-    }
-    if !current.words.is_empty() || filled.is_empty() {
-        current.last = true;
-        filled.push(current);
-    }
+    let measure = Measure {
+        first: width - first_indent,
+        rest: width,
+        stretch: if justify { 0.0 } else { RAGGED * style.size.0 },
+        hang: match words.first() {
+            Some(word) if justify => protrusion::leading(&word.fragments[0].run, 0),
+            _ => 0.0,
+        },
+    };
+    let Some(marks) = breaking::breaks(&items, &measure) else {
+        let (index, excess) = excess
+            .into_iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("only words can make a paragraph unbreakable");
+        let text: String = words[index].fragments.iter().map(|f| f.run.text.as_str()).collect();
+        return Err(format!(
+            "\"{text}\" is {excess:.1}pt wider than the line and cannot be broken"
+        ));
+    };
 
     let block_face = fonts.face(&style.font, style.weight, style.style);
     let height = style.size.0 * style.line_height;
     let baseline = baseline(height, &fonts.metrics(block_face, style.size));
-    let underline = inline.link_underline;
-    Ok(filled
+    let mut start = Cursor::word(0);
+    Ok(marks
         .into_iter()
         .enumerate()
-        .map(|(index, line)| {
+        .map(|(index, mark)| {
+            let runs = line_runs(&words, start, mark, fonts, lang);
+            start = mark.at;
             let indent = if index == 0 { first_indent } else { 0.0 };
-            let slack = available(index) - line.natural;
-            let spaces = line.words.len().saturating_sub(1);
-            let (start, stretch) = match style.align {
-                Align::Justify if !line.last && spaces > 0 => (0.0, slack / spaces as f64),
-                Align::Justify | Align::Left => (0.0, 0.0),
-                Align::Center => (slack / 2.0, 0.0),
-                Align::Right => (slack, 0.0),
-            };
-            let mut items = Vec::new();
-            let mut open_link: Option<usize> = None;
-            let mut x = indent + start;
-            for (position, (before, word)) in line.words.into_iter().enumerate() {
-                if position > 0 {
-                    x += before + stretch;
-                }
-                for fragment in word.fragments {
-                    let width = fragment.run.width.0;
-                    if let Some(url) = fragment.link {
-                        let metrics = fragment.metrics;
-                        let extends = open_link.and_then(|i| match &mut items[i] {
-                            Item::Link { rect, url: open } if *open == url => Some(rect),
-                            _ => None,
-                        });
-                        match extends {
-                            Some(rect) => rect.width = Pt(x + width - rect.x.0),
-                            None => {
-                                open_link = Some(items.len());
-                                items.push(Item::Link {
-                                    rect: Rect {
-                                        x: Pt(x),
-                                        y: Pt(baseline - metrics.ascender.0),
-                                        width: Pt(width),
-                                        height: Pt(metrics.ascender.0 + metrics.descender.0),
-                                    },
-                                    url,
-                                });
-                            }
-                        }
-                        if underline {
-                            let rect = Rect {
-                                x: Pt(x),
-                                y: Pt(baseline + metrics.underline_position.0),
-                                width: Pt(width),
-                                height: metrics.underline_thickness,
-                            };
-                            items.push(Item::Rect {
-                                rect,
-                                color: fragment.color,
-                            });
-                        }
-                    } else {
-                        open_link = None;
-                    }
-                    items.push(text_item(x, baseline, fragment.run, fragment.color));
-                    x += width;
-                }
-            }
+            let items = position(
+                runs,
+                &spaces,
+                style.align,
+                width - indent,
+                indent,
+                mark.forced,
+                baseline,
+                inline.link_underline,
+            );
             Line {
                 height,
                 baseline,
@@ -165,6 +159,359 @@ pub fn lines(
             }
         })
         .collect())
+}
+
+/// Turns words and spaces into breaking items, with hyphenation points and margin hangs.
+struct Builder<'a> {
+    fonts: &'a Fonts,
+    lang: Lang,
+    hyphenate: bool,
+    justify: bool,
+    /// Width and right hang of a hyphen per face and size; `None` if the face has no hyphen.
+    hyphens: HashMap<(FaceId, u64), Option<(f64, f64)>>,
+    words: Vec<Word>,
+    /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
+    spaces: Vec<f64>,
+    /// How far each word's widest unbreakable piece exceeds its line.
+    excess: Vec<f64>,
+    items: Vec<Element<Mark>>,
+}
+
+impl Builder<'_> {
+    fn build(&mut self, tokens: Vec<Token>, width: f64, first_indent: f64) {
+        let mut tokens = tokens.into_iter().peekable();
+        let mut space = None;
+        let mut line_has_word = false;
+        while let Some(token) = tokens.next() {
+            match token {
+                Token::Space(width) => space = Some(width),
+                Token::LineBreak => {
+                    let next = self.words.len();
+                    let start = match tokens.peek() {
+                        Some(Token::Word(word)) => self.leading(word),
+                        _ => 0.0,
+                    };
+                    self.items.push(Element::Fill);
+                    self.items.push(Element::Break {
+                        at: Mark {
+                            at: Cursor::word(next),
+                            hyphen: false,
+                            forced: true,
+                        },
+                        hang: self.hang(0.0, start),
+                    });
+                    space = None;
+                    line_has_word = false;
+                }
+                Token::Word(word) => {
+                    let index = self.words.len();
+                    match space.take().filter(|_| line_has_word) {
+                        Some(space) => {
+                            let end = self.words.last().map_or(0.0, |previous| {
+                                let last = &previous.fragments[previous.fragments.len() - 1].run;
+                                protrusion::trailing(last, last.text.len())
+                            });
+                            let (stretch, shrink) = if self.justify {
+                                (space * STRETCH, space * SHRINK)
+                            } else {
+                                (0.0, 0.0)
+                            };
+                            self.items.push(Element::Glue {
+                                width: space,
+                                stretch,
+                                shrink,
+                                at: Mark {
+                                    at: Cursor::word(index),
+                                    hyphen: false,
+                                    forced: false,
+                                },
+                                hang: self.hang(end, self.leading(&word)),
+                            });
+                            self.spaces.push(space);
+                        }
+                        None => self.spaces.push(0.0),
+                    }
+                    let available = if index == 0 { width - first_indent } else { width };
+                    self.word(index, &word, available, width);
+                    self.words.push(word);
+                    line_has_word = true;
+                }
+            }
+        }
+        self.items.push(Element::Fill);
+        self.items.push(Element::Break {
+            at: Mark {
+                at: Cursor::word(self.words.len()),
+                hyphen: false,
+                forced: true,
+            },
+            hang: Hang::default(),
+        });
+    }
+
+    /// Adds the boxes and inner breaks of word `index`. Its first piece has `first` width
+    /// available, later pieces `rest`.
+    fn word(&mut self, index: usize, word: &Word, first: f64, rest: f64) {
+        let mut piece_start = (0, 0);
+        let mut excess = f64::NEG_INFINITY;
+        for (fragment, offset, hyphen) in self.cuts(word) {
+            let (hyphen_width, end) = if hyphen {
+                let run = &word.fragments[fragment].run;
+                self.hyphen(run.face, run.size)
+                    .expect("cuts only hyphenate faces with a hyphen")
+            } else {
+                (0.0, protrusion::trailing(&word.fragments[fragment].run, offset))
+            };
+            let piece = span_width(word, piece_start, (fragment, offset));
+            let available = if piece_start == (0, 0) { first } else { rest };
+            excess = excess.max(piece + hyphen_width - available);
+            self.items.push(Element::Box(piece));
+            self.items.push(Element::Penalty {
+                width: hyphen_width,
+                cost: HYPHEN_COST,
+                flagged: true,
+                at: Mark {
+                    at: Cursor {
+                        word: index,
+                        fragment,
+                        offset,
+                    },
+                    hyphen,
+                    forced: false,
+                },
+                hang: self.hang(end, leading_at(word, fragment, offset)),
+            });
+            piece_start = (fragment, offset);
+        }
+        let last = word.fragments.len() - 1;
+        let piece = span_width(word, piece_start, (last, word.fragments[last].run.text.len()));
+        let available = if piece_start == (0, 0) { first } else { rest };
+        self.excess.push(excess.max(piece - available));
+        self.items.push(Element::Box(piece));
+    }
+
+    /// Places inside `word` where a line may end, as fragment, byte offset, and whether a hyphen
+    /// is added. A cut at a fragment boundary belongs to the end of the earlier fragment.
+    fn cuts(&mut self, word: &Word) -> Vec<(usize, usize, bool)> {
+        if !word.fragments.iter().any(|f| f.prose) {
+            return Vec::new();
+        }
+        let text: String = word.fragments.iter().map(|f| f.run.text.as_str()).collect();
+        let mut points: Vec<(usize, bool)> = hyphenation::explicit(&text).into_iter().map(|p| (p, false)).collect();
+        if self.hyphenate {
+            points.extend(hyphenation::points(&text, self.lang).into_iter().map(|p| (p, true)));
+            points.sort_by_key(|&(offset, _)| offset);
+        }
+        let mut cuts = Vec::with_capacity(points.len());
+        for (point, hyphen) in points {
+            let mut start = 0;
+            let Some((fragment, offset)) = word.fragments.iter().enumerate().find_map(|(index, f)| {
+                let end = start + f.run.text.len();
+                let found = (point <= end).then_some((index, point - start));
+                start = end;
+                found
+            }) else {
+                continue;
+            };
+            let current = &word.fragments[fragment];
+            let next_prose = match word.fragments.get(fragment + 1) {
+                Some(next) if offset == current.run.text.len() => next.prose,
+                _ => current.prose,
+            };
+            let has_hyphen = !hyphen || self.hyphen(current.run.face, current.run.size).is_some();
+            if current.prose && next_prose && has_hyphen {
+                cuts.push((fragment, offset, hyphen));
+            }
+        }
+        cuts
+    }
+
+    /// Width and right hang of a hyphen in a face and size, or `None` if the face has no hyphen.
+    fn hyphen(&mut self, face: FaceId, size: Pt) -> Option<(f64, f64)> {
+        let (fonts, lang) = (self.fonts, self.lang);
+        let justify = self.justify;
+        *self.hyphens.entry((face, size.0.to_bits())).or_insert_with(|| {
+            let run = fonts.shape("-", face, size, lang);
+            let hang = if justify { protrusion::trailing(&run, 1) } else { 0.0 };
+            missing_glyph(&run).is_none().then_some((run.width.0, hang))
+        })
+    }
+
+    fn leading(&self, word: &Word) -> f64 {
+        protrusion::leading(&word.fragments[0].run, 0)
+    }
+
+    /// Margin hangs apply to justified text only.
+    fn hang(&self, end: f64, start: f64) -> Hang {
+        if self.justify {
+            Hang { end, start }
+        } else {
+            Hang::default()
+        }
+    }
+}
+
+/// The natural width of `word` between two (fragment, offset) positions. A glyph counts where its
+/// text starts, so a ligature across a cut counts before it; the exact width comes from reshaping.
+fn span_width(word: &Word, from: (usize, usize), to: (usize, usize)) -> f64 {
+    let mut width = 0.0;
+    for index in from.0..=to.0 {
+        let run = &word.fragments[index].run;
+        let low = if index == from.0 { from.1 } else { 0 };
+        let high = if index == to.0 { to.1 } else { run.text.len() };
+        width += run
+            .glyphs
+            .iter()
+            .filter(|glyph| (low..high).contains(&glyph.text.start))
+            .map(|glyph| glyph.x_advance.0)
+            .sum::<f64>();
+    }
+    width
+}
+
+/// The left hang of a line starting at a cut.
+fn leading_at(word: &Word, fragment: usize, offset: usize) -> f64 {
+    let run = &word.fragments[fragment].run;
+    match word.fragments.get(fragment + 1) {
+        Some(next) if offset == run.text.len() => protrusion::leading(&next.run, 0),
+        _ => protrusion::leading(run, offset),
+    }
+}
+
+/// The shaped runs of one line, each with its fragment and whether a space comes before it.
+/// Fragments cut by a break are reshaped; the hyphen of a hyphenated line joins its fragment.
+fn line_runs<'a>(
+    words: &'a [Word],
+    start: Cursor,
+    end: Mark,
+    fonts: &Fonts,
+    lang: Lang,
+) -> Vec<(ShapedRun, &'a Fragment, Option<usize>)> {
+    let last_word = if end.at.fragment == 0 && end.at.offset == 0 {
+        end.at.word
+    } else {
+        end.at.word + 1
+    };
+    let mut runs = Vec::new();
+    for (index, word) in words.iter().enumerate().take(last_word).skip(start.word) {
+        let mut first = true;
+        for (number, fragment) in word.fragments.iter().enumerate() {
+            if index == start.word && number < start.fragment {
+                continue;
+            }
+            if index == end.at.word && number > end.at.fragment {
+                break;
+            }
+            let text = &fragment.run.text;
+            let low = if index == start.word && number == start.fragment {
+                start.offset
+            } else {
+                0
+            };
+            let at_end = index == end.at.word && number == end.at.fragment;
+            let high = if at_end { end.at.offset } else { text.len() };
+            if low >= high {
+                continue;
+            }
+            let hyphen = at_end && end.hyphen;
+            let run = if low == 0 && high == text.len() && !hyphen {
+                fragment.run.clone()
+            } else {
+                let mut piece = text[low..high].to_owned();
+                if hyphen {
+                    piece.push('-');
+                }
+                fonts.shape(&piece, fragment.run.face, fragment.run.size, lang)
+            };
+            let space = (first && index > start.word).then_some(index);
+            runs.push((run, fragment, space));
+            first = false;
+        }
+    }
+    runs
+}
+
+/// Positions the runs of one line of `available` width, starting at `indent`.
+#[allow(clippy::too_many_arguments)]
+fn position(
+    runs: Vec<(ShapedRun, &Fragment, Option<usize>)>,
+    spaces: &[f64],
+    align: Align,
+    available: f64,
+    indent: f64,
+    last: bool,
+    baseline: f64,
+    underline: bool,
+) -> Vec<Item> {
+    let space_total: f64 = runs
+        .iter()
+        .filter_map(|(.., space)| space.map(|word| spaces[word]))
+        .sum();
+    let natural = space_total + runs.iter().map(|(run, ..)| run.width.0).sum::<f64>();
+    let (left, right) = match (align, runs.first(), runs.last()) {
+        (Align::Justify, Some((first, ..)), Some((last, ..))) => (
+            protrusion::leading(first, 0),
+            protrusion::trailing(last, last.text.len()),
+        ),
+        _ => (0.0, 0.0),
+    };
+    let slack = available + left + right - natural;
+    let (start, adjust) = match align {
+        Align::Justify if space_total > 0.0 && (!last || slack < 0.0) => (-left, slack / space_total),
+        Align::Justify => (-left, 0.0),
+        Align::Left => (0.0, 0.0),
+        Align::Center => (slack / 2.0, 0.0),
+        Align::Right => (slack, 0.0),
+    };
+
+    let mut items = Vec::new();
+    let mut open_link: Option<usize> = None;
+    let mut x = indent + start;
+    for (run, fragment, space) in runs {
+        if let Some(word) = space {
+            x += spaces[word] * (1.0 + adjust);
+        }
+        let width = run.width.0;
+        if let Some(url) = &fragment.link {
+            let metrics = fragment.metrics;
+            let extends = open_link.and_then(|i| match &mut items[i] {
+                Item::Link { rect, url: open } if open == url => Some(rect),
+                _ => None,
+            });
+            match extends {
+                Some(rect) => rect.width = Pt(x + width - rect.x.0),
+                None => {
+                    open_link = Some(items.len());
+                    items.push(Item::Link {
+                        rect: Rect {
+                            x: Pt(x),
+                            y: Pt(baseline - metrics.ascender.0),
+                            width: Pt(width),
+                            height: Pt(metrics.ascender.0 + metrics.descender.0),
+                        },
+                        url: url.clone(),
+                    });
+                }
+            }
+            if underline {
+                let rect = Rect {
+                    x: Pt(x),
+                    y: Pt(baseline + metrics.underline_position.0),
+                    width: Pt(width),
+                    height: metrics.underline_thickness,
+                };
+                items.push(Item::Rect {
+                    rect,
+                    color: fragment.color,
+                });
+            }
+        } else {
+            open_link = None;
+        }
+        items.push(text_item(x, baseline, run, fragment.color));
+        x += width;
+    }
+    items
 }
 
 /// The baseline offset from the top of a line of `height`, centering the font's ascender and descender.
@@ -237,12 +584,16 @@ fn tokens(
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
             }
-            word.width += run.width.0;
+            let spells_url = text_style
+                .link
+                .as_deref()
+                .is_some_and(|url| url == part || url.strip_prefix("mailto:") == Some(part));
             word.fragments.push(Fragment {
                 run,
                 color,
                 link: text_style.link.clone(),
                 metrics,
+                prose: !text_style.code && !spells_url,
             });
         }
     }

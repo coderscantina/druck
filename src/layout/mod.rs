@@ -1,8 +1,8 @@
 //! Layout: places the document's blocks on pages using resolved styles and shaped text.
 //!
 //! Blocks become a vertical flow of lines and spaces, which is then cut into pages.
-//! Milestone 02 fills lines greedily ([`paragraph`]) and breaks pages at the first line that
-//! does not fit ([`paginate`]). Milestones 03 and 04 replace these two steps.
+//! [`paragraph`] chooses line breaks for each whole paragraph. [`paginate`] still breaks pages at
+//! the first line that does not fit; milestone 04 replaces it with scored page breaks.
 
 mod paragraph;
 #[cfg(test)]
