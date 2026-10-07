@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: ${{ matrix.os }}
@@ -21,7 +24,56 @@ jobs:
       - name: Format
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --check
+      - name: Notices are current
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/notices.py --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+
+  # Renders every sample with the release build on each OS, from an empty
+  # working directory. Fonts and hyphenation data are bundled, so the result
+  # must not depend on what the runner has installed.
+  render:
+    name: render samples on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Render samples
+        run: scripts/render-samples.sh target/release/kyber "$RUNNER_TEMP/pdfs"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfs-${{ matrix.os }}
+          path: ${{ runner.temp }}/pdfs/*.pdf
+          if-no-files-found: error
+
+  # Layout must be identical across platforms. The PDFs have no timestamps, so
+  # the comparison starts at bytes. See scripts/check-pdfs.sh for the fallback.
+  compare:
+    name: compare PDFs across OSes
+    needs: render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pdfs-*
+          path: pdfs
+      - name: Install poppler
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - name: Compare and check fonts
+        run: scripts/check-pdfs.sh pdfs

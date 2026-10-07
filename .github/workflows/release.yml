@@ -1,0 +1,52 @@
+name: Release build
+
+# Builds and packages binaries as workflow artifacts. It does not create a
+# GitHub release, upload release assets, or publish a crate. See docs/RELEASE.md.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds run on the oldest hosted image to keep the glibc requirement low.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, smoke: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, smoke: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, smoke: true }
+          # Cross-built on the arm64 runner, so it is packaged but not run.
+          - { target: x86_64-apple-darwin, os: macos-latest, smoke: false }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, smoke: true }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Render samples with the release binary
+        if: matrix.smoke
+        run: scripts/render-samples.sh target/${{ matrix.target }}/release/kyber "$RUNNER_TEMP/pdfs"
+      - name: Package
+        run: python3 scripts/package.py ${{ matrix.target }} target/${{ matrix.target }}/release/kyber${{ contains(matrix.target, 'windows') && '.exe' || '' }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kyber-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
