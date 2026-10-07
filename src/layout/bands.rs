@@ -8,7 +8,8 @@
 //! `{section}` is the first level 1 heading that starts on the page, otherwise the last one on an
 //! earlier page. `{subsection}` is the first level 2 heading that starts on the page after the
 //! section shown there, otherwise the last level 2 heading before the page if no level 1 heading
-//! came after it. Both show the heading's number and text.
+//! came after it. Both show the heading's number and text. `{section-page}` counts the pages that show
+//! the same `{section}` from 1, and `{section-pages}` is their number, blank pages included.
 //!
 //! A band is a list of slot groups. A group's slots are stacked as title slots are, one line per line
 //! of their text, which is never wrapped. Groups are anchored to the band baseline across the margin
@@ -19,9 +20,12 @@
 //! A slot without a value is left out, unless it is required, which is an error naming the page. A
 //! line wider than its group and lines of different groups that overlap are errors, since nothing is
 //! clipped.
+//!
+//! The [watermark] is drawn here too, behind the content of the same pages, with the same values.
 
+use super::fields::Fields;
 use super::structure::Structure;
-use super::{paragraph, text_item, titles};
+use super::{paragraph, text_item, titles, watermark};
 use crate::config::resolved::{BandSlot, Config, Group, PageVariant, Style};
 use crate::config::template::{Placeholder, Value};
 use crate::config::theme::{Align, Vertical};
@@ -30,8 +34,9 @@ use crate::diagnostic::Diagnostic;
 use crate::page::{Item, Page, Position};
 use crate::text::{Fonts, ShapedRun};
 
-/// Draws the header and footer of every page but the `blanks`. `first` is the index of the first body
-/// page and `anchors` are the final anchor positions.
+/// Draws the header, footer, and watermark of every page but the `blanks`. `first` is the index of the
+/// first body page and `anchors` are the final anchor positions.
+#[allow(clippy::too_many_arguments, reason = "the final pages and what their bands show")]
 pub(super) fn draw(
     pages: &mut [Page],
     first: usize,
@@ -39,6 +44,7 @@ pub(super) fn draw(
     structure: &Structure,
     anchors: &[Position],
     config: &Config,
+    fields: &Fields,
     fonts: &Fonts,
 ) -> Result<(), Vec<Diagnostic>> {
     let geometry = &config.page;
@@ -48,6 +54,7 @@ pub(super) fn draw(
         .map(|heading| (anchors[heading.anchor].page, heading.level, heading.title()))
         .collect();
     let marks = marks(&headings, pages.len());
+    let section_pages = section_pages(&marks);
     let title_page = config.document.title_page;
     let total = pages.len().to_string();
     let mut errors = Vec::new();
@@ -57,14 +64,28 @@ pub(super) fn draw(
         }
         let (name, variant) = variant(config, index, title_page, first);
         let number = (index + 1).to_string();
-        let (section, subsection) = &marks[index];
+        let (section, subsection) = marks[index];
+        let title = |heading: Option<usize>| heading.map(|heading| Value::Text(headings[heading].2.clone()));
+        let in_section = section_pages[index];
         let value = |placeholder: &Placeholder| match placeholder {
-            Placeholder::Section => section.clone().map(Value::Text),
-            Placeholder::Subsection => subsection.clone().map(Value::Text),
+            Placeholder::Section => title(section),
+            Placeholder::Subsection => title(subsection),
             Placeholder::Page => Some(Value::Text(number.clone())),
             Placeholder::Pages => Some(Value::Text(total.clone())),
-            other => titles::value(&config.metadata, other),
+            Placeholder::SectionPage => in_section.map(|(page, _)| Value::Text(page.to_string())),
+            Placeholder::SectionPages => in_section.map(|(_, pages)| Value::Text(pages.to_string())),
+            other => fields.value(other),
         };
+        if let Some(mark) = &config.watermark {
+            match watermark::item(mark, &value, page, config, fonts) {
+                Ok(Some(item)) => page.items.insert(0, item),
+                Ok(None) => {}
+                Err(problem) => errors.push(
+                    Diagnostic::new(None, format!("{problem}, on page {}", index + 1))
+                        .property(Some("watermark.text".to_owned())),
+                ),
+            }
+        }
         let bands = [
             (
                 "header",
@@ -118,40 +139,45 @@ fn variant(config: &Config, index: usize, title_page: bool, first: usize) -> (&'
         .expect("the body variant always exists")
 }
 
-/// The `{section}` and `{subsection}` values of each page, from the headings in document order with
-/// their page index, level, and title.
-fn marks(headings: &[(usize, u8, String)], pages: usize) -> Vec<(Option<String>, Option<String>)> {
+/// The headings that `{section}` and `{subsection}` show on each page, as indexes into `headings`, which
+/// are in document order with their page index, level, and title.
+fn marks(headings: &[(usize, u8, String)], pages: usize) -> Vec<(Option<usize>, Option<usize>)> {
     let mut marks = Vec::with_capacity(pages);
-    let (mut section, mut subsection): (Option<&str>, Option<&str>) = (None, None);
+    let (mut section, mut subsection): (Option<usize>, Option<usize>) = (None, None);
     let mut next = 0;
     for page in 0..pages {
         let end = next + headings[next..].iter().take_while(|heading| heading.0 == page).count();
-        let on_page = &headings[next..end];
-        let first_section = on_page.iter().position(|heading| heading.1 == 1);
-        let shown_section = first_section.map(|i| on_page[i].2.as_str()).or(section);
+        let on_page = next..end;
+        let first_section = on_page.clone().find(|&i| headings[i].1 == 1);
+        let shown_section = first_section.or(section);
         let shown_subsection = match first_section {
-            Some(i) => on_page[i + 1..]
-                .iter()
-                .take_while(|heading| heading.1 != 1)
-                .find(|heading| heading.1 == 2)
-                .map(|heading| heading.2.as_str()),
-            None => on_page
-                .iter()
-                .find(|heading| heading.1 == 2)
-                .map(|heading| heading.2.as_str())
-                .or(subsection),
+            Some(i) => (i + 1..end)
+                .take_while(|&i| headings[i].1 != 1)
+                .find(|&i| headings[i].1 == 2),
+            None => on_page.clone().find(|&i| headings[i].1 == 2).or(subsection),
         };
-        marks.push((shown_section.map(str::to_owned), shown_subsection.map(str::to_owned)));
-        for (_, level, title) in on_page {
-            match level {
-                1 => (section, subsection) = (Some(title.as_str()), None),
-                2 => subsection = Some(title.as_str()),
+        marks.push((shown_section, shown_subsection));
+        for i in on_page {
+            match headings[i].1 {
+                1 => (section, subsection) = (Some(i), None),
+                2 => subsection = Some(i),
                 _ => {}
             }
         }
         next = end;
     }
     marks
+}
+
+/// The `{section-page}` and `{section-pages}` values of each page: its place among the consecutive
+/// pages that show the same section, counted from 1, and their number.
+fn section_pages(marks: &[(Option<usize>, Option<usize>)]) -> Vec<Option<(usize, usize)>> {
+    let mut values = Vec::with_capacity(marks.len());
+    for run in marks.chunk_by(|a, b| a.0 == b.0) {
+        let shown = run[0].0.is_some();
+        values.extend((1..=run.len()).map(|page| shown.then_some((page, run.len()))));
+    }
+    values
 }
 
 /// One header or footer on one page.

@@ -4,8 +4,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A value a slot can insert. Metadata is known at configuration time; section titles and
-/// page numbers are known after layout.
+/// A value a slot or the body can insert. Metadata, the build date, and text statistics are known
+/// before layout; section titles and page numbers after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Placeholder {
     Title,
@@ -17,12 +17,31 @@ pub enum Placeholder {
     Subsection,
     Page,
     Pages,
+    /// The page within the pages that show the current `{section}`, and their number.
+    SectionPage,
+    SectionPages,
+    /// Characters with and without spaces, words, sentences, and paragraphs; see [`crate::statistics`].
+    Chars,
+    CharsNoSpaces,
+    Words,
+    Sentences,
+    Paragraphs,
+    /// Reading time in whole minutes.
+    ReadingTime,
+    /// Numbered figures and tables.
+    Figures,
+    Tables,
+    /// The day of the run, and its year.
+    BuildDate,
+    Year,
+    /// The `draft` label, only in drafts.
+    Draft,
     /// An entry of the front matter `meta` map.
     Meta(String),
 }
 
 impl Placeholder {
-    const FIXED: [(&'static str, Self); 9] = [
+    const FIXED: [(&'static str, Self); 22] = [
         ("title", Self::Title),
         ("subtitle", Self::Subtitle),
         ("author", Self::Author),
@@ -32,9 +51,23 @@ impl Placeholder {
         ("subsection", Self::Subsection),
         ("page", Self::Page),
         ("pages", Self::Pages),
+        ("section-page", Self::SectionPage),
+        ("section-pages", Self::SectionPages),
+        ("chars", Self::Chars),
+        ("chars-no-spaces", Self::CharsNoSpaces),
+        ("words", Self::Words),
+        ("sentences", Self::Sentences),
+        ("paragraphs", Self::Paragraphs),
+        ("reading-time", Self::ReadingTime),
+        ("figures", Self::Figures),
+        ("tables", Self::Tables),
+        ("build-date", Self::BuildDate),
+        ("year", Self::Year),
+        ("draft", Self::Draft),
     ];
 
-    fn parse(name: &str) -> Result<Self, String> {
+    /// The placeholder `name` names, as written between braces.
+    pub fn parse(name: &str) -> Result<Self, String> {
         if let Some(key) = name.strip_prefix("meta.") {
             return if is_meta_key(key) {
                 Ok(Self::Meta(key.to_owned()))
@@ -56,7 +89,10 @@ impl Placeholder {
 
     /// Whether the value depends on the page the slot appears on, or on the page count.
     pub fn is_page_dependent(&self) -> bool {
-        matches!(self, Self::Section | Self::Subsection | Self::Page | Self::Pages)
+        matches!(
+            self,
+            Self::Section | Self::Subsection | Self::Page | Self::Pages | Self::SectionPage | Self::SectionPages
+        )
     }
 }
 

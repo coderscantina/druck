@@ -56,6 +56,7 @@ fn render(body: &str) -> (Config, Vec<Page>) {
         &config,
         &fonts,
         &source(),
+        crate::date::Date::from_unix(0),
     )
     .expect("layout succeeds")
     .pages;

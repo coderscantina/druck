@@ -41,6 +41,7 @@ pub struct Config {
     pub title_block: TitleBlock,
     pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,
+    pub watermark: Option<Watermark>,
     pub labels: LabelSet,
     /// Problems that do not stop the run.
     #[serde(skip)]
@@ -172,6 +173,14 @@ pub struct BandSlot {
     pub style: Option<SlotStyle>,
     pub required: bool,
     pub space_before: Pt,
+}
+
+/// Text in the `watermark` style, centered on the page and turned `angle` degrees counterclockwise.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Watermark {
+    pub text: Template,
+    pub angle: f64,
 }
 
 /// The files of a family's faces.

@@ -20,12 +20,11 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
+use super::fields::Fields;
 use super::paragraph;
 use super::{Break, Flow, Frame, Line, translate_line};
-use crate::config::front_matter::{MetaValue, Metadata};
 use crate::config::resolved::{Config, Group, SlotContent, Style, TitleSlot};
 use crate::config::source::{Resource, Source};
-use crate::config::template::{Placeholder, Value};
 use crate::config::theme::{Align, SlotStyle, TemplateStyle, Vertical};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
@@ -38,8 +37,8 @@ use crate::text::Fonts;
 pub(super) const FRONT_MATTER: Location = Location { line: 1, column: 1 };
 
 /// Reports required slots of the title layout in use whose placeholders have no value.
-pub fn check(config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
-    let errors: Vec<_> = active(config)
+pub(super) fn check(config: &Config, fields: &Fields, source: &Source) -> Result<(), Vec<Diagnostic>> {
+    let errors: Vec<_> = active(config, fields)
         .into_iter()
         .flat_map(|(prefix, slots)| {
             slots
@@ -52,7 +51,7 @@ pub fn check(config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
             let SlotContent::Text(text) = &slot.content else {
                 return None;
             };
-            let missing = text.fill(|p| value(&config.metadata, p)).err()?;
+            let missing = text.fill(|p| fields.value(p)).err()?;
             let message = format!("this required slot needs {{{missing}}}; set {missing} in the front matter");
             Some(Diagnostic::new(Some(source.clone()), message).property(Some(format!("{prefix}.slots.{index}.text"))))
         })
@@ -60,11 +59,16 @@ pub fn check(config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The theme images that the title layout in use shows.
+/// The theme images that the title layout in use may show. A title block's are included even if the
+/// document has no values for it.
 pub fn images(config: &Config) -> HashSet<&Resource> {
-    active(config)
+    let slots: Vec<&TitleSlot> = if config.document.title_page {
+        config.title_page.iter().flat_map(|group| &group.slots).collect()
+    } else {
+        config.title_block.slots.iter().collect()
+    };
+    slots
         .into_iter()
-        .flat_map(|(_, slots)| slots)
         .filter_map(|slot| match &slot.content {
             SlotContent::Image { image, .. } => Some(image),
             SlotContent::Text(_) => None,
@@ -73,14 +77,14 @@ pub fn images(config: &Config) -> HashSet<&Resource> {
 }
 
 /// The property prefix and slots of each part of the title layout in use.
-fn active(config: &Config) -> Vec<(String, &[TitleSlot])> {
+fn active<'a>(config: &'a Config, fields: &Fields) -> Vec<(String, &'a [TitleSlot])> {
     if config.document.title_page {
         let groups = config.title_page.iter().enumerate();
         groups
             .map(|(index, group)| (format!("title-page.groups.{index}"), group.slots.as_slice()))
             .collect()
     } else {
-        block(config)
+        block(config, fields)
             .map(|slots| ("title-block".to_owned(), slots))
             .into_iter()
             .collect()
@@ -88,35 +92,19 @@ fn active(config: &Config) -> Vec<(String, &[TitleSlot])> {
 }
 
 /// The title block's slots, if the document has a value for one of its placeholders.
-pub(super) fn block(config: &Config) -> Option<&[TitleSlot]> {
+pub(super) fn block<'a>(config: &'a Config, fields: &Fields) -> Option<&'a [TitleSlot]> {
     let slots = &config.title_block.slots;
     let shown = slots.iter().any(|slot| match &slot.content {
-        SlotContent::Text(text) => text.placeholders().any(|p| value(&config.metadata, p).is_some()),
+        SlotContent::Text(text) => text.placeholders().any(|p| fields.value(p).is_some()),
         SlotContent::Image { .. } => false,
     });
     shown.then_some(slots.as_slice())
 }
 
-/// The metadata value of a placeholder. Authors are joined with commas. Blank values count as missing.
-pub(super) fn value(metadata: &Metadata, placeholder: &Placeholder) -> Option<Value> {
-    let text = match placeholder {
-        Placeholder::Title => metadata.title.clone(),
-        Placeholder::Subtitle => metadata.subtitle.clone(),
-        Placeholder::Author => Some(metadata.authors.join(", ")),
-        Placeholder::Date => metadata.date.clone(),
-        Placeholder::Abstract => metadata.abstract_.clone(),
-        Placeholder::Meta(key) => match metadata.meta.get(key)? {
-            MetaValue::Text(text) => Some(text.clone()),
-            MetaValue::Lines(lines) => return Some(Value::Lines(lines.clone())),
-        },
-        Placeholder::Section | Placeholder::Subsection | Placeholder::Page | Placeholder::Pages => None,
-    };
-    text.filter(|text| !text.trim().is_empty()).map(Value::Text)
-}
-
 /// The title page: each `title-page` group placed at its anchor on the margin frame.
 pub(super) fn page(
     config: &Config,
+    fields: &Fields,
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
     source: &Source,
@@ -126,7 +114,16 @@ pub(super) fn page(
     let (frame_width, frame_height) = (geometry.text_width().0, geometry.text_height().0);
     let mut items = Vec::new();
     for (index, group) in config.title_page.iter().enumerate() {
-        let lines = slots(&group.slots, group.align, config, fonts, theme_images, group.width.0).map_err(error)?;
+        let lines = slots(
+            &group.slots,
+            group.align,
+            config,
+            fields,
+            fonts,
+            theme_images,
+            group.width.0,
+        )
+        .map_err(error)?;
         let height: f64 = lines.iter().map(|(space, line)| space + line.height).sum();
         let top = match group.anchor.vertical() {
             Vertical::Top => group.y.0,
@@ -170,7 +167,15 @@ impl<'a> Flow<'a> {
     /// Sets the title block at the start of the body, kept on one page.
     pub(super) fn title(&mut self, slots: &[TitleSlot], frame: Frame<'a>) {
         let width = self.width(frame);
-        match self::slots(slots, None, self.config, self.fonts, self.theme_images, width) {
+        match self::slots(
+            slots,
+            None,
+            self.config,
+            self.fields,
+            self.fonts,
+            self.theme_images,
+            width,
+        ) {
             Ok(lines) => {
                 let count = lines.len();
                 for (index, (space, line)) in lines.into_iter().enumerate() {
@@ -195,6 +200,7 @@ fn slots(
     slots: &[TitleSlot],
     align: Option<Align>,
     config: &Config,
+    fields: &Fields,
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
     width: f64,
@@ -205,7 +211,7 @@ fn slots(
         let start = lines.len();
         match &slot.content {
             SlotContent::Text(text) => {
-                let Ok(filled) = text.fill(|p| value(&config.metadata, p)) else {
+                let Ok(filled) = text.fill(|p| fields.value(p)) else {
                     continue;
                 };
                 let mut set = Vec::new();

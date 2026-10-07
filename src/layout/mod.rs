@@ -18,6 +18,7 @@
 mod bands;
 mod bibliography;
 mod classes;
+mod fields;
 mod notes;
 mod pages;
 mod paragraph;
@@ -33,11 +34,13 @@ mod table_tests;
 mod tests;
 mod titles;
 mod toc;
+mod watermark;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
+use self::fields::Fields;
 use self::notes::NoteStyles;
 use self::structure::Structure;
 use crate::citations::Cited;
@@ -45,6 +48,7 @@ use crate::config::resolved::{Config, CustomStyle, PageGeometry, Style};
 use crate::config::source::{Resource, Source};
 use crate::config::theme::{Align, FontStyle, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
+use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location};
 use crate::image::Image;
@@ -58,7 +62,12 @@ const PASSES: usize = 5;
 
 /// Lays out `document` on pages with its title, table of contents, bibliography, headers, and footers.
 /// `cited` holds its formatted citations, `images` the loaded [`Document::images`], and `theme_images`
-/// the loaded theme images by resource. Errors name the source location of content that cannot fit.
+/// the loaded theme images by resource. `today` is the build date. Errors name the source location of
+/// content that cannot fit.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the inputs of layout, each prepared separately"
+)]
 pub fn layout(
     document: &Document,
     cited: &Cited,
@@ -67,13 +76,16 @@ pub fn layout(
     config: &Config,
     fonts: &Fonts,
     source: &Source,
+    today: Date,
 ) -> Result<Output, Vec<Diagnostic>> {
-    titles::check(config, source)?;
+    let fields = Fields::new(document, config, today);
+    titles::check(config, &fields, source)?;
     classes::check(document, config, source)?;
+    fields.check(document, source)?;
     let structure = Structure::new(document, config, cited.references());
     let notes = NoteStyles::new(config);
     let title_page = if config.document.title_page {
-        Some(titles::page(config, fonts, theme_images, source)?)
+        Some(titles::page(config, &fields, fonts, theme_images, source)?)
     } else {
         None
     };
@@ -85,6 +97,7 @@ pub fn layout(
         images,
         theme_images,
         config,
+        fields: &fields,
         fonts,
         source,
         structure: &structure,
@@ -98,7 +111,9 @@ pub fn layout(
         blanks.insert(0, 1);
     }
     let mut pages: Vec<Page> = title_page.into_iter().chain(blank).chain(body.pages).collect();
-    bands::draw(&mut pages, pass.first, &blanks, &structure, &anchors, config, fonts)?;
+    bands::draw(
+        &mut pages, pass.first, &blanks, &structure, &anchors, config, &fields, fonts,
+    )?;
     let outline = structure
         .headings
         .iter()
@@ -160,6 +175,7 @@ struct Pass<'a> {
     images: &'a [Image],
     theme_images: &'a HashMap<Resource, Image>,
     config: &'a Config,
+    fields: &'a Fields<'a>,
     fonts: &'a Fonts,
     source: &'a Source,
     structure: &'a Structure,
@@ -199,6 +215,7 @@ impl Pass<'_> {
         let config = self.config;
         let mut flow = Flow {
             config,
+            fields: self.fields,
             fonts: self.fonts,
             source: self.source,
             cited: self.cited,
@@ -222,7 +239,7 @@ impl Pass<'_> {
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
         if !config.document.title_page
-            && let Some(slots) = titles::block(config)
+            && let Some(slots) = titles::block(config, self.fields)
         {
             flow.title(slots, frame);
         }
@@ -362,6 +379,7 @@ impl<'a> Frame<'a> {
 
 struct Flow<'a> {
     config: &'a Config,
+    fields: &'a Fields<'a>,
     fonts: &'a Fonts,
     source: &'a Source,
     cited: &'a Cited,
@@ -753,12 +771,13 @@ impl<'a> Flow<'a> {
         )
     }
 
-    /// Replaces cross-references and citations with their text, linked to their anchor. A page reference
-    /// shows the page this pass assumes. Each work in a citation links to its bibliography entry.
+    /// Replaces cross-references, citations, and placeholders with their text, cross-references and
+    /// citations linked to their anchor. A page reference shows the page this pass assumes. Each work in
+    /// a citation links to its bibliography entry.
     fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
         if !content
             .iter()
-            .any(|inline| matches!(inline, Inline::Ref(_) | Inline::Citation { .. }))
+            .any(|inline| matches!(inline, Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. }))
         {
             return Cow::Borrowed(content);
         }
@@ -788,6 +807,10 @@ impl<'a> Flow<'a> {
                         },
                     }));
                 }
+                Inline::Field { placeholder, style, .. } => resolved.push(Inline::Text {
+                    text: self.fields.text(placeholder).expect("fields are checked before layout"),
+                    style: style.clone(),
+                }),
                 inline => resolved.push(inline.clone()),
             }
         }
@@ -1188,6 +1211,19 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
     };
     match item {
         Item::Text { x, y, run, color } => text_item(x.0 + dx, y.0 + dy, run, color),
+        Item::TurnedText {
+            x,
+            y,
+            angle,
+            run,
+            color,
+        } => Item::TurnedText {
+            x: Pt(x.0 + dx),
+            y: Pt(y.0 + dy),
+            angle,
+            run,
+            color,
+        },
         Item::Rect { rect: r, color } => Item::Rect { rect: rect(r), color },
         Item::Link { rect: r, link } => Item::Link { rect: rect(r), link },
         Item::Image { rect: r, image } => Item::Image { rect: rect(r), image },

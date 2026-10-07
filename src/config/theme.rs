@@ -41,6 +41,8 @@ pub struct Theme {
     pub title_block: TitleBlock,
     pub title_page: TitleLayout,
     pub pages: PageVariants,
+    /// Text set large and turned behind the content of every page that has bands. `null` for none.
+    pub watermark: Option<Watermark>,
     pub labels: Labels,
 }
 
@@ -57,6 +59,8 @@ pub struct DocumentDefaults {
     pub numbering_depth: HeadingDepth,
     pub toc_depth: HeadingDepth,
     pub citation_style: CitationStyle,
+    /// Whether the document is a draft, which gives `{draft}` its value.
+    pub draft: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -452,6 +456,7 @@ pub struct Styles<B> {
     pub toc_entry: B,
     pub header: B,
     pub footer: B,
+    pub watermark: B,
 }
 
 impl<B> Styles<B> {
@@ -483,6 +488,7 @@ impl<B> Styles<B> {
             toc_entry: f("toc-entry", self.toc_entry)?,
             header: f("header", self.header)?,
             footer: f("footer", self.footer)?,
+            watermark: f("watermark", self.watermark)?,
         })
     }
 
@@ -526,6 +532,7 @@ impl<B> Styles<B> {
             "toc-entry" => &self.toc_entry,
             "header" => &self.header,
             "footer" => &self.footer,
+            "watermark" => &self.watermark,
             _ => return None,
         })
     }
@@ -953,6 +960,15 @@ pub struct BandSlot {
     pub space_before: Spec<Spacing>,
 }
 
+/// The watermark: slot text in the `watermark` style, centered on the page and turned by `angle`
+/// degrees counterclockwise. A watermark whose placeholders lack a value is not set.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Watermark {
+    pub text: Template,
+    pub angle: f64,
+}
+
 /// Generated text per document language.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -982,6 +998,7 @@ pub struct LabelSet {
     pub abstract_: String,
     pub references: String,
     pub continued: String,
+    pub draft: String,
 }
 
 impl fmt::Display for Lang {

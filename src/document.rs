@@ -4,6 +4,7 @@
 //! never walks a nested inline tree.
 
 use crate::bibliography::syntax;
+use crate::config::template::Placeholder;
 
 /// A 1-based line and column in the Markdown file. Columns count characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +215,13 @@ pub enum Inline {
     Ref(Reference),
     /// A citation: an index into [`Document::citations`].
     Citation { index: usize, style: InlineStyle },
+    /// A `{placeholder}` such as `{words}`, replaced by its value in layout. It counts as no text in
+    /// the statistics it may show.
+    Field {
+        placeholder: Placeholder,
+        at: Location,
+        style: InlineStyle,
+    },
 }
 
 /// A cross-reference such as `@fig:chart`, or `[@fig:chart, page]` for the page it is on.

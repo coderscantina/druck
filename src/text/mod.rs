@@ -118,6 +118,15 @@ impl Fonts {
         }
     }
 
+    /// The height of capital letters of a face at `size`, or 0.7 em if the font does not say.
+    pub fn cap_height(&self, face: FaceId, size: Pt) -> Pt {
+        let buzz = &self.faces[face.0].buzz;
+        let units = buzz
+            .capital_height()
+            .map_or(0.7 * f64::from(buzz.units_per_em()), f64::from);
+        Pt(units * size.0 / f64::from(buzz.units_per_em()))
+    }
+
     /// Shapes one line-free piece of text with kerning and standard ligatures enabled.
     /// A positive `y_offset` moves a glyph up.
     pub fn shape(&self, text: &str, face: FaceId, size: Pt, lang: Lang) -> ShapedRun {

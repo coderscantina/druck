@@ -44,6 +44,15 @@ pub struct Page {
 pub enum Item {
     /// A shaped run whose baseline starts at (`x`, `y`).
     Text { x: Pt, y: Pt, run: ShapedRun, color: Color },
+    /// A shaped run turned `angle` degrees counterclockwise about the start of its baseline at
+    /// (`x`, `y`), used for watermarks.
+    TurnedText {
+        x: Pt,
+        y: Pt,
+        angle: f64,
+        run: ShapedRun,
+        color: Color,
+    },
     /// A filled rectangle, used for underlines and rules.
     Rect { rect: Rect, color: Color },
     /// A clickable area that opens a URL or goes to an anchor.

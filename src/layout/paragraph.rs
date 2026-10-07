@@ -716,8 +716,8 @@ fn tokens(
                 continue;
             }
             Inline::Text { text, style } => (text, style),
-            Inline::Ref(_) | Inline::Citation { .. } => {
-                unreachable!("layout resolves cross-references and citations before setting text")
+            Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => {
+                unreachable!("layout resolves cross-references, citations, and placeholders before setting text")
             }
             Inline::FootnoteRef(index) => {
                 let (weight, font_style) = inline_face(style, false, false);

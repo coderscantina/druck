@@ -44,7 +44,17 @@ fn config() -> Config {
 fn render(config: &Config, fonts: &Fonts, body: &str) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
     let cited = Cited::default();
-    layout(&document, &cited, &[], &HashMap::new(), config, fonts, &source()).map(|output| output.pages)
+    layout(
+        &document,
+        &cited,
+        &[],
+        &HashMap::new(),
+        config,
+        fonts,
+        &source(),
+        crate::date::Date::from_unix(0),
+    )
+    .map(|output| output.pages)
 }
 
 /// Every text run as (page, x, baseline, run).

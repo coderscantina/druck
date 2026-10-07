@@ -41,6 +41,12 @@ fn config(yaml: &str, theme: Value) -> Config {
     .expect("configuration resolves")
 }
 
+/// The title check with values for an empty document.
+fn check_titles(config: &Config) -> Result<(), Vec<Diagnostic>> {
+    let fields = Fields::new(&Document::default(), config, crate::date::Date::from_unix(0));
+    titles::check(config, &fields, &source())
+}
+
 fn theme() -> Value {
     json!({"version": 1})
 }
@@ -56,7 +62,16 @@ fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]
         bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
     let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source())?;
     let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
-    layout(&document, &cited, images, &HashMap::new(), config, &fonts, &source())
+    layout(
+        &document,
+        &cited,
+        images,
+        &HashMap::new(),
+        config,
+        &fonts,
+        &source(),
+        crate::date::Date::from_unix(0),
+    )
 }
 
 fn render(config: &Config, body: &str) -> Output {
@@ -180,7 +195,7 @@ fn a_title_page_stands_alone_and_body_pages_follow_its_parity() {
 
 #[test]
 fn a_required_title_slot_without_a_value_is_an_error() {
-    let error = titles::check(&config("title-page: true\nauthor: Ada", theme()), &source()).unwrap_err();
+    let error = check_titles(&config("title-page: true\nauthor: Ada", theme())).unwrap_err();
     assert_eq!(error.len(), 1);
     assert_eq!(error[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
     assert_eq!(
@@ -190,8 +205,8 @@ fn a_required_title_slot_without_a_value_is_an_error() {
     assert_eq!(error[0].source, Some(source()));
 
     // The title block is set only when the document has metadata for it.
-    assert!(titles::check(&config("author: Ada", theme()), &source()).is_err());
-    assert!(titles::check(&config("{}", theme()), &source()).is_ok());
+    assert!(check_titles(&config("author: Ada", theme())).is_err());
+    assert!(check_titles(&config("{}", theme())).is_ok());
     let errors = render_images(&config("author: Ada", theme()), "Text.", &[]).unwrap_err();
     assert_eq!(errors[0].property.as_deref(), Some("title-block.slots.0.text"));
 }
@@ -222,7 +237,7 @@ fn headers_show_the_section_and_subsection_of_each_page_and_footers_the_page() {
     let marks = json!([group("left", "{section}"), group("right", "{subsection}")]);
     let theme = json!({"version": 1, "pages": {"first": null, "body": {
         "header": marks,
-        "footer": [group("center", "{page}")],
+        "footer": [group("center", "{page}"), group("right", "{section-page}/{section-pages}")],
     }}});
     let config = config("{}", theme);
     let body = "Lead.\n\n# One\n\n## One A\n\nText.\n\n::: page-break\nText.\n\n## One B\n\nText.\n\n\
@@ -239,8 +254,8 @@ fn headers_show_the_section_and_subsection_of_each_page_and_footers_the_page() {
             vec!["2 Two"],
         ]
     );
-    let footers: Vec<_> = output.pages.iter().map(|page| footer(page, &config).join("")).collect();
-    assert_eq!(footers, ["1", "2", "3", "4"]);
+    let footers: Vec<_> = output.pages.iter().map(|page| footer(page, &config)).collect();
+    assert_eq!(footers, [["1", "1/2"], ["2", "2/2"], ["3", "1/2"], ["4", "2/2"]]);
 
     // A required slot without a value names the slot and the page.
     let required = json!({"version": 1, "pages": {"first": null, "body": {
@@ -252,6 +267,70 @@ fn headers_show_the_section_and_subsection_of_each_page_and_footers_the_page() {
         errors[0].message,
         "this required slot has no value for {section} on page 1"
     );
+}
+
+#[test]
+fn body_placeholders_show_statistics_and_metadata_that_do_not_count_themselves() {
+    let config = config("meta: {client: [ACME, Vienna]}", theme());
+    let body = "This text has {words} words in {paragraphs} paragraph for {meta.client}, {year}.\n\n\
+        Read in {reading-time} minute.";
+    let output = render(&config, body);
+    let texts = texts(&output.pages[0]);
+    assert!(
+        texts.contains(&"This text has 10 words in 2 paragraph for ACME, Vienna, 1970.".to_owned()),
+        "{texts:?}"
+    );
+    assert!(texts.contains(&"Read in 1 minute.".to_owned()), "{texts:?}");
+
+    let errors = render_images(&config, "By {subtitle}.\n\nA {draft}.", &[]).unwrap_err();
+    let errors: Vec<_> = errors.iter().map(|e| (e.location, e.message.as_str())).collect();
+    assert_eq!(
+        errors,
+        [
+            (
+                Some((1, 4)),
+                "{subtitle} has no value; set subtitle in the front matter"
+            ),
+            (Some((3, 3)), "{draft} has a value only in drafts; set draft: true"),
+        ]
+    );
+}
+
+/// The watermark of a page: its text, size, and angle, if it is the first item, behind the content.
+fn watermark(page: &Page) -> Option<(String, f64, f64)> {
+    match page.items.first()? {
+        Item::TurnedText { run, angle, .. } => Some((run.text.clone(), run.size.0, *angle)),
+        _ => None,
+    }
+}
+
+#[test]
+fn drafts_have_a_turned_watermark_behind_every_page_with_bands() {
+    let body = "Text.\n\n::: page-break\nMore.";
+    assert_eq!(
+        render(&config("{}", theme()), body)
+            .pages
+            .iter()
+            .filter_map(watermark)
+            .count(),
+        0
+    );
+
+    let output = render(
+        &config("draft: true\ntitle: T\ntitle-page: true\nduplex: true", theme()),
+        body,
+    );
+    let marks: Vec<_> = output.pages.iter().map(watermark).collect();
+    let draft = Some(("DRAFT".to_owned(), 160.0, 45.0));
+    // The blank page after the title page has no bands and no watermark.
+    assert_eq!(marks, [draft.clone(), None, draft.clone(), draft]);
+
+    // A smaller page sets the text smaller so it fits, in the document language.
+    let small = json!({"version": 1, "page": {"size": "a5"}, "watermark": {"text": "{draft}", "angle": 30}});
+    let output = render(&config("draft: true\nlang: de", small), body);
+    let (text, size, angle) = watermark(&output.pages[0]).expect("a watermark");
+    assert_eq!((text.as_str(), angle), ("ENTWURF", 30.0));
+    assert!(size < 160.0, "{size}");
 }
 
 #[test]
@@ -844,7 +923,7 @@ fn a_missing_meta_value_omits_its_slot_unless_it_is_required() {
     );
     assert_eq!(texts(&output.pages[0]), ["ACME", "Offer"]);
 
-    let errors = titles::check(&config(front, theme), &source()).unwrap_err();
+    let errors = check_titles(&config(front, theme)).unwrap_err();
     assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
     assert_eq!(
         errors[0].message,

@@ -53,6 +53,19 @@ pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) ->
                 Item::Text { x, y, run, color } => {
                     draw_run(&mut surface, fonts, run, Point::from_xy(x.0 as f32, y.0 as f32), *color)
                 }
+                Item::TurnedText {
+                    x,
+                    y,
+                    angle,
+                    run,
+                    color,
+                } => {
+                    let start = Point::from_xy(x.0 as f32, y.0 as f32);
+                    // y grows downward, so a counterclockwise turn is a negative angle.
+                    surface.push_transform(&Transform::from_rotate_at(-*angle as f32, start.x, start.y));
+                    draw_run(&mut surface, fonts, run, start, *color);
+                    surface.pop();
+                }
                 Item::Rect { rect, color } => draw_rect(&mut surface, rect, *color)?,
                 Item::Link { rect, link } => links.push((rect, link)),
                 Item::Image { rect, image } => draw_image(&mut surface, rect, image)?,

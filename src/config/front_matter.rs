@@ -55,6 +55,8 @@ pub struct FrontMatter {
     pub toc_depth: Option<HeadingDepth>,
     #[serde(default, deserialize_with = "non_null")]
     pub citation_style: Option<CitationStyle>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub draft: Option<bool>,
 
     #[serde(default, deserialize_with = "non_null")]
     pub page_size: Option<PageSize>,
@@ -254,6 +256,7 @@ impl FrontMatter {
             ("numbering-depth", self.numbering_depth.as_ref().map(json)),
             ("toc-depth", self.toc_depth.as_ref().map(json)),
             ("citation-style", self.citation_style.as_ref().map(json)),
+            ("draft", self.draft.map(Value::Bool)),
         ];
         for (key, value) in document {
             if let Some(value) = value {

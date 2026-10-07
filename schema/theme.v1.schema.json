@@ -58,6 +58,10 @@
             "numeric"
           ],
           "description": "Citation style."
+        },
+        "draft": {
+          "type": "boolean",
+          "description": "Whether the document is a draft, which gives {draft} its value."
         }
       },
       "description": "Document defaults. Front matter and CLI options may override them."
@@ -333,6 +337,10 @@
         },
         "footer": {
           "description": "Running footer text.",
+          "$ref": "#/$defs/blockStyle"
+        },
+        "watermark": {
+          "description": "Watermark text. Font, size, weight, style, color, tracking, and uppercase apply.",
           "$ref": "#/$defs/blockStyle"
         }
       },
@@ -620,6 +628,30 @@
       },
       "description": "Headers and footers per page variant."
     },
+    "watermark": {
+      "description": "Text centered on every page with bands and turned behind the content, or null for none. It is not set while a placeholder in it has no value, so {draft} shows it only in drafts.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "description": "Watermark text in the watermark style.",
+              "$ref": "#/$defs/template"
+            },
+            "angle": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "description": "Counterclockwise turn in degrees."
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "labels": {
       "type": "object",
       "additionalProperties": false,
@@ -723,7 +755,7 @@
     },
     "template": {
       "type": "string",
-      "description": "Text with placeholders {title}, {subtitle}, {author}, {date}, {abstract}, {section}, {subsection}, {page}, {pages}, and {meta.key} for an entry of the front matter meta map. A line break starts a new line. Write {{ and }} for literal braces."
+      "description": "Text with placeholders: metadata {title}, {subtitle}, {author}, {date}, {abstract}, and {meta.key} for an entry of the front matter meta map; pages {section}, {subsection}, {page}, {pages}, {section-page}, and {section-pages}; statistics {chars}, {chars-no-spaces}, {words}, {sentences}, {paragraphs}, {reading-time}, {figures}, and {tables}; and {build-date}, {year}, and {draft}. A line break starts a new line. Write {{ and }} for literal braces."
     },
     "headingDepth": {
       "type": "integer",
@@ -1363,6 +1395,10 @@
         "continued": {
           "type": "string",
           "description": "Marker for a table continued on the next page."
+        },
+        "draft": {
+          "type": "string",
+          "description": "The value of {draft} in drafts."
         }
       },
       "description": "Generated text for one language."

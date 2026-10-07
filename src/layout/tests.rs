@@ -65,7 +65,17 @@ fn render_with_images(
         citations: Vec::new(),
     };
     let cited = Cited::default();
-    layout(&document, &cited, images, &HashMap::new(), &config, &fonts, &source()).map(|output| output.pages)
+    layout(
+        &document,
+        &cited,
+        images,
+        &HashMap::new(),
+        &config,
+        &fonts,
+        &source(),
+        crate::date::Date::from_unix(0),
+    )
+    .map(|output| output.pages)
 }
 
 fn note(line: u64, text: &str) -> Footnote {
@@ -1341,12 +1351,14 @@ fn flow(markdown: &str) -> Vec<FlowLine> {
     let cited = Cited::default();
     let structure = Structure::new(&document, &config, cited.references());
     let notes = NoteStyles::new(&config);
+    let fields = Fields::new(&document, &config, crate::date::Date::from_unix(0));
     let pass = Pass {
         document: &document,
         cited: &cited,
         images: &[],
         theme_images: &HashMap::new(),
         config: &config,
+        fields: &fields,
         fonts: &fonts,
         source: &source(),
         structure: &structure,
@@ -1433,6 +1445,7 @@ fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
         &config,
         &fonts,
         &source(),
+        crate::date::Date::from_unix(0),
     )
     .unwrap();
     let pages = &output.pages;

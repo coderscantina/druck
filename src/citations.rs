@@ -94,7 +94,7 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             match inline {
                 Inline::Citation { index, .. } => order.push(*index),
                 Inline::FootnoteRef(note) => reading_order(&document.footnotes[*note].blocks, document, order),
-                Inline::Text { .. } | Inline::LineBreak | Inline::Ref(_) => {}
+                Inline::Text { .. } | Inline::LineBreak | Inline::Ref(_) | Inline::Field { .. } => {}
             }
         }
     };

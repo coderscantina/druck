@@ -9,7 +9,8 @@
     "numbered-headings": true,
     "numbering-depth": 3,
     "toc-depth": 2,
-    "citation-style": "author-date"
+    "citation-style": "author-date",
+    "draft": false
   },
   "fonts": {
     "Libertinus Serif": {
@@ -510,6 +511,23 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false
+    },
+    "watermark": {
+      "font": "$fonts.body",
+      "size": "160pt",
+      "weight": "regular",
+      "style": "normal",
+      "color": "#dcdcdc",
+      "line-height": 1,
+      "align": "center",
+      "hyphenate": false,
+      "space-before": "$spacing.none",
+      "space-after": "$spacing.none",
+      "indent": "$spacing.none",
+      "first-line-indent": "$spacing.none",
+      "tracking": 0.04,
+      "uppercase": true,
+      "keep-with-next": false
     }
   },
   "custom-styles": {},
@@ -671,6 +689,10 @@
       ]
     }
   },
+  "watermark": {
+    "text": "{draft}",
+    "angle": 45
+  },
   "labels": {
     "en": {
       "figure": "Figure",
@@ -680,7 +702,8 @@
       "contents": "Contents",
       "abstract": "Abstract",
       "references": "References",
-      "continued": "(continued)"
+      "continued": "(continued)",
+      "draft": "Draft"
     },
     "de": {
       "figure": "Abbildung",
@@ -690,7 +713,8 @@
       "contents": "Inhalt",
       "abstract": "Zusammenfassung",
       "references": "Literatur",
-      "continued": "(Fortsetzung)"
+      "continued": "(Fortsetzung)",
+      "draft": "Entwurf"
     }
   }
 }

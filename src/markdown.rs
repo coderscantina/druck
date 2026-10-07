@@ -11,6 +11,9 @@
 //! citation, see [`syntax`]; inside link text it stays text. References and citations are read from
 //! the source text, so an escaped `\@` stays text.
 //!
+//! A `{name}` in text is a [placeholder](Placeholder) such as `{words}`, unless its brace is escaped.
+//! Placeholders whose value depends on the page are rejected, as are placeholders in headings.
+//!
 //! A custom style is applied with `{.name}` at the end of a heading or paragraph, or on a line of its
 //! own directly before a list. A heading may combine it with its label, as in `{#sec:name .name}`.
 //!
@@ -25,6 +28,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagE
 
 use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::Source;
+use crate::config::template::Placeholder;
 use crate::diagnostic::Diagnostic;
 use crate::document::{
     Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, Inline, InlineStyle,
@@ -1010,7 +1014,22 @@ impl<'a> Builder<'a> {
             return;
         }
         let mut start = 0;
-        for (index, _) in text.match_indices('@') {
+        for (index, mark) in text.match_indices(['@', '{']) {
+            if mark == "{" {
+                let escapes =
+                    self.body[..offset + index].len() - self.body[..offset + index].trim_end_matches('\\').len();
+                let Some(length) =
+                    field_name(&text[index + 1..]).filter(|_| escapes.is_multiple_of(2) && index >= start)
+                else {
+                    continue;
+                };
+                if index > start {
+                    self.push_text(offset + start, &text[start..index], false);
+                }
+                self.field(offset + index, &text[index + 1..index + 1 + length]);
+                start = index + length + 2;
+                continue;
+            }
             let before = text[..index]
                 .chars()
                 .next_back()
@@ -1114,6 +1133,23 @@ impl<'a> Builder<'a> {
         });
         let style = self.style(false);
         self.push_inline(offset, Inline::Citation { index, style });
+    }
+
+    /// Adds the placeholder `name`, written in braces at `offset`.
+    fn field(&mut self, offset: usize, name: &str) {
+        let placeholder = match Placeholder::parse(name) {
+            Ok(placeholder) => placeholder,
+            Err(message) => return self.report(offset, format!("{message}; write \\{{ for a brace")),
+        };
+        if placeholder.is_page_dependent() {
+            let message = format!("{{{placeholder}}} depends on the page and is available only in headers and footers");
+            return self.report(offset, message);
+        }
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
+            return self.report(offset, "a heading cannot hold a placeholder");
+        }
+        let (at, style) = (self.location(offset), self.style(false));
+        self.push_inline(offset, Inline::Field { placeholder, at, style });
     }
 
     fn reference(&mut self, offset: usize, label: String, page: bool) {
@@ -1585,6 +1621,18 @@ fn column_align(align: Alignment) -> Option<ColumnAlign> {
         Alignment::Center => Some(ColumnAlign::Center),
         Alignment::Right => Some(ColumnAlign::Right),
     }
+}
+
+/// The length of the placeholder name in `{name}` when `text` starts after the brace: a letter, then
+/// letters, digits, `-`, `_`, and `.`. Other braces, such as `{.name}` and `{span=2}`, are text.
+fn field_name(text: &str) -> Option<usize> {
+    let length = text.find('}')?;
+    let name = &text[..length];
+    let valid = name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    valid.then_some(length)
 }
 
 /// The number of cells a table row's source line holds, counting unescaped pipes. One leading and
@@ -2572,6 +2620,60 @@ mod tests {
                 plain(", @fig:chart, or a@fig:chart."),
             ]
         );
+    }
+
+    #[test]
+    fn reads_placeholders_in_text_and_leaves_attributes_escapes_and_code_alone() {
+        let strong = InlineStyle {
+            strong: true,
+            ..Default::default()
+        };
+        let field = |placeholder, column, style| Inline::Field {
+            placeholder,
+            at: at(1, column),
+            style,
+        };
+        assert_eq!(
+            inlines("About **{words}** words, {meta.client}; not \\{year}, {a b}, `{year}` {.x}\n"),
+            vec![
+                plain("About "),
+                field(Placeholder::Words, 9, strong.clone()),
+                plain(" words, "),
+                field(Placeholder::Meta("client".into()), 26, InlineStyle::default()),
+                plain("; not {year}, {a b}, "),
+                text(
+                    "{year}",
+                    InlineStyle {
+                        code: true,
+                        ..Default::default()
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_unknown_page_and_heading_placeholders() {
+        let body = "# On {words} words\n\nPage {page} and {wrods}.\n";
+        let errors = diagnostics(body, 1);
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert_eq!(
+            errors[0],
+            (Some((1, 6)), "a heading cannot hold a placeholder".to_owned())
+        );
+        assert_eq!(
+            errors[1],
+            (
+                Some((3, 6)),
+                "{page} depends on the page and is available only in headers and footers".to_owned()
+            )
+        );
+        assert!(
+            errors[2].1.starts_with("unknown placeholder {wrods}"),
+            "{}",
+            errors[2].1
+        );
+        assert!(errors[2].1.ends_with("; write \\{ for a brace"), "{}", errors[2].1);
     }
 
     #[test]

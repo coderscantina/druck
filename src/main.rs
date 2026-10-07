@@ -3,6 +3,7 @@
 mod bibliography;
 mod citations;
 mod config;
+mod date;
 mod diagnostic;
 mod document;
 mod image;
@@ -11,6 +12,7 @@ mod layout;
 mod markdown;
 mod page;
 mod pdf;
+mod statistics;
 mod text;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -108,7 +110,7 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 .iter()
                 .flat_map(|page| &page.items)
                 .filter_map(|item| match item {
-                    page::Item::Text { run, .. } => Some(run.face),
+                    page::Item::Text { run, .. } | page::Item::TurnedText { run, .. } => Some(run.face),
                     _ => None,
                 })
                 .collect();
@@ -168,6 +170,7 @@ fn typeset(config: &Config, document: &DocumentFile) -> Result<(Fonts, page::Out
     let installed = find_installed(config)?;
     let fonts = Fonts::load(config, &installed)?;
     let prepared = prepare(config, document)?;
+    let today = date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?;
     let laid = layout::layout(
         &prepared.content,
         &prepared.cited,
@@ -176,6 +179,7 @@ fn typeset(config: &Config, document: &DocumentFile) -> Result<(Fonts, page::Out
         config,
         &fonts,
         &document.source,
+        today,
     )?;
     Ok((fonts, laid))
 }

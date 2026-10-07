@@ -267,7 +267,7 @@ pub(super) fn plain(content: &[Inline]) -> String {
         match inline {
             Inline::Text { text: piece, .. } => text.push_str(piece),
             Inline::LineBreak => text.push(' '),
-            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } => {}
+            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => {}
         }
     }
     text

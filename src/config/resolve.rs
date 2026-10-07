@@ -1006,6 +1006,18 @@ impl<'a> Resolver<'a> {
             |property, slots, width| self.title_slots(property, slots, slot_styles, &images, &page, width, body),
         );
         let pages = self.page_variants(&page, slot_styles, body);
+        let watermark = theme.watermark.as_ref().map(|watermark| {
+            self.check_placeholders(&watermark.text, "watermark.text", "the watermark", |p| {
+                *p == Placeholder::Abstract
+            });
+            if !(-180.0..=180.0).contains(&watermark.angle) {
+                self.error("watermark.angle", "the angle must be from -180 to 180 degrees");
+            }
+            resolved::Watermark {
+                text: watermark.text.clone(),
+                angle: watermark.angle,
+            }
+        });
 
         let bibliography_file = [overrides, document].into_iter().find_map(|input| {
             let path = input.settings.bibliography.as_ref()?;
@@ -1038,6 +1050,7 @@ impl<'a> Resolver<'a> {
             },
             title_page: title_page?,
             pages: pages?,
+            watermark,
             labels: theme.labels.get(theme.document.lang).clone(),
             warnings: self.unused_font_warnings(document, overrides),
         })
@@ -1155,6 +1168,20 @@ mod tests {
             ]
         );
         assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
+    }
+
+    #[test]
+    fn rejects_a_watermark_angle_past_a_half_turn_and_the_abstract_in_it() {
+        let (property, message) = rejection(json!({"version": 1, "watermark": {"text": "{draft}", "angle": 181}}));
+        assert_eq!(
+            (property.as_str(), message.as_str()),
+            ("watermark.angle", "the angle must be from -180 to 180 degrees")
+        );
+        let (property, message) = rejection(json!({"version": 1, "watermark": {"text": "{abstract}", "angle": 0}}));
+        assert_eq!(
+            (property.as_str(), message.as_str()),
+            ("watermark.text", "{abstract} is not available in the watermark")
+        );
     }
 
     #[test]
