@@ -70,13 +70,13 @@ Support explicit lengths in pt, mm, cm, and in. Support em for typography-relati
 
 ### Structured templates
 
-Title-page templates contain ordered content slots. Header and footer templates have fixed left, center, and right slots. Slots have supported styles and bounded spacing.
+Title-page templates contain ordered content slots. Header and footer templates have fixed left, center, and right slots. Slots have supported styles and bounded spacing. The [business documents amendment](#business-documents-amendment) replaces fixed band slots and the single title-page column with anchored slot groups.
 
 Slot values can refer to document metadata, applicable section titles, and page numbers. Insert values as text, never as layout commands or executable expressions. Omit empty optional slots and their associated spacing. A missing value for a slot marked required is an error.
 
 Support explicit page variants for title pages, the first body page, normal body pages, odd pages, and even pages. Define a deterministic fallback order and document which page-numbering sequence determines parity. Variant precedence, section-title selection, and empty-slot behavior must be consistent across page layout and final PDF output.
 
-Nested row/column template containers, arbitrary selectors, conditional expressions, and absolute positioning are outside scope. Body columns retain the explicit one/two-column behavior specified below.
+Nested row/column template containers, arbitrary selectors, conditional expressions, and absolute positioning are outside scope. Anchored slot groups from the amendment are positioned relative to the margin frame, not at absolute page coordinates. Body columns retain the explicit one/two-column behavior specified below.
 
 ### Validation and resources
 
@@ -151,7 +151,7 @@ Support local PNG, JPEG, and SVG images. Automatic floats, wrapping prose around
 
 Tables wrap cell text, repeat headers across pages, and break between rows. They can continue across pages. A single row taller than the available page area receives an error.
 
-Merged cells and splitting an individual table row across pages are outside scope.
+Splitting an individual table row across pages is outside scope. Row spans are outside scope; column spans arrive with the [amendment](#business-documents-amendment).
 
 ## Document structure
 
@@ -182,7 +182,7 @@ Arbitrary CSL styles, custom entry types, and broad BibTeX compatibility such as
 
 Resolve document resource paths relative to the input Markdown file and theme resource paths relative to the theme origin. Resources include local images, bibliography files, and optional local font files. Preserve the origin of each resource reference through configuration resolution. Do not fetch remote resources.
 
-Bundle the default fonts and hyphenation data so ordinary rendering does not depend on system-installed resources.
+Bundle the default fonts and hyphenation data so ordinary rendering does not depend on system-installed resources. A theme may name an installed font family by the [amendment](#business-documents-amendment); that font is then an input resource like a font file, and a missing one is an error, never a silent substitution.
 
 Give clear diagnostics tied to the source location where possible. Errors must identify the relevant resource, citation, reference, or layout constraint.
 
@@ -205,7 +205,7 @@ Tagged accessibility and PDF/A compliance are deferred.
 
 ## Phase 1 delivery stages
 
-The stages below describe product delivery. [The ten development milestones](PHASE_1_MILESTONES.md) divide them into bounded agent work with explicit completion gates. Current implementation state is tracked in [progress](PROGRESS.md).
+The stages below describe product delivery. [The development milestones](PHASE_1_MILESTONES.md) divide them into bounded agent work with explicit completion gates. Current implementation state is tracked in [progress](PROGRESS.md).
 
 ### Stage 1: Core composition
 
@@ -229,6 +229,16 @@ Finish CLI distribution for macOS, Linux, and Windows, bundled resources, and th
 
 Expose this renderer as a public Rust crate after the phase 1 contract is complete. Phase 2 adds the supported API, inspectable layout results, explicit resource resolvers, cancellation, concurrent job contract, and CLI integration through the public API. See the separate phase 2 briefing for its requirements and acceptance criteria.
 
+## Business documents amendment
+
+Added on 2026-10-07 so a theme can set business documents such as a multi-page offer: a cover with a metadata block, a narrow prose column with wider tables, a multi-column footer, and cost tables with rich cells. The decisions behind it are in [decisions](DECISIONS.md#2026-10-07-business-documents-amendment). It is delivered by milestones 11 to 13 in [the milestone index](PHASE_1_MILESTONES.md).
+
+- **Installed fonts.** A font family name that is neither bundled nor defined in `font-files` is looked up among installed fonts, including font collections. Styles take numeric weights from 100 to 900. A missing family, weight, or style is an error. A font whose license restricts embedding is embedded with a warning.
+- **Typography.** Block styles gain letter spacing and an uppercase transform. Themes define named custom styles based on another style, without cascading selectors. Authors attach them with `{.name}` to headings, paragraphs, lists, and table rows and cells. Styles may keep a block with the next one, carry list bullets, and set a hanging gap after a leading number in a heading.
+- **Page geometry.** Margins may stay the same on every page instead of mirroring. Prose may use a width narrower than the margin frame while chosen block kinds, such as tables, use the full frame.
+- **Anchored slot groups.** The title page and headers and footers are lists of slot groups. Each group is anchored to the margin frame with an offset, a width, and an alignment, and holds multi-line slots. Free document metadata from front matter and the page total are slot values.
+- **Rich tables.** A list-based table directive allows block content in cells, column spans, column alignment and widths, row and cell styles, and theme rules below the header and below rows.
+
 ## Acceptance and performance
 
 Judge visual quality against the project's own reviewed English and German sample documents. LaTeX reference PDFs and matching LaTeX line or page breaks are not acceptance requirements.
@@ -247,7 +257,7 @@ Benchmark 10-, 50-, and 100-page documents. Set runtime and memory limits after 
 
 ## Explicit boundaries and remaining implementation decisions
 
-The first release excludes math, automatic floats, image text wrapping, unequal or three-column layouts, merged table cells, split table rows, arbitrary typesetting commands, embedded HTML rendering, remote resource fetching, arbitrary CSL styles, broad BibTeX compatibility, glyph-width adjustments, right-to-left and CJK layout, tagged accessibility, and PDF/A compliance. Theme inheritance chains, multiple theme overlays, cascading selectors, arbitrary template trees, expressions, and absolute positioning are also excluded. The public Rust API is deferred to phase 2.
+The first release excludes math, automatic floats, image text wrapping, unequal or three-column layouts, row-spanning table cells, split table rows, arbitrary typesetting commands, embedded HTML rendering, remote resource fetching, arbitrary CSL styles, broad BibTeX compatibility, glyph-width adjustments, right-to-left and CJK layout, tagged accessibility, and PDF/A compliance. Theme inheritance chains, multiple theme overlays, cascading selectors, arbitrary template trees, expressions, and absolute positioning are also excluded. The public Rust API is deferred to phase 2.
 
 Dependency crate choices, internal module interfaces, exact directive spelling, the front-matter schema, exact JSON properties and slot identifiers, page-variant fallback order, measurement encoding, default font selection, numeric typography settings, concrete citation formatting, and CLI flags remain implementation decisions within this contract. These choices must be documented and deterministic. Performance limits will be set from prototype measurements.
 

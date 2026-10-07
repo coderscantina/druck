@@ -502,6 +502,30 @@ Built in parallel with milestone 09, without touching the renderer. The procedur
 - **Release builds:** [release.yml](../.github/workflows/release.yml) builds x86_64 and aarch64 Linux on Ubuntu 22.04 images (older glibc), aarch64 and x86_64 macOS, and x86_64 Windows on manual dispatch or `v*` tags, renders the samples with each runnable binary, and uploads archives with SHA-256 files. It does not create a GitHub release.
 - **Not set:** `rust-version`, because no older toolchain was tested, and `license`, which waits for the owner's choice.
 
+## 2026-10-07: Business documents amendment
+
+Decided with the owner against a reference offer PDF: a cover with a metadata block, prose narrower than the tables, a three-column footer, and cost tables with detail lists in cells. The product contract is in [the amendment](BRIEFING.md#business-documents-amendment); milestones [11](milestones/11-typography.md), [12](milestones/12-page-geometry.md), and [13](milestones/13-rich-tables.md) deliver it.
+
+- **Scope:** everything the reference needs, including eyebrows above headings, ✓ lists, Medium and Light weights, and totals rows. Totals are typed by the author, not computed.
+- **Installed fonts:** a bare family name in `fonts` is looked up among installed fonts when it is neither bundled nor in `font-files`; `font-files` wins on a name clash. Absolute `font-files` paths already worked, but collections and weights did not. Lookup happens at the CLI boundary only, so the phase 2 crate takes a caller-supplied font resolver instead. A missing font is an error, since a silent fallback changes layout. Restricted embedding licenses only warn: the license is the user's to manage.
+- **Weights:** numeric 100 to 900 with `regular` and `bold` as aliases, rather than one family per weight or a few named weights.
+- **Custom styles:** named styles with `based-on` and overrides, applied with `{.name}`. Inferring styles from structure was rejected as too implicit. Directives could not serve, since they are not allowed inside lists and so not inside list-table cells. Placement: end of a heading or paragraph, a line before a list, start of a row or cell item.
+- **Style properties:** `tracking` and `uppercase` for letter-spaced capitals, `keep-with-next` for eyebrows (a paragraph, so not in the outline), `bullets` on list styles for per-list markers, and `number-gap` for hanging step numbers typed by the author. A heading `eyebrow` attribute and automatic per-section counters were rejected as one-off machinery.
+- **Geometry:** `margins.mirror: false` instead of separate `left` and `right` keys, which would be awkward to override across theme layers. `page.text-width` with a theme `wide` list of block kinds; authors do not mark wide blocks.
+- **Anchored slot groups:** one model for the title page and the bands, anchored to the margin frame so a margin change moves them along. Absolute page coordinates stay excluded.
+- **Metadata:** a free `meta` map in front matter used as `{meta.key}`; other unknown keys stay errors so typos are still caught. `{pages}` adds the page total.
+- **Tables:** a `::: table` list table, because pipe tables cannot hold lists and grid tables are hard to edit. Column spans with an explicit `{span=n}`, because inferring spans from short rows would hide a missing cell. Alignment and widths as directive attributes. Header and row rules in the theme with a `rule-below: none` opt-out for totals.
+- **Verification:** the offer theme with the commercial font stays outside the repository and is compared on the owner's machine. CI covers the features with synthetic samples and tests.
+- **Milestones:** three, grouped as typography, geometry, and tables. 11 and 12 are independent; 13 needs both.
+
+## 2026-10-07: Milestone 11 installed fonts and custom styles
+
+Not started.
+
+## 2026-10-07: Milestone 12 page geometry, covers, and bands
+
+Not started.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

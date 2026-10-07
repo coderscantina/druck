@@ -1,8 +1,8 @@
 # Phase 1 milestones
 
-## Why ten milestones
+## Why these milestones
 
-Use ten milestones to separate configuration, the first rendering path, paragraph composition, page composition, columns, images, tables, document structures, citations, and release acceptance. These are dependency and verification boundaries, not fixed token budgets or promises that each fits one conversation.
+Use ten milestones to separate configuration, the first rendering path, paragraph composition, page composition, columns, images, tables, document structures, citations, and release acceptance. These are dependency and verification boundaries, not fixed token budgets or promises that each fits one conversation. Milestones 11 to 13 were added later by an amendment.
 
 The three delivery stages in [the product briefing](BRIEFING.md) remain intact: milestones 01–03 implement core composition, 04–07 implement page and column constraints, and 08–10 complete documents and distribution. The public crate remains [phase 2](RUST_CRATE_API_PHASE_2.md).
 
@@ -18,6 +18,11 @@ The three delivery stages in [the product briefing](BRIEFING.md) remain intact: 
 8. [Document structures and templates](milestones/08-document-structures.md).
 9. [Citations and bibliography](milestones/09-citations.md).
 10. [Release acceptance and distribution](milestones/10-release-acceptance.md).
+11. [Installed fonts and custom styles](milestones/11-typography.md).
+12. [Page geometry, covers, and bands](milestones/12-page-geometry.md).
+13. [Rich tables](milestones/13-rich-tables.md).
+
+Milestones 11 to 13 deliver the [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07. Milestones 11 and 12 depend only on milestone 09 and may run in parallel; 13 needs both. The release acceptance of milestone 10 covers them once they are complete.
 
 Each milestone depends on the preceding milestones unless its brief states otherwise. Work may be split into smaller sessions. Begin a later milestone only within the user's authorized scope and with its prerequisites satisfied.
 
