@@ -1,7 +1,8 @@
-name: Release build
+name: Release
 
-# Builds and packages binaries as workflow artifacts. It does not create a
-# GitHub release, upload release assets, or publish a crate. See docs/RELEASE.md.
+# Builds and packages binaries for five targets. A manual run keeps them as
+# workflow artifacts. A tag push from scripts/release.sh also creates the GitHub
+# release with the newest CHANGELOG.md section. See docs/RELEASE.md.
 on:
   workflow_dispatch:
   push:
@@ -50,3 +51,32 @@ jobs:
           name: druck-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
+
+  publish:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag against the version and commit
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          expected="v$version-$(git rev-parse --short=7 HEAD)"
+          if [[ "$GITHUB_REF_NAME" != "$expected" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match $expected" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: druck-*
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk '/^## /{n++; next} n==1' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "Druck $GITHUB_REF_NAME" --notes-file notes.md
