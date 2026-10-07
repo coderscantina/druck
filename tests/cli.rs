@@ -282,7 +282,7 @@ fn render(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
 #[test]
 fn renders_the_samples() {
     let sandbox = Sandbox::new("samples");
-    for name in ["en", "de", "pagination", "columns", "images", "tables"] {
+    for name in ["en", "de", "pagination", "columns", "images", "tables", "offer"] {
         let output = sandbox.root.join(format!("{name}.pdf"));
         let document = format!("{REPO}/samples/{name}.md");
         let pdf = render(&sandbox, &[&document, "-o", output.to_str().unwrap()], &output);
@@ -332,7 +332,7 @@ fn check_reports_a_required_title_slot_without_a_value() {
     let stderr = sandbox.rejection(&[&document]);
     assert!(
         stderr.contains(&format!(
-            "{document}: title-page.slots.0.text: this required slot needs {{title}}; set title in the front matter"
+            "{document}: title-page.groups.0.slots.0.text: this required slot needs {{title}}; set title in the front matter"
         )),
         "{stderr}"
     );

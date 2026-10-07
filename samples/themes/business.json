@@ -1,0 +1,80 @@
+{
+  "$schema": "../../schema/theme.v1.schema.json",
+  "version": 1,
+  "document": {
+    "title-page": true,
+    "numbered-headings": false
+  },
+  "tokens": {
+    "colors": {
+      "accent": "#1f4e5f"
+    }
+  },
+  "page": {
+    "margins": {
+      "top": "25mm",
+      "bottom": "40mm",
+      "inner": "25mm",
+      "outer": "20mm",
+      "mirror": false
+    },
+    "text-width": "112mm",
+    "header-offset": "10mm",
+    "footer-offset": "12mm"
+  },
+  "styles": {
+    "title": { "align": "left", "color": "$colors.accent" },
+    "subtitle": { "align": "left" },
+    "heading-1": { "color": "$colors.accent" },
+    "heading-2": { "color": "$colors.accent" },
+    "body": { "align": "left", "first-line-indent": "0pt", "space-after": "0.6em" }
+  },
+  "title-page": {
+    "groups": [
+      {
+        "anchor": "top-right",
+        "width": "58mm",
+        "align": "left",
+        "slots": [
+          { "text": "{meta.client}" },
+          { "text": "Offer {meta.offer}\n{date}", "space-before": "1.5em", "required": true }
+        ]
+      },
+      {
+        "anchor": "middle-left",
+        "width": "112mm",
+        "align": "left",
+        "slots": [
+          { "text": "{title}", "style": "title", "required": true },
+          { "text": "{subtitle}", "style": "subtitle", "space-before": "0.8em" }
+        ]
+      }
+    ]
+  },
+  "pages": {
+    "title": null,
+    "first": null,
+    "body": {
+      "header": null,
+      "footer": [
+        {
+          "anchor": "top-left",
+          "width": "50mm",
+          "slots": [{ "text": "Kyber Example Studio\nLindengasse 5\n1070 Vienna" }]
+        },
+        {
+          "anchor": "top-left",
+          "offset": { "x": "56mm" },
+          "width": "55mm",
+          "slots": [{ "text": "{meta.contact}" }]
+        },
+        {
+          "anchor": "top-right",
+          "width": "40mm",
+          "align": "right",
+          "slots": [{ "text": "Page {page}|{pages}" }]
+        }
+      ]
+    }
+  }
+}
