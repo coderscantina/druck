@@ -524,7 +524,39 @@ Not started.
 
 ## 2026-10-07: Milestone 12 page geometry, covers, and bands
 
-Not started.
+### Margins and prose width
+
+`page.margins.mirror` (default `true`) is the only switch. [`PageGeometry::left_margin`](../src/config/resolved.rs) picks the left margin per physical page for the body, the bands, and the title page, which is page 1 and so always has the inner margin on the left.
+
+`page.text-width` is a length or `null` for the frame width. `null` was chosen over a sentinel such as `"100%"`, since lengths have no percentages, and it fits the rule that `null` removes something: here the narrowing. `page.wide` lists `table`, `figure`, and `code-block`; it lives under `page` because it only matters together with the text width. A text width that is zero or wider than the frame is an error, and the column gap is now checked against the prose width.
+
+Lines are still broken once, before pagination, at block-level insets. [The flow](../src/layout/mod.rs) starts in a prose frame whose right inset is the difference between frame and prose width, and the frame carries that difference as `widen`. A table, figure, or code block listed in `wide` drops it and spans the frame. Lists, quotations, column sections, and footnotes set `widen` to zero, so a wide block inside them keeps the width it is in. A `keep` group and a `full-width` block of a column section pass the prose frame on, so wide blocks widen there. Column sections divide the prose width. This keeps one rule, "a wide block widens where it stands directly in the prose", without asking the composer to know block kinds.
+
+Prose starts at the inner edge. With mirrored margins that is the right side of even pages, which is only known during composition, so every flow line records whether it is wide, and [the composer](../src/layout/pages.rs) moves prose lines, column regions, footnotes, and the footnote rule right by the difference on those pages while wide lines and their repeated table headers stay put. With the default `null` the shift is zero, which is why existing output is unchanged.
+
+### Slot groups
+
+The title page and each header and footer are arrays of groups `{anchor, offset: {x, y}, width, align, slots}`. Offsets are non-negative and point into the frame: `x` from the anchored side, `y` down from top and middle anchors and up from bottom ones. Signed offsets were not needed, since the anchor already picks the direction. `width` defaults to the frame width less `x`; a group must fit in the frame. `align` overrides the slot styles' alignment and defaults to it, so the default title page keeps its centered title and justified abstract in one group.
+
+Title page groups are placed by their box, including the space above the first slot, as title slots were stacked from the top of the text area. Band groups are placed by baselines on the band baseline that `header-offset` and `footer-offset` already define: top anchors put the first baseline there, bottom anchors the last, middle anchors center them. Boxes would have moved existing band baselines by font metrics, and baselines are what bands align across a page. `header-offset` and `footer-offset` therefore stay.
+
+The old `left`, `center`, and `right` band shape and `title-page.slots` were replaced, not kept alongside: schema version 1 is unreleased, and one shape avoids two code paths. The default theme, the report sample theme, the docs, and the tests were migrated; all nine existing sample renders are byte-identical. This supersedes the band slot `null` of milestone 01 and the fixed slot positions of milestone 08: a band is `null` or an array of groups. A band slot is `{text, style, required, space-before}`; `style` is one optional field from the existing style list, defaulting to the band's `header` or `footer` style, so milestone 13 can widen it to custom names. Image slots stay title-only, since bands align baselines.
+
+Band text never wraps; each line of slot text is one line and too wide a line is an error naming the group and page. Overlap is checked between the line boxes of all groups of a band, not between group boxes, so the default theme's three full-width groups do not collide.
+
+### Lines and metadata
+
+[`Template::fill`](../src/config/template.rs) returns lines. A line break in theme text and each entry of a list value start a line; blank lines and blank list entries are dropped. Line breaks inside a scalar value keep their earlier meaning: paragraphs and spaces on the title page, spaces in bands. Splitting values at single line breaks would have changed abstracts written with hard-wrapped YAML.
+
+Front matter gains `meta`, a map of text or lists of text, merged per key so `--set meta.key=value` replaces one entry. Keys use the label alphabet (letters, digits, `-`, `_`) in both the map and `{meta.key}`, so a key a slot can never name is rejected. Unknown top-level keys stay errors. Numbers must be quoted, as for `date`. `{meta.key}` is accepted in any slot, since only the document knows its keys; a missing value omits an optional slot, and required slots report `{meta.key}` like other placeholders.
+
+`{pages}` is the physical page count. It is rejected in title slots like `{page}`. Bands are drawn after the final layout pass and never change the layout, so the total needs no extra settling pass.
+
+### Consequences
+
+- A wide table narrower than the frame is centered in the frame, which looks off beside narrow left-set prose (tables 2 and 3 in [the offer sample](../samples/offer.md)). Milestone 13's column widths, or aligning narrow wide tables to the inner edge, would address it.
+- Figures and tables inside `columns` still take the column width even when listed in `wide`; an author who wants them wide uses `full-width`.
+- The sample [offer](../samples/offer.md) with [its theme](../samples/themes/business.json) selects the theme in front matter, so `scripts/render-samples.sh` renders it once.
 
 ## Recording a decision
 

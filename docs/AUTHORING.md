@@ -36,8 +36,22 @@ Metadata is plain text. It is inserted into templates as text only: `*word*` sta
 | `author` | string or list of strings | Value of `{author}`. |
 | `date` | string | Value of `{date}`. |
 | `abstract` | string | Value of `{abstract}`. |
+| `meta` | map of strings or lists of strings | Value of `{meta.key}` for each `key`. |
 
 Metadata fills the title block at the start of the first page, or the separate title page with `title-page: true`. See [document structure](#document-structure).
+
+`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Numbers must be quoted, as in `offer: "2026-117"`. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
+
+```yaml
+meta:
+  offer: "2026-117"
+  client:
+    - Northwind Instruments GmbH
+    - Hafenstraße 12
+    - 20457 Hamburg
+```
+
+On the command line, `--set meta.offer=2026-118` replaces one entry and keeps the others.
 
 ### Files
 
@@ -163,6 +177,8 @@ A character the selected font has no glyph for is an error, as is a word wider t
 Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it. A paragraph's first or last line is not left alone at the bottom or top of a page if a better break exists. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
 
 Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
+
+A theme may set prose narrower than the text area and let tables, figures, and code blocks use the whole width, see [margins and text width](THEMES.md#margins-and-text-width). Widths named below for text then mean the prose width.
 
 ## Images and captions
 
@@ -302,6 +318,8 @@ A document with a `title`, `subtitle`, `author`, `date`, or `abstract` starts wi
 
 A slot whose value is missing is left out with the space above it. The theme marks some slots as required; the default theme requires `title`, and a missing required value is an error that names the slot, from `kyber check` and `kyber render`. The abstract is set under the heading "Abstract" ("Zusammenfassung" in German).
 
+A theme may place several groups of slots on the title page, such as an address block at the top right and the title halfway down. [`samples/offer.md`](../samples/offer.md) with [its theme](../samples/themes/business.json) shows a cover of that kind.
+
 ### Numbered headings
 
 Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. `numbered-headings: false` turns numbering off.
@@ -312,7 +330,7 @@ Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default 
 
 ### Page numbers and running headers
 
-Pages are numbered from 1, counting the title page, so the number on a page is the one a PDF viewer shows. The default theme puts the page number at the foot of every page except the title page, and the current section in the header of every page after the first. The section shown is the first numbered top-level heading that starts on the page, or the last one before it. Themes change all of this, see [themes](THEMES.md#header-and-footer-bands).
+Pages are numbered from 1, counting the title page, so the number on a page is the one a PDF viewer shows. Themes can also show the total, as in "Page 2|4". The default theme puts the page number at the foot of every page except the title page, and the current section in the header of every page after the first. The section shown is the first numbered top-level heading that starts on the page, or the last one before it. Themes change all of this, see [themes](THEMES.md#header-and-footer-bands).
 
 Headings appear as bookmarks in the PDF, nested by level.
 

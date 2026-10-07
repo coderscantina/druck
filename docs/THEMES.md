@@ -25,7 +25,7 @@ Configuration resolves in this order, later layers winning:
 
 Merge rules:
 
-- Objects merge by field. Arrays (`lists.bullets`, title `slots`) replace the earlier array whole.
+- Objects merge by field. Arrays (`lists.bullets`, `page.wide`, title `slots`, `title-page.groups`, and each header and footer) replace the earlier array whole.
 - An omitted field inherits the earlier value.
 - `null` is accepted only where listed below. Anywhere else it is an error.
 
@@ -37,7 +37,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | --- | --- |
 | `pages.title`, `pages.first`, `pages.odd`, `pages.even` | Remove the variant, so the fallback order applies. |
 | `pages.<variant>.header`, `pages.<variant>.footer` | No header or footer on that variant. |
-| `pages.<variant>.<header or footer>.left`, `center`, `right` | The slot is empty. |
+| `page.text-width` | Prose uses the whole margin frame. |
 | `fonts.<family>.italic`, `bold`, `bold-italic` | The family has no such face. |
 
 `pages.body` itself cannot be null, and `fonts.<family>.regular` is required.
@@ -51,7 +51,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `fonts` | Font families and their files. |
 | `images` | Named images used by title slots. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
-| `page` | Page size, margins, column gap, header and footer offsets. |
+| `page` | Page size, margins and their mirroring, prose width and wide blocks, column gap, header and footer offsets. |
 | `styles` | One style per block element. |
 | `inline` | Inline code, links, footnote markers. |
 | `lists` | Indent, item spacing, bullets per level. |
@@ -61,8 +61,8 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `bibliography` | Hanging indent and entry spacing. |
 | `toc` | Level indent and dot leaders. |
 | `title-block` | Title slots at the start of the body, and the space below them. |
-| `title-page` | Title slots for a separate title page. |
-| `pages` | Header and footer bands per page variant. |
+| `title-page` | Slot groups for a separate title page. |
+| `pages` | Header and footer slot groups per page variant. |
 | `labels` | Generated text per language. |
 
 `document` values are defaults. Front matter and `--set` can override each of them. `document.lang` must be `en` or `de`, `citation-style` is `author-date` or `numeric`, and both depths are integers from 1 to 6.
@@ -160,12 +160,12 @@ Space between blocks (`space-before` and `space-after`) may grow by up to half i
 
 ## Footnotes
 
-Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across its full width:
+Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across the prose width:
 
 | Key | Effect |
 | --- | --- |
 | `footnotes.gap` | Minimum space between the body text and the separator. |
-| `footnotes.separator-width`, `separator-thickness`, `separator-color` | The rule above the notes, starting at the left edge of the text area. |
+| `footnotes.separator-width`, `separator-thickness`, `separator-color` | The rule above the notes, starting at the left edge of the prose. |
 | `footnotes.spacing` | Space between the separator and the first note, and between notes. |
 | `inline.footnote-marker.size`, `raise` | Size and baseline shift of the note number, in the text and at the start of the note, relative to the surrounding text. |
 
@@ -191,9 +191,19 @@ Header cells use `styles.table-header` and body cells `styles.table-cell`. A col
 
 There are no vertical rules. A table is spaced like a figure: the caption style's `space-after` above and below it, and its `space-before` between the caption and the table. The header row, with its rules, repeats at the top of each page or column a table continues in.
 
+## Margins and text width
+
+The margins leave the margin frame, the text area of the page. `page.margins.inner` is the left margin of odd pages, counted from 1 including the title page. With `mirror: true`, the default, it is the right margin of even pages, as in a bound book. With `mirror: false` the inner margin is on the left of every page, for the body, the bands, and the title page.
+
+`page.text-width` narrows prose to a column measured from the inner edge of the frame; `null`, the default, uses the whole frame. Headings, paragraphs, lists, quotations, footnotes, the title block, the table of contents, the bibliography, and column sections use the prose width. The block kinds listed in `page.wide` span the whole frame instead: `table`, `figure`, and `code-block`, all three by default. A wide block widens only where it stands directly in the prose, also inside `keep` and in a `full-width` block of a column section. Inside lists, quotations, columns, and footnotes it keeps the width it is in. Headers, footers, and title page groups always use the frame.
+
+With mirrored margins the inner edge is on the right of even pages, so prose moves to the right there while wide blocks keep spanning the frame. A narrower table is centered in the frame, as it is without a text width.
+
+The text width must be greater than zero and at most the frame width.
+
 ## Columns
 
-`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the text width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the full text width.
+`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the prose width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the prose width.
 
 Other sections have their own fields; the [schema](../schema/theme.v1.schema.json) lists them all.
 
@@ -203,40 +213,68 @@ Title slots and header/footer slots hold text with placeholders. Kyber fills the
 
 ### Placeholders
 
-`{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{section}`, `{subsection}`, `{page}`.
+`{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{section}`, `{subsection}`, `{page}`, `{pages}`, and `{meta.key}`.
 
 - Write `{{` and `}}` for literal braces.
 - Unknown placeholders and unbalanced braces are errors.
 - Values are inserted as text. They are never read as layout commands or expressions.
-- Title slots may not use `{section}`, `{subsection}`, or `{page}`.
+- Title slots may not use `{section}`, `{subsection}`, `{page}`, or `{pages}`.
 - Headers and footers may not use `{abstract}`.
 - A slot's value is missing when any placeholder in it has no value or only spaces.
-- `{author}` joins several authors with commas. `{page}` is the page number, counted from 1 including the title page. `{section}` and `{subsection}` are explained under [header and footer bands](#header-and-footer-bands).
+- `{author}` joins several authors with commas. `{page}` is the page number, counted from 1 including the title page, and `{pages}` the number of pages. `{section}` and `{subsection}` are explained under [header and footer bands](#header-and-footer-bands).
+- `{meta.key}` is the entry `key` of the front matter `meta` map. Keys use letters, digits, `-`, and `_`. Any key is accepted here, since only the document knows its keys; a key the document lacks is a missing value.
+
+A line break in slot text starts a new line, so `"Studio\nMain Street 1"` sets two lines. A `meta` value that is a list starts a new line with each entry after the first; text before the placeholder joins the first entry and text after it the last. Empty lines are dropped. Within a value, line breaks follow the rules of the slot kind below.
 
 ### Title slots
 
-`title-block` and `title-page` each have an ordered `slots` array. A slot is either text or an image:
+`title-block` has an ordered `slots` array, and each group of `title-page` has one. A slot is either text or an image:
 
 | Field | Meaning |
 | --- | --- |
 | `text` | Slot text with placeholders. Use this or `image`, not both. |
 | `image` | A name from the theme `images` map. |
-| `width` | Image width. Required for image slots, an error on text slots. It may not exceed the text width. |
+| `width` | Image width. Required for image slots, an error on text slots. It may not exceed the prose width in the title block, or the group width on the title page. |
 | `style` | One of `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `body`. Default `body`. |
 | `required` | Default `false`. |
 | `space-before` | Default `0pt`. May not exceed the text height. |
 
 Because arrays replace whole, a theme that changes one slot restates the whole list.
 
-`title-page` slots fill the first page when a document sets `title-page: true`, stacked from the top of the text area. Otherwise the `title-block` slots start the body, provided the document has a value for at least one of their placeholders; a document without metadata has no title block. `title-block.space-after` is the space between the block and the body.
+The `title-page` groups fill the first page when a document sets `title-page: true`, see [slot groups](#slot-groups). Otherwise the `title-block` slots start the body, provided the document has a value for at least one of their placeholders; a document without metadata has no title block. `title-block.space-after` is the space between the block and the body.
 
-Slots are set in order, each `space-before` below the previous one. The style of a slot sets its font, alignment, and indent; its own `space-before` and `space-after` are not used. An optional slot whose value is missing is left out with its `space-before`. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style, followed by that style's `space-after`. In slot values, blank lines start a new paragraph, which gets the style's `first-line-indent`. An image slot is aligned like text in its style.
+Slots are set in order, each `space-before` below the previous one. The style of a slot sets its font, alignment, and indent; its own `space-before` and `space-after` are not used. An optional slot whose value is missing is left out with its `space-before`. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style, followed by that style's `space-after`. Each line of slot text wraps at the available width. In values, blank lines start a new paragraph, which gets the style's `first-line-indent`, and other line breaks are spaces. An image slot is aligned like text in its style.
+
+### Slot groups
+
+The title page and each header and footer are arrays of slot groups. A group stacks its slots in a box placed on the margin frame:
+
+| Field | Meaning |
+| --- | --- |
+| `anchor` | `top-left`, `top-right`, `middle-left`, `middle-right`, `bottom-left`, or `bottom-right`. Required. |
+| `offset` | `{ "x": ..., "y": ... }`, each default `0pt`. `x` moves the group in from the anchored left or right edge. `y` moves it down from a top or middle anchor and up from a bottom one. |
+| `width` | Default: the frame width less `offset.x`. The group must fit in the frame with its offset. |
+| `align` | `left`, `center`, `right`, or `justify` for every line in the group. Default: each slot's style alignment. |
+| `slots` | Title slots on the title page, header and footer slots in bands. |
+
+Lengths in `offset` and `width` use the body size for `em`. Because margins position the frame, a group moves with them, and with `mirror: true` a band's left and right anchors follow the margins on even pages.
+
+On the title page an anchor places the group's box, from the space above its first slot to the bottom of its last line: its top edge `y` below the frame's top, its middle `y` below the frame's middle, or its bottom edge `y` above the frame's bottom. A group that runs past the top or bottom of the frame is an error naming the group. The default theme has one group at `top-left` that stacks its slots from the top of the text area.
 
 ### Header and footer bands
 
-Each page variant has a `header` and a `footer`. A band has fixed `left`, `center`, and `right` slots, each `{ "text": "...", "required": false }` or `null`.
+Each page variant has a `header` and a `footer`: an array of slot groups, or `null` for none. A header or footer slot has these fields:
 
-The header's baseline is `page.header-offset` above the text area and the footer's `page.footer-offset` below it, in the `header` and `footer` styles. The left slot starts at the left edge of the text area, the center slot is centered on it, and the right slot ends at its right edge; they do not swap on even pages, so use the `odd` and `even` variants for mirrored bands. A slot is one line. Slots that overlap or run past the text width are an error naming the band and the page. A slot without a value stays empty.
+| Field | Meaning |
+| --- | --- |
+| `text` | Slot text with placeholders. Required. |
+| `style` | One of the title slot styles. Default: the `header` or `footer` style. |
+| `required` | Default `false`. |
+| `space-before` | Space above the slot's first line, default `0pt`. `em` refers to the slot style size. |
+
+The header's baseline is `page.header-offset` above the text area and the footer's `page.footer-offset` below it. Groups are anchored to that baseline: a top anchor puts the group's first baseline `y` below it, a bottom anchor its last baseline `y` above it, and a middle anchor centers the group's baselines `y` below it. So a multi-line footer anchored at the top grows down toward the page edge, and a header anchored at the bottom grows up. Lines follow each other at the style's line height plus each slot's `space-before`. Every line of slot text is one line: it never wraps, and line breaks in values are spaces. A line wider than its group and lines of two groups that overlap are errors naming the band or group and the page, since nothing is clipped. An optional slot without a value is left out.
+
+The default theme's left, center, and right band slots are groups as wide as the frame, aligned left, center, or right. Groups do not swap on even pages, so use the `odd` and `even` variants for bands that change sides.
 
 `{section}` is the first level 1 heading that starts on the page, otherwise the last level 1 heading on an earlier page. `{subsection}` is the first level 2 heading on the page after that section, otherwise the last level 2 heading before the page, unless a level 1 heading followed it. Both include the heading number. On pages before the first heading they have no value.
 
@@ -256,7 +294,7 @@ A slot marked `required` whose value is missing is an error. Title slots are che
 
 A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one.
 
-The inner margin sits on the left of odd pages and mirrors on even pages.
+The inner margin sits on the left of odd pages and, unless `page.margins.mirror` is `false`, on the right of even pages.
 
 ## Labels
 
@@ -337,11 +375,10 @@ A partial theme: a sans heading font (the default heading styles use bold and it
   },
   "pages": {
     "body": {
-      "footer": {
-        "left": { "text": "{title}" },
-        "center": null,
-        "right": { "text": "{page}" }
-      }
+      "footer": [
+        { "anchor": "top-left", "slots": [{ "text": "{title}" }] },
+        { "anchor": "top-right", "width": "30mm", "align": "right", "slots": [{ "text": "{page}|{pages}" }] }
+      ]
     }
   },
   "labels": {
