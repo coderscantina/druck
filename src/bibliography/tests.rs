@@ -6,6 +6,8 @@ use crate::config::source::Source;
 use crate::config::theme::{CitationStyle, Lang};
 use crate::document::Inline;
 
+use super::cite::{CitationId, Rendered};
+use super::syntax::{Segment, find};
 use super::*;
 
 const FIXTURE: &str = include_str!("../../tests/fixtures/bib/all-types.bib");
@@ -74,7 +76,10 @@ fn reports_unsupported_types_duplicates_and_syntax_with_the_path_and_location() 
     let text = "@inbook{a, title = {T}}\n@misc{b, title = {T}, url = {u}}\n  @misc{b, title = {T}, url = {v}}";
     let diagnostics = Bibliography::parse(text, Path::new("/docs/refs.bib")).unwrap_err();
     assert_eq!(diagnostics.len(), 2);
-    assert_eq!(diagnostics[0].source, Some(Source::Document("/docs/refs.bib".into())));
+    assert_eq!(
+        diagnostics[0].source,
+        Some(Source::Bibliography("/docs/refs.bib".into()))
+    );
     assert_eq!(diagnostics[0].location, Some((1, 1)));
     assert!(diagnostics[0].message.contains("unsupported type `@inbook`"));
     assert_eq!(diagnostics[1].location, Some((3, 3)));
@@ -106,7 +111,7 @@ fn reports_unknown_keys_at_the_citation() {
     let missing = citations.add(citation).unwrap_err();
     assert_eq!(missing.len(), 1);
     assert_eq!(missing[0].key, "nobody2000");
-    assert_eq!(&text[missing[0].range.clone()], "@nobody2000");
+    assert_eq!(missing[0].item, 1);
 }
 
 #[test]
@@ -117,9 +122,9 @@ fn formats_author_date_citations_in_english() {
         cited(&texts, CitationStyle::AuthorDate, Lang::En),
         [
             "(Weber 2020)",
-            "(Lee et al. 2022, p. 12)",
-            "(Müller et al. 2019; Ito 2021, pp. 3–5)",
-            "World Health Organization (2023, p. 7)",
+            "(Lee et al. 2022, p.\u{a0}12)",
+            "(Müller et al. 2019; Ito 2021, pp.\u{a0}3–5)",
+            "World Health Organization (2023, p.\u{a0}7)",
             "Typst documentation (n.d.)",
             "(Knuth 1984)",
         ]
@@ -131,7 +136,10 @@ fn formats_author_date_citations_in_german() {
     let texts = ["[@smith2024a, S. 12] @smith2024a [S. 3-4]"];
     assert_eq!(
         cited(&texts, CitationStyle::AuthorDate, Lang::De),
-        ["(Smith und Jones 2024, S. 12)", "Smith und Jones (2024, S. 3–4)"]
+        [
+            "(Smith und Jones 2024, S.\u{a0}12)",
+            "Smith und Jones (2024, S.\u{a0}3–4)"
+        ]
     );
     assert_eq!(
         cited(&["@typst"], CitationStyle::AuthorDate, Lang::De),
@@ -202,11 +210,11 @@ fn formats_numeric_citations_with_grouping_locators_and_narrative_form() {
         cited(&texts, CitationStyle::Numeric, Lang::En),
         [
             "[1]",
-            "[2, p. 12]",
+            "[2, p.\u{a0}12]",
             "[3]",
             "[1–4]",
-            "[1, pp. 3–5; 4]",
-            "Lee et al. [2, p. 2]",
+            "[1, pp.\u{a0}3–5; 4]",
+            "Lee et al. [2, p.\u{a0}2]",
             "Ito [3]",
         ]
     );
@@ -238,7 +246,7 @@ fn formats_an_article_and_a_book() {
     );
     assert_eq!(
         entries[1],
-        "Müller, Hans, Eva Großmann, and Cy Lee (2019). *Satz und Schrift: Grundlagen der digitalen Typografie*. 2 ed. Berlin: Springer Vieweg."
+        "Müller, Hans, Eva Großmann, and Cy Lee (2019). *Satz und Schrift: Grundlagen der digitalen Typografie*. 2nd ed. Berlin: Springer Vieweg."
     );
     assert_eq!(
         entries[2],

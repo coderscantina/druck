@@ -3,9 +3,13 @@
 //!
 //! Numbers do not depend on pages, so they are final before the first layout pass. Layout visits
 //! headings, images, and tables in the same order as this pass and takes their entries in turn.
+//!
+//! The bibliography's heading is an unnumbered level 1 heading with the `references` label, so it is in
+//! the table of contents, the outline, and running headers like any other. Each entry has an anchor.
 
 use std::collections::HashMap;
 
+use crate::bibliography::Reference;
 use crate::config::resolved::Config;
 use crate::document::{Block, Document, Inline, Location};
 
@@ -19,6 +23,8 @@ pub(super) struct Structure {
     pub tables: Vec<Option<Numbered>>,
     /// Where each anchor is defined and what it marks, by anchor number, for diagnostics.
     pub anchors: Vec<(Location, String)>,
+    /// The anchor of each bibliography entry, in bibliography order.
+    pub entries: Vec<usize>,
     /// The labels that page references point to.
     paged: Vec<String>,
     /// The anchor and reference text of each label.
@@ -52,18 +58,21 @@ pub(super) struct Numbered {
 }
 
 impl Structure {
-    pub fn new(document: &Document, config: &Config) -> Self {
+    /// The structure of `document` with its bibliography section of `references`, if it cites.
+    pub fn new(document: &Document, config: &Config, references: &[Reference]) -> Self {
         let mut structure = Self {
             headings: Vec::new(),
             figures: Vec::new(),
             tables: Vec::new(),
             anchors: Vec::new(),
+            entries: Vec::new(),
             paged: Vec::new(),
             labels: HashMap::new(),
         };
         let mut walk = Walk {
             structure: &mut structure,
             config,
+            references,
             counters: [0; 6],
         };
         walk.blocks(&document.blocks);
@@ -101,6 +110,7 @@ impl Structure {
 struct Walk<'a> {
     structure: &'a mut Structure,
     config: &'a Config,
+    references: &'a [Reference],
     /// The current number at each heading level.
     counters: [usize; 6],
 }
@@ -211,6 +221,25 @@ impl Walk<'_> {
                 | Block::Keep { blocks, .. }
                 | Block::Columns { blocks, .. }
                 | Block::FullWidth { blocks, .. } => self.blocks(blocks),
+                Block::Bibliography { at } => {
+                    // Without citations there is no section, also where `::: bibliography` asks for one.
+                    if self.references.is_empty() {
+                        continue;
+                    }
+                    let text = labels.references.clone();
+                    let anchor = self.anchor(*at, format!("the heading \"{text}\""));
+                    self.structure.headings.push(Heading {
+                        at: *at,
+                        level: 1,
+                        number: None,
+                        text,
+                        anchor,
+                    });
+                    for reference in self.references {
+                        let anchor = self.anchor(*at, format!("the bibliography entry `{}`", reference.key));
+                        self.structure.entries.push(anchor);
+                    }
+                }
                 Block::Code { .. } | Block::PageBreak { .. } => {}
             }
         }
@@ -224,7 +253,7 @@ pub(super) fn plain(content: &[Inline]) -> String {
         match inline {
             Inline::Text { text: piece, .. } => text.push_str(piece),
             Inline::LineBreak => text.push(' '),
-            Inline::FootnoteRef(_) | Inline::Ref(_) => {}
+            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } => {}
         }
     }
     text

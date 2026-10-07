@@ -490,3 +490,95 @@ fn set_paths_resolve_against_the_working_directory() {
         json!({"origin": "working-dir", "dir": sandbox.cwd, "path": "refs.bib"})
     );
 }
+
+#[test]
+fn renders_the_reports_with_citations_in_both_styles_the_same_every_time() {
+    let sandbox = Sandbox::new("citations");
+    let output = sandbox.root.join("report.pdf");
+    for name in ["report", "report-de"] {
+        let document = format!("{REPO}/samples/{name}.md");
+        for style in ["author-date", "numeric"] {
+            let args = [
+                &document,
+                "--set",
+                &format!("citation-style={style}"),
+                "-o",
+                "../report.pdf",
+            ];
+            let pdf = render(&sandbox, &args, &output);
+            if name == "report-de" && style == "numeric" {
+                assert!(pdf == render(&sandbox, &args, &output), "renders are identical");
+            }
+            let pdf = String::from_utf8_lossy(&pdf);
+            let heading = if name == "report" { "References" } else { "Literatur" };
+            assert!(
+                pdf.contains(&format!("/Title({heading})")),
+                "{name}: the bibliography is bookmarked"
+            );
+        }
+    }
+}
+
+/// A sandbox with `doc.md` holding `body` after front matter that names `refs.bib`, which holds `bib`.
+fn citation_sandbox(name: &str, body: &str, bib: &str) -> (Sandbox, String, String) {
+    let sandbox = Sandbox::new(name);
+    let document = sandbox.write("doc.md", &format!("---\nbibliography: refs.bib\n---\n{body}"));
+    let bib = sandbox.write("refs.bib", bib);
+    (sandbox, document, bib)
+}
+
+#[test]
+fn reports_a_missing_bibliography_file_by_property() {
+    let sandbox = Sandbox::new("missing-bib");
+    let document = sandbox.write("doc.md", "---\nbibliography: refs.bib\n---\nText.\n");
+    let stderr = sandbox.rejection(&[&document]);
+    let dir = sandbox.root.display();
+    assert!(
+        stderr.contains(&format!(
+            "bibliography: resource not found: \"refs.bib\" relative to the document in {dir}"
+        )),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn reports_bibliography_errors_at_their_line_in_the_bib_file() {
+    let bib = "@book{good, author = {A}, title = {T}, publisher = {P}, year = {2020}}\n\n@book{bad, title = {T}}\n";
+    let (sandbox, document, bib) = citation_sandbox("bib-errors", "Text [@good].\n", bib);
+    let run = sandbox.run(&["render", &document]);
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr.contains(&format!(
+            "{bib}:3:1: entry `bad` is missing required fields: `author or editor`, `publisher`, `year`"
+        )),
+        "{}",
+        run.stderr
+    );
+}
+
+#[test]
+fn reports_citations_without_a_bibliography_or_entry_at_their_location() {
+    let sandbox = Sandbox::new("no-bib");
+    let document = sandbox.write("doc.md", "# Title\n\nText [@a].\n");
+    let run = sandbox.run(&["render", &document]);
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr.contains(&format!(
+            "{document}:3:6: a citation needs a bibliography; set `bibliography` to a BibTeX file in the front matter"
+        )),
+        "{}",
+        run.stderr
+    );
+
+    let bib = "@misc{web, title = {T}, url = {https://example.org}}\n";
+    let (sandbox, document, bib) = citation_sandbox("missing-key", "Per @web and\n[@web; @nobody].\n", bib);
+    let run = sandbox.run(&["render", &document]);
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr
+            .contains(&format!("{document}:5:8: no entry in {bib} has the key `nobody`")),
+        "{}",
+        run.stderr
+    );
+    assert!(!sandbox.root.join("doc.pdf").exists());
+}

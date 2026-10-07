@@ -7,19 +7,21 @@
 //!
 //! Labels carry a kind prefix: `# Heading {#sec:name}`, `![Caption](file){#fig:name}`, and
 //! `: Caption {#tbl:name}`. References are `@sec:name` or `[@sec:name]` for the number, and
-//! `[@sec:name, page]` for the page. Both are read from the source text, so an escaped `\@` stays
-//! text. An `@key` without one of the three prefixes is left as text for citations.
+//! `[@sec:name, page]` for the page. An `@key` or `[@key]` without one of the three prefixes is a
+//! citation, see [`syntax`]; inside link text it stays text. References and citations are read from
+//! the source text, so an escaped `\@` stays text.
 
 use std::collections::HashMap;
 use std::ops::Range;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
+use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
 use crate::document::{
-    Block, Cell, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link, Location, Reference,
-    Row,
+    Block, Cell, Citation, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link, Location,
+    Reference, Row,
 };
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
@@ -179,7 +181,10 @@ struct Builder<'a> {
     /// Defined labels with their locations, and the references to check against them.
     labels: HashMap<String, Location>,
     references_to: Vec<(String, Location)>,
-    /// Source text before this offset was read as a label or reference, so text events in it are skipped.
+    citations: Vec<Citation>,
+    /// Where `::: bibliography` stands, if it does.
+    bibliography: Option<Location>,
+    /// Source text before this offset was read as a label, reference, or citation, so text events in it are skipped.
     consumed: usize,
 }
 
@@ -211,6 +216,8 @@ impl<'a> Builder<'a> {
             image_index: HashMap::new(),
             labels: HashMap::new(),
             references_to: Vec::new(),
+            citations: Vec::new(),
+            bibliography: None,
             consumed: 0,
         }
     }
@@ -255,11 +262,16 @@ impl<'a> Builder<'a> {
             self.diagnostics.sort_by_key(|d| d.location);
             return Err(self.diagnostics);
         }
-        let blocks = self.blocks.pop().unwrap_or_default();
+        let mut blocks = self.blocks.pop().unwrap_or_default();
+        if !self.citations.is_empty() && self.bibliography.is_none() {
+            let at = self.location(self.body.trim_end().len());
+            blocks.push(Block::Bibliography { at });
+        }
         Ok(Document {
             blocks,
             footnotes,
             images: self.images,
+            citations: self.citations,
         })
     }
 
@@ -316,6 +328,18 @@ impl<'a> Builder<'a> {
                 }
                 return;
             }
+            "bibliography" => {
+                if open.contains(&Some(Fence::Keep)) {
+                    self.report(offset, "bibliography is not allowed inside keep");
+                } else if let Some(first) = self.bibliography {
+                    let message = format!("the bibliography is already placed on line {}", first.line);
+                    self.report(offset, message);
+                } else {
+                    self.bibliography = Some(at);
+                    self.push_block(Block::Bibliography { at });
+                }
+                return;
+            }
             "keep" => Some(Fence::Keep),
             "columns" => {
                 if open.contains(&Some(Fence::Columns)) {
@@ -336,7 +360,7 @@ impl<'a> Builder<'a> {
             }
             _ => {
                 let message =
-                    format!("unknown layout directive \"{name}\"; use columns, full-width, keep, or page-break");
+                    format!("unknown directive \"{name}\"; use columns, full-width, keep, page-break, or bibliography");
                 self.report(offset, message);
                 None
             }
@@ -600,6 +624,8 @@ impl<'a> Builder<'a> {
                 None => self.text(&text, range),
             },
             Event::Code(text) => self.push_text(offset, &text, true),
+            // A citation group may span lines.
+            Event::SoftBreak if offset < self.consumed => {}
             Event::SoftBreak => self.push_text(offset, " ", false),
             Event::HardBreak => self.push_inline(offset, Inline::LineBreak),
             Event::Rule => {
@@ -628,7 +654,7 @@ impl<'a> Builder<'a> {
         }
         if text == "[" {
             self.check_undefined_footnote(offset);
-            if self.bracketed_reference(offset) {
+            if self.bracketed_reference(offset) || self.bracketed_citation(offset) {
                 return;
             }
         }
@@ -651,15 +677,32 @@ impl<'a> Builder<'a> {
             if before.is_some_and(char::is_alphanumeric) || escapes % 2 == 1 || index < start {
                 continue;
             }
-            let Some(length) = reference_label(&text[index + 1..]) else {
-                continue;
+            let at = offset + index;
+            let reference = reference_label(&text[index + 1..]);
+            let citation = match reference {
+                None if self.links.is_empty() => narrative(self.body, at),
+                _ => None,
             };
+            if reference.is_none() && citation.is_none() {
+                continue;
+            }
             if index > start {
                 self.push_text(offset + start, &text[start..index], false);
             }
-            let label = text[index + 1..index + 1 + length].to_owned();
-            self.reference(offset + index, label, false);
-            start = index + 1 + length;
+            if let Some(length) = reference {
+                let label = text[index + 1..index + 1 + length].to_owned();
+                self.reference(at, label, false);
+                start = index + 1 + length;
+            } else if let Some((line, citation)) = citation {
+                let end = line + citation.range.end - offset;
+                self.citation(line, citation);
+                if end > text.len() {
+                    // A locator in brackets is in the text events that follow.
+                    self.consumed = offset + end;
+                    return;
+                }
+                start = end;
+            }
         }
         if start < text.len() {
             self.push_text(offset + start, &text[start..], false);
@@ -688,6 +731,47 @@ impl<'a> Builder<'a> {
         self.consumed = offset + "[@".len() + length + close;
         self.reference(offset, label, page);
         true
+    }
+
+    /// Reads a citation group such as `[@a, p. 3; @b]` at the `[` at `offset`, and whether it was one.
+    /// The group ends at the first `]` and may span lines.
+    fn bracketed_citation(&mut self, offset: usize) -> bool {
+        if !self.links.is_empty() || !self.body[offset + 1..].trim_start().starts_with('@') {
+            return false;
+        }
+        let Some(close) = self.body[offset..].find(']') else {
+            return false;
+        };
+        let end = offset + close + 1;
+        match syntax::find(&self.body[offset..end]).into_iter().next() {
+            Some(Segment::Citation(citation)) => self.citation(offset, citation),
+            Some(Segment::Invalid { message, .. }) => self.report(offset, message),
+            _ => return false,
+        }
+        self.consumed = end;
+        true
+    }
+
+    /// Adds a citation whose byte ranges start at `base`.
+    fn citation(&mut self, base: usize, citation: syntax::Citation) {
+        let offset = base + citation.range.start;
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
+            self.report(offset, "a heading cannot hold a citation");
+            return;
+        }
+        let keys = citation
+            .items
+            .iter()
+            .map(|item| self.location(base + item.range.start))
+            .collect();
+        let index = self.citations.len();
+        self.citations.push(Citation {
+            at: self.location(offset),
+            syntax: citation,
+            keys,
+        });
+        let style = self.style(false);
+        self.push_inline(offset, Inline::Citation { index, style });
     }
 
     fn reference(&mut self, offset: usize, label: String, page: bool) {
@@ -1107,6 +1191,20 @@ fn reference_label(text: &str) -> Option<usize> {
     (name > 0).then_some(prefix.len() + 1 + name)
 }
 
+/// The narrative citation that starts with the `@` at `at`, if there is one. Its line is scanned so
+/// that the citation syntax decides whether the `@` starts a word. Returns the line's offset, where
+/// the citation's byte ranges start, and the citation.
+fn narrative(body: &str, at: usize) -> Option<(usize, syntax::Citation)> {
+    let start = body[..at].rfind('\n').map_or(0, |newline| newline + 1);
+    let end = body[at..].find('\n').map_or(body.len(), |newline| at + newline);
+    syntax::find(&body[start..end])
+        .into_iter()
+        .find_map(|segment| match segment {
+            Segment::Citation(citation) if start + citation.range.start == at => Some((start, citation)),
+            _ => None,
+        })
+}
+
 /// The length of the label name that `text` starts with.
 fn label_name_length(text: &str) -> usize {
     text.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
@@ -1452,7 +1550,7 @@ mod tests {
             (
                 "::: float\nx\n:::",
                 (1, 1),
-                "unknown layout directive \"float\"; use columns, full-width, keep, or page-break",
+                "unknown directive \"float\"; use columns, full-width, keep, page-break, or bibliography",
             ),
             ("::: keep\nx", (1, 1), "\"::: keep\" is never closed"),
             ("x\n:::", (2, 1), "\":::\" closes no open layout directive"),
@@ -1762,7 +1860,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_labels_and_references_and_leaves_other_at_signs_as_text() {
+    fn parses_labels_and_references_and_leaves_escaped_at_signs_as_text() {
         let body = "# Intro {#sec:intro}\n\n![A chart](c.svg){#fig:chart}\n\n| a |\n|---|\n\n: Data {#tbl:data}\n\n\
             See @sec:intro, *[@fig:chart, page]* and [@tbl:data]. Not @smith2024, \\@fig:chart, or a@fig:chart.\n";
         let blocks = blocks(body);
@@ -1788,7 +1886,12 @@ mod tests {
                 reference("fig:chart", true, em),
                 plain(" and "),
                 reference("tbl:data", false, InlineStyle::default()),
-                plain(". Not @smith2024, @fig:chart, or a@fig:chart."),
+                plain(". Not "),
+                Inline::Citation {
+                    index: 0,
+                    style: InlineStyle::default(),
+                },
+                plain(", @fig:chart, or a@fig:chart."),
             ]
         );
     }
@@ -1840,6 +1943,100 @@ mod tests {
                 "# A {#sec:a}\n\n[@sec:a; p. 3]\n",
                 (3, 1),
                 "write a cross-reference in brackets as [@sec:a] or [@sec:a, page]",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
+    }
+
+    fn citation(index: usize) -> Inline {
+        Inline::Citation {
+            index,
+            style: InlineStyle::default(),
+        }
+    }
+
+    #[test]
+    fn parses_citations_with_their_key_locations_and_adds_the_bibliography_at_the_end() {
+        let body = "As [@a, p. 3; @b] and @c [pp. 3-5] show,\n[@d;\n@e] and [ask @f](https://x.org/).\n\n# End\n";
+        let document = parse(body, 1, &source()).expect("parses");
+        let link = InlineStyle {
+            link: Some(Link::Url("https://x.org/".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            document.blocks[0],
+            Block::Paragraph {
+                at: at(1, 1),
+                content: vec![
+                    plain("As "),
+                    citation(0),
+                    plain(" and "),
+                    citation(1),
+                    plain(" show, "),
+                    citation(2),
+                    plain(" and "),
+                    text("ask @f", link),
+                    plain("."),
+                ],
+            }
+        );
+        let keys: Vec<_> = document
+            .citations
+            .iter()
+            .map(|citation| citation.keys.clone())
+            .collect();
+        assert_eq!(
+            keys,
+            [vec![at(1, 5), at(1, 15)], vec![at(1, 23)], vec![at(2, 2), at(3, 1)]]
+        );
+        assert!(document.citations[1].syntax.items[0].locator.is_some());
+        assert_eq!(document.blocks[2], Block::Bibliography { at: at(5, 6) });
+
+        let placed = blocks("::: columns\n::: bibliography\n:::\n\nText [@a].\n");
+        assert_eq!(
+            placed[0],
+            Block::Columns {
+                at: at(1, 1),
+                blocks: vec![Block::Bibliography { at: at(2, 1) }],
+            }
+        );
+        assert_eq!(placed.len(), 2, "the marker places the only bibliography");
+    }
+
+    #[test]
+    fn reports_citation_and_bibliography_errors_at_their_location() {
+        let cases = [
+            (
+                "x [@a, see below] y\n",
+                (1, 3),
+                "unsupported locator `see below`; use `p. 12`, `pp. 3-5`, or `S. 12`",
+            ),
+            (
+                "See [@a; @sec:b].\n",
+                (1, 5),
+                "a citation group cannot hold a cross-reference; write them apart, as in [@key] and @sec:name",
+            ),
+            (
+                "See [@sec:b; @a].\n",
+                (1, 5),
+                "write a cross-reference in brackets as [@sec:b] or [@sec:b, page]",
+            ),
+            ("# Heading @a\n", (1, 11), "a heading cannot hold a citation"),
+            (
+                "::: bibliography\n\n::: bibliography\n",
+                (3, 1),
+                "the bibliography is already placed on line 1",
+            ),
+            (
+                "::: keep\n::: bibliography\n:::\n",
+                (2, 1),
+                "bibliography is not allowed inside keep",
             ),
         ];
         for (body, location, message) in cases {

@@ -10,11 +10,13 @@
 //!
 //! Before layout, [`structure`] numbers headings, figures, and tables and gives each an anchor. The
 //! body may start with a [title block](titles) and a [table of contents](toc), and a separate title
-//! page may precede it. Page numbers shown in the text, in the table of contents and in page
-//! references, are only known after layout, so layout repeats until they agree with the pages it
-//! produced. Headers and footers are drawn on the final pages; see [`bands`].
+//! page may precede it. A document that cites has a [bibliography] section. Page numbers shown in the
+//! text, in the table of contents and in page references, are only known after layout, so layout
+//! repeats until they agree with the pages it produced. Headers and footers are drawn on the final
+//! pages; see [`bands`].
 
 mod bands;
+mod bibliography;
 mod pages;
 mod paragraph;
 mod structure;
@@ -31,6 +33,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use self::structure::Structure;
+use crate::citations::Cited;
 use crate::config::resolved::{Config, Style};
 use crate::config::source::{Resource, Source};
 use crate::config::theme::{FontStyle, Weight};
@@ -46,11 +49,12 @@ pub use self::titles::check as check_title;
 /// The most layout passes spent on page numbers that change the layout they come from.
 const PASSES: usize = 5;
 
-/// Lays out `document` on pages with its title, table of contents, headers, and footers. `images` are
-/// the loaded [`Document::images`], and `theme_images` the loaded theme images by resource. Errors name
-/// the source location of content that cannot fit.
+/// Lays out `document` on pages with its title, table of contents, bibliography, headers, and footers.
+/// `cited` holds its formatted citations, `images` the loaded [`Document::images`], and `theme_images`
+/// the loaded theme images by resource. Errors name the source location of content that cannot fit.
 pub fn layout(
     document: &Document,
+    cited: &Cited,
     images: &[Image],
     theme_images: &HashMap<Resource, Image>,
     config: &Config,
@@ -58,7 +62,7 @@ pub fn layout(
     source: &Source,
 ) -> Result<Output, Vec<Diagnostic>> {
     titles::check(config, source)?;
-    let structure = Structure::new(document, config);
+    let structure = Structure::new(document, config, cited.references());
     let title_page = if config.document.title_page {
         Some(titles::page(config, fonts, theme_images, source)?)
     } else {
@@ -66,6 +70,7 @@ pub fn layout(
     };
     let pass = Pass {
         document,
+        cited,
         images,
         theme_images,
         config,
@@ -135,6 +140,7 @@ fn settle<T>(
 /// What every layout pass shares.
 struct Pass<'a> {
     document: &'a Document,
+    cited: &'a Cited,
     images: &'a [Image],
     theme_images: &'a HashMap<Resource, Image>,
     config: &'a Config,
@@ -154,6 +160,7 @@ impl Pass<'_> {
             config,
             fonts: self.fonts,
             source: self.source,
+            cited: self.cited,
             images: self.images,
             theme_images: self.theme_images,
             structure: self.structure,
@@ -217,7 +224,7 @@ impl Pass<'_> {
         }
         let positions = positions
             .into_iter()
-            .map(|position| position.expect("layout places every heading, figure, and table"))
+            .map(|position| position.expect("layout places every anchor"))
             .collect();
         Ok((pages, positions))
     }
@@ -284,6 +291,7 @@ struct Flow<'a> {
     config: &'a Config,
     fonts: &'a Fonts,
     source: &'a Source,
+    cited: &'a Cited,
     images: &'a [Image],
     theme_images: &'a HashMap<Resource, Image>,
     structure: &'a Structure,
@@ -451,6 +459,7 @@ impl<'a> Flow<'a> {
                     self.table(block, frame);
                 }
                 Block::Columns { blocks, .. } => self.columns(blocks, frame),
+                Block::Bibliography { at } => self.bibliography(*at, frame),
                 Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
             }
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
@@ -491,7 +500,7 @@ impl<'a> Flow<'a> {
         self.space(style.space_after.0);
     }
 
-    /// Breaks inline content into lines of `width` in `style`, with cross-references resolved.
+    /// Breaks inline content into lines of `width` in `style`, with cross-references and citations resolved.
     fn set(&self, content: &[Inline], style: &Style, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
         let content = self.resolve(content);
         let lang = self.config.document.lang;
@@ -506,10 +515,13 @@ impl<'a> Flow<'a> {
         )
     }
 
-    /// Replaces cross-references with their text, linked to their anchor. A page reference shows the
-    /// page this pass assumes.
+    /// Replaces cross-references and citations with their text, linked to their anchor. A page reference
+    /// shows the page this pass assumes. A citation links to the bibliography entry of the first work it shows.
     fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
-        if !content.iter().any(|inline| matches!(inline, Inline::Ref(_))) {
+        if !content
+            .iter()
+            .any(|inline| matches!(inline, Inline::Ref(_) | Inline::Citation { .. }))
+        {
             return Cow::Borrowed(content);
         }
         let resolved = content
@@ -527,6 +539,16 @@ impl<'a> Flow<'a> {
                         ..reference.style.clone()
                     };
                     Inline::Text { text, style }
+                }
+                Inline::Citation { index, style } => {
+                    let anchor = self.structure.entries[self.cited.targets[*index]];
+                    Inline::Text {
+                        text: self.cited.texts[*index].clone(),
+                        style: InlineStyle {
+                            link: Some(Link::Anchor(anchor)),
+                            ..style.clone()
+                        },
+                    }
                 }
                 inline => inline.clone(),
             })

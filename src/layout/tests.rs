@@ -61,8 +61,10 @@ fn render_with_images(
         blocks,
         footnotes,
         images: Vec::new(),
+        citations: Vec::new(),
     };
-    layout(&document, images, &HashMap::new(), &config, &fonts, &source()).map(|output| output.pages)
+    let cited = Cited::default();
+    layout(&document, &cited, images, &HashMap::new(), &config, &fonts, &source()).map(|output| output.pages)
 }
 
 fn note(line: u64, text: &str) -> Footnote {

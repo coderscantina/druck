@@ -1,6 +1,6 @@
 //! Supported entry types, their required fields, and the typed entry built from the raw syntax.
 
-use super::bibtex::{Problem, RawEntry, RawField};
+use super::bibtex::{Position, Problem, RawEntry, RawField};
 use super::latex;
 use super::names::Names;
 
@@ -51,6 +51,8 @@ pub enum Lead<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub key: String,
+    /// Where the entry starts in the `.bib` file.
+    pub at: Position,
     pub kind: Kind,
     pub authors: Names,
     pub editors: Names,
@@ -102,6 +104,7 @@ impl Entry {
         let editors = reader.names("editor");
         let entry = Self {
             key: raw.key.clone(),
+            at: raw.at,
             kind,
             authors,
             editors,

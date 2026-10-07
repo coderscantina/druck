@@ -1,5 +1,7 @@
 //! Kyber command-line interface: reads inputs, presents diagnostics, and sets exit codes.
 
+mod bibliography;
+mod citations;
 mod config;
 mod diagnostic;
 mod document;
@@ -14,6 +16,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bibliography::Bibliography;
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Map, Value};
 
@@ -121,16 +124,40 @@ struct DocumentFile {
     text: String,
 }
 
-/// Parses the Markdown body, loads its images and the theme's, and lays it out.
+/// Parses the Markdown body, loads its images, the theme's, and the bibliography, formats citations, and lays it
+/// out.
 fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<page::Output, Vec<Diagnostic>> {
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
     let content = markdown::parse(body, first_line, &document.source)?;
+    let bibliography = load_bibliography(config)?;
+    let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let images = load_images(&content.images, dir, &document.source)?;
     let theme_images = load_theme_images(config)?;
-    layout::layout(&content, &images, &theme_images, config, fonts, &document.source)
+    layout::layout(
+        &content,
+        &cited,
+        &images,
+        &theme_images,
+        config,
+        fonts,
+        &document.source,
+    )
+}
+
+/// Reads and checks the BibTeX file the configuration names, if any. `load` has checked that it exists.
+fn load_bibliography(config: &Config) -> Result<Option<Bibliography>, Vec<Diagnostic>> {
+    let Some(resource) = &config.bibliography_file else {
+        return Ok(None);
+    };
+    let path = resource.file().expect("a bibliography is never bundled");
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        let message = format!("cannot read bibliography {resource}: {e}");
+        vec![Diagnostic::new(None, message).property(Some("bibliography".to_owned()))]
+    })?;
+    Bibliography::parse(&text, &path).map(Some)
 }
 
 /// Reads and decodes the images a theme names for its title slots. Errors name the property.

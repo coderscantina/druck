@@ -145,7 +145,8 @@ pub fn reference(entry: &Entry, lang: Lang, suffix: &str) -> Vec<Inline> {
 /// The type-specific sentences:
 ///
 /// - article: `*Journal* 12(3), 45–67.`
-/// - book: `2nd ed.` (German `2. Aufl.`), then `Address: Publisher.`
+/// - book: `2nd ed.` (German `2. Aufl.`) from `edition = {2}`, other edition text as written, then
+///   `Address: Publisher.`
 /// - conference paper: `In: *Proceedings*, 45–67.`, then `Address: Publisher.`
 /// - thesis: `PhD thesis, School.` The `type` field replaces the wording.
 /// - report: `Technical report 42, Institution, Address.` The institution is left out when it leads.
@@ -180,13 +181,9 @@ fn details(entry: &Entry, words: &Words) -> Vec<Sentence> {
         Kind::Book => {
             add(&|s| {
                 if let Some(edition) = &entry.edition {
-                    // German editions written as digits get the ordinal period: "2. Aufl."
-                    let ordinal = if words.edition == "Aufl." && edition.chars().all(|c| c.is_ascii_digit()) {
-                        "."
-                    } else {
-                        ""
-                    };
-                    s.plain(&format!("{edition}{ordinal} {}", words.edition));
+                    // An edition written as a number gets the language's ordinal; other text prints as written.
+                    let edition = edition.parse().map_or_else(|_| edition.clone(), words.ordinal);
+                    s.plain(&format!("{edition} {}", words.edition));
                 }
             });
             add(&place_and_publisher);

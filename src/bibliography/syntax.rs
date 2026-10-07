@@ -7,7 +7,8 @@
 //!
 //! A locator is `p.`, `pp.`, or `S.`, then a page or a range of two pages, each made of letters and digits ("12",
 //! "xiv", "A3"). The range separator is `-` or an en dash and is normalized to an en dash. Keys with the prefixes of
-//! cross-references (`sec:`, `fig:`, `tbl:`) are not citations, and a bracket group holding one is left as text.
+//! cross-references (`sec:`, `fig:`, `tbl:`) are not citations: a bracket group of only such keys is left as text,
+//! and a group that mixes them with citation keys is invalid.
 
 use std::ops::Range;
 
@@ -23,7 +24,7 @@ const RESERVED_PREFIXES: [&str; 3] = ["sec:", "fig:", "tbl:"];
 pub struct Locator(String);
 
 impl Locator {
-    /// The text with the language's label: "p. 12", "pp. 3–5", or "S. 12", "S. 3–5".
+    /// The text with the language's label: "p. 12", "pp. 3–5", or "S. 12", "S. 3–5", joined by a no-break space.
     pub fn text(&self, lang: Lang) -> String {
         let words = words(lang);
         let label = if self.0.contains('–') {
@@ -31,7 +32,7 @@ impl Locator {
         } else {
             words.page
         };
-        format!("{label} {}", self.0)
+        format!("{label}\u{a0}{}", self.0)
     }
 }
 
@@ -147,7 +148,7 @@ fn parse_locator(text: &str) -> Option<Locator> {
     Some(Locator(normalized))
 }
 
-/// Parses `[@a, p. 3; @b]` at `open`. `None` means the text is not a citation; a group with a cross-reference key is
+/// Parses `[@a, p. 3; @b]` at `open`. `None` means the text is not a citation; a group of cross-reference keys is
 /// returned as text so that its keys are not read as narrative citations.
 fn bracketed(text: &str, open: usize) -> Option<Segment<'_>> {
     let inner_start = open + 1;
@@ -167,11 +168,17 @@ fn bracketed(text: &str, open: usize) -> Option<Segment<'_>> {
         offset += part.len() + 1;
     }
     let range = open..close + 1;
-    if items.iter().any(|item| is_reserved(&item.key)) {
+    let reserved = items.iter().filter(|item| is_reserved(&item.key)).count();
+    if reserved > 0 && reserved == items.len() && error.is_none() {
         return Some(Segment::Text {
             range: range.clone(),
             text: &text[range],
         });
+    }
+    if reserved > 0 {
+        error = error.or(Some(
+            "a citation group cannot hold a cross-reference; write them apart, as in [@key] and @sec:name".to_owned(),
+        ));
     }
     Some(match error {
         Some(message) => Segment::Invalid { range, message },
@@ -291,9 +298,9 @@ mod tests {
         assert_eq!(keys(&found[0]), ["a", "b", "c", "d"]);
         let locators: Vec<_> = found[0].items.iter().map(|item| item.locator.clone()).collect();
         assert_eq!(locators[0], None);
-        assert_eq!(locators[1].as_ref().unwrap().text(Lang::En), "p. 12");
-        assert_eq!(locators[2].as_ref().unwrap().text(Lang::En), "pp. 3–5");
-        assert_eq!(locators[3].as_ref().unwrap().text(Lang::De), "S. 7–9");
+        assert_eq!(locators[1].as_ref().unwrap().text(Lang::En), "p.\u{a0}12");
+        assert_eq!(locators[2].as_ref().unwrap().text(Lang::En), "pp.\u{a0}3–5");
+        assert_eq!(locators[3].as_ref().unwrap().text(Lang::De), "S.\u{a0}7–9");
     }
 
     #[test]
@@ -314,10 +321,15 @@ mod tests {
     }
 
     #[test]
-    fn leaves_cross_reference_keys_alone() {
-        let found = citations("see [@sec:intro] and @fig:one and [@tbl:x; @a] and [@a]");
+    fn leaves_cross_reference_keys_alone_and_rejects_mixed_groups() {
+        let found = citations("see [@sec:intro] and @fig:one and [@tbl:x; @tbl:y] and [@a]");
         assert_eq!(found.len(), 1);
         assert_eq!(keys(&found[0]), ["a"]);
+        let segments = find("[@a; @tbl:x]");
+        let Segment::Invalid { message, .. } = &segments[0] else {
+            panic!("expected invalid")
+        };
+        assert!(message.contains("cannot hold a cross-reference"));
     }
 
     #[test]

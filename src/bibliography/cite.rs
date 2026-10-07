@@ -17,11 +17,11 @@
 //! - numbers follow the first citation, and the bibliography keeps that order with the label `[1]`
 
 use std::collections::BTreeMap;
-use std::ops::Range;
 
 use crate::config::theme::{CitationStyle, Lang};
 use crate::document::Inline;
 
+use super::bibtex::Position;
 use super::entry::{Entry, Lead};
 use super::names::fold;
 use super::syntax::{Citation, Form, Locator};
@@ -32,8 +32,8 @@ use super::{Bibliography, format};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingKey {
     pub key: String,
-    /// Where the key is written, as in [`super::syntax::Item::range`].
-    pub range: Range<usize>,
+    /// The position of the key's item in [`Citation::items`].
+    pub item: usize,
 }
 
 /// Identifies an added citation, in the order of [`Citations::add`] calls.
@@ -44,6 +44,8 @@ pub struct CitationId(usize);
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reference {
     pub key: String,
+    /// Where the entry starts in the `.bib` file.
+    pub at: Position,
     /// "[1]" in the numeric style.
     pub label: Option<String>,
     pub content: Vec<Inline>,
@@ -64,6 +66,10 @@ impl Rendered {
     /// The cited works in bibliography order.
     pub fn references(&self) -> &[Reference] {
         &self.references
+    }
+
+    pub fn into_references(self) -> Vec<Reference> {
+        self.references
     }
 }
 
@@ -92,12 +98,12 @@ impl<'a> Citations<'a> {
     pub fn add(&mut self, citation: &Citation) -> Result<CitationId, Vec<MissingKey>> {
         let mut items = Vec::new();
         let mut missing = Vec::new();
-        for item in &citation.items {
+        for (position, item) in citation.items.iter().enumerate() {
             match self.bibliography.index(&item.key) {
                 Some(index) => items.push((index, item.locator.clone())),
                 None => missing.push(MissingKey {
                     key: item.key.clone(),
-                    range: item.range.clone(),
+                    item: position,
                 }),
             }
         }
@@ -144,6 +150,7 @@ impl<'a> Citations<'a> {
             .iter()
             .map(|&index| Reference {
                 key: entries[index].key.clone(),
+                at: entries[index].at,
                 label: (style == CitationStyle::Numeric).then(|| format!("[{}]", numbers[index])),
                 content: format::reference(&entries[index], lang, &suffixes[index]),
             })

@@ -3,6 +3,8 @@
 //! Inline content is flat. Each text piece carries its complete inline style, so layout
 //! never walks a nested inline tree.
 
+use crate::bibliography::syntax;
+
 /// A 1-based line and column in the Markdown file. Columns count characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Location {
@@ -17,6 +19,19 @@ pub struct Document {
     pub footnotes: Vec<Footnote>,
     /// The distinct image files referenced, in order of first use.
     pub images: Vec<ImageFile>,
+    /// The citations in source order. [`Inline::Citation`] refers to them by index.
+    pub citations: Vec<Citation>,
+}
+
+/// A citation as written, such as `[@a, p. 3; @b]` or `@a`. Its text depends on every citation in the
+/// document, so it is formatted after parsing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Citation {
+    pub at: Location,
+    /// The parsed citation. Its byte ranges refer to the scanned text and are not used after parsing.
+    pub syntax: syntax::Citation,
+    /// Where each item's key is written, in the order of the items.
+    pub keys: Vec<Location>,
 }
 
 /// An image file as written in the Markdown, relative to the document, with its first reference.
@@ -104,6 +119,10 @@ pub enum Block {
     PageBreak {
         at: Location,
     },
+    /// The bibliography: `::: bibliography`, or added at the end of a document that cites without one.
+    Bibliography {
+        at: Location,
+    },
 }
 
 /// A table row with its cells in column order.
@@ -137,6 +156,8 @@ pub enum Inline {
     FootnoteRef(usize),
     /// A cross-reference to a labelled heading, figure, or table.
     Ref(Reference),
+    /// A citation: an index into [`Document::citations`].
+    Citation { index: usize, style: InlineStyle },
 }
 
 /// A cross-reference such as `@fig:chart`, or `[@fig:chart, page]` for the page it is on.

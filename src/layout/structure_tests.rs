@@ -2,10 +2,12 @@
 //! the table of contents, cross-references, and settling page numbers.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde_json::{Value, json};
 
 use super::*;
+use crate::bibliography::Bibliography;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 
@@ -44,9 +46,17 @@ fn theme() -> Value {
 }
 
 fn render_images(config: &Config, body: &str, images: &[Image]) -> Result<Output, Vec<Diagnostic>> {
+    render_cited(config, body, None, images)
+}
+
+/// Lays out `body` with its citations formatted from the BibTeX text `bib`.
+fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]) -> Result<Output, Vec<Diagnostic>> {
     let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
+    let bibliography =
+        bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
+    let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source())?;
     let fonts = Fonts::load(config).expect("bundled fonts");
-    layout(&document, images, &HashMap::new(), config, &fonts, &source())
+    layout(&document, &cited, images, &HashMap::new(), config, &fonts, &source())
 }
 
 fn render(config: &Config, body: &str) -> Output {
@@ -377,4 +387,192 @@ fn repeated_layout_with_generated_content_is_identical() {
     let second = render(&config, &body);
     assert_eq!(format!("{:?}", first.pages), format!("{:?}", second.pages));
     assert_eq!(first.anchors, second.anchors);
+    let cited = format!("{body} Cited [@lee2022; @weber2020, p. 4].");
+    let first = render_cited(&config, &cited, Some(BIB), &[]).expect("layout succeeds");
+    let second = render_cited(&config, &cited, Some(BIB), &[]).expect("layout succeeds");
+    assert_eq!(format!("{:?}", first.pages), format!("{:?}", second.pages));
+    assert_eq!(first.anchors, second.anchors);
+}
+
+const BIB: &str = include_str!("../../tests/fixtures/bib/all-types.bib");
+
+fn render_bib(front: &str, body: &str) -> Output {
+    render_cited(&config(front, theme()), body, Some(BIB), &[]).expect("layout succeeds")
+}
+
+/// The text lines of every page as (page index, baseline, left edge, text), with no-break spaces as spaces.
+fn all_lines(output: &Output) -> Vec<(usize, f64, f64, String)> {
+    let pages = output.pages.iter().enumerate();
+    pages
+        .flat_map(|(index, page)| lines(page).into_iter().map(move |(y, x, text)| (index, y, x, text)))
+        .map(|(index, y, x, text)| (index, y, x, text.replace('\u{a0}', " ")))
+        .collect()
+}
+
+/// The anchors that the links on all pages go to, in page order, without repeats for wrapped links.
+fn link_targets(output: &Output) -> Vec<usize> {
+    let mut targets: Vec<usize> = Vec::new();
+    for item in output.pages.iter().flat_map(|page| &page.items) {
+        if let Item::Link {
+            link: Link::Anchor(id), ..
+        } = item
+            && targets.last() != Some(id)
+        {
+            targets.push(*id);
+        }
+    }
+    targets
+}
+
+#[test]
+fn citations_show_their_style_and_link_to_their_bibliography_entry() {
+    let body = "# Intro {#sec:intro}\n\n[@smith2024a, p. 12; @lee2022]\n\n@weber2020 [pp. 3-5] and @sec:intro.\n";
+    let cases = [
+        (
+            "author-date",
+            [
+                "(Smith and Jones 2024, p. 12; Lee et al. 2022)",
+                "Weber (2020, pp. 3–5) and Section 1.",
+            ],
+            "Smith, Ada and Bob Jones (2024).",
+            [2, 3],
+        ),
+        (
+            "numeric",
+            ["[1, p. 12; 2]", "Weber [3, pp. 3–5] and Section 1."],
+            "[1] Smith, Ada",
+            [1, 3],
+        ),
+    ];
+    for (style, texts, smith, entries) in cases {
+        let output = render_bib(&format!("citation-style: {style}"), body);
+        let lines = all_lines(&output);
+        let has = |text: &str| lines.iter().any(|line| line.3 == text);
+        assert!(texts.iter().all(|text| has(text)), "{style}: {lines:?}");
+
+        let intro = output.outline[0].anchor;
+        let references = &output.outline[1];
+        assert_eq!((references.title.as_str(), references.level), ("References", 1));
+        let first = references.anchor;
+        assert_eq!(link_targets(&output), [first + entries[0], first + entries[1], intro]);
+        let anchor = output.anchors[first + entries[0]];
+        let line = lines
+            .iter()
+            .find(|line| line.3.starts_with(smith))
+            .expect("Smith's entry");
+        assert!(
+            line.1 > anchor.y.0 && line.1 - anchor.y.0 < 15.0,
+            "{style}: the anchor marks the entry"
+        );
+    }
+}
+
+#[test]
+fn the_bibliography_lists_each_cited_entry_once_in_style_order_with_a_hanging_indent() {
+    let keys = [
+        "weber2020",
+        "smith2024b",
+        "typst",
+        "knuth1984",
+        "lee2022",
+        "ito2021",
+        "who2023",
+        "lab2018",
+        "pdfspec",
+        "mueller2019",
+        "smith2024a",
+        "weber2020",
+    ];
+    let citations: Vec<String> = keys.iter().map(|key| format!("[@{key}]")).collect();
+    let body = format!("# Text\n\n{}\n", citations.join(" "));
+    let starts = |output: &Output| -> Vec<String> {
+        let lines = all_lines(output);
+        let heading = lines.iter().position(|line| line.3 == "References").expect("heading");
+        let left = lines[heading].2;
+        let entries = lines[heading + 1..].iter().filter(|line| (line.2 - left).abs() < 0.01);
+        entries
+            .map(|line| line.3.split(" (").next().unwrap_or_default().to_owned())
+            .collect()
+    };
+
+    let author_date = render_bib("toc: true", &body);
+    assert_eq!(
+        starts(&author_date),
+        [
+            "Adobe Systems",
+            "Ito, Mei",
+            "Knuth, Donald E.",
+            "Kyber Lab",
+            "Lee, Cy et al.",
+            "Müller, Hans, Eva Großmann, and Cy Lee",
+            "Smith, Ada",
+            "Smith, Ada and Bob Jones",
+            "Typst documentation",
+            "Weber, Lena",
+            "World Health Organization",
+        ]
+    );
+    let numeric = render_bib("toc: true\ncitation-style: numeric", &body);
+    let numbered = starts(&numeric);
+    assert_eq!(numbered.len(), 11);
+    assert_eq!(numbered[0], "[1] Weber, Lena");
+    assert_eq!(numbered[10], "[11] Smith, Ada and Bob Jones");
+
+    // A wrapped entry hangs by the theme's indent, and the contents list the section with its page.
+    let config = config("{}", theme());
+    let lines = all_lines(&numeric);
+    let lee = lines
+        .iter()
+        .position(|line| line.3.starts_with("[5] Lee"))
+        .expect("Lee's entry");
+    let hang = lines[lee + 1].2 - lines[lee].2;
+    assert!((hang - config.bibliography.hanging_indent.0).abs() < 0.01, "{hang}");
+    let references = numeric.outline.last().expect("bookmarks");
+    let page = page_of(&numeric, references.anchor);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.3.starts_with("References .") && line.3.ends_with(&format!(" {page}")))
+    );
+}
+
+#[test]
+fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the_bib_file() {
+    let citations: Vec<&str> = BIB
+        .lines()
+        .filter_map(|line| line.strip_prefix('@')?.split_once('{')?.1.strip_suffix(','))
+        .collect();
+    let citations: Vec<String> = citations.iter().map(|key| format!("[@{key}]")).collect();
+    let body = |citations: &[String]| {
+        format!(
+            "{}\n\n::: columns\n::: bibliography\n:::\n\nAfter.\n",
+            citations.join(" ")
+        )
+    };
+    let config = config("{}", theme());
+
+    // The long URL of `pdfspec` does not fit a column, which is reported at the entry in the `.bib` file.
+    let errors = render_cited(&config, &body(&citations), Some(BIB), &[]).unwrap_err();
+    assert_eq!(errors[0].source, Some(Source::Bibliography("/fake/refs.bib".into())));
+    assert_eq!(errors[0].location, Some((90, 1)));
+    assert!(
+        errors[0].message.starts_with("entry `pdfspec`: \"https://"),
+        "{}",
+        errors[0].message
+    );
+
+    let fitting: Vec<String> = citations
+        .into_iter()
+        .filter(|citation| citation != "[@pdfspec]")
+        .collect();
+    let output = render_cited(&config, &body(&fitting), Some(BIB), &[]).expect("layout succeeds");
+    let lines = all_lines(&output);
+    let middle = config.page.margin_inner.0 + config.page.text_width().0 / 2.0;
+    let heading = lines.iter().position(|line| line.3 == "References").expect("heading");
+    let after = lines.iter().position(|line| line.3 == "After.").expect("text after");
+    assert!(lines[heading].2 < middle, "the heading starts the first column");
+    assert!(
+        lines[heading..after].iter().any(|line| line.2 > middle),
+        "entries fill the second column"
+    );
 }

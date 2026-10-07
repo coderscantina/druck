@@ -15,9 +15,6 @@
 //!
 //! Other fields are ignored. `@string` macros and `crossref` are errors.
 
-// Nothing calls this module until the integration with the Markdown parser and layout.
-#![allow(dead_code, unused_imports)]
-
 mod bibtex;
 mod cite;
 mod entry;
@@ -33,9 +30,8 @@ use std::path::Path;
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
 
-pub use cite::{CitationId, Citations, MissingKey, Reference, Rendered};
+pub use cite::{Citations, Reference};
 pub use entry::Entry;
-pub use syntax::{Citation, Segment, find};
 
 use bibtex::Problem;
 use entry::Kind;
@@ -43,17 +39,18 @@ use entry::Kind;
 /// The entries of one `.bib` file, in file order, with unique keys.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bibliography {
+    source: Source,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
 }
 
 impl Bibliography {
     /// Reads and validates a bibliography. All problems are reported together, in file order, each with the path and
-    /// the line and column. The `.bib` file has no `Source` variant of its own, so the path is reported as
-    /// [`Source::Document`], which prints as the plain path.
+    /// the line and column.
     pub fn parse(text: &str, path: &Path) -> Result<Self, Vec<Diagnostic>> {
         let (raw_entries, mut problems) = bibtex::read(text);
         let mut bibliography = Self {
+            source: Source::Bibliography(path.to_path_buf()),
             entries: Vec::new(),
             index: BTreeMap::new(),
         };
@@ -79,11 +76,16 @@ impl Bibliography {
             return Ok(bibliography);
         }
         problems.sort_by_key(|problem| problem.at);
-        let source = Source::Document(path.to_path_buf());
+        let source = &bibliography.source;
         Err(problems
             .into_iter()
             .map(|problem| Diagnostic::new(Some(source.clone()), problem.message).at(problem.at.0, problem.at.1))
             .collect())
+    }
+
+    /// The `.bib` file, for diagnostics.
+    pub fn source(&self) -> &Source {
+        &self.source
     }
 
     pub fn entries(&self) -> &[Entry] {
