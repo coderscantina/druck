@@ -24,7 +24,7 @@ use serde_json::{Map, Value};
 use config::front_matter::{self, FrontMatter};
 use config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use config::resolved::{Config, FontFiles};
-use config::source::{Origin, Resource, Source};
+use config::source::{Origin, Resource, Source, normalize, show_relative_to, shown};
 use diagnostic::Diagnostic;
 use image::Image;
 use text::Fonts;
@@ -39,7 +39,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Validate a document's configuration and theme without rendering.
+    /// Validate a document, its theme, images, and bibliography without rendering.
     Check {
         #[command(flatten)]
         input: InputArgs,
@@ -87,18 +87,19 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             let (config, document) = load(&input)?;
             find_installed(&config)?;
             layout::check_title(&config, &document.source)?;
+            prepare(&config, &document)?;
             if print_config {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
                 println!("{json}");
             } else {
-                println!("{}: configuration is valid", input.input.display());
+                println!("{}: document is valid", shown(&document.path));
             }
             Ok(())
         }
         Command::Render { input, output } => {
             let (config, document) = load(&input)?;
             let output = match output {
-                Some(path) => document.working_dir.join(path),
+                Some(path) => normalize(&document.working_dir.join(path)),
                 None => document.path.with_extension("pdf"),
             };
             let installed = find_installed(&config)?;
@@ -119,11 +120,11 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 eprintln!("warning: {warning}");
             }
             std::fs::write(&output, pdf)
-                .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", output.display()))])?;
+                .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(&output)))])?;
             let count = laid.pages.len();
             println!(
                 "{}: wrote {count} page{}",
-                output.display(),
+                shown(&output),
                 if count == 1 { "" } else { "s" }
             );
             Ok(())
@@ -139,9 +140,16 @@ struct DocumentFile {
     text: String,
 }
 
-/// Parses the Markdown body, loads its images, the theme's, and the bibliography, formats citations, and lays it
-/// out.
-fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<page::Output, Vec<Diagnostic>> {
+/// Everything layout needs besides the configuration and fonts.
+struct Prepared {
+    content: document::Document,
+    cited: citations::Cited,
+    images: Vec<Image>,
+    theme_images: HashMap<Resource, Image>,
+}
+
+/// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
+fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Diagnostic>> {
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
@@ -151,11 +159,22 @@ fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<pag
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let images = load_images(&content.images, dir, &document.source)?;
     let theme_images = load_theme_images(config)?;
+    Ok(Prepared {
+        content,
+        cited,
+        images,
+        theme_images,
+    })
+}
+
+/// Lays out the prepared document.
+fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<page::Output, Vec<Diagnostic>> {
+    let prepared = prepare(config, document)?;
     layout::layout(
-        &content,
-        &cited,
-        &images,
-        &theme_images,
+        &prepared.content,
+        &prepared.cited,
+        &prepared.images,
+        &prepared.theme_images,
         config,
         fonts,
         &document.source,
@@ -175,11 +194,12 @@ fn load_bibliography(config: &Config) -> Result<Option<Bibliography>, Vec<Diagno
     Bibliography::parse(&text, &path).map(Some)
 }
 
-/// Reads and decodes the images a theme names for its title slots. Errors name the property.
+/// Reads and decodes the theme images that the title layout in use shows. Errors name the property.
 fn load_theme_images(config: &Config) -> Result<HashMap<Resource, Image>, Vec<Diagnostic>> {
+    let used = layout::title_images(config);
     let mut images = HashMap::new();
     let mut errors = Vec::new();
-    for (name, resource) in &config.images {
+    for (name, resource) in config.images.iter().filter(|(_, resource)| used.contains(resource)) {
         let loaded = match resource.file() {
             None => Err(format!("{resource} is not bundled")),
             Some(path) => {
@@ -233,7 +253,8 @@ fn load(args: &InputArgs) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
             format!("cannot determine the working directory: {e}"),
         )]
     })?;
-    let document_path = working_dir.join(&args.input);
+    show_relative_to(working_dir.clone());
+    let document_path = normalize(&working_dir.join(&args.input));
     let document_source = Source::Document(document_path.clone());
     let cli_source = Source::Cli {
         working_dir: working_dir.clone(),
@@ -244,8 +265,8 @@ fn load(args: &InputArgs) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let overrides = parse_overrides(&args.overrides, &cli_source)?;
 
     let theme_path = match (&args.theme, &document.theme) {
-        (Some(path), _) => Some(working_dir.join(path)),
-        (None, Some(path)) => document_path.parent().map(|dir| dir.join(path)),
+        (Some(path), _) => Some(normalize(&working_dir.join(path))),
+        (None, Some(path)) => document_path.parent().map(|dir| normalize(&dir.join(path))),
         (None, None) => None,
     };
     let theme = theme_path.map(|path| load_theme(&path)).transpose()?;
@@ -262,6 +283,9 @@ fn load(args: &InputArgs) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
         },
     })?;
     check_resources(&config)?;
+    for warning in &config.warnings {
+        eprintln!("{warning}");
+    }
     let document = DocumentFile {
         path: document_path,
         working_dir,
@@ -316,8 +340,12 @@ fn parse_overrides(pairs: &[String], source: &Source) -> Result<FrontMatter, Vec
         if key == "theme" {
             return Err(error("--set theme: use --theme to select a theme".into()));
         }
-        let value: Value =
+        let mut parsed: Value =
             serde_saphyr::from_str(value).map_err(|e| error(format!("--set {key}: {}", yaml_message(&e))))?;
+        if front_matter::TEXT_SETTINGS.contains(&key) && matches!(parsed, Value::Number(_) | Value::Bool(_)) {
+            parsed = Value::String(value.trim().to_owned());
+        }
+        let value = parsed;
         let mut target = &mut settings;
         let mut keys = key.split('.').peekable();
         while let Some(part) = keys.next() {

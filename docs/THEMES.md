@@ -143,7 +143,7 @@ A font whose license (the OS/2 `fsType` field) restricts embedding or subsetting
 
 Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: the nearest weight first, then the requested style. For weights from 400 to 500, the weights up to 500 are tried first, then lighter ones, then heavier ones; below 400 lighter ones come first, above 500 heavier ones, as in CSS. So bold-italic falls back to bold, then italic, and italic falls back to regular. Strong text sets weight 700, or keeps a heavier weight of its style. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering with the default theme never depends on installed fonts.
 
-`images` maps a name to a file path. Title slots refer to images by that name. Images in the document body are not part of the theme; they resolve relative to the document.
+`images` maps a name to a file path. Title slots refer to images by that name. Only the images that the title layout in use shows are read, so an unused image is not decoded. Images in the document body are not part of the theme; they resolve relative to the document.
 
 Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `kyber check` reports missing ones.
 

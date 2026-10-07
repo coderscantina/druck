@@ -27,7 +27,7 @@ Front matter cannot redefine templates (title slots, headers, footers). That bel
 
 ### Metadata
 
-Metadata is plain text. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
+Metadata is plain text. A number or boolean is read as its text, so `date: 2024` needs no quotes; in `meta` and `--set`, a decimal such as `1.50` reads as `1.5`, so quote it to keep the zero. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
 
 | Key | Type | Effect |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ Metadata is plain text. It is inserted into templates as text only: `*word*` sta
 
 Metadata fills the title block at the start of the first page, or the separate title page with `title-page: true`. See [document structure](#document-structure).
 
-`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Numbers must be quoted, as in `offer: "2026-117"`. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
+`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
 
 ```yaml
 meta:
@@ -100,7 +100,7 @@ Notes:
 
 - A single `margins` length sets all four sides. A map sets only the sides it lists.
 - Lengths use `pt`, `mm`, `cm`, `in`, or `em`. See [measurements](THEMES.md#measurements). `font-size` must be an absolute length because `em` sizes refer to it.
-- `fonts.*` changes the font tokens. A theme only follows them if its styles reference `$fonts.body`, `$fonts.heading`, and `$fonts.mono`. The bundled theme does.
+- `fonts.*` changes the font tokens. A theme only follows them if its styles reference `$fonts.body`, `$fonts.heading`, and `$fonts.mono`. The bundled theme does. A font setting that no style references prints a `warning:` line and has no effect.
 - Settings are checked like theme values. A font family must exist in the theme, in `font-files`, or among the installed fonts, and must have the faces the styles request. A missing installed family, weight, or style is an error naming what was searched for. A font whose license restricts embedding is embedded with a warning.
 
 ## Command line
@@ -110,7 +110,7 @@ kyber check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
 kyber render <doc.md> [-o PATH]
 ```
 
-`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, and reports problems. `--print-config` prints the resolved configuration as JSON.
+`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, parses the Markdown body, reads the images and the `.bib` file, resolves citations, and reports the same problems as `render` up to layout. Problems that only layout finds, such as a word wider than its line, show up in `render`. `--print-config` prints the resolved configuration as JSON.
 
 `render` validates the same way, then parses the Markdown, lays it out, and writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
@@ -172,7 +172,7 @@ The following are reported as errors with their line and column, and no PDF is w
 
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
-A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
+A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` does not lay out the document, so it does not find these.
 
 ## Pages
 

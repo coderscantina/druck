@@ -50,6 +50,7 @@ use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
 
 pub use self::titles::check as check_title;
+pub use self::titles::images as title_images;
 
 /// The most layout passes spent on page numbers that change the layout they come from.
 const PASSES: usize = 5;

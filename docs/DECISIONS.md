@@ -652,7 +652,25 @@ Not started.
 
 ### Configuration and CLI
 
-Not started.
+#### Text settings accept numbers
+
+`title`, `subtitle`, `date`, and `abstract` in front matter already read any scalar as its source text, because serde-saphyr hands the raw text to a `String`. `author` and `meta` values deserialize through a visitor, where serde-saphyr offers only the parsed number, so `1.50` becomes `1.5`; those visitors accept integers, floats, and booleans as text. `--set` parses values into `serde_json::Value`, which also loses the text, so for the four plain text keys a number or boolean keeps its trimmed source text. Consequence: quote a decimal in `meta` or `author` to keep trailing zeros.
+
+#### Check runs everything before layout
+
+`kyber check` calls the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images. Layout and font loading stay out, so `check` stays quick and needs no fonts. Consequence: fixtures used with `check` need a valid `.bib` file.
+
+#### Theme images follow the title layout
+
+Only images in the slots of the title layout in use are decoded: the title page groups with `document.title-page`, else the title block when it shows. Header and footer slots hold no images. The file existence check still covers every theme image.
+
+#### Unused font settings warn
+
+Resolution records the font tokens that styles use, following token-to-token references, and warns for a `fonts.*` setting from front matter or `--set` whose token nothing uses. Warnings are diagnostics with a `warning` flag, kept in `Config` and printed after loading. The latest layer that sets a token gets the warning.
+
+#### Paths in messages
+
+Document, theme, bibliography, and resource paths are normalized lexically, with no canonicalization, so symlinks stay as written. Messages print paths inside the working directory relative to it, and others in full. The base is process-wide state set once by the CLI (`show_relative_to`), so `Source` and `Resource` display code needs no extra argument.
 
 ### References and structure
 
