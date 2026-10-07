@@ -353,7 +353,7 @@
       "space-before": "$spacing.none",
       "space-after": "$spacing.none",
       "indent": "$spacing.none",
-      "first-line-indent": "$spacing.none"
+      "first-line-indent": "$spacing.paragraph-indent"
     },
     "bibliography": {
       "font": "$fonts.body",
