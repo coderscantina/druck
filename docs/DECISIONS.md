@@ -642,6 +642,17 @@ An offer theme with installed Avenir Next (Gotham, the reference font, is not in
 
 Fixes for follow-ups from milestones 03 to 13 that needed no product decision.
 
+The owner decided the remaining ones the same day. Built: a `marker` style for list markers, captions at the table's width, Pandoc-style citation prefixes, `document.duplex`, `toc.level-styles`, an error for headings in footnotes, stored raster density, block spacing around lists in the default theme, line-end hyphens that survive text extraction, and `page.column-change-spacing`. Kept as they are, by choice:
+
+- List table cells hold paragraphs and lists only.
+- A `.bib` `type` field prints as written; an absent one uses the localized label.
+- `{section}` shows the first section that starts on the page, as LaTeX's right mark.
+- A keep group too tall for a page stays an error; its images are not shrunk.
+- The page-scoring trade-offs recorded for the images sample, short pages before tall images, uneven final columns at a keep group, and heading columns ending a line apart stay; tuning one tends to regress another.
+- German compounds hyphenate at any pattern point; better data would need a new dependency.
+- No settling cache, single PNG decode, or theme settings for breaking constants until a document needs them.
+- `margins.mirror` stays theme-only, and captions do not hold footnotes.
+
 ### Text and line breaking
 
 - **Tracking at line ends.** Tracking still follows every character, but alignment measures a line up to its last glyph. A shaped run records its letter spacing, and the space after the last character of a line may pass the measure, like a margin hang. Before a hard break or the paragraph end only that space may pass it, not punctuation, as before. Right-aligned and centered tracked text, in paragraphs and in band slots, now ends exactly at its edge; the offer's "AMOUNT" header and its "OFFER" footer line up with the text below them.

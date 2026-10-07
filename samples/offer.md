@@ -240,6 +240,4 @@ The fine print {.eyebrow}
 
 This offer is valid until 6 November 2026. We invoice each part when you approve it, payable within fourteen days. You receive the theme and all converted sources along with the PDFs, and may use them for later editions without further cost.
 
-Kyber Example Studio keeps the right to show the cover and two sample pages in its portfolio, unless you ask us not to. Everything else stays confidential.
-
 We look forward to working with you. If you have questions about this offer, please call or write to us at the numbers in the footer.

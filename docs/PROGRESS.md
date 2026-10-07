@@ -8,6 +8,8 @@ Milestones 11 and 12 are complete and merged. The [business documents amendment]
 
 Milestone 13 is complete. A `::: table` directive holds a list table whose cells hold paragraphs and lists, with `{span=n}` cells, `{.name}` on rows and cells, and `align` and `widths` attributes where `*` columns fill the frame. Themes set `top-rule`, `header-rule`, and `row-rule`, and a row style's `rule-below` drops or changes the rule below its row. Title and band slots may name custom styles, and bands apply tracking and capitals. A wide table narrower than the frame starts with the prose instead of centering across the frame ([decisions](DECISIONS.md#2026-10-07-milestone-13-rich-tables), [authoring](AUTHORING.md#list-tables)).
 
+The follow-up fixes of 2026-10-07 closed the open follow-ups from milestones 03 to 13 or settled them as [decisions](DECISIONS.md#2026-10-07-follow-up-fixes).
+
 Current milestone: [10: Release acceptance](milestones/10-release-acceptance.md).
 
 ## Milestone status
@@ -33,6 +35,8 @@ Next: milestone 10, release acceptance, still blocked on the owner's choice of K
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: Kyber's own license (the owner's decision; distribution is blocked until then), the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Follow-up fixes, on 2026-10-07 on the same machine: four branches merged onto `0823f59`, plus a fix for list items that took the list's block spacing. `cargo test -q` passed 228 unit and 28 integration tests, and `cargo clippy --all-targets -q`, `cargo fmt --check`, and `python3 scripts/notices.py --check` were clean. Sample PDFs changed on purpose (pagination rules, list spacing, caption widths, label column, URL breaks); all samples were rendered with `scripts/render-samples.sh` from the merged tree, and the changed pages were inspected per branch and again after merging: the offer (5 pages, after dropping one sample paragraph that left two lines on a sixth page), `en`, `typography`, the numeric German bibliography, and a scratch document with a list and code in a footnote. Benchmarks per branch stayed within 10% of the earlier numbers (`samples/en.md` ×52 0.36 to 0.37 s, `samples/tables.md` ×34 0.29 s).
 
 Milestone 13, on 2026-10-07 on the same machine: `cargo test -q` passed 199 unit and 23 integration tests; `cargo clippy --all-targets -q` and `cargo fmt --check` were clean; no dependency changed. `scripts/render-samples.sh` with a release build of `31c1e4f` and of the milestone 13 tree, compared with `cmp`, gave byte-identical PDFs for all renders except `offer.pdf`, which changed on purpose (new content, and wide tables now start with the prose). New tests cover parsing list tables with attributes, spans, row and cell styles, block cells, and captions; ten parser errors at their locations; slot styles naming custom styles, an unknown slot style, and `rule-below` on a list style; schema cases for the rules and slot styles; and in layout `*` and `auto` widths with column and cell alignment, the theme rules and their opt-out, a spanning cell widening its columns, a repeated header over three pages, a kept group row, wide placement, and band capitals with tracking. The 34-copy `samples/tables.md` benchmark (93 pages) took 0.30 s and 42 MB against 0.29 s and 40 MB for `31c1e4f`, with identical output. `samples/offer.md` (5 pages) was rasterized with `pdftoppm -r 80 -png` and every page inspected: cover labels in tracked capitals, eyebrows kept with their headings, the cost table over pages 2 to 4 with its header in small spaced capitals repeated, group rows kept with their first item, muted detail lists, the note row, totals without rules, and narrow wide tables flush with the prose. The reference offer comparison with installed Avenir Next is recorded in [decisions](DECISIONS.md#reference-comparison).
 
@@ -71,52 +75,15 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
-- List table cells hold only paragraphs and lists; code, quotations, and images in cells would need their own measuring. Row spans stay out of scope.
-- List markers take the list style's size and face, so a detail list cannot have smaller bullets than its text.
-- A wide table's caption is set across the table's placement width; a non-wide table's caption still spans its frame (see the follow-up on captions below).
-- Tracking adds space after the last letter of a line, so tracked right-aligned text sits slightly left.
-- `meta` numbers must be quoted, like `date`. `margins.mirror` is theme-only, not a front matter setting.
-- When no first line of a ragged paragraph fits within tolerance, the breaker's second pass caps badness at 10 000, so all very loose first lines tie and the earliest break wins. A bibliography entry whose URL does not fit after the first line can then break after its first word: "Knuth," alone in the custom-theme report, "The Unicode Standard, Version / 16.0" in the German numeric one. Uncapped badness in the second pass, or an emergency stretch, in [the breaker](../src/layout/paragraph/breaking.rs) would fix it; it changes milestone 03 behaviour, so it was left.
-- URLs and DOIs never break, so one wider than a column is an error at its `.bib` entry. Allowing breaks after `/` in link text that spells its URL would make two-column bibliographies safer.
-- In both reports, page 3 ends about 40% short and page 4 starts with the last line of a paragraph, because the longer text before the column section no longer fits on page 3. A pagination scoring trade-off before a column region, not caused by citations; the milestone 08 version of the sample laid out fully.
-- Every citation links to one entry, the first work it shows. Per-work links inside a group would need per-item output from `Rendered`.
-- Numeric entries put their label at the start of the first line; there is no label column, so text after "[10]" starts later than after "[9]".
-- `kyber check` reads neither the Markdown body nor the `.bib` file, so citation and BibTeX errors only show up in `render`.
-- A bracket that does not start with `@`, such as `[see @key, p. 3]`, is text with a narrative citation inside, not a citation with a prefix as in Pandoc.
-- The `type` field of a report or thesis prints as written, so an English `type` reads English in a German document.
-- A reference's label can hyphenate at a line end ("Fig-ure 1" in the report sample), since label and number form one word. A rule against breaking inside reference text is an option.
-- `{section}` shows the first section that starts on a page, so a page that opens in the middle of section 2 and starts section 3 shows section 3. This is LaTeX's right mark; a theme choice of the section in effect at the top of the page is an option if review asks for it.
-- After a title page the body starts on an even page. Duplex printing would want a blank page so it starts on the right; there is no setting for that.
-- The heading number is followed by one space. A theme setting for the gap, like LaTeX's quad, is an option.
-- All contents entries use one style. Bold top-level entries would need per-level styles.
-- Settling has no damping; a document whose page numbers oscillate is reported after 5 passes. Every pass shapes everything again; caching paragraphs without page references would make the second pass cheaper if larger documents need it.
-- Headings inside footnotes are set unnumbered and left out of the contents and outline. Rejecting them in the parser is an option.
-- Every theme image is decoded on render, also ones no active slot uses.
-- Page 2 of `samples/images.md` ends about a quarter page early. The text after the chart fits there, and that end is cheaper for page 2 alone, but the search prefers to keep page 3 fuller because the square fill cost spreads the shortfall that the tall image on page 4 forces. A scoring trade-off, not a composer defect; details in [decisions](DECISIONS.md#composer-gap-in-the-images-sample). Tables do not trigger it.
-- A short table can split like a short paragraph. A higher cost for breaking inside a table, or orphan and widow rules over two rows, is an option if review asks for it.
-- A table caption is set across the frame width even when the table is narrower and centered. Setting it at the table width would align it with the table but wrap long captions more.
-- Without floats, an image that does not fit leaves a short page, and the square fill cost may then prefer a widow over an even shorter page (page 1 of `samples/images.md`). A tall image in columns can leave the other column mostly empty. Both follow from document order; a scoring change needs care, see decisions.
-- Raster images ignore stored density (PNG `pHYs`, JPEG JFIF), so high-resolution screenshots appear at one pixel per point unless scaled down. Reading density is a small addition if review asks for it.
-- PNG images are decoded twice, once to validate and once by krilla while writing. Fine at document image sizes.
-- Captions cannot hold footnotes, because CommonMark does not parse `[^note]` in an image description.
-- An image in a keep group is not shrunk to fit the rest of the group; a group too tall is reported at its directive as before.
-- Notes have no widow or orphan rules, so a continued note can leave one line on either page.
-- A keep group where the even column split would fall can leave final columns visibly uneven. Both splits are about equally tall, and LaTeX's multicol picks the same one. A preference for a taller first column at near-equal height is an option if review asks for it.
-- Columns with headings can end up to a line apart when their spaces cannot absorb the difference within bounds.
-- The space at a change between one and two columns reuses `page.column-gap`. A separate theme setting is possible if review asks for it.
-- A line hyphenated at the foot of a page costs nothing extra. TeX penalizes that; it showed up in the footnote benchmark.
-- An introducing sentence ending in a colon can end a page while its list or code block starts the next. Authors can use `keep`; a small penalty after such lines is an option.
-- Lists and code inside notes use the list and code styles at body size, not the footnote size.
-- German compounds break at any pattern point, not preferably at compound boundaries. Better data would be needed.
-- Only one glyph protrudes per line edge. A comma after a closing quote hangs; the quote does not.
-- Breaking and page-scoring constants are internal. Expose them in themes only if visual review asks for it.
-- Explicit hyphens at a line end are dropped by `pdftotext`. Marked content with actual text could fix extraction, if needed for accessibility work.
+- Open decision: a hyphen that is part of the text and ends a line is written as U+2011 so `pdftotext` keeps it. krilla keeps the first text it sees per glyph, so if a face's first hyphen ends a line, every `-` in that face extracts as U+2011 in viewers without ActualText support.
+- `kyber check` stops before layout, so layout errors such as a word wider than its line show up only in `render`.
+- Unquoted decimals in `meta` and `author` lose trailing zeros (`1.50` reads `1.5`); serde-saphyr keeps source text only for plain string fields.
+- A URL without a single slash that is wider than its column is still an error.
+- Custom list styles and quotations inside footnotes stay at body size.
+- Citation suffixes after a locator are not supported.
+- A long caption over a very narrow table wraps heavily, since captions take the table's width.
+- `samples/themes/business.json` could use a `marker` style for the smaller detail bullets.
 - Font bytes from disk are leaked once per render. Fine for the CLI; the phase 2 crate must own them (see decisions).
-- `kyber check` does not parse the Markdown body, so unsupported content, directive, footnote, and label errors only show up in `render`. Consider parsing in `check` too.
-- Adjacent lists of different kinds and a list right after a paragraph get no space between them, because the default `list` style has zero `space-before`. A theme design question.
-- `--set date=2024` parses as a number and fails; quoting works. Consider accepting numbers for text metadata.
-- Front matter font settings take effect only if the theme uses the `body`, `heading`, and `mono` font tokens. A warning for unused settings might help.
-- Paths in diagnostics are absolute and not normalized (`doc/../theme`).
 
 ## Updating this file
 
