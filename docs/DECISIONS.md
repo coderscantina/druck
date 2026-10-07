@@ -424,6 +424,32 @@ Every pass lays out the whole document again, shaping included. Measured on 2026
 - A bibliography is generated content in the flow. Numeric citation labels do not depend on pages, but the bibliography's length moves later pages, so it must be laid out in every pass, like the table of contents.
 - The milestone 08 integration scenario (`samples/report.md` in both themes) must be re-run with bibliography content.
 
+## 2026-10-07: Milestone 09 citation groundwork
+
+Built in parallel with milestone 08, as new files in [src/bibliography/](../src/bibliography/mod.rs) that nothing calls yet. The module carries `#![allow(dead_code, unused_imports)]` until milestone 09 wires it into the parser and layout. Required fields per entry type are in the module's doc comment and go into [authoring](AUTHORING.md) with that work.
+
+### Reader
+
+A hand-written BibTeX reader, no dependency. Types and field names are case-insensitive. `@comment` and `@preamble` are skipped; `@string` macros and `crossref` are errors, as the briefing allows. Month macros (`jan`) are accepted; other bare macros are errors. Common LaTeX escapes for English and German text become Unicode (`\"a`, accents, `\ss`, `--`, `---`, `~`, escaped specials, protective braces). Any other escape is an error naming entry, field, and escape, but only in fields the entry type uses. `url` and `doi` stay verbatim. A syntax error stops reading; recoverable errors are collected together.
+
+Only BibTeX fields are read: `year`, `journal`, `address`. BibLaTeX's `date`, `journaltitle`, and `location` are ignored like any unknown field.
+
+### Citation syntax
+
+`[@a]`, `[@a; @b]`, `[@a, p. 12]`, narrative `@a` and `@a [p. 12]`. Locators are `p.`, `pp.`, or `S.` with one page or a range; output is normalized per language ("pp. 3–5", "S. 3–5"). Narrative `@key` counts after the start of text, whitespace, or an opening bracket or quote, so `a@b.de` is not a citation but `ask @mike` is, and fails as a missing key. Keys with a `sec:`, `fig:`, or `tbl:` prefix are never citations. A bracket group that starts with `@` but cannot be read is returned as invalid so the integrator reports it.
+
+Open for milestone 09: a bracket group mixing a cross-reference label and a citation key is currently left as plain text. It should be an error, since otherwise the citation silently disappears into text.
+
+### Styles
+
+Entries read the same in both styles: lead (authors inverted for the first, else editors, else a report's institution, else the title), year in parentheses, title (italic for book, thesis, report), type details, then DOI or URL as a link. Numeric adds an `[n]` label and orders by first citation; author-date sorts by lead with umlauts folded, then year, title, key, and disambiguates equal labels and years with a, b. Author-date citations read "(Smith 2024, p. 12)" and "Smith (2024)", with "and"/"und" for two authors and "et al." for three or more. Numeric citations read "[1, p. 12]", collapse runs to "[1–3, 5]", and narrative "Smith [1]". Given names print as written; English editions print as written ("2nd"), German numeric editions get an ordinal period ("2. Aufl.").
+
+`finish` is a second step after collecting every citation, because year suffixes depend on the whole document.
+
+### Diagnostics
+
+`Source` has no bibliography variant yet, so `.bib` errors use `Source::Document(path)`, which prints the path with line and column. Milestone 09 should add `Source::Bibliography`.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.
