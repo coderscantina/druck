@@ -39,10 +39,17 @@ const SHORT: f64 = 1000.0;
 const STRETCHED: f64 = 100.0;
 /// Cost of a break between two lines of a block.
 const INSIDE: f64 = 50.0;
-/// Cost of a break that leaves a block's first line alone at the bottom of a page.
+/// Cost of a column break or a footnote break that leaves a block's first line alone at the bottom.
+/// Pages never end there.
 const ORPHAN: f64 = 5000.0;
-/// Cost of a break that leaves a block's last line alone at the top of a page.
+/// Cost of a column break or a footnote break that leaves a block's last line alone at the top.
+/// Pages never end there.
 const WIDOW: f64 = 5000.0;
+/// Cost of a page or column ending after a hyphenated line, as TeX's `\brokenpenalty`.
+pub(super) const HYPHENATED: f64 = 1000.0;
+/// Cost of a page or column ending after a paragraph that ends in a colon, before the list or code
+/// block it introduces.
+pub(super) const INTRODUCTION: f64 = 500.0;
 /// Cost of continuing a footnote on the next page.
 const SPLIT_NOTE: f64 = 2000.0;
 /// Cost of a page that holds only the continuation of footnotes.
@@ -56,19 +63,19 @@ pub(super) fn column_width(page: &PageGeometry) -> f64 {
     (page.prose_width.0 - page.column_gap.0) / 2.0
 }
 
-/// The rule after line `index` of a block of `count` lines.
+/// The rule after line `index` of a block of `count` lines. A page never leaves a block's first line
+/// alone at its bottom or its last line alone at its top; a column or a footnote does at a cost.
 pub(super) fn line_break(index: usize, count: usize) -> Break {
     if index + 1 == count {
         return Break::Allowed(0.0);
     }
-    let mut cost = INSIDE;
-    if index == 0 {
-        cost += ORPHAN;
+    let orphan = if index == 0 { ORPHAN } else { 0.0 };
+    let widow = if index + 2 == count { WIDOW } else { 0.0 };
+    if orphan + widow > 0.0 {
+        Break::Avoid(INSIDE + orphan + widow)
+    } else {
+        Break::Allowed(INSIDE)
     }
-    if index + 2 == count {
-        cost += WIDOW;
-    }
-    Break::Allowed(cost)
 }
 
 /// A table in the flow, whose header row repeats where a page or column starts inside it.
@@ -245,6 +252,23 @@ impl Notes {
         self.overhead + marker - self.top[from]
     }
 
+    /// The cost of a page whose note area holds stream lines `from..placed` when the notes referenced
+    /// so far end at `end`: none if all are placed, else the cost of continuing a note, plus the break
+    /// cost of the line it stops after, so continued notes follow the rules of body text.
+    fn split(&self, from: usize, placed: usize, end: usize) -> f64 {
+        if placed >= end {
+            return 0.0;
+        }
+        let line = match self.lines[..placed].last().filter(|_| placed > from) {
+            None => 0.0,
+            Some(line) => match line.after {
+                Break::Allowed(cost) | Break::Avoid(cost) => cost,
+                Break::Never | Break::Forced => WIDOW,
+            },
+        };
+        SPLIT_NOTE + line
+    }
+
     /// The furthest end in `min..=max` whose area from `from` fits in `room`, if `min` fits.
     fn fit(&self, from: usize, min: usize, max: usize, room: f64) -> Option<usize> {
         if self.area(from, min) > room {
@@ -349,7 +373,7 @@ impl<'a> Composer<'a> {
                 self.repeat(index)
             };
             natural += line.line.height;
-            if line.after == Break::Never && index + 1 < self.body.len() {
+            if !line.after.ends_page() && index + 1 < self.body.len() {
                 continue;
             }
             let (first, last) = (self.through[start], self.through[index + 1]);
@@ -461,7 +485,7 @@ impl<'a> Composer<'a> {
             && let Some(placed) = self.notes.fit(from, from, pending, self.height)
             && placed > from
         {
-            let split = if placed < pending { SPLIT_NOTE } else { 0.0 };
+            let split = self.notes.split(from, placed, pending);
             pages.push((start, placed, state.cost + NOTE_PAGE + split, 0.0));
         }
 
@@ -497,7 +521,7 @@ impl<'a> Composer<'a> {
                     (natural, stretch, cost, 0.0)
                 }
                 Some(run) => {
-                    if line.after == Break::Never && !last && end < run.end {
+                    if !line.after.ends_page() && !last && end < run.end {
                         continue;
                     }
                     let first = run.start.max(start);
@@ -526,25 +550,29 @@ impl<'a> Composer<'a> {
             };
             let penalty = match line.after {
                 _ if last => 0.0,
-                Break::Never => continue,
+                Break::Never | Break::Avoid(_) => continue,
                 Break::Forced => 0.0,
                 Break::Allowed(cost) => cost,
             };
             let max = self.notes.start[referenced];
-            let Some(placed) = self.notes.fit(from, min, max, self.height - page) else {
+            let Some(fitted) = self.notes.fit(from, min, max, self.height - page) else {
                 break;
             };
-            let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
-            let (fill, ratio) = if last || line.after == Break::Forced {
-                (0.0, 0.0)
-            } else {
-                let used = short.min(page_stretch);
-                let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
-                let lines = (short - used + deficit) / self.line;
-                (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
-            };
-            let split = if placed < max { SPLIT_NOTE } else { 0.0 };
-            pages.push((end, placed, state.cost + fill + penalty + split + page_cost, ratio));
+            // A continued note may also stop a line earlier, so it strands no line.
+            let earlier = (fitted < max && fitted > min).then(|| fitted - 1);
+            for placed in std::iter::once(fitted).chain(earlier) {
+                let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
+                let (fill, ratio) = if last || line.after == Break::Forced {
+                    (0.0, 0.0)
+                } else {
+                    let used = short.min(page_stretch);
+                    let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
+                    let lines = (short - used + deficit) / self.line;
+                    (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
+                };
+                let split = self.notes.split(from, placed, max);
+                pages.push((end, placed, state.cost + fill + penalty + split + page_cost, ratio));
+            }
             if line.after == Break::Forced {
                 break;
             }
@@ -601,7 +629,7 @@ impl Composer<'_> {
             };
             let cost = match self.body[at - 1].after {
                 _ if at == b => 0.0,
-                Break::Allowed(cost) => cost,
+                Break::Allowed(cost) | Break::Avoid(cost) => cost,
                 Break::Never | Break::Forced => unreachable!("splits follow lines a column may end after"),
             };
             Columns {
@@ -623,7 +651,7 @@ impl Composer<'_> {
                 high = middle;
             }
         }
-        let allowed = |&at: &usize| at == b || matches!(self.body[at - 1].after, Break::Allowed(_));
+        let allowed = |&at: &usize| at == b || matches!(self.body[at - 1].after, Break::Allowed(_) | Break::Avoid(_));
         let mut down = (a + 1..low).rev().filter(allowed);
         let mut up = (low..=b).filter(allowed);
         let least = [down.clone().next(), up.clone().next()]
@@ -808,6 +836,7 @@ mod tests {
                 baseline: 8.0,
                 items: Vec::new(),
                 notes,
+                hyphenated: false,
             },
             space_before: 0.0,
             after,
@@ -868,6 +897,27 @@ mod tests {
         let mut body = paragraph(9);
         body.extend(paragraph(5));
         assert_eq!(body_pages(&body), vec![0..9, 9..14]);
+    }
+
+    #[test]
+    fn a_page_strands_no_line_even_when_it_runs_short() {
+        // A two-line heading after seven lines leaves room for one line of the next paragraph only.
+        let mut body = paragraph(7);
+        body.extend([line(Break::Never, Vec::new()), line(Break::Never, Vec::new())]);
+        body.extend(paragraph(5));
+        assert_eq!(body_pages(&body), vec![0..7, 7..14]);
+    }
+
+    #[test]
+    fn a_continued_note_strands_no_line_where_the_body_can_make_room() {
+        // Nine lines with the note's first line would fill the page, but strand that line.
+        let body = loose(14, &[(8, 0)]);
+        let notes = Notes::new(vec![paragraph(4)], vec![loose(1, &[])], 0.0, 0.0);
+        let plans = Composer::new(&body, &[], &vec![None; body.len()], &notes, PAGE, 10.0)
+            .search()
+            .expect("breaks exist");
+        let pages: Vec<_> = plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect();
+        assert_eq!(pages, vec![(0..8, 0..0), (8..14, 0..4)]);
     }
 
     #[test]

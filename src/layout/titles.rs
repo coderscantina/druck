@@ -287,5 +287,6 @@ fn image_line(image: &Image, width: Pt, align: Align, frame_width: f64) -> Line 
             image: image.clone(),
         }],
         notes: Vec::new(),
+        hyphenated: false,
     }
 }

@@ -248,6 +248,8 @@ impl Prepared<'_> {
                     baseline,
                     items,
                     notes,
+                    // Only breaks inside a word have an offset into its fragment.
+                    hyphenated: mark.at.offset > 0,
                 }
             })
             .collect())

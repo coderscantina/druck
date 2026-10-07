@@ -161,6 +161,30 @@ impl Pass<'_> {
     /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages and
     /// where each anchor is in the whole document.
     fn run(&self, assumed: &[usize]) -> Result<(Vec<Page>, Vec<Position>), Vec<Diagnostic>> {
+        let content = self.content(assumed)?;
+        let pages = pages::compose(content, self.first, self.config, self.source)?;
+        let mut positions = vec![None; self.structure.anchors.len()];
+        for (index, page) in pages.iter().enumerate() {
+            for item in &page.items {
+                if let Item::Anchor { id, x, y } = item {
+                    positions[*id] = Some(Position {
+                        page: self.first + index,
+                        x: *x,
+                        y: *y,
+                    });
+                }
+            }
+        }
+        let positions = positions
+            .into_iter()
+            .map(|position| position.expect("layout places every anchor"))
+            .collect();
+        Ok((pages, positions))
+    }
+
+    /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
+    /// the anchors.
+    fn content(&self, assumed: &[usize]) -> Result<pages::Content, Vec<Diagnostic>> {
         let config = self.config;
         let mut flow = Flow {
             config,
@@ -208,32 +232,14 @@ impl Pass<'_> {
         if !flow.errors.is_empty() {
             return Err(flow.errors);
         }
-        let content = pages::Content {
+        Ok(pages::Content {
             body,
             keeps,
             columns,
             tables,
             notes,
             continued,
-        };
-        let pages = pages::compose(content, self.first, config, self.source)?;
-        let mut positions = vec![None; self.structure.anchors.len()];
-        for (index, page) in pages.iter().enumerate() {
-            for item in &page.items {
-                if let Item::Anchor { id, x, y } = item {
-                    positions[*id] = Some(Position {
-                        page: self.first + index,
-                        x: *x,
-                        y: *y,
-                    });
-                }
-            }
-        }
-        let positions = positions
-            .into_iter()
-            .map(|position| position.expect("layout places every anchor"))
-            .collect();
-        Ok((pages, positions))
+        })
     }
 }
 
@@ -245,14 +251,35 @@ struct Line {
     items: Vec<Item>,
     /// The footnotes referenced on this line.
     notes: Vec<usize>,
+    /// Whether the line ends inside a word, at a hyphenation point or after an explicit hyphen.
+    hyphenated: bool,
 }
 
 /// Whether a page may end after a line, and at what cost.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Break {
     Allowed(f64),
+    /// A page never ends here, since it would strand a line. A column or a continued footnote may, at
+    /// this cost.
+    Avoid(f64),
     Never,
     Forced,
+}
+
+impl Break {
+    /// Whether a page may end after the line.
+    fn ends_page(self) -> bool {
+        matches!(self, Self::Allowed(_) | Self::Forced)
+    }
+
+    /// The rule with `extra` added to its cost, if it has one.
+    fn costlier(self, extra: f64) -> Self {
+        match self {
+            Self::Allowed(cost) => Self::Allowed(cost + extra),
+            Self::Avoid(cost) => Self::Avoid(cost + extra),
+            other => other,
+        }
+    }
 }
 
 /// A line in the flow with the space above it and the rule for a page break below it.
@@ -402,6 +429,7 @@ impl<'a> Flow<'a> {
     }
 
     fn blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
+        let mut previous: Option<&Block> = None;
         for block in blocks {
             let kind = match block {
                 Block::Table { .. } => Some(WideBlock::Table),
@@ -420,6 +448,14 @@ impl<'a> Flow<'a> {
             } else {
                 frame
             };
+            if matches!(block, Block::List { .. } | Block::Code { .. })
+                && let Some(Block::Paragraph { content, .. }) = previous
+                && introduces(content)
+                && let Some(line) = self.lines.last_mut()
+            {
+                line.after = line.after.costlier(pages::INTRODUCTION);
+            }
+            previous = Some(block);
             match block {
                 Block::Paragraph { at, content, class } => {
                     let style = self.paragraph_style(class.as_ref(), &frame);
@@ -593,7 +629,8 @@ impl<'a> Flow<'a> {
     }
 
     /// Sets a paragraph or heading. Headings never end a page, so they stay with what follows, and
-    /// neither does a block whose style keeps it with the next one.
+    /// neither does a block whose style keeps it with the next one. Such a block keeps the first two
+    /// lines of a paragraph after it, also in columns.
     fn text_block(
         &mut self,
         at: Location,
@@ -604,6 +641,7 @@ impl<'a> Flow<'a> {
         role: Role,
     ) {
         let width = self.width(frame) - 2.0 * style.indent.0;
+        let kept = self.lines.last().is_some_and(|line| line.after == Break::Never);
         self.space(style.space_before.0);
         match self.set(content, style, width, first_indent) {
             Ok(lines) => {
@@ -617,6 +655,7 @@ impl<'a> Flow<'a> {
                             }
                             Break::Never
                         }
+                        Role::Text if kept && index == 0 && count > 1 => Break::Never,
                         Role::Text => pages::line_break(index, count),
                     };
                     self.push(translate_line(line, dx), at, after);
@@ -843,6 +882,7 @@ impl<'a> Flow<'a> {
             baseline: size.1,
             items,
             notes: Vec::new(),
+            hyphenated: false,
         };
         let count = caption.len();
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
@@ -941,10 +981,17 @@ impl<'a> Flow<'a> {
             baseline: paragraph::baseline(height, &metrics),
             items: Vec::new(),
             notes: Vec::new(),
+            hyphenated: false,
         }
     }
 
+    /// Adds a line to the flow. A page or column ending after a hyphenated line costs more.
     fn push(&mut self, line: Line, at: Location, after: Break) {
+        let after = if line.hyphenated {
+            after.costlier(pages::HYPHENATED)
+        } else {
+            after
+        };
         self.lines.push(FlowLine {
             line,
             space_before: std::mem::take(&mut self.space),
@@ -966,6 +1013,11 @@ impl<'a> Flow<'a> {
     fn error(&self, at: Location, message: String) -> Diagnostic {
         Diagnostic::new(Some(self.source.clone()), message).at(at.line, at.column)
     }
+}
+
+/// Whether a paragraph ends in a colon, introducing what follows.
+fn introduces(content: &[Inline]) -> bool {
+    matches!(content.last(), Some(Inline::Text { text, .. }) if text.trim_end().ends_with(':'))
 }
 
 /// A number such as "2." typed at the start of a heading and followed by a space, and the content
