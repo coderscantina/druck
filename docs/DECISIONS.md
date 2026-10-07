@@ -757,6 +757,36 @@ A caption is as wide as its table, unless the table is narrower than a third of 
 
 `samples/themes/business.json` has a `detail-marker` custom style, 0.6em of the body size in the muted color, which the `detail` list style names as its `marker`. The cost table's detail bullets are smaller than their text. The offer stays at 5 pages.
 
+## 2026-10-07: Placeholders, statistics, and drafts
+
+Built at the owner's request: text statistics, the build date, section page counts, and drafts with a watermark. Authors' rules are in [authoring](AUTHORING.md#placeholders), themes' in [templates](THEMES.md#placeholders) and [watermark](THEMES.md#watermark).
+
+### Placeholders in the body
+
+A `{name}` in Markdown text is a token, `Inline::Field`, which layout replaces with its value in the style of the text around it. Statistics are counted from the parsed document before layout, so values are final before the first pass and never change the page count they might depend on. Two rules keep values free of circular references:
+
+- Placeholders count as no text. A count never includes its own digits or another count's, so `{words}` is the same whether the text shows it once or ten times.
+- Placeholders that depend on the page (`{page}`, `{pages}`, `{section}`, `{subsection}`, `{section-page}`, `{section-pages}`) are rejected in the body. `{pages}` in the text would change the layout that decides it; the settling loop could carry it, but no document has needed it.
+
+Only a brace around a name (a letter, then letters, digits, `-`, `_`, `.`) is a token, so `{.name}`, `{span=2}`, and `{a, b}` stay as before. An unknown name is an error rather than text, since a typo such as `{wrods}` would otherwise print silently. `\{` escapes. Headings reject placeholders, because their text feeds contents, bookmarks, and running headers before layout. A placeholder without a value, including `{draft}` outside a draft, is an error at its location, so draft-only text cannot reach a final render.
+
+### Counting
+
+[`statistics`](../src/statistics.rs) uses `unicode-segmentation` for UAX #29 grapheme clusters, words, and sentences: hand-written splitting on spaces miscounts dashes, combining accents, and emoji, and the crate is small, has no dependencies, and is already the standard. On top of UAX #29:
+
+- Words joined by one hyphen count once, as word processors and dictionaries treat "well-known". UAX #29 splits them.
+- A sentence does not end after a single letter, a short per-language abbreviation list, or in German a number before a month or "Jahrhundert". UAX #29 breaks after "Dr." before a capital. A general German ordinal rule was tried and dropped: "S. 12. Das" is a sentence end, and German nouns are capitalized, so only the noun after the number can tell them apart.
+- Generated text (heading numbers, citations, cross-references, footnote markers) is not counted, as LaTeX's `texcount` does by default. Citations would otherwise change counts with the citation style. Headings, table cells, and captions count toward characters and words but are not sentences or paragraphs.
+- Reading speed is 228 words a minute in English and 179 in German, both from one study (Trauzettel-Klosinski and Dietz 2012, IReST), so the two languages compare. It is not configurable yet.
+
+### Build date
+
+`{build-date}` and `{year}` use the UTC day of the run, without a date dependency. `SOURCE_DATE_EPOCH` fixes it, which keeps reproducible builds byte-identical. The local time zone is not used: the standard library cannot read it, and around midnight the date can differ from the local one by a day. Documents without these placeholders are unaffected, so sample renders stay byte-identical.
+
+### Drafts and the watermark
+
+`document.draft` (front matter `draft`) gives `{draft}` the new `draft` label. The new theme section `watermark` is `null` or `{text, angle}`, set in the new `watermark` block style; it is not set while a placeholder in its text lacks a value. The default theme uses `{draft}`, so a draft gets "DRAFT" and a final document nothing, with no separate switch. This follows LaTeX's `draftwatermark`: centered, 45 degrees, light gray, behind the content. The text shrinks to fit within 90% of the page, so "ENTWURF" fits on A5 without a theme change. Blank pages get none, like bands. A new page item, `TurnedText`, carries the angle to the PDF writer, which turns the run about its baseline start.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

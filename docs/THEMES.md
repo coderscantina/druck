@@ -49,7 +49,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | Key | Purpose |
 | --- | --- |
 | `version`, `$schema` | Format version and editor hint. |
-| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`. |
+| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`, `draft`. |
 | `fonts` | Font families and their files. |
 | `images` | Named images used by title slots. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
@@ -66,6 +66,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `title-block` | Title slots at the start of the body, and the space below them. |
 | `title-page` | Slot groups for a separate title page. |
 | `pages` | Header and footer slot groups per page variant. |
+| `watermark` | Text turned behind the content of each page, such as "DRAFT". |
 | `labels` | Generated text per language. |
 
 `document` values are defaults. Front matter and `--set` can override each of them. `document.lang` must be `en` or `de`, `citation-style` is `author-date` or `numeric`, and both depths are integers from 1 to 6.
@@ -178,7 +179,7 @@ With `number-gap` on a heading style, the automatic number is set hanging and th
 
 `indent` narrows the block on both sides, as for a quotation. `first-line-indent` applies to a paragraph that follows another paragraph. Vertical spacing between blocks collapses: the larger of one block's `space-after` and the next block's `space-before` applies, and space at the top of a page is dropped. Lines are `size × line-height` apart.
 
-Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`.
+Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
 
@@ -271,20 +272,30 @@ Other sections have their own fields; the [schema](../schema/theme.v1.schema.jso
 
 ## Templates
 
-Title slots and header/footer slots hold text with placeholders. Kyber fills them from the document's metadata and the page.
+Title slots, header/footer slots, and the watermark hold text with placeholders. Kyber fills them from the document's metadata, its text, the date, and the page.
 
 ### Placeholders
 
-`{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{section}`, `{subsection}`, `{page}`, `{pages}`, and `{meta.key}`.
+| Kind | Placeholders |
+| --- | --- |
+| Metadata | `{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{meta.key}` |
+| Pages | `{section}`, `{subsection}`, `{page}`, `{pages}`, `{section-page}`, `{section-pages}` |
+| Statistics | `{chars}`, `{chars-no-spaces}`, `{words}`, `{sentences}`, `{paragraphs}`, `{reading-time}`, `{figures}`, `{tables}` |
+| Other | `{build-date}`, `{year}`, `{draft}` |
 
 - Write `{{` and `}}` for literal braces.
 - Unknown placeholders and unbalanced braces are errors.
 - Values are inserted as text. They are never read as layout commands or expressions.
-- Title slots may not use `{section}`, `{subsection}`, `{page}`, or `{pages}`.
-- Headers and footers may not use `{abstract}`.
+- Title slots may not use the page placeholders.
+- Headers, footers, and the watermark may not use `{abstract}`.
 - A slot's value is missing when any placeholder in it has no value or only spaces.
-- `{author}` joins several authors with commas. `{page}` is the page number, counted from 1 including the title page, and `{pages}` the number of pages. `{section}` and `{subsection}` are explained under [header and footer bands](#header-and-footer-bands).
+- `{author}` joins several authors with commas. `{page}` is the page number, counted from 1 including the title page, and `{pages}` the number of pages. `{section}`, `{subsection}`, `{section-page}`, and `{section-pages}` are explained under [header and footer bands](#header-and-footer-bands).
 - `{meta.key}` is the entry `key` of the front matter `meta` map. Keys use letters, digits, `-`, and `_`. Any key is accepted here, since only the document knows its keys; a key the document lacks is a missing value.
+- The statistics count the document's own text, as described in [placeholders](AUTHORING.md#placeholders). Counts are grouped by thousands for the document language, as in "12,480" and "12.480".
+- `{build-date}` is the day of the run, as in "7 October 2026" or "7. Oktober 2026", and `{year}` its year.
+- `{draft}` is the `draft` label when `document.draft` is true, and missing otherwise. A slot such as `"{draft} · {build-date}"` therefore appears only in drafts.
+
+Documents can use the placeholders that do not depend on the page in their text, see [placeholders](AUTHORING.md#placeholders).
 
 A line break in slot text starts a new line, so `"Studio\nMain Street 1"` sets two lines. A `meta` value that is a list starts a new line with each entry after the first; text before the placeholder joins the first entry and text after it the last. Empty lines are dropped. Within a value, line breaks follow the rules of the slot kind below.
 
@@ -340,6 +351,8 @@ The default theme's left, center, and right band slots are groups as wide as the
 
 `{section}` is the first level 1 heading that starts on the page, otherwise the last level 1 heading on an earlier page. `{subsection}` is the first level 2 heading on the page after that section, otherwise the last level 2 heading before the page, unless a level 1 heading followed it. Both include the heading number. On pages before the first heading they have no value.
 
+`{section-page}` counts the consecutive pages that show the same `{section}`, from 1, and `{section-pages}` is their number, so `"{section-page} of {section-pages}"` reads "2 of 5". Blank pages count. Both have no value where `{section}` has none.
+
 ### Missing values
 
 A slot marked `required` whose value is missing is an error. Title slots are checked for the title layout in use as soon as the document's metadata is known, by `kyber check` and `kyber render`. Header and footer slots need the page, so `kyber render` checks them after layout and names the page. Optional slots with no value are omitted along with their spacing.
@@ -360,9 +373,22 @@ With `document.duplex: true` the body starts on an odd page: a blank page follow
 
 The inner margin sits on the left of odd pages and, unless `page.margins.mirror` is `false`, on the right of even pages.
 
+## Watermark
+
+`watermark` sets one line of text large and turned behind the content of every page that has bands, so not on blank pages. It is `null` for none, or:
+
+| Field | Meaning |
+| --- | --- |
+| `text` | Text with placeholders, set in the `watermark` style. Line breaks are spaces. |
+| `angle` | The counterclockwise turn in degrees, from -180 to 180. |
+
+The center of the line, halfway between its baseline and the height of capitals, lies on the center of the page. The line is set at the style's size, or smaller so that its turned box fits within 90% of the page width and height. While a placeholder in the text has no value, there is no watermark.
+
+The default theme follows LaTeX's `draftwatermark` package: `{draft}` at 45 degrees in light gray capitals at 160pt, so only drafts show it, as "DRAFT" or "ENTWURF". A fixed text such as `"Confidential"` shows on every page.
+
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used.
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`. The set for `document.lang` is used.
 
 | Key | Used for |
 | --- | --- |
@@ -373,6 +399,7 @@ The inner margin sits on the left of odd pages and, unless `page.margins.mirror`
 | `abstract` | The heading above an `abstract` title slot. |
 | `references` | The bibliography heading, also in the table of contents, bookmarks, and running headers. |
 | `continued` | The continuation of a footnote on the next page. |
+| `draft` | The value of `{draft}` in drafts. |
 
 A reference joins the label and the number with a no-break space. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 

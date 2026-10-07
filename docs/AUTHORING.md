@@ -89,6 +89,7 @@ Each setting writes one property of the resolved theme.
 | `numbering-depth` | 1 to 6 | `document.numbering-depth` |
 | `toc-depth` | 1 to 6 | `document.toc-depth` |
 | `citation-style` | `author-date`, `numeric` | `document.citation-style` |
+| `draft` | `true`, `false` | `document.draft` |
 | `page-size` | `a4`, `a5`, `b5`, `letter`, `legal`, or `{width, height}` | `page.size` |
 | `margins` | one length, or `{top, bottom, inner, outer}` | `page.margins.*` |
 | `column-gap` | length | `page.column-gap` |
@@ -162,6 +163,7 @@ The body is CommonMark. These constructs render:
 - [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 - [Labels and cross-references](#labels-and-cross-references) to headings, figures, and tables.
 - [Custom styles](#custom-styles) from the theme on headings, paragraphs, and lists.
+- [Placeholders](#placeholders) such as `{words}` and `{build-date}`.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
@@ -402,6 +404,52 @@ These are errors with their location:
 - A label on an image without a caption, or on a heading together with attributes other than one [style](#custom-styles).
 - A reference in a heading or inside a link.
 - Brackets that hold more than the reference or `, page`, as in `[@sec:a; @sec:b]`.
+
+## Placeholders
+
+A placeholder in braces inserts a value into the text:
+
+```markdown
+This report has {words} words and takes about {reading-time} minutes to read.
+```
+
+| Placeholder | Value |
+| --- | --- |
+| `{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{meta.key}` | The [metadata](#metadata). A `meta` list joins its entries with commas. |
+| `{chars}`, `{chars-no-spaces}` | Characters with and without spaces. |
+| `{words}`, `{sentences}`, `{paragraphs}` | Words, sentences, and paragraphs. |
+| `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German. |
+| `{figures}`, `{tables}` | Figures and tables with a caption, the numbered ones. |
+| `{build-date}`, `{year}` | The day the document is rendered, as in "7 October 2026", and its year. |
+| `{draft}` | The draft label, "Draft" or "Entwurf", when `draft: true`. |
+
+The value is set in the style of the text around it. Counts are grouped by thousands for the document language, as in "12,480" or "12.480".
+
+Placeholders are read in paragraphs, lists, quotations, table cells, captions, and footnotes, but not in headings or code. Write `\{` for a brace that should stay text. Braces around anything other than a name, such as `{a, b}` or `{.name}`, stay text too.
+
+These are errors with their location:
+
+- An unknown name, such as `{wrods}`.
+- A placeholder that depends on the page, such as `{page}` or `{section}`. Those are for [headers and footers](THEMES.md#header-and-footer-bands).
+- A placeholder in a heading.
+- A placeholder without a value, such as `{subtitle}` in a document without a subtitle, or `{draft}` outside a draft.
+
+### What the statistics count
+
+The statistics count the text you wrote in the body and the footnotes: paragraphs, list items, quotations, headings, table cells, and captions. They leave out code blocks, the front matter, the table of contents, the bibliography, and text Kyber generates: heading numbers, citations, cross-references, and footnote markers. Placeholders count as no text, so a count never includes itself and never depends on another count. Each block counts on its own; runs of spaces and line breaks count as one space.
+
+- Characters are the characters a reader sees, so "é" counts once even when written as "e" with a combining accent, and so does an emoji.
+- Words follow the Unicode word rules ([UAX #29](https://www.unicode.org/reports/tr29/)) and must hold a letter or digit. Words joined by a hyphen count once, as in "well-known" or "e-mail". "can't", "3.5", and "12,480" are one word each; "this—that" with a dash is two.
+- Sentences follow the Unicode sentence rules. A full stop after a single letter ("J. R. R.", "z. B."), after a common abbreviation of the document language ("Dr.", "e.g.", "vgl.", "Nr."), or in German after a number before a month or "Jahrhundert" ("am 3. Oktober") does not end a sentence. The end of a block always ends one.
+- Paragraphs are paragraphs with at least one word, including list items, quotations, and footnotes. Headings, table cells, and captions count toward characters and words only.
+
+### Build date
+
+`{build-date}` and `{year}` use the date in UTC when Kyber runs. For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Kyber then uses that day.
+
+### Drafts
+
+`draft: true` in the front matter, or `--set draft=true`, marks a draft. The default theme then sets "DRAFT" large and diagonally behind every page, as LaTeX's `draftwatermark` package does, and gives `{draft}` its value for slots and text. Themes change or remove the watermark, see [watermark](THEMES.md#watermark).
 
 ## Custom styles
 

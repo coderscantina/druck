@@ -10,6 +10,8 @@ Milestone 13 is complete. A `::: table` directive holds a list table whose cells
 
 The follow-up fixes of 2026-10-07 closed the open follow-ups from milestones 03 to 13 or settled them as [decisions](DECISIONS.md#2026-10-07-follow-up-fixes).
 
+Placeholders, statistics, and drafts were added on 2026-10-07 at the owner's request, outside the milestone plan. Documents use `{words}`, `{chars}`, `{build-date}`, and the other placeholders that do not depend on the page in their text; slots gain the statistics, `{section-page}`, and `{section-pages}`; `draft: true` sets a LaTeX-style diagonal watermark from the new theme `watermark` section ([decisions](DECISIONS.md#2026-10-07-placeholders-statistics-and-drafts), [authoring](AUTHORING.md#placeholders)).
+
 Current milestone: [10: Release acceptance](milestones/10-release-acceptance.md).
 
 ## Milestone status
@@ -35,6 +37,8 @@ Next: milestone 10, release acceptance, still blocked on the owner's choice of K
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: Kyber's own license (the owner's decision; distribution is blocked until then), the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Placeholders, statistics, and drafts, on 2026-10-07 on the same machine: `cargo test -q` passed 245 unit and 29 integration tests, and `cargo clippy --all-targets -q`, `cargo fmt --check`, and `python3 scripts/notices.py --check` were clean; `unicode-segmentation` is the one new dependency. New tests cover counting (grapheme clusters, hyphenated words, abbreviations and German ordinals, generated text and placeholders counting as nothing, which blocks count as prose), reading time, the build date from Unix times, digit grouping, placeholder parsing and its errors, body values and missing values, `{section-page}` in footers, the watermark on every page with bands and shrunk on A5, and the theme's angle and `{abstract}` checks. `scripts/render-samples.sh` with debug builds of `e825c1e` and of the new tree gave byte-identical PDFs for all 11 renders. A scratch draft with every statistic, `SOURCE_DATE_EPOCH=1791331200`, and a footer with `{draft} · {build-date}` and `{section} {section-page}/{section-pages}` was rendered and inspected after `pdftoppm -r 50 -png`: "DRAFT" in light gray at 45 degrees, centered behind the text on both pages, "Draft · 7 October 2026" and "1 Introduction 1/1" in the footer, and counts that match a count by hand (53 words, 7 sentences, 3 paragraphs).
 
 Owner follow-ups, on 2026-10-07 on the same machine, from `a153a39`: `cargo test -q` passed 231 unit and 29 integration tests, and `cargo clippy --all-targets -q` and `cargo fmt --check` were clean. New tests cover `check` reporting an unbreakable word without writing a PDF, quotations and custom lists scaled in a footnote, citation suffixes in the parser and in both styles, and a caption over a narrow table. `scripts/render-samples.sh` with release builds of `a153a39` (rendered from its own samples) and of the new tree: only `offer.pdf`, `report.pdf`, and `tables.pdf` changed. The offer (still 5 pages) shows smaller muted detail bullets on pages 2 to 4; `tables.pdf` page 3 has the caption of the narrow Table 3 on one line; `report.pdf` differs only in the extracted text of a line-end "full-" (plain hyphen again), with no visual change. All were inspected after `pdftoppm -r 80 -png` or compared with `pdftotext -layout`. The decisions are in [decisions](DECISIONS.md#owner-follow-ups).
 
@@ -79,6 +83,8 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 - Unquoted decimals in `meta` and `author` lose trailing zeros (`1.50` reads `1.5`); serde-saphyr keeps source text only for plain string fields.
 - A URL without a single slash that is wider than its column is still an error.
+- `{pages}` and other page placeholders are rejected in the body; supporting them would need the settling loop to carry the page count.
+- Reading speed for `{reading-time}` is fixed per language, and `{build-date}` uses UTC, not the local time zone.
 - Font bytes from disk are leaked once per render. Fine for the CLI; the phase 2 crate must own them (see decisions).
 
 ## Updating this file
