@@ -548,14 +548,22 @@ impl<'a> Flow<'a> {
         }
     }
 
-    /// The style and bullets of a list: its custom style's, or the theme's.
-    fn list_style(&self, class: Option<&Class>) -> (&'a Style, &'a [String]) {
-        let lists = &self.config.lists;
-        match class.map(|class| self.custom(class)) {
-            None => (&self.config.styles.list, &lists.bullets),
-            Some(CustomStyle::List { style, bullets }) => (style, bullets.as_ref().unwrap_or(&lists.bullets)),
+    /// The style, bullets, and marker style of a list: its custom style's, else the theme's. Markers
+    /// take the list style unless a marker style is named.
+    fn list_style(&self, class: Option<&Class>) -> (&'a Style, &'a [String], &'a Style) {
+        let config = self.config;
+        let lists = &config.lists;
+        let (style, bullets, marker) = match class.map(|class| self.custom(class)) {
+            None => (&config.styles.list, &lists.bullets, &lists.marker),
+            Some(CustomStyle::List { style, bullets, marker }) => (
+                style,
+                bullets.as_ref().unwrap_or(&lists.bullets),
+                if marker.is_some() { marker } else { &lists.marker },
+            ),
             Some(_) => unreachable!("classes are checked before layout"),
-        }
+        };
+        let marker = marker.as_deref().map_or(style, |name| config.named_style(name));
+        (style, bullets, marker)
     }
 
     /// Sets a heading. With a number gap, a number such as "2." that the author typed at its start
@@ -695,7 +703,8 @@ impl<'a> Flow<'a> {
     }
 
     /// Sets a list in the `list` style or its custom style, with markers before the items. A custom
-    /// style's bullets replace the theme's.
+    /// style's bullets replace the theme's. Markers take the font, size, weight, and color of the marker
+    /// style and sit on the baseline of their item's first line.
     fn list(
         &mut self,
         at: Location,
@@ -705,7 +714,7 @@ impl<'a> Flow<'a> {
         frame: Frame<'a>,
     ) {
         let lists = &self.config.lists;
-        let (style, bullets) = self.list_style(class);
+        let (style, bullets, marker_style) = self.list_style(class);
         let start_line = self.lines.len();
         let inner = Frame {
             left: frame.left + lists.indent.0,
@@ -714,7 +723,7 @@ impl<'a> Flow<'a> {
             widen: 0.0,
             ..frame
         };
-        let face = self.fonts.face(&style.font, style.weight, style.style);
+        let face = (self.fonts).face(&marker_style.font, marker_style.weight, marker_style.style);
         self.space(style.space_before.0);
         for (index, item) in items.iter().enumerate() {
             if index > 0 {
@@ -724,7 +733,7 @@ impl<'a> Flow<'a> {
                 Some(first) => format!("{}.", first + index as u64),
                 None => bullets[frame.list_depth.min(bullets.len() - 1)].clone(),
             };
-            let run = self.fonts.shape(&marker, face, style.size, self.config.document.lang);
+            let run = (self.fonts).shape(&marker, face, marker_style.size, self.config.document.lang);
             if let Some(problem) = paragraph::missing_glyph(&run) {
                 self.errors.push(self.error(at, problem.to_string()));
             }
@@ -739,7 +748,7 @@ impl<'a> Flow<'a> {
             }
             let line = &mut self.lines[first].line;
             let y = line.baseline;
-            line.items.push(text_item(x, y, run, style.color));
+            line.items.push(text_item(x, y, run, marker_style.color));
         }
         if style.keep_with_next && self.lines.len() > start_line {
             self.keep_last();

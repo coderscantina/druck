@@ -56,7 +56,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `styles` | One style per block element. |
 | `custom-styles` | Named styles that documents apply with `{.name}`. |
 | `inline` | Inline code, links, footnote markers. |
-| `lists` | Indent, item spacing, bullets per level. |
+| `lists` | Indent, item spacing, bullets per level, and the marker style. |
 | `tables` | Cell padding and rules. |
 | `footnotes` | Footnote gap and separator. |
 | `captions` | Separator between label and caption text. |
@@ -202,6 +202,7 @@ Space between blocks (`space-before` and `space-after`) may grow by up to half i
 - The built-in style at the end of the chain decides what the style applies to: a heading style makes it a heading style, `list` a list style, and any other a paragraph style. Table rows and cells take paragraph styles. Applying a style to another kind of block is an error at the attribute.
 - Names use ASCII letters, digits, `-`, and `_`, and cannot be the name of a built-in style.
 - `bullets` is allowed on list styles. It replaces `lists.bullets` for a list in that style, one marker per nesting level as there. Numbered lists keep their numbers.
+- `marker` is allowed on list styles, and `lists.marker` sets it for all lists. It names a built-in or custom style, such as `"footnote"`, whose font, size, weight, and color set the bullets and numbers. Markers stay on the baseline of their item's first line and still end half an em of the list style before the text. Without a marker style they use the list style; a custom list style without one takes `lists.marker`.
 - `rule-below` is allowed on paragraph styles: `none`, `header`, or `row`. A table row in that style draws no rule below it, or the header or row rule instead of its own. Cells and paragraphs in the style ignore it.
 - `number-gap` is allowed on heading styles. A heading in that style that starts with a number its author typed, such as "2." followed by a space, sets the number in front and the text after the gap, so every line of the heading starts at the same place. Such a heading is not numbered automatically, and it does not count toward the numbers of other headings.
 - Spaces between blocks collapse to the larger, so a heading's `space-before` also separates it from a kept paragraph above it. For a label directly above a heading, give the label the space above and the heading a small `space-before`.

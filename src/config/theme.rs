@@ -549,8 +549,8 @@ pub struct BlockStyle {
 }
 
 /// A named style applied with `{.name}`: the style named by `based-on` with the fields given here
-/// replaced. `bullets` applies to styles based on `list`, `number-gap` to styles based on a heading,
-/// and `rule-below` to paragraph styles that style a table row.
+/// replaced. `bullets` and `marker` apply to styles based on `list`, `number-gap` to styles based on
+/// a heading, and `rule-below` to paragraph styles that style a table row.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CustomStyle {
@@ -588,6 +588,9 @@ pub struct CustomStyle {
     /// List markers per nesting level, as in `lists.bullets`.
     #[serde(default, deserialize_with = "non_null")]
     pub bullets: Option<Vec<String>>,
+    /// The style whose font, size, weight, and color set the markers, as in `lists.marker`.
+    #[serde(default, deserialize_with = "non_null")]
+    pub marker: Option<String>,
     /// Space between an author-typed leading number, such as "2.", and the heading text.
     #[serde(default, deserialize_with = "non_null")]
     pub number_gap: Option<Spec<Spacing>>,
@@ -675,6 +678,9 @@ pub struct Lists {
     pub item_spacing: Spec<Spacing>,
     /// Bullet per nesting level; deeper levels repeat the last entry.
     pub bullets: Vec<String>,
+    /// The built-in or custom style whose font, size, weight, and color set bullets and numbers, or
+    /// `null` for the list style.
+    pub marker: Option<String>,
 }
 
 /// Table layout. `em` lengths refer to the table cell style size.

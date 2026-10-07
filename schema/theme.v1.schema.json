@@ -407,6 +407,17 @@
             "type": "string"
           },
           "description": "Bullet per nesting level. Deeper levels repeat the last entry."
+        },
+        "marker": {
+          "description": "A built-in or custom style whose font, size, weight, and color set bullets and numbers, or null for the list style.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "description": "List layout."
@@ -963,6 +974,10 @@
             "pattern": "\\S"
           },
           "description": "List markers per nesting level, for styles based on list."
+        },
+        "marker": {
+          "type": "string",
+          "description": "A built-in or custom style whose font, size, weight, and color set bullets and numbers, for styles based on list."
         },
         "number-gap": {
           "description": "Space between a number the author typed at the start of a heading, such as 2., and the heading text, which hangs. For styles based on a heading style.",

@@ -69,6 +69,13 @@ impl Config {
             SlotStyle::Custom(name) => self.custom_styles[name].style(),
         }
     }
+
+    /// A built-in or custom style by name, such as a list's marker style. Resolution has checked that it exists.
+    pub fn named_style(&self, name: &str) -> &Style {
+        self.styles
+            .named(name)
+            .unwrap_or_else(|| self.custom_styles[name].style())
+    }
 }
 
 /// Page dimensions and the text area, the margin frame. Odd pages put the inner margin on the left,
@@ -207,9 +214,11 @@ pub enum CustomStyle {
         style: Style,
         number_gap: Option<Pt>,
     },
+    /// `marker` names the style of the markers, see [`Config::named_style`].
     List {
         style: Style,
         bullets: Option<Vec<String>>,
+        marker: Option<String>,
     },
 }
 
@@ -266,6 +275,8 @@ pub struct Lists {
     pub indent: Pt,
     pub item_spacing: Pt,
     pub bullets: Vec<String>,
+    /// The style of bullets and numbers, see [`Config::named_style`]; `None` for the list style.
+    pub marker: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
