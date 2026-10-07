@@ -231,7 +231,7 @@ impl BandLines<'_> {
         let mut lines: Vec<BandLine> = Vec::new();
         for (index, slot) in group.slots.iter().enumerate() {
             let property = format!("{property}.slots.{index}");
-            let style = slot.style.map_or(self.style, |style| config.styles.get(style));
+            let style = slot.style.as_ref().map_or(self.style, |style| config.slot_style(style));
             let texts = match slot.text.fill(value) {
                 Ok(texts) => texts,
                 Err(missing) if slot.required => {
@@ -248,8 +248,11 @@ impl BandLines<'_> {
             let offset = paragraph::baseline(height, &fonts.metrics(face, style.size));
             let mut space = slot.space_before.0;
             for text in texts.iter().filter(|text| !text.trim().is_empty()) {
-                let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                let run = fonts.shape(&text, face, style.size, config.document.lang);
+                let mut text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                if style.uppercase {
+                    text = text.to_uppercase();
+                }
+                let run = fonts.shape_tracked(&text, face, style.size, config.document.lang, style.tracking);
                 if let Some(problem) = paragraph::missing_glyph(&run) {
                     return Err(error(property, format!("{problem}, on page {}", self.page)));
                 }

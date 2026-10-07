@@ -419,13 +419,38 @@
           "description": "Padding inside cells. em is relative to the table cell style size.",
           "$ref": "#/$defs/spacingSpec"
         },
-        "rule-thickness": {
-          "description": "Rule thickness. em is relative to the table cell style size.",
-          "$ref": "#/$defs/spacingSpec"
+        "top-rule": {
+          "description": "Rule above the header row, or null for none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tableRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "rule-color": {
-          "description": "Rule color.",
-          "$ref": "#/$defs/colorSpec"
+        "header-rule": {
+          "description": "Rule below the header row, or null for none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tableRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "row-rule": {
+          "description": "Rule below each body row, or null for none. A row style's rule-below replaces it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tableRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "description": "Table layout."
@@ -679,16 +704,39 @@
       "description": "Unitless multiple of the element font size, from 0.8 to 3."
     },
     "templateStyle": {
-      "enum": [
-        "title",
-        "subtitle",
-        "author",
-        "date",
-        "abstract-heading",
-        "abstract",
-        "body"
+      "anyOf": [
+        {
+          "enum": [
+            "title",
+            "subtitle",
+            "author",
+            "date",
+            "abstract-heading",
+            "abstract",
+            "body"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
       ],
-      "description": "The block style a slot is set in."
+      "description": "The style a slot is set in: a built-in slot style or the name of a custom style."
+    },
+    "tableRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thickness": {
+          "description": "Rule thickness. em is relative to the table cell style size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "color": {
+          "description": "Rule color.",
+          "$ref": "#/$defs/colorSpec"
+        }
+      },
+      "description": "A rule across a table."
     },
     "weight": {
       "anyOf": [
@@ -919,6 +967,14 @@
         "number-gap": {
           "description": "Space between a number the author typed at the start of a heading, such as 2., and the heading text, which hangs. For styles based on a heading style.",
           "$ref": "#/$defs/spacingSpec"
+        },
+        "rule-below": {
+          "enum": [
+            "none",
+            "header",
+            "row"
+          ],
+          "description": "The rule below a table row in this style: none, the header rule, or the row rule. For paragraph styles."
         }
       },
       "description": "A named style: another style with the fields given here replaced."

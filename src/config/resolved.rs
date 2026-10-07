@@ -12,7 +12,7 @@ use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
 use super::theme::{
-    Align, Anchor, DocumentDefaults, Face, FontStyle, LabelSet, Styles, TemplateStyle, Weight, WideBlock,
+    Align, Anchor, DocumentDefaults, Face, FontStyle, LabelSet, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
 
@@ -60,6 +60,14 @@ impl Config {
             .iter()
             .map(|file| ("bibliography".to_owned(), file));
         fonts.chain(images).chain(bibliography).collect()
+    }
+
+    /// The style a title or band slot names. Resolution has checked that custom names exist.
+    pub fn slot_style(&self, style: &SlotStyle) -> &Style {
+        match style {
+            SlotStyle::Template(style) => self.styles.get(*style),
+            SlotStyle::Custom(name) => self.custom_styles[name].style(),
+        }
     }
 }
 
@@ -148,7 +156,7 @@ pub struct PageVariant {
 pub struct BandSlot {
     pub text: Template,
     /// `None` uses the band's own style.
-    pub style: Option<TemplateStyle>,
+    pub style: Option<SlotStyle>,
     pub required: bool,
     pub space_before: Pt,
 }
@@ -190,15 +198,25 @@ pub struct Style {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum CustomStyle {
-    Paragraph { style: Style },
-    Heading { style: Style, number_gap: Option<Pt> },
-    List { style: Style, bullets: Option<Vec<String>> },
+    /// `rule_below` applies where the style styles a table row.
+    Paragraph {
+        style: Style,
+        rule_below: Option<RuleBelow>,
+    },
+    Heading {
+        style: Style,
+        number_gap: Option<Pt>,
+    },
+    List {
+        style: Style,
+        bullets: Option<Vec<String>>,
+    },
 }
 
 impl CustomStyle {
     pub fn style(&self) -> &Style {
         match self {
-            Self::Paragraph { style } | Self::Heading { style, .. } | Self::List { style, .. } => style,
+            Self::Paragraph { style, .. } | Self::Heading { style, .. } | Self::List { style, .. } => style,
         }
     }
 
@@ -254,8 +272,16 @@ pub struct Lists {
 #[serde(rename_all = "kebab-case")]
 pub struct Tables {
     pub cell_padding: Pt,
-    pub rule_thickness: Pt,
-    pub rule_color: Color,
+    pub top_rule: Option<Rule>,
+    pub header_rule: Option<Rule>,
+    pub row_rule: Option<Rule>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Rule {
+    pub thickness: Pt,
+    pub color: Color,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -294,7 +320,7 @@ pub struct TitleBlock {
 #[serde(rename_all = "kebab-case")]
 pub struct TitleSlot {
     pub content: SlotContent,
-    pub style: TemplateStyle,
+    pub style: SlotStyle,
     pub required: bool,
     pub space_before: Pt,
 }

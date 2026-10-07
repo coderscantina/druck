@@ -47,6 +47,15 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&Class, BlockKind)) {
                 class.iter().for_each(|class| visit(class, BlockKind::List));
                 items.iter().for_each(|item| walk(item, visit));
             }
+            Block::Table { header, rows, .. } => {
+                for row in std::iter::once(header).chain(rows) {
+                    row.class.iter().for_each(|class| visit(class, BlockKind::Paragraph));
+                    for cell in &row.cells {
+                        cell.class.iter().for_each(|class| visit(class, BlockKind::Paragraph));
+                        walk(&cell.blocks, visit);
+                    }
+                }
+            }
             Block::Quote { blocks, .. }
             | Block::Keep { blocks, .. }
             | Block::Columns { blocks, .. }

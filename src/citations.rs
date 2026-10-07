@@ -124,7 +124,7 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             } => {
                 inlines(caption, order);
                 for cell in header.cells.iter().chain(rows.iter().flat_map(|row| &row.cells)) {
-                    inlines(&cell.content, order);
+                    reading_order(&cell.blocks, document, order);
                 }
             }
             Block::List { items, .. } => items.iter().for_each(|item| reading_order(item, document, order)),

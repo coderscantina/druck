@@ -881,6 +881,20 @@ fn reports_an_image_whose_caption_leaves_no_room() {
     );
 }
 
+/// A pipe table cell: one paragraph.
+fn cell(at: Location, content: Vec<Inline>) -> crate::document::Cell {
+    crate::document::Cell {
+        at,
+        blocks: vec![Block::Paragraph {
+            at,
+            content,
+            class: None,
+        }],
+        span: 1,
+        class: None,
+    }
+}
+
 /// A table at source line `line` with a header row and body rows of plain text cells. Row `i` is at
 /// line `line + 2 + i`.
 fn table(line: u64, header: &[&str], rows: &[Vec<String>], caption: &str) -> Block {
@@ -888,15 +902,17 @@ fn table(line: u64, header: &[&str], rows: &[Vec<String>], caption: &str) -> Blo
         at: Location { line, column: 1 },
         cells: cells
             .into_iter()
-            .map(|text| crate::document::Cell {
-                at: Location { line, column: 3 },
-                content: vec![text_inline(&text)],
-            })
+            .map(|text| cell(Location { line, column: 3 }, vec![text_inline(&text)]))
             .collect(),
+        class: None,
+    };
+    let column = crate::document::Column {
+        align: None,
+        width: crate::document::ColumnWidth::Auto,
     };
     Block::Table {
         at: Location { line, column: 1 },
-        align: vec![None; header.len()],
+        columns: vec![column; header.len()],
         header: row(line, header.iter().map(|text| text.to_string()).collect()),
         rows: rows
             .iter()
@@ -1019,19 +1035,17 @@ fn a_row_is_as_tall_as_its_tallest_cell_with_padding_and_rule() {
         .filter(|placed| placed.y > rules[1] && placed.y < rules[2])
         .count();
     let tables = &config.tables;
+    let rule = tables.row_rule.unwrap().thickness.0;
 
     assert_eq!(rules.len(), 4, "above and below the header, below each row");
     assert!(wrapped > 1);
-    let expected = wrapped as f64 * line + 2.0 * tables.cell_padding.0 + tables.rule_thickness.0;
+    let expected = wrapped as f64 * line + 2.0 * tables.cell_padding.0 + rule;
     assert!(
         close(rules[2] - rules[1], expected),
         "{} against {expected}",
         rules[2] - rules[1]
     );
-    assert!(close(
-        rules[3] - rules[2],
-        line + 2.0 * tables.cell_padding.0 + tables.rule_thickness.0
-    ));
+    assert!(close(rules[3] - rules[2], line + 2.0 * tables.cell_padding.0 + rule));
 }
 
 #[test]
@@ -1146,13 +1160,14 @@ fn a_note_referenced_in_a_cell_goes_on_the_page_of_its_row() {
             }
             crate::document::Row {
                 at,
-                cells: content
-                    .into_iter()
-                    .map(|content| crate::document::Cell { at, content })
-                    .collect(),
+                cells: content.into_iter().map(|content| cell(at, content)).collect(),
+                class: None,
             }
         };
-        let Block::Table { at, align, header, .. } = table(18, &["Head", "Text"], &[], "") else {
+        let Block::Table {
+            at, columns, header, ..
+        } = table(18, &["Head", "Text"], &[], "")
+        else {
             unreachable!()
         };
         let rows = rows
@@ -1162,7 +1177,7 @@ fn a_note_referenced_in_a_cell_goes_on_the_page_of_its_row() {
             .collect();
         let block = Block::Table {
             at,
-            align,
+            columns,
             header,
             rows,
             caption: Vec::new(),

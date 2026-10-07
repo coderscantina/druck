@@ -13,6 +13,10 @@
 //!
 //! A custom style is applied with `{.name}` at the end of a heading or paragraph, or on a line of its
 //! own directly before a list. A heading may combine it with its label, as in `{#sec:name .name}`.
+//!
+//! A `::: table` directive holds a list table: a list with an item per row, each holding a nested list
+//! with an item per cell. The first row is the header. Rows take `{.name}` and cells `{.name span=n}`
+//! at the start of their item; the directive takes `{align="left right" widths="* auto"}`.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -23,8 +27,8 @@ use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
 use crate::document::{
-    Block, Cell, Citation, Class, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link,
-    Location, Reference, Row,
+    Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, Inline, InlineStyle,
+    LabelKind, Link, Location, Reference, Row,
 };
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
@@ -88,6 +92,7 @@ enum Fence {
     Columns,
     FullWidth,
     Keep,
+    Table,
 }
 
 enum Container {
@@ -95,19 +100,48 @@ enum Container {
     List {
         at: Location,
         start: Option<u64>,
-        items: Vec<Vec<Block>>,
+        items: Vec<ListItem>,
         class: Option<Class>,
     },
-    Item,
+    Item(ListItem),
     /// `None` for an unknown directive name, which has been reported.
     Directive {
         at: Location,
         fence: Option<Fence>,
+        columns: ColumnAttributes,
     },
     Footnote {
         at: Location,
         label: String,
     },
+}
+
+/// A list item. Items of a `::: table` carry their attributes, and a row its cells once its nested list ends.
+struct ListItem {
+    at: Location,
+    blocks: Vec<Block>,
+    attributes: Option<ItemAttributes>,
+    cells: Option<Vec<Cell>>,
+}
+
+/// The attributes at the start of a row or cell item of a list table.
+struct ItemAttributes {
+    class: Option<Class>,
+    span: Option<usize>,
+}
+
+/// The `align` and `widths` attributes of `::: table`, one entry per column.
+#[derive(Default)]
+struct ColumnAttributes {
+    align: Option<Vec<ColumnAlign>>,
+    widths: Option<Vec<ColumnWidth>>,
+}
+
+/// What a list item of a `::: table` stands for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TableItem {
+    Row,
+    Cell,
 }
 
 /// A paragraph or heading whose inline content is being collected.
@@ -139,7 +173,7 @@ struct LeafImage {
 /// A table whose rows are being collected.
 struct TableState {
     at: Location,
-    align: Vec<Option<ColumnAlign>>,
+    columns: Vec<Column>,
     header: Option<Row>,
     rows: Vec<Row>,
     in_header: bool,
@@ -237,7 +271,7 @@ impl<'a> Builder<'a> {
         let end = self.body.len();
         self.directives_before(end..end);
         self.misplaced_class();
-        while let Some(Container::Directive { at, fence }) = self.containers.pop() {
+        while let Some(Container::Directive { at, fence, .. }) = self.containers.pop() {
             if let Some(fence) = fence {
                 self.report_at(at, format!("\"::: {}\" is never closed", fence_name(fence)));
             }
@@ -308,7 +342,16 @@ impl<'a> Builder<'a> {
     fn directive(&mut self, offset: usize, text: &str) {
         self.misplaced_class();
         let at = self.location(offset);
-        let name = text.trim_start_matches(':').trim();
+        let line = text.trim_start_matches(':').trim();
+        let (name, attributes) = line.split_at(line.find([' ', '\t', '{']).unwrap_or(line.len()));
+        let attributes = attributes.trim_start();
+        let mut columns = ColumnAttributes::default();
+        if !attributes.is_empty() {
+            match column_attributes(name, attributes) {
+                Ok(parsed) => columns = parsed,
+                Err(message) => self.report(offset, message),
+            }
+        }
         let open: Vec<Option<Fence>> = self
             .containers
             .iter()
@@ -320,7 +363,7 @@ impl<'a> Builder<'a> {
         let fence = match name {
             "" => {
                 // Only directive containers are open between top-level blocks.
-                let Some(Container::Directive { at, fence }) = self.containers.pop() else {
+                let Some(Container::Directive { at, fence, columns }) = self.containers.pop() else {
                     self.report(offset, "\":::\" closes no open layout directive");
                     return;
                 };
@@ -329,6 +372,7 @@ impl<'a> Builder<'a> {
                     Some(Fence::Keep) => self.push_block(Block::Keep { at, blocks }),
                     Some(Fence::Columns) => self.push_block(Block::Columns { at, blocks }),
                     Some(Fence::FullWidth) => self.push_block(Block::FullWidth { at, blocks }),
+                    Some(Fence::Table) => self.close_table(at, blocks, columns),
                     None => {}
                 }
                 return;
@@ -354,6 +398,7 @@ impl<'a> Builder<'a> {
                 return;
             }
             "keep" => Some(Fence::Keep),
+            "table" => Some(Fence::Table),
             "columns" => {
                 if open.contains(&Some(Fence::Columns)) {
                     self.report(offset, "columns cannot be nested");
@@ -372,13 +417,14 @@ impl<'a> Builder<'a> {
                 Some(Fence::FullWidth)
             }
             _ => {
-                let message =
-                    format!("unknown directive \"{name}\"; use columns, full-width, keep, page-break, or bibliography");
+                let message = format!(
+                    "unknown directive \"{name}\"; use columns, full-width, keep, table, page-break, or bibliography"
+                );
                 self.report(offset, message);
                 None
             }
         };
-        self.containers.push(Container::Directive { at, fence });
+        self.containers.push(Container::Directive { at, fence, columns });
         self.blocks.push(Vec::new());
     }
 
@@ -432,6 +478,207 @@ impl<'a> Builder<'a> {
             label: None,
             class: None,
             text_end: offset,
+        });
+        if level.is_none() {
+            self.item_attributes(offset);
+        }
+    }
+
+    /// Whether the innermost open list item is a row or a cell of a `::: table`.
+    fn table_item(&self) -> Option<TableItem> {
+        let table = |container: &Container| {
+            matches!(
+                container,
+                Container::Directive {
+                    fence: Some(Fence::Table),
+                    ..
+                }
+            )
+        };
+        match self.containers.as_slice() {
+            [.., directive, Container::List { .. }, Container::Item(_)] if table(directive) => Some(TableItem::Row),
+            [
+                ..,
+                directive,
+                Container::List { .. },
+                Container::Item(_),
+                Container::List { .. },
+                Container::Item(_),
+            ] if table(directive) => Some(TableItem::Cell),
+            _ => None,
+        }
+    }
+
+    /// Reads attributes such as `{.name span=2}` at `offset`, where a paragraph starts, if it is the first
+    /// content of a row or cell item of a `::: table`, and stores them on the item.
+    fn item_attributes(&mut self, offset: usize) {
+        let Some(kind) = self.table_item() else { return };
+        let fresh = matches!(self.containers.last(), Some(Container::Item(item)) if item.attributes.is_none());
+        if !fresh || !self.blocks.last().is_some_and(Vec::is_empty) {
+            return;
+        }
+        let Some((attributes, length)) = attributes(&self.body[offset..]) else {
+            return;
+        };
+        let at = self.location(offset);
+        let (mut class, mut span) = (None, None);
+        for attribute in attributes {
+            match (attribute, kind) {
+                (Attribute::Class(name), _) if class.is_none() => {
+                    class = Some(Class {
+                        name: name.to_owned(),
+                        at,
+                    });
+                }
+                (Attribute::Pair("span", value), TableItem::Cell) if span.is_none() => match value.parse::<usize>() {
+                    Ok(columns) if columns > 0 => span = Some(columns),
+                    _ => self.report(offset, format!("span=\"{value}\" is not a number of columns")),
+                },
+                (_, TableItem::Row) => self.report(offset, "a table row takes one style, as in {.name}"),
+                (_, TableItem::Cell) => {
+                    self.report(offset, "a table cell takes one style and a span, as in {.name span=2}")
+                }
+            }
+        }
+        let rest = &self.body[offset + length..];
+        let end = offset + length + rest.len() - rest.trim_start().len();
+        self.consumed = self.consumed.max(end);
+        if let Some(Container::Item(item)) = self.containers.last_mut() {
+            item.attributes = Some(ItemAttributes { class, span });
+        }
+    }
+
+    /// The cells of a row from the items of its nested list. Cells hold paragraphs and lists.
+    fn cells(&mut self, items: Vec<ListItem>) -> Vec<Cell> {
+        items
+            .into_iter()
+            .map(|item| {
+                self.cell_blocks(&item.blocks);
+                let (class, span) = item.attributes.map_or((None, None), |a| (a.class, a.span));
+                Cell {
+                    at: item.at,
+                    blocks: item.blocks,
+                    span: span.unwrap_or(1),
+                    class,
+                }
+            })
+            .collect()
+    }
+
+    /// Reports blocks in a list table cell other than paragraphs and lists.
+    fn cell_blocks(&mut self, blocks: &[Block]) {
+        for block in blocks {
+            match block {
+                Block::Paragraph { .. } => {}
+                Block::List { items, .. } => items.iter().for_each(|item| self.cell_blocks(item)),
+                block => self.report_at(block.at(), "a table cell holds only paragraphs and lists"),
+            }
+        }
+    }
+
+    /// The table from the items of the list in a `::: table`: the first row is the header, and every row's
+    /// cells span as many columns as the header's.
+    fn list_table(&mut self, at: Location, items: Vec<ListItem>) -> Option<Block> {
+        let mut rows = Vec::with_capacity(items.len());
+        for item in items {
+            let stray = item.blocks.first().map(Block::at);
+            match (stray, item.cells) {
+                (None, Some(cells)) => rows.push(Row {
+                    at: item.at,
+                    cells,
+                    class: item.attributes.and_then(|attributes| attributes.class),
+                }),
+                (stray, _) => self.report_at(
+                    stray.unwrap_or(item.at),
+                    "a table row holds only its cells, as a nested list with an item per cell",
+                ),
+            }
+        }
+        if rows.is_empty() {
+            return None;
+        }
+        let header = rows.remove(0);
+        let span = |row: &Row| row.cells.iter().map(|cell| cell.span).sum::<usize>();
+        let count = span(&header);
+        for row in &rows {
+            let spanned = span(row);
+            if spanned != count {
+                let message = format!("the cells of this row span {spanned} columns, but the header's span {count}");
+                self.report_at(row.at, message);
+            }
+        }
+        let notes: Vec<Location> = header
+            .cells
+            .iter()
+            .flat_map(|cell| footnotes(&cell.blocks))
+            .map(|index| self.references[index].1)
+            .collect();
+        for at in notes {
+            self.report_at(at, HEADER_NOTE);
+        }
+        let column = Column {
+            align: None,
+            width: ColumnWidth::Auto,
+        };
+        Some(Block::Table {
+            at,
+            columns: vec![column; count],
+            header,
+            rows,
+            caption: Vec::new(),
+            label: None,
+        })
+    }
+
+    /// Pushes the table that a `::: table` directive at `at` holds, with its column attributes applied.
+    fn close_table(&mut self, at: Location, blocks: Vec<Block>, attributes: ColumnAttributes) {
+        let Ok(
+            [
+                Block::Table {
+                    mut columns,
+                    header,
+                    rows,
+                    caption,
+                    label,
+                    ..
+                },
+            ],
+        ) = <[Block; 1]>::try_from(blocks)
+        else {
+            self.report_at(
+                at,
+                "a table directive holds one list, with an item per row and a nested item per cell",
+            );
+            return;
+        };
+        let count = columns.len();
+        let mut mismatch = |name: &str, entries: usize| {
+            if entries != count {
+                let message = format!("{name} has {entries} entries, but the table has {count} columns");
+                self.report_at(at, message);
+            }
+        };
+        if let Some(align) = &attributes.align {
+            mismatch("align", align.len());
+        }
+        if let Some(widths) = &attributes.widths {
+            mismatch("widths", widths.len());
+        }
+        for (index, column) in columns.iter_mut().enumerate() {
+            if let Some(align) = attributes.align.as_ref().and_then(|align| align.get(index)) {
+                column.align = Some(*align);
+            }
+            if let Some(width) = attributes.widths.as_ref().and_then(|widths| widths.get(index)) {
+                column.width = *width;
+            }
+        }
+        self.push_block(Block::Table {
+            at,
+            columns,
+            header,
+            rows,
+            caption,
+            label,
         });
     }
 
@@ -706,6 +953,10 @@ impl<'a> Builder<'a> {
             Event::Text(text) => match self.code.as_mut() {
                 Some(code) => code.text.push_str(&text),
                 None => {
+                    // Opened before the text is read, so attributes at the start of a table item are seen.
+                    if self.leaf.is_none() {
+                        self.open_leaf(offset, None, true);
+                    }
                     let end = range.end;
                     self.text(&text, range);
                     if let Some(leaf) = self.leaf.as_mut() {
@@ -912,8 +1163,7 @@ impl<'a> Builder<'a> {
             return;
         }
         if self.table.as_ref().is_some_and(|table| table.in_header) {
-            let message = "a table header cannot hold footnotes, because it repeats on every page";
-            self.report_at(at, message);
+            self.report_at(at, HEADER_NOTE);
             return;
         }
         let key = label.to_lowercase();
@@ -1051,7 +1301,12 @@ impl<'a> Builder<'a> {
                 });
             }
             Tag::Item => {
-                self.containers.push(Container::Item);
+                self.containers.push(Container::Item(ListItem {
+                    at: self.location(offset),
+                    blocks: Vec::new(),
+                    attributes: None,
+                    cells: None,
+                }));
                 self.blocks.push(Vec::new());
             }
             Tag::CodeBlock(kind) => {
@@ -1082,7 +1337,13 @@ impl<'a> Builder<'a> {
                 let at = self.location(offset);
                 self.table = Some(TableState {
                     at,
-                    align: align.into_iter().map(column_align).collect(),
+                    columns: align
+                        .into_iter()
+                        .map(|align| Column {
+                            align: column_align(align),
+                            width: ColumnWidth::Auto,
+                        })
+                        .collect(),
                     header: None,
                     rows: Vec::new(),
                     in_header: false,
@@ -1141,10 +1402,11 @@ impl<'a> Builder<'a> {
         let row = Row {
             at: table.row_at,
             cells: std::mem::take(&mut table.cells),
+            class: None,
         };
-        let too_many = cell_count(&self.body[table.row_source.clone()]) > table.align.len();
+        let too_many = cell_count(&self.body[table.row_source.clone()]) > table.columns.len();
         let caption = matches!(row.cells.split_first(), Some((first, rest))
-            if starts_with_caption_marker(&first.content) && rest.iter().all(|cell| cell.content.is_empty()));
+            if starts_with_caption_marker(pipe_cell(first)) && rest.iter().all(|cell| pipe_cell(cell).is_empty()));
         let at = row.at;
         if !caption {
             table.rows.push(row);
@@ -1155,6 +1417,49 @@ impl<'a> Builder<'a> {
         if caption {
             self.report_at(at, "leave a blank line between a table and its caption");
         }
+    }
+
+    /// Pushes a finished list, or in a `::: table` the table its items hold or the cells of a row.
+    fn end_list(&mut self, at: Location, start: Option<u64>, items: Vec<ListItem>, class: Option<Class>) {
+        let rows = matches!(
+            self.containers.last(),
+            Some(Container::Directive {
+                fence: Some(Fence::Table),
+                ..
+            })
+        );
+        let cells = self.table_item() == Some(TableItem::Row);
+        if !rows && !cells {
+            let items = items.into_iter().map(|item| item.blocks).collect();
+            self.push_block(Block::List {
+                at,
+                start,
+                items,
+                class,
+            });
+            return;
+        }
+        if let Some(class) = class {
+            let message = format!(
+                "style the rows and cells of a table at the start of their item, as in - {{.{}}}",
+                class.name
+            );
+            self.report_at(class.at, message);
+        }
+        if rows {
+            if let Some(table) = self.list_table(at, items) {
+                self.push_block(table);
+            }
+            return;
+        }
+        let cells = self.cells(items);
+        if let Some(Container::Item(row)) = self.containers.last_mut()
+            && row.cells.is_none()
+        {
+            row.cells = Some(cells);
+            return;
+        }
+        self.report_at(at, "a table row holds one list of cells");
     }
 
     fn end(&mut self, tag: TagEnd) {
@@ -1169,9 +1474,10 @@ impl<'a> Builder<'a> {
             TagEnd::Item => {
                 self.close_implicit_leaf();
                 let blocks = self.blocks.pop().unwrap_or_default();
-                self.containers.pop();
-                if let Some(Container::List { items, .. }) = self.containers.last_mut() {
-                    items.push(blocks);
+                if let Some(Container::Item(item)) = self.containers.pop()
+                    && let Some(Container::List { items, .. }) = self.containers.last_mut()
+                {
+                    items.push(ListItem { blocks, ..item });
                 }
             }
             TagEnd::List(_) => {
@@ -1182,12 +1488,7 @@ impl<'a> Builder<'a> {
                     class,
                 }) = self.containers.pop()
                 {
-                    self.push_block(Block::List {
-                        at,
-                        start,
-                        items,
-                        class,
-                    });
+                    self.end_list(at, start, items, class);
                 }
             }
             TagEnd::CodeBlock => {
@@ -1214,7 +1515,17 @@ impl<'a> Builder<'a> {
             }
             TagEnd::TableCell => {
                 if let (Some(Leaf { at, content, .. }), Some(table)) = (self.leaf.take(), self.table.as_mut()) {
-                    table.cells.push(Cell { at, content });
+                    let paragraph = Block::Paragraph {
+                        at,
+                        content,
+                        class: None,
+                    };
+                    table.cells.push(Cell {
+                        at,
+                        blocks: vec![paragraph],
+                        span: 1,
+                        class: None,
+                    });
                 }
             }
             TagEnd::TableHead => {
@@ -1222,6 +1533,7 @@ impl<'a> Builder<'a> {
                     table.header = Some(Row {
                         at: table.row_at,
                         cells: std::mem::take(&mut table.cells),
+                        class: None,
                     });
                     table.in_header = false;
                 }
@@ -1230,7 +1542,7 @@ impl<'a> Builder<'a> {
             TagEnd::Table => {
                 if let Some(TableState {
                     at,
-                    align,
+                    columns,
                     header: Some(header),
                     rows,
                     ..
@@ -1238,7 +1550,7 @@ impl<'a> Builder<'a> {
                 {
                     self.push_block(Block::Table {
                         at,
-                        align,
+                        columns,
                         header,
                         rows,
                         caption: Vec::new(),
@@ -1257,6 +1569,7 @@ impl<'a> Builder<'a> {
 }
 
 const ALONE: &str = "an image must stand alone in its paragraph";
+const HEADER_NOTE: &str = "a table header cannot hold footnotes, because it repeats on every page";
 const BROKEN_IMAGE: &str = "this image is not valid Markdown: write ![Caption](file.png), with <> around a path \
     that has spaces; a caption cannot hold footnotes";
 
@@ -1280,6 +1593,110 @@ fn cell_count(line: &str) -> usize {
         escaped = c == '\\' && !escaped;
     }
     pipes + 1 - usize::from(line.starts_with('|')) - usize::from(last_is_pipe)
+}
+
+/// The content of a pipe table cell, which is one paragraph.
+fn pipe_cell(cell: &Cell) -> &[Inline] {
+    match cell.blocks.as_slice() {
+        [Block::Paragraph { content, .. }] => content,
+        _ => &[],
+    }
+}
+
+/// The footnotes referenced in `blocks`, which hold paragraphs and lists.
+fn footnotes(blocks: &[Block]) -> Vec<usize> {
+    let mut notes = Vec::new();
+    for block in blocks {
+        match block {
+            Block::Paragraph { content, .. } => notes.extend(content.iter().filter_map(|inline| match inline {
+                Inline::FootnoteRef(index) => Some(*index),
+                _ => None,
+            })),
+            Block::List { items, .. } => notes.extend(items.iter().flat_map(|item| footnotes(item))),
+            _ => {}
+        }
+    }
+    notes
+}
+
+/// An attribute in braces: `.name`, or `key=value` with the value in quotes if it holds spaces.
+enum Attribute<'s> {
+    Class(&'s str),
+    Pair(&'s str, &'s str),
+}
+
+/// The attributes in the braces that `text` starts with, and the length up to the closing brace, or
+/// `None` if `text` does not start with attributes. Names are letters, digits, `-`, and `_`.
+fn attributes(text: &str) -> Option<(Vec<Attribute<'_>>, usize)> {
+    let mut rest = text.strip_prefix('{')?;
+    let mut list = Vec::new();
+    loop {
+        rest = rest.trim_start_matches([' ', '\t']);
+        if let Some(after) = rest.strip_prefix('}') {
+            return (!list.is_empty()).then_some((list, text.len() - after.len()));
+        }
+        let class = rest.strip_prefix('.');
+        let name = label_name_length(class.unwrap_or(rest));
+        if name == 0 {
+            return None;
+        }
+        if let Some(class) = class {
+            list.push(Attribute::Class(&class[..name]));
+            rest = &class[name..];
+        } else {
+            let (key, after) = rest.split_at(name);
+            let after = after.strip_prefix('=')?;
+            let (value, after) = match after.strip_prefix('"') {
+                Some(quoted) => {
+                    let end = quoted.find(['"', '\n'])?;
+                    quoted[end..]
+                        .starts_with('"')
+                        .then_some((&quoted[..end], &quoted[end + 1..]))?
+                }
+                None => after.split_at(after.find([' ', '\t', '}', '\n']).unwrap_or(after.len())),
+            };
+            list.push(Attribute::Pair(key, value));
+            rest = after;
+        }
+        if !rest.starts_with([' ', '\t', '}']) {
+            return None;
+        }
+    }
+}
+
+/// The `align` and `widths` attributes written after a directive's name.
+fn column_attributes(name: &str, text: &str) -> Result<ColumnAttributes, String> {
+    const SYNTAX: &str = "write table attributes as {align=\"left right\" widths=\"* auto\"}";
+    if name != "table" {
+        return Err(format!("\"{name}\" takes no attributes; only table does"));
+    }
+    let Some((list, _)) = attributes(text).filter(|(_, length)| *length == text.len()) else {
+        return Err(SYNTAX.to_owned());
+    };
+    let mut columns = ColumnAttributes::default();
+    for attribute in list {
+        match attribute {
+            Attribute::Pair("align", value) if columns.align.is_none() => {
+                let align = value.split_whitespace().map(|word| match word {
+                    "left" => Ok(ColumnAlign::Left),
+                    "center" => Ok(ColumnAlign::Center),
+                    "right" => Ok(ColumnAlign::Right),
+                    _ => Err(format!("align \"{word}\" is not left, center, or right")),
+                });
+                columns.align = Some(align.collect::<Result<_, _>>()?);
+            }
+            Attribute::Pair("widths", value) if columns.widths.is_none() => {
+                let widths = value.split_whitespace().map(|word| match word {
+                    "auto" => Ok(ColumnWidth::Auto),
+                    "*" => Ok(ColumnWidth::Fill),
+                    _ => Err(format!("width \"{word}\" is not * or auto")),
+                });
+                columns.widths = Some(widths.collect::<Result<_, _>>()?);
+            }
+            _ => return Err(SYNTAX.to_owned()),
+        }
+    }
+    Ok(columns)
 }
 
 fn starts_with_caption_marker(content: &[Inline]) -> bool {
@@ -1334,6 +1751,7 @@ fn fence_name(fence: Fence) -> &'static str {
         Fence::Columns => "columns",
         Fence::FullWidth => "full-width",
         Fence::Keep => "keep",
+        Fence::Table => "table",
     }
 }
 
@@ -1675,7 +2093,7 @@ mod tests {
             (
                 "::: float\nx\n:::",
                 (1, 1),
-                "unknown directive \"float\"; use columns, full-width, keep, page-break, or bibliography",
+                "unknown directive \"float\"; use columns, full-width, keep, table, page-break, or bibliography",
             ),
             ("::: keep\nx", (1, 1), "\"::: keep\" is never closed"),
             ("x\n:::", (2, 1), "\":::\" closes no open layout directive"),
@@ -1786,8 +2204,22 @@ mod tests {
     fn cell(line: u64, column: u64, content: Vec<Inline>) -> Cell {
         Cell {
             at: at(line, column),
-            content,
+            blocks: vec![Block::Paragraph {
+                at: at(line, column),
+                content,
+                class: None,
+            }],
+            span: 1,
+            class: None,
         }
+    }
+
+    fn columns(align: &[Option<ColumnAlign>]) -> Vec<Column> {
+        let column = |align| Column {
+            align,
+            width: ColumnWidth::Auto,
+        };
+        align.iter().copied().map(column).collect()
     }
 
     fn table(body: &str) -> Block {
@@ -1813,12 +2245,12 @@ mod tests {
             table(body),
             Block::Table {
                 at: at(1, 1),
-                align: vec![
+                columns: columns(&[
                     Some(ColumnAlign::Left),
                     Some(ColumnAlign::Center),
                     Some(ColumnAlign::Right),
                     None
-                ],
+                ]),
                 header: Row {
                     at: at(1, 1),
                     cells: vec![
@@ -1827,6 +2259,7 @@ mod tests {
                         cell(1, 11, vec![plain("C")]),
                         cell(1, 15, vec![plain("D")]),
                     ],
+                    class: None,
                 },
                 rows: vec![
                     Row {
@@ -1837,6 +2270,7 @@ mod tests {
                             cell(3, 15, vec![text("z", link)]),
                             cell(3, 35, vec![plain("w")]),
                         ],
+                        class: None,
                     },
                     Row {
                         at: at(4, 1),
@@ -1846,6 +2280,7 @@ mod tests {
                             cell(4, 10, Vec::new()),
                             cell(4, 10, Vec::new()),
                         ],
+                        class: None,
                     },
                 ],
                 caption: Vec::new(),
@@ -1966,13 +2401,120 @@ mod tests {
     }
 
     #[test]
+    fn parses_list_tables_with_column_attributes_block_cells_spans_and_styles() {
+        let body = "::: table {align=\"left right\" widths=\"* auto\"}\n- - Item\n  - Amount\n- {.group}\n  - {span=2} \
+            **Design**\n- - Styleguide\n\n    {.detail}\n    - Logo\n  - {.amount} 2,400\n:::\n\n: Costs {#tbl:costs}\n";
+        let Block::Table {
+            at: table_at,
+            columns,
+            header,
+            rows,
+            caption,
+            label,
+        } = table(body)
+        else {
+            panic!("a table")
+        };
+        assert_eq!(table_at, at(1, 1));
+        let fill = |align, width| Column {
+            align: Some(align),
+            width,
+        };
+        assert_eq!(
+            columns,
+            [
+                fill(ColumnAlign::Left, ColumnWidth::Fill),
+                fill(ColumnAlign::Right, ColumnWidth::Auto)
+            ]
+        );
+        assert_eq!(header.cells.len(), 2);
+        assert_eq!((caption, label.as_deref()), (vec![plain("Costs")], Some("tbl:costs")));
+        let strong = InlineStyle {
+            strong: true,
+            ..Default::default()
+        };
+        assert_eq!(rows[0].class, class("group", 4, 3));
+        assert_eq!(rows[0].cells.len(), 1);
+        assert_eq!((rows[0].cells[0].span, &rows[0].cells[0].class), (2, &None));
+        assert_eq!(pipe_cell(&rows[0].cells[0]), [text("Design", strong)]);
+        let [styleguide, amount] = rows[1].cells.as_slice() else {
+            panic!("two cells")
+        };
+        assert!(
+            matches!(styleguide.blocks.as_slice(), [Block::Paragraph { .. }, Block::List { class: detail, .. }]
+            if *detail == class("detail", 8, 5))
+        );
+        assert_eq!((amount.at, &amount.class), (at(10, 3), &class("amount", 10, 5)));
+        assert_eq!(pipe_cell(amount), [plain("2,400")]);
+    }
+
+    #[test]
+    fn reports_list_table_errors_at_their_location() {
+        let cases = [
+            (
+                "::: table\n- - A\n  - B\n- - x\n:::\n",
+                (4, 1),
+                "the cells of this row span 1 columns, but the header's span 2",
+            ),
+            (
+                "::: table\n- Text\n  - A\n:::\n",
+                (2, 3),
+                "a table row holds only its cells, as a nested list with an item per cell",
+            ),
+            (
+                "::: table\n- - A\n  - # Head\n:::\n",
+                (3, 5),
+                "a table cell holds only paragraphs and lists",
+            ),
+            (
+                "::: table\n- {span=2}\n  - A\n:::\n",
+                (2, 3),
+                "a table row takes one style, as in {.name}",
+            ),
+            (
+                "::: table\n- - {span=x} A\n:::\n",
+                (2, 5),
+                "span=\"x\" is not a number of columns",
+            ),
+            (
+                "::: table {align=\"left\"}\n- - A\n  - B\n:::\n",
+                (1, 1),
+                "align has 1 entries, but the table has 2 columns",
+            ),
+            (
+                "::: table {widths=\"50%\"}\n- - A\n:::\n",
+                (1, 1),
+                "width \"50%\" is not * or auto",
+            ),
+            (
+                "::: keep {align=\"left\"}\nA\n:::\n",
+                (1, 1),
+                "\"keep\" takes no attributes; only table does",
+            ),
+            (
+                "::: table\nText\n:::\n",
+                (1, 1),
+                "a table directive holds one list, with an item per row and a nested item per cell",
+            ),
+            ("::: table\n- - A[^n]\n:::\n\n[^n]: Note.\n", (2, 6), HEADER_NOTE),
+        ];
+        for (body, (line, column), message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some((line, column)), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
     fn numbers_footnotes_in_table_cells_in_reading_order() {
         let body = "A[^a]\n\n| h |\n|---|\n| b[^b] |\n\nC[^c]\n\n[^a]: a\n\n[^b]: b\n\n[^c]: c\n";
         let document = parse(body, 1, &source()).unwrap();
         let Block::Table { rows, .. } = &document.blocks[1] else {
             panic!("table")
         };
-        assert_eq!(rows[0].cells[0].content, vec![plain("b"), Inline::FootnoteRef(1)]);
+        assert_eq!(pipe_cell(&rows[0].cells[0]), [plain("b"), Inline::FootnoteRef(1)]);
         let notes: Vec<_> = document.footnotes.iter().map(|note| note.at.line).collect();
         assert_eq!(notes, vec![9, 11, 13]);
     }

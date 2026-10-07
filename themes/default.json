@@ -531,8 +531,9 @@
   },
   "tables": {
     "cell-padding": "0.4em",
-    "rule-thickness": "$spacing.hairline",
-    "rule-color": "$colors.rule"
+    "top-rule": { "thickness": "$spacing.hairline", "color": "$colors.rule" },
+    "header-rule": { "thickness": "$spacing.hairline", "color": "$colors.rule" },
+    "row-rule": { "thickness": "$spacing.hairline", "color": "$colors.rule" }
   },
   "footnotes": {
     "gap": "1em",

@@ -549,7 +549,8 @@ pub struct BlockStyle {
 }
 
 /// A named style applied with `{.name}`: the style named by `based-on` with the fields given here
-/// replaced. `bullets` applies to styles based on `list`, `number-gap` to styles based on a heading.
+/// replaced. `bullets` applies to styles based on `list`, `number-gap` to styles based on a heading,
+/// and `rule-below` to paragraph styles that style a table row.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CustomStyle {
@@ -590,6 +591,9 @@ pub struct CustomStyle {
     /// Space between an author-typed leading number, such as "2.", and the heading text.
     #[serde(default, deserialize_with = "non_null")]
     pub number_gap: Option<Spec<Spacing>>,
+    /// The rule below a table row in this style, instead of the header or row rule.
+    #[serde(default, deserialize_with = "non_null")]
+    pub rule_below: Option<RuleBelow>,
 }
 
 impl CustomStyle {
@@ -678,8 +682,29 @@ pub struct Lists {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Tables {
     pub cell_padding: Spec<Spacing>,
-    pub rule_thickness: Spec<Spacing>,
-    pub rule_color: Spec<Color>,
+    /// The rule above the header row, or `null` for none.
+    pub top_rule: Option<Rule>,
+    /// The rule below the header row, or `null` for none.
+    pub header_rule: Option<Rule>,
+    /// The rule below each body row, or `null` for none.
+    pub row_rule: Option<Rule>,
+}
+
+/// A horizontal rule across a table.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Rule {
+    pub thickness: Spec<Spacing>,
+    pub color: Spec<Color>,
+}
+
+/// The theme rule drawn below a table row whose style sets `rule-below`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuleBelow {
+    None,
+    Header,
+    Row,
 }
 
 /// Footnote area. `em` lengths refer to the footnote style size.
@@ -814,8 +839,8 @@ pub struct TitleSlot {
     /// Image width. Required for image slots, rejected for text slots.
     #[serde(default, deserialize_with = "non_null")]
     pub width: Option<Spec<Spacing>>,
-    #[serde(default = "TemplateStyle::body")]
-    pub style: TemplateStyle,
+    #[serde(default = "SlotStyle::body")]
+    pub style: SlotStyle,
     #[serde(default)]
     pub required: bool,
     #[serde(default = "Spec::zero")]
@@ -834,9 +859,35 @@ pub enum TemplateStyle {
     Body,
 }
 
-impl TemplateStyle {
+/// The style of a title or band slot: a built-in slot style or a custom style by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotStyle {
+    Template(TemplateStyle),
+    Custom(String),
+}
+
+impl SlotStyle {
     fn body() -> Self {
-        Self::Body
+        Self::Template(TemplateStyle::Body)
+    }
+}
+
+impl Serialize for SlotStyle {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Template(style) => style.serialize(serializer),
+            Self::Custom(name) => serializer.serialize_str(name),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SlotStyle {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::value::StrDeserializer;
+
+        let name = String::deserialize(deserializer)?;
+        let builtin = TemplateStyle::deserialize(StrDeserializer::<serde::de::value::Error>::new(&name));
+        Ok(builtin.map_or(Self::Custom(name), Self::Template))
     }
 }
 
@@ -875,7 +926,7 @@ pub struct BandSlot {
     pub text: Template,
     /// Defaults to the `header` or `footer` style.
     #[serde(default, deserialize_with = "non_null")]
-    pub style: Option<TemplateStyle>,
+    pub style: Option<SlotStyle>,
     #[serde(default)]
     pub required: bool,
     #[serde(default = "Spec::zero")]

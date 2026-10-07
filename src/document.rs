@@ -101,11 +101,11 @@ pub enum Block {
         /// A `fig:` label from `{#fig:name}` after the image. Only captioned images have one.
         label: Option<String>,
     },
-    /// A pipe table. The header row and every body row have one cell per column.
+    /// A pipe table or a `::: table` list table. The cells of the header row and of every body row
+    /// span all columns together.
     Table {
         at: Location,
-        /// The alignment of each column; `None` keeps the alignment of the cell style.
-        align: Vec<Option<ColumnAlign>>,
+        columns: Vec<Column>,
         header: Row,
         rows: Vec<Row>,
         /// The caption from a `: Caption` paragraph directly after the table, empty for none.
@@ -138,20 +138,63 @@ pub enum Block {
     },
 }
 
+impl Block {
+    /// Where the block starts.
+    pub fn at(&self) -> Location {
+        match self {
+            Self::Paragraph { at, .. }
+            | Self::Heading { at, .. }
+            | Self::List { at, .. }
+            | Self::Quote { at, .. }
+            | Self::Code { at, .. }
+            | Self::Image { at, .. }
+            | Self::Table { at, .. }
+            | Self::Keep { at, .. }
+            | Self::Columns { at, .. }
+            | Self::FullWidth { at, .. }
+            | Self::PageBreak { at }
+            | Self::Bibliography { at } => *at,
+        }
+    }
+}
+
+/// A table column: its alignment and how its width is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Column {
+    /// `None` keeps the alignment of the cell style.
+    pub align: Option<ColumnAlign>,
+    pub width: ColumnWidth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnWidth {
+    /// Fits the content, as far as the available width allows.
+    Auto,
+    /// `*`: shares the width the other columns leave.
+    Fill,
+}
+
 /// A table row with its cells in column order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub at: Location,
     pub cells: Vec<Cell>,
+    /// A custom style from `{.name}` for every cell of the row.
+    pub class: Option<Class>,
 }
 
+/// A table cell. A pipe table cell holds one paragraph; a list table cell holds paragraphs and lists.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     pub at: Location,
-    pub content: Vec<Inline>,
+    pub blocks: Vec<Block>,
+    /// The number of columns the cell spans, at least 1.
+    pub span: usize,
+    /// A custom style from `{.name}`, which replaces the row's.
+    pub class: Option<Class>,
 }
 
-/// A column alignment set in a table's delimiter row.
+/// A column alignment set in a table's delimiter row or `align` attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnAlign {
     Left,

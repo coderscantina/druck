@@ -26,7 +26,7 @@ use crate::config::front_matter::{MetaValue, Metadata};
 use crate::config::resolved::{Config, Group, SlotContent, Style, TitleSlot};
 use crate::config::source::{Resource, Source};
 use crate::config::template::{Placeholder, Value};
-use crate::config::theme::{Align, TemplateStyle, Vertical};
+use crate::config::theme::{Align, SlotStyle, TemplateStyle, Vertical};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
@@ -189,7 +189,7 @@ fn slots(
 ) -> Result<Vec<(f64, Line)>, String> {
     let mut lines = Vec::new();
     for slot in slots {
-        let style = aligned(config.styles.get(slot.style), align);
+        let style = aligned(config.slot_style(&slot.style), align);
         let start = lines.len();
         match &slot.content {
             SlotContent::Text(text) => {
@@ -200,7 +200,7 @@ fn slots(
                 for line in &filled {
                     set.extend(text_lines(line, &style, config, fonts, width)?);
                 }
-                if slot.style == TemplateStyle::Abstract {
+                if slot.style == SlotStyle::Template(TemplateStyle::Abstract) {
                     let heading = aligned(&config.styles.abstract_heading, align);
                     let label = &config.labels.abstract_;
                     lines.extend(

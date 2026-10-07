@@ -14,7 +14,9 @@ use super::merge::Merged;
 use super::resolved::{self, Config, CustomStyle, FaceFile, FontFiles, PageGeometry, SlotContent, Style};
 use super::source::{Resource, Source};
 use super::template::{Placeholder, Template};
-use super::theme::{self, BlockStyle, Face, FontFile, FontStyle, PageSize, PaperSize, Theme, TitleSlot, Weight};
+use super::theme::{
+    self, BlockStyle, Face, FontFile, FontStyle, PageSize, PaperSize, SlotStyle, Theme, TitleSlot, Weight,
+};
 use super::values::{Color, FontName, Length, Pt, Size, Spacing, Spec, TokenKind, TokenName};
 use crate::diagnostic::Diagnostic;
 
@@ -217,6 +219,39 @@ impl<'a> Resolver<'a> {
         self.value(&self.tokens.colors, spec, property)
     }
 
+    /// A table rule, `Some(None)` for none, or `None` after reporting a problem.
+    fn rule(&self, rule: Option<&theme::Rule>, property: &str, em: Pt) -> Option<Option<resolved::Rule>> {
+        let Some(rule) = rule else { return Some(None) };
+        let thickness = self.spacing(&rule.thickness, &format!("{property}.thickness"), em);
+        let color = self.color(&rule.color, &format!("{property}.color"));
+        Some(Some(resolved::Rule {
+            thickness: thickness?,
+            color: color?,
+        }))
+    }
+
+    /// The style a slot names, or `None` after reporting a custom style the theme does not define, or when
+    /// the styles failed to resolve, which has been reported.
+    fn slot_style<'s>(&self, style: &SlotStyle, property: &str, styles: SlotStyles<'s>) -> Option<&'s Style> {
+        match style {
+            SlotStyle::Template(style) => styles.builtin.map(|s| s.get(*style)),
+            SlotStyle::Custom(name) => {
+                let custom = styles.custom?;
+                let found = custom.get(name).map(CustomStyle::style);
+                if found.is_none() {
+                    self.error(
+                        property,
+                        format!(
+                            "style \"{name}\" is neither title, subtitle, author, date, abstract-heading, abstract, \
+                             body, nor a custom style"
+                        ),
+                    );
+                }
+                found
+            }
+        }
+    }
+
     /// A font family name with the requested face. A family defined in `fonts` must have the face; any
     /// other family is recorded for lookup among installed fonts.
     fn font(&self, spec: &Spec<FontName>, property: &str, weight: Weight, style: FontStyle) -> Option<String> {
@@ -367,6 +402,7 @@ impl<'a> Resolver<'a> {
                 .fold(base.clone(), |raw, (_, style)| style.apply(&raw));
             let bullets = chain.iter().find_map(|(_, style)| style.bullets.clone());
             let number_gap = chain.iter().find_map(|(_, style)| style.number_gap.clone());
+            let rule_below = chain.iter().find_map(|(_, style)| style.rule_below);
             let Some(resolved_style) = self.block(&path, &raw, body) else {
                 valid = false;
                 continue;
@@ -379,6 +415,12 @@ impl<'a> Resolver<'a> {
                 self.error(
                     &format!("{path}.number-gap"),
                     "number-gap applies only to styles based on a heading style",
+                );
+            }
+            if rule_below.is_some() && (heading || base_name == "list") {
+                self.error(
+                    &format!("{path}.rule-below"),
+                    "rule-below applies only to paragraph styles, which can style table rows",
                 );
             }
             if bullets
@@ -409,7 +451,10 @@ impl<'a> Resolver<'a> {
                     style: resolved_style,
                     number_gap,
                 },
-                _ => CustomStyle::Paragraph { style: resolved_style },
+                _ => CustomStyle::Paragraph {
+                    style: resolved_style,
+                    rule_below,
+                },
             };
             resolved.insert(name.clone(), style);
         }
@@ -542,7 +587,7 @@ impl<'a> Resolver<'a> {
         &self,
         prefix: &str,
         slots: &[TitleSlot],
-        styles: Option<&theme::Styles<Style>>,
+        styles: SlotStyles,
         images: &BTreeMap<String, Resource>,
         page: &PageGeometry,
         width: Pt,
@@ -553,7 +598,9 @@ impl<'a> Resolver<'a> {
             .enumerate()
             .map(|(index, slot)| {
                 let property = |field: &str| format!("{prefix}.slots.{index}{field}");
-                let em = styles.map_or(body, |s| s.get(slot.style).size);
+                let em = self
+                    .slot_style(&slot.style, &property(".style"), styles)
+                    .map_or(body, |s| s.size);
                 let content = match (&slot.text, &slot.image, &slot.width) {
                     (Some(text), None, None) => {
                         self.check_placeholders(
@@ -600,7 +647,7 @@ impl<'a> Resolver<'a> {
                 }
                 Some(resolved::TitleSlot {
                     content: content?,
-                    style: slot.style,
+                    style: slot.style.clone(),
                     required: slot.required,
                     space_before: space_before?,
                 })
@@ -668,18 +715,13 @@ impl<'a> Resolver<'a> {
         let space_before = self.spacing(&slot.space_before, &format!("{property}.space-before"), em);
         Some(resolved::BandSlot {
             text: slot.text.clone(),
-            style: slot.style,
+            style: slot.style.clone(),
             required: slot.required,
             space_before: space_before?,
         })
     }
 
-    fn page_variants(
-        &self,
-        page: &PageGeometry,
-        styles: Option<&theme::Styles<Style>>,
-        body: Pt,
-    ) -> Option<resolved::PageVariants> {
+    fn page_variants(&self, page: &PageGeometry, styles: SlotStyles, body: Pt) -> Option<resolved::PageVariants> {
         let pages = &self.theme.pages;
         let variant = |name: &str, variant: &theme::PageVariant| {
             let band = |band: &str, groups: &Option<theme::Band>, own: Option<&Style>| {
@@ -690,9 +732,13 @@ impl<'a> Resolver<'a> {
                         .iter()
                         .enumerate()
                         .map(|(index, slot)| {
-                            let style = slot.style.map_or(own, |style| styles.map(|s| s.get(style)));
+                            let property = format!("{property}.slots.{index}");
+                            let style = match &slot.style {
+                                Some(style) => self.slot_style(style, &format!("{property}.style"), styles),
+                                None => own,
+                            };
                             let em = style.map_or(body, |s| s.size);
-                            self.band_slot(&format!("{property}.slots.{index}"), slot, em)
+                            self.band_slot(&property, slot, em)
                         })
                         .collect();
                     resolved.into_iter().collect()
@@ -700,8 +746,8 @@ impl<'a> Resolver<'a> {
                 self.groups(&property, groups, page, body, slots).map(Some)
             };
             Some(resolved::PageVariant {
-                header: band("header", &variant.header, styles.map(|s| &s.header))?,
-                footer: band("footer", &variant.footer, styles.map(|s| &s.footer))?,
+                header: band("header", &variant.header, styles.builtin.map(|s| &s.header))?,
+                footer: band("footer", &variant.footer, styles.builtin.map(|s| &s.footer))?,
             })
         };
         let optional = |name: &str, page: &Option<theme::PageVariant>| match page {
@@ -786,8 +832,9 @@ impl<'a> Resolver<'a> {
         let tables = (|| {
             Some(resolved::Tables {
                 cell_padding: self.spacing(&theme.tables.cell_padding, "tables.cell-padding", table_em)?,
-                rule_thickness: self.spacing(&theme.tables.rule_thickness, "tables.rule-thickness", table_em)?,
-                rule_color: self.color(&theme.tables.rule_color, "tables.rule-color")?,
+                top_rule: self.rule(theme.tables.top_rule.as_ref(), "tables.top-rule", table_em)?,
+                header_rule: self.rule(theme.tables.header_rule.as_ref(), "tables.header-rule", table_em)?,
+                row_rule: self.rule(theme.tables.row_rule.as_ref(), "tables.row-rule", table_em)?,
             })
         })();
         let notes = &theme.footnotes;
@@ -831,10 +878,14 @@ impl<'a> Resolver<'a> {
             });
 
         let page = page?;
+        let slot_styles = SlotStyles {
+            builtin: s,
+            custom: custom_styles.as_ref(),
+        };
         let title_block = self.title_slots(
             "title-block",
             &theme.title_block.slots,
-            s,
+            slot_styles,
             &images,
             &page,
             page.prose_width,
@@ -846,9 +897,9 @@ impl<'a> Resolver<'a> {
             &theme.title_page.groups,
             &page,
             body,
-            |property, slots, width| self.title_slots(property, slots, s, &images, &page, width, body),
+            |property, slots, width| self.title_slots(property, slots, slot_styles, &images, &page, width, body),
         );
-        let pages = self.page_variants(&page, s, body);
+        let pages = self.page_variants(&page, slot_styles, body);
 
         let bibliography_file = [overrides, document].into_iter().find_map(|input| {
             let path = input.settings.bibliography.as_ref()?;
@@ -884,6 +935,13 @@ impl<'a> Resolver<'a> {
             labels: theme.labels.get(theme.document.lang).clone(),
         })
     }
+}
+
+/// The built-in and custom styles that slots may name, each `None` if it failed to resolve.
+#[derive(Clone, Copy)]
+struct SlotStyles<'s> {
+    builtin: Option<&'s theme::Styles<Style>>,
+    custom: Option<&'s BTreeMap<String, CustomStyle>>,
 }
 
 /// Whether a custom style name can be written as `{.name}`: ASCII letters, digits, `-`, and `_`.
@@ -1057,7 +1115,7 @@ mod tests {
         });
         let config = resolve(inputs(theme)).expect("theme resolves");
         let custom = &config.custom_styles;
-        let CustomStyle::Paragraph { style } = &custom["dark-eyebrow"] else {
+        let CustomStyle::Paragraph { style, .. } = &custom["dark-eyebrow"] else {
             panic!("a paragraph style")
         };
         assert_eq!((style.size, style.uppercase, style.tracking), (Pt(8.0), true, 0.1));
@@ -1083,6 +1141,36 @@ mod tests {
         let (property, message) = rejection(theme);
         assert_eq!(property, "custom-styles.a.based-on");
         assert_eq!(message, "custom styles are based on each other: a -> b -> a");
+    }
+
+    #[test]
+    fn slots_name_custom_styles_and_rows_take_rule_below_from_paragraph_styles() {
+        let theme = json!({
+            "version": 1,
+            "custom-styles": {"spaced": {"based-on": "footer", "tracking": 0.2}, "total": {"based-on": "table-cell", "rule-below": "none"}},
+            "pages": {"body": {"footer": [{"anchor": "top-left", "slots": [{"text": "{page}", "style": "spaced"}]}]}},
+        });
+        let config = resolve(inputs(theme)).expect("theme resolves");
+        let slot = &config.pages.body.footer.as_ref().unwrap()[0].slots[0];
+        assert_eq!(config.slot_style(slot.style.as_ref().unwrap()).tracking, 0.2);
+        assert!(matches!(
+            config.custom_styles["total"],
+            CustomStyle::Paragraph {
+                rule_below: Some(theme::RuleBelow::None),
+                ..
+            }
+        ));
+
+        let slots = json!([{"anchor": "top-left", "slots": [{"text": "{title}", "style": "titel"}]}]);
+        let (property, message) = rejection(json!({"version": 1, "title-page": {"groups": slots}}));
+        assert_eq!(property, "title-page.groups.0.slots.0.style");
+        assert!(message.starts_with("style \"titel\" is neither title"), "{message}");
+
+        let (property, _) = rejection(json!({
+            "version": 1,
+            "custom-styles": {"x": {"based-on": "list", "rule-below": "none"}},
+        }));
+        assert_eq!(property, "custom-styles.x.rule-below");
     }
 
     #[test]

@@ -219,7 +219,7 @@ impl Walk<'_> {
                 } => {
                     self.inlines(caption);
                     for cell in header.cells.iter().chain(rows.iter().flat_map(|row| &row.cells)) {
-                        self.inlines(&cell.content);
+                        self.blocks(&cell.blocks);
                     }
                     let table = (!caption.is_empty()).then(|| {
                         let number = self.structure.tables.iter().flatten().count() + 1;

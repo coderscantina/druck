@@ -774,7 +774,7 @@ fn stack(
     mut y: f64,
     ratio: f64,
 ) -> f64 {
-    let left = |line: &FlowLine| if line.wide { x } else { x + shift };
+    let left = |line: &FlowLine| x + line.wide.map_or(shift, |room| shift.min(room));
     if let Some(Some(header)) = headers.get(lines.start).filter(|_| !lines.is_empty()) {
         let x = left(&body[lines.start]);
         items.extend(header.items.iter().cloned().map(|item| translate(item, x, y)));
@@ -812,7 +812,7 @@ mod tests {
             space_before: 0.0,
             after,
             at: Location { line: 1, column: 1 },
-            wide: false,
+            wide: None,
         }
     }
 

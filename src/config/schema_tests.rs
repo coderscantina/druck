@@ -210,6 +210,22 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             true,
         ),
         (
+            "table rules and a row style without a rule",
+            json!({"version": 1, "tables": {"top-rule": null, "header-rule": {"thickness": "1pt", "color": "#000000"}},
+                "custom-styles": {"total": {"based-on": "table-cell", "rule-below": "none"}}}),
+            true,
+        ),
+        (
+            "table rule with a width",
+            json!({"version": 1, "tables": {"row-rule": {"thickness": "1pt", "width": "1cm"}}}),
+            false,
+        ),
+        (
+            "slot in a custom style",
+            json!({"version": 1, "title-page": {"groups": [{"anchor": "top-left", "slots": [{"text": "{title}", "style": "cover-label"}]}]}}),
+            true,
+        ),
+        (
             "custom style without base",
             json!({"version": 1, "custom-styles": {"eyebrow": {"uppercase": true}}}),
             false,

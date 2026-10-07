@@ -27,6 +27,8 @@ mod structure_tests;
 mod style_tests;
 mod table;
 #[cfg(test)]
+mod table_tests;
+#[cfg(test)]
 mod tests;
 mod titles;
 mod toc;
@@ -39,7 +41,7 @@ use self::structure::Structure;
 use crate::citations::Cited;
 use crate::config::resolved::{Config, CustomStyle, PageGeometry, Style};
 use crate::config::source::{Resource, Source};
-use crate::config::theme::{FontStyle, Weight, WideBlock};
+use crate::config::theme::{Align, FontStyle, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location};
@@ -179,7 +181,7 @@ impl Pass<'_> {
             after_paragraph: false,
             keeps: Vec::new(),
             columns: Vec::new(),
-            wide: false,
+            wide: None,
             errors: Vec::new(),
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
@@ -262,9 +264,9 @@ struct FlowLine {
     after: Break,
     /// The source of the line's block, for diagnostics.
     at: Location,
-    /// Whether the line spans the frame instead of the prose width, so it stays put where prose moves
-    /// to the inner edge.
-    wide: bool,
+    /// `None` for a line in the prose width, which moves to the inner edge with the prose. For a wide line,
+    /// how far it may move right with the prose, which is the frame width it leaves free.
+    wide: Option<f64>,
 }
 
 /// How a text block takes part in page breaking.
@@ -285,6 +287,8 @@ struct Frame<'a> {
     list_depth: usize,
     /// How much wider a wide block may be, on the right. Zero inside lists, quotations, and columns.
     widen: f64,
+    /// The alignment of paragraphs without a custom style, instead of their style's: a table column's.
+    align: Option<Align>,
 }
 
 impl<'a> Frame<'a> {
@@ -297,6 +301,7 @@ impl<'a> Frame<'a> {
             style,
             list_depth: 0,
             widen: inset,
+            align: None,
         }
     }
 }
@@ -328,8 +333,8 @@ struct Flow<'a> {
     keeps: Vec<(Range<usize>, Location)>,
     /// Line ranges set in two columns. A full-width block ends one run and starts the next.
     columns: Vec<Range<usize>>,
-    /// Whether a wide block is being set across the frame.
-    wide: bool,
+    /// Whether a wide block is being set across the frame, with the frame width its lines leave free.
+    wide: Option<f64>,
     errors: Vec<Diagnostic>,
 }
 
@@ -404,8 +409,9 @@ impl<'a> Flow<'a> {
                 Block::Code { .. } => Some(WideBlock::CodeBlock),
                 _ => None,
             };
-            self.wide = frame.widen > 0.0 && kind.is_some_and(|kind| self.config.page.wide.contains(&kind));
-            let frame = if self.wide {
+            let wide = frame.widen > 0.0 && kind.is_some_and(|kind| self.config.page.wide.contains(&kind));
+            self.wide = wide.then_some(0.0);
+            let frame = if wide {
                 Frame {
                     right: frame.right - frame.widen,
                     widen: 0.0,
@@ -416,17 +422,14 @@ impl<'a> Flow<'a> {
             };
             match block {
                 Block::Paragraph { at, content, class } => {
-                    let style = match class {
-                        Some(class) => self.custom(class).style(),
-                        None => frame.style,
-                    };
+                    let style = self.paragraph_style(class.as_ref(), &frame);
                     // Only a paragraph that continues another one gets a first-line indent.
                     let indent = if self.after_paragraph {
                         style.first_line_indent.0
                     } else {
                         0.0
                     };
-                    self.text_block(*at, content, style, frame, indent, Role::Text);
+                    self.text_block(*at, content, &style, frame, indent, Role::Text);
                 }
                 Block::Heading {
                     at,
@@ -501,7 +504,7 @@ impl<'a> Flow<'a> {
                 }
                 Block::Table {
                     at,
-                    align,
+                    columns,
                     header,
                     rows,
                     caption,
@@ -511,7 +514,7 @@ impl<'a> Flow<'a> {
                     self.tables += 1;
                     let block = table::TableBlock {
                         at: *at,
-                        align,
+                        columns,
                         header,
                         rows,
                         caption,
@@ -524,13 +527,35 @@ impl<'a> Flow<'a> {
                 Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
             }
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
-            self.wide = false;
+            self.wide = None;
         }
     }
 
     /// The custom style of a class, which [`classes::check`] has found in the theme.
     fn custom(&self, class: &Class) -> &'a CustomStyle {
         &self.config.custom_styles[&class.name]
+    }
+
+    /// The style of a paragraph in `frame`: its custom style, or the frame's with the frame's alignment.
+    fn paragraph_style(&self, class: Option<&Class>, frame: &Frame<'a>) -> Cow<'a, Style> {
+        match (class, frame.align) {
+            (Some(class), _) => Cow::Borrowed(self.custom(class).style()),
+            (None, Some(align)) => Cow::Owned(Style {
+                align,
+                ..frame.style.clone()
+            }),
+            (None, None) => Cow::Borrowed(frame.style),
+        }
+    }
+
+    /// The style and bullets of a list: its custom style's, or the theme's.
+    fn list_style(&self, class: Option<&Class>) -> (&'a Style, &'a [String]) {
+        let lists = &self.config.lists;
+        match class.map(|class| self.custom(class)) {
+            None => (&self.config.styles.list, &lists.bullets),
+            Some(CustomStyle::List { style, bullets }) => (style, bullets.as_ref().unwrap_or(&lists.bullets)),
+            Some(_) => unreachable!("classes are checked before layout"),
+        }
     }
 
     /// Sets a heading. With a number gap, a number such as "2." that the author typed at its start
@@ -679,11 +704,7 @@ impl<'a> Flow<'a> {
         frame: Frame<'a>,
     ) {
         let lists = &self.config.lists;
-        let (style, bullets) = match class.map(|class| self.custom(class)) {
-            None => (&self.config.styles.list, &lists.bullets),
-            Some(CustomStyle::List { style, bullets }) => (style, bullets.as_ref().unwrap_or(&lists.bullets)),
-            Some(_) => unreachable!("classes are checked before layout"),
-        };
+        let (style, bullets) = self.list_style(class);
         let start_line = self.lines.len();
         let inner = Frame {
             left: frame.left + lists.indent.0,
