@@ -15,6 +15,8 @@ pub struct Output {
     pub anchors: Vec<Position>,
     /// Headings in document order, for bookmarks.
     pub outline: Vec<Bookmark>,
+    /// The text of the first top-level level 1 heading, the PDF title when the metadata has none.
+    pub heading_title: Option<String>,
 }
 
 /// A place on a page: the page index from zero and a point on it.

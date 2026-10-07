@@ -63,6 +63,32 @@ impl Date {
         Ok(Self::from_unix(seconds))
     }
 
+    /// The day written as `YYYY-MM-DD`, if `text` is one and the day exists.
+    pub fn iso(text: &str) -> Option<Self> {
+        let number = |part: &str, digits: usize| {
+            (part.len() == digits && part.bytes().all(|b| b.is_ascii_digit())).then(|| part.parse::<u16>().ok())?
+        };
+        let mut parts = text.split('-');
+        let (year, month, day) = (
+            number(parts.next()?, 4)?,
+            number(parts.next()?, 2)?,
+            number(parts.next()?, 2)?,
+        );
+        let year = i64::from(year);
+        let length = match month {
+            2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            1..=12 => 31,
+            _ => return None,
+        };
+        (parts.next().is_none() && (1..=length).contains(&day)).then_some(Self {
+            year,
+            month: month as u8,
+            day: day as u8,
+        })
+    }
+
     /// The UTC day of a Unix time, by Howard Hinnant's `civil_from_days`.
     pub fn from_unix(seconds: i64) -> Self {
         let days = seconds.div_euclid(86_400) + 719_468;
@@ -107,6 +133,23 @@ mod tests {
         assert_eq!(Date::from_unix(951_782_400), date(2000, 2, 29));
         assert_eq!(Date::from_unix(1_791_417_599), date(2026, 10, 7));
         assert_eq!(Date::from_unix(1_791_417_600), date(2026, 10, 8));
+    }
+
+    #[test]
+    fn reads_only_existing_iso_days() {
+        let date = |year, month, day| Some(Date { year, month, day });
+        assert_eq!(Date::iso("2026-10-07"), date(2026, 10, 7));
+        assert_eq!(Date::iso("2024-02-29"), date(2024, 2, 29));
+        for text in [
+            "2026-02-29",
+            "2026-13-01",
+            "2026-10-7",
+            "2026-10-07T12:00",
+            "7 October 2026",
+            "2026",
+        ] {
+            assert_eq!(Date::iso(text), None, "{text}");
+        }
     }
 
     #[test]

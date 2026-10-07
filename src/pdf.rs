@@ -9,7 +9,7 @@ use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
 use krilla::destination::XyzDestination;
 use krilla::geom::{PathBuilder, Point, Rect as PdfRect, Size, Transform};
-use krilla::metadata::Metadata as PdfMetadata;
+use krilla::metadata::{DateTime, Metadata as PdfMetadata};
 use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
 use krilla::paint::Fill;
@@ -20,14 +20,19 @@ use krilla_svg::{SurfaceExt, SvgSettings};
 use crate::config::front_matter::Metadata;
 use crate::config::theme::Lang;
 use crate::config::values::Color;
+use crate::date::Date;
 use crate::document::Link;
 use crate::image::{Image, Pixels};
 use crate::page::{Bookmark, Item, Output, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-/// Writes the pages of `output` as a PDF document, with links, anchors, and bookmarks. Title, authors,
-/// and language go into the document info. No creation date is written, so the same input gives the
-/// same bytes.
+/// The application, as named in the creator and producer fields of every PDF.
+const CREATOR: &str = concat!("Druck ", env!("CARGO_PKG_VERSION"));
+const PRODUCER: &str = concat!("Coder's Cantina Druck ", env!("CARGO_PKG_VERSION"));
+
+/// Writes the pages of `output` as a PDF document, with links, anchors, and bookmarks. The document
+/// info holds the title, authors, subject, language, and application, and a creation date only from an
+/// ISO `date`, so the same input gives the same bytes.
 pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) -> Result<Vec<u8>, String> {
     let destination = |anchor: usize| {
         let position = output
@@ -41,7 +46,7 @@ pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) ->
         ))
     };
     let mut document = Document::new();
-    document.set_metadata(document_info(metadata, lang));
+    document.set_metadata(document_info(metadata, output.heading_title.as_deref(), lang));
     for page in &output.pages {
         let settings = PageSettings::from_wh(page.width.0 as f32, page.height.0 as f32)
             .ok_or_else(|| format!("invalid page size {} x {} pt", page.width.0, page.height.0))?;
@@ -113,17 +118,30 @@ fn outline(
     Ok(outline)
 }
 
-fn document_info(metadata: &Metadata, lang: Lang) -> PdfMetadata {
+/// The front matter title, else `heading_title`. The subject is the abstract, else the subtitle, on one
+/// line.
+fn document_info(metadata: &Metadata, heading_title: Option<&str>, lang: Lang) -> PdfMetadata {
     let language = match lang {
         Lang::En => "en",
         Lang::De => "de",
     };
-    let mut info = PdfMetadata::new().language(language.to_owned());
-    if let Some(title) = &metadata.title {
-        info = info.title(title.clone());
+    let mut info = PdfMetadata::new()
+        .language(language.to_owned())
+        .creator(CREATOR.to_owned())
+        .producer(PRODUCER.to_owned());
+    if let Some(title) = metadata.title.as_deref().or(heading_title) {
+        info = info.title(title.to_owned());
     }
     if !metadata.authors.is_empty() {
         info = info.authors(metadata.authors.clone());
+    }
+    let subject = metadata.abstract_.as_deref().or(metadata.subtitle.as_deref());
+    let subject = subject.map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "));
+    if let Some(subject) = subject.filter(|subject| !subject.is_empty()) {
+        info = info.description(subject);
+    }
+    if let Some(date) = metadata.date.as_deref().and_then(|text| Date::iso(text.trim())) {
+        info = info.creation_date(DateTime::new(date.year as u16).month(date.month).day(date.day));
     }
     info
 }
@@ -267,6 +285,7 @@ mod tests {
             pages,
             anchors: Vec::new(),
             outline: Vec::new(),
+            heading_title: None,
         }
     }
 
@@ -305,6 +324,7 @@ mod tests {
                 bookmark(2, "Detail", 1),
                 bookmark(1, "Close", 2),
             ],
+            heading_title: None,
         };
         let bytes = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
         let pdf = String::from_utf8_lossy(&bytes);
@@ -325,6 +345,51 @@ mod tests {
             ..output
         };
         assert!(write(&missing, &fonts(), &Metadata::default(), Lang::En).is_err());
+    }
+
+    #[test]
+    fn writes_document_info_from_metadata_and_the_first_heading() {
+        let info = |metadata: &Metadata, heading_title: Option<&str>| {
+            let output = Output {
+                heading_title: heading_title.map(str::to_owned),
+                ..output(Vec::new())
+            };
+            let bytes = write(&output, &fonts(), metadata, Lang::En).expect("pdf");
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let producer = text.find("/Producer").expect("document info");
+            let start = text[..producer].rfind("<<").expect("dictionary start");
+            let end = producer + text[producer..].find(">>").expect("dictionary end");
+            text[start..end].to_owned()
+        };
+        let metadata = Metadata {
+            subtitle: Some("Sub".to_owned()),
+            abstract_: Some("First  line\n\nSecond".to_owned()),
+            date: Some("2026-10-07".to_owned()),
+            ..Metadata::default()
+        };
+        let dict = info(&metadata, Some("Heading"));
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(dict.contains("/Title(Heading)"), "{dict}");
+        assert!(dict.contains("/Subject(First line Second)"), "{dict}");
+        assert!(dict.contains("/CreationDate(D:20261007"), "{dict}");
+        assert!(dict.contains(&format!("/Creator(Druck {version})")), "{dict}");
+        assert!(
+            dict.contains(&format!("/Producer(Coder's Cantina Druck {version})")),
+            "{dict}"
+        );
+
+        let metadata = Metadata {
+            title: Some("Front".to_owned()),
+            subtitle: Some("Sub".to_owned()),
+            date: Some("Spring 2026".to_owned()),
+            ..Metadata::default()
+        };
+        let dict = info(&metadata, Some("Heading"));
+        assert!(
+            dict.contains("/Title(Front)") && dict.contains("/Subject(Sub)"),
+            "{dict}"
+        );
+        assert!(!dict.contains("/CreationDate"), "{dict}");
     }
 
     #[test]

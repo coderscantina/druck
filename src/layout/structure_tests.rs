@@ -334,6 +334,14 @@ fn drafts_have_a_turned_watermark_behind_every_page_with_bands() {
 }
 
 #[test]
+fn takes_the_first_level_1_heading_without_number_or_style_as_heading_title() {
+    let body = "## Before\n\n# The *main* title[^1]\n\n# Second\n\n[^1]: Note.";
+    let output = render(&config("numbering-depth: 2", theme()), body);
+    assert_eq!(output.heading_title.as_deref(), Some("The main title"));
+    assert_eq!(render(&config("", theme()), "## Only\n\nText.").heading_title, None);
+}
+
+#[test]
 fn numbers_headings_to_the_numbering_depth_and_bookmarks_them() {
     let body = "# A\n\n## B\n\n### C\n\n# D\n\n### E\n\nText.";
     let output = render(&config("numbering-depth: 2", theme()), body);

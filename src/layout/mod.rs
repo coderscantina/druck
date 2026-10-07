@@ -123,10 +123,19 @@ pub fn layout(
             anchor: heading.anchor,
         })
         .collect();
+    let heading_title = document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Heading { level: 1, content, .. } => Some(structure::plain(content).trim().to_owned()),
+            _ => None,
+        })
+        .filter(|title| !title.is_empty());
     Ok(Output {
         pages,
         anchors,
         outline,
+        heading_title,
     })
 }
 
