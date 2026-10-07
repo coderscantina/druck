@@ -155,7 +155,7 @@ SOFTWARE.
 
 ## Rust crates
 
-124 crates are linked into the binary on at least one of: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-apple-darwin, x86_64-pc-windows-msvc.
+125 crates are linked into the binary on at least one of: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-apple-darwin, x86_64-pc-windows-msvc.
 Build scripts, procedural macros, and test-only crates are not linked and are not listed.
 Where a crate offers a choice of licenses (`OR`), either one applies.
 
@@ -269,6 +269,7 @@ Where a crate offers a choice of licenses (`OR`), either one applies.
 | unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unicode-properties | 0.1.4 | MIT/Apache-2.0 |
 | unicode-script | 0.5.8 | MIT OR Apache-2.0 |
+| unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | usvg | 0.47.0 | Apache-2.0 OR MIT |
@@ -292,7 +293,7 @@ Texts are copied from each crate's source. Identical texts are shown once.
 
 ### LICENSE-APACHE
 
-Used by: arrayvec 0.7.8, base64 0.22.1, base64 0.23.1, bitflags 2.13.2, bumpalo 3.20.3, cfg-if 1.0.5, core_detect 1.0.0, data-url 0.3.2, encoding_rs_io 0.1.8, equivalent 1.0.2, euclid 0.22.14, flate2 1.1.10, gif 0.14.2, hashbrown 0.17.1, heck 0.5.0, indexmap 2.14.2, log 0.4.34, num-traits 0.2.19, png 0.18.1, roxmltree 0.20.0, roxmltree 0.21.1, scopeguard 1.2.0, simplecss 0.2.2, smallvec 1.16.2, stable_deref_trait 1.2.1, svgtypes 0.16.1, ttf-parser 0.25.1, unicase 2.10.0, unicode-bidi 0.3.18, unicode-bidi-mirroring 0.4.0, unicode-ccc 0.4.0, unicode-properties 0.1.4, unicode-vo 0.1.0, unicode-width 0.2.2, weezl 0.1.12
+Used by: arrayvec 0.7.8, base64 0.22.1, base64 0.23.1, bitflags 2.13.2, bumpalo 3.20.3, cfg-if 1.0.5, core_detect 1.0.0, data-url 0.3.2, encoding_rs_io 0.1.8, equivalent 1.0.2, euclid 0.22.14, flate2 1.1.10, gif 0.14.2, hashbrown 0.17.1, heck 0.5.0, indexmap 2.14.2, log 0.4.34, num-traits 0.2.19, png 0.18.1, roxmltree 0.20.0, roxmltree 0.21.1, scopeguard 1.2.0, simplecss 0.2.2, smallvec 1.16.2, stable_deref_trait 1.2.1, svgtypes 0.16.1, ttf-parser 0.25.1, unicase 2.10.0, unicode-bidi 0.3.18, unicode-bidi-mirroring 0.4.0, unicode-ccc 0.4.0, unicode-properties 0.1.4, unicode-segmentation 1.13.3, unicode-vo 0.1.0, unicode-width 0.2.2, weezl 0.1.12
 
 ```text
 Apache License
@@ -1338,6 +1339,38 @@ Apache License
 
 ### LICENSE-MIT
 
+Used by: heck 0.5.0, unicode-bidi 0.3.18, unicode-properties 0.1.4, unicode-segmentation 1.13.3, unicode-width 0.2.2
+
+```text
+Copyright (c) 2015 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### LICENSE-MIT
+
 Used by: hypher 0.1.8, pdf-writer 0.15.0, simdutf8 0.1.5, subsetter 0.2.6, xmp-writer 0.3.3
 
 ```text
@@ -1442,38 +1475,6 @@ Used by: font-types 0.11.3, read-fonts 0.39.2, skrifa 0.42.1, write-fonts 0.48.1
 
 ```text
 Copyright (c) 2019 Colin Rothfels
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
-### LICENSE-MIT
-
-Used by: heck 0.5.0, unicode-bidi 0.3.18, unicode-properties 0.1.4, unicode-width 0.2.2
-
-```text
-Copyright (c) 2015 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
