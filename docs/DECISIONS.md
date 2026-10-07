@@ -648,7 +648,23 @@ Not started.
 
 ### Pagination
 
-Not started.
+**Stranded lines are a rule for pages.** A page never ends after a block's first line or before its last line. The 5 000 costs of [milestone 04](#page-breaks) lost to the square fill cost whenever avoiding them moved a tall unit, such as a heading with its first line or a table row, or added a line to a page that was short anyway, where one more line costs about 2 000 times the shortfall. Page 4 of `samples/offer.md` ended with "Optional work" and one line, and page 4 of both report renders started with a paragraph's last line. Such lines are now `Break::Avoid` in [the flow](../src/layout/mod.rs): no page ends there, but a column split or a continued footnote may, at the old cost, so column balancing keeps its milestone 05 trade-off. A heading, or a block kept with the next one, keeps the first two lines of the paragraph after it, in columns too.
+
+Consequences: paragraphs of two or three lines no longer split across pages. The offer now runs to six pages, the last holding the closing two lines, because the fifth is full; trimming the sample text would bring it back to five. The 52-copy `samples/en.md` benchmark went from 103 to 105 pages.
+
+**Table rows** follow the same rule, applied to the first and the next-to-last body row. Where two rows with the repeated header, and the caption for the first row, are taller than the text area, the row keeps the soft cost, so tall rows never become an error. Kept rows stay kept.
+
+**Hyphenated lines** carry a `hyphenated` flag from the breaker, set where a line ends inside a word. A page or column ending after one costs 1 000 more, as much as a page one line short, after TeX's `\brokenpenalty`.
+
+**Introducing colons.** A page or column ending after a paragraph whose text ends in ':' directly before a list or code block costs 500 more. It only tips close cases; `keep` still forces it.
+
+**Notes** split at the break cost of the note line they stop after, plus the 2 000 for continuing, so they follow the body text rules at the same costs. For each page end the composer also tries stopping a continued note one line earlier, so a single last line can move with the rest. Notes keep soft costs because the check before the search only guarantees that a note's first line fits.
+
+**The page before the report's column section.** In `samples/report.md` and its theme render, the widow rule fixed it: page 3 now holds the whole paragraph and starts the column section. `samples/report-de.md` is unchanged: page 3 ends about a quarter short and page 4 starts with the paragraph's last two lines, which the rules allow. Pages 3 to 5 together fall about 31 lines short, because the full-width chart and the tall drawing cannot split, and the square fill cost spreads that over the three pages (about 10, 7, and 15 lines). Ending page 3 two lines later lowers its cost from 97 767 to 62 197 but raises that of page 4 from 48 056 to 125 694. This is the trade-off accepted for the images sample, so it stays.
+
+**Duplex.** `document.duplex`, default `false`, starts the body on an odd page: a blank page follows the title page, and the table of contents ends its page and is followed by a blank page when the next page would be even. [The composer](../src/layout/pages.rs) inserts that blank page while rendering, so parity, margins, anchors, `{page}`, and `{pages}` all count it. Blank pages have no bands, and the `first` variant applies to the first page after the title page and its blank page. Without a page break after the contents in duplex, the body would start on the same page and the setting could not hold, so duplex ends the contents page itself.
+
+**Column change spacing.** `page.column-change-spacing` is the least space between a column section and the full-width blocks around it, which reused `page.column-gap` before. Its default `null` means the column gap, so themes that set only the gap render as before.
 
 ### Configuration and CLI
 

@@ -177,7 +177,7 @@ A character the selected font has no glyph for is an error, as is a word wider t
 
 ## Pages
 
-Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it. A paragraph's first or last line is not left alone at the bottom or top of a page if a better break exists. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
+Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it, with at least two lines of a paragraph after it. A paragraph's first or last line is never left alone at the bottom or top of a page, and neither is a table's first or last row unless two rows are too tall to share a page. A page avoids ending after a hyphenated line or after a sentence ending in a colon that introduces a list or code block. A continued footnote avoids leaving a single line on either page. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
 
 Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
 
