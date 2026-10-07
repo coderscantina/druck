@@ -180,7 +180,7 @@ fn a_title_page_stands_alone_and_body_pages_follow_its_parity() {
 
 #[test]
 fn a_required_title_slot_without_a_value_is_an_error() {
-    let error = check_title(&config("title-page: true\nauthor: Ada", theme()), &source()).unwrap_err();
+    let error = titles::check(&config("title-page: true\nauthor: Ada", theme()), &source()).unwrap_err();
     assert_eq!(error.len(), 1);
     assert_eq!(error[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
     assert_eq!(
@@ -190,8 +190,8 @@ fn a_required_title_slot_without_a_value_is_an_error() {
     assert_eq!(error[0].source, Some(source()));
 
     // The title block is set only when the document has metadata for it.
-    assert!(check_title(&config("author: Ada", theme()), &source()).is_err());
-    assert!(check_title(&config("{}", theme()), &source()).is_ok());
+    assert!(titles::check(&config("author: Ada", theme()), &source()).is_err());
+    assert!(titles::check(&config("{}", theme()), &source()).is_ok());
     let errors = render_images(&config("author: Ada", theme()), "Text.", &[]).unwrap_err();
     assert_eq!(errors[0].property.as_deref(), Some("title-block.slots.0.text"));
 }
@@ -844,7 +844,7 @@ fn a_missing_meta_value_omits_its_slot_unless_it_is_required() {
     );
     assert_eq!(texts(&output.pages[0]), ["ACME", "Offer"]);
 
-    let errors = check_title(&config(front, theme), &source()).unwrap_err();
+    let errors = titles::check(&config(front, theme), &source()).unwrap_err();
     assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
     assert_eq!(
         errors[0].message,

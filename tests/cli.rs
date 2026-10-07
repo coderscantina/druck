@@ -671,3 +671,13 @@ fn decodes_only_theme_images_the_title_layout_shows() {
     let stderr = sandbox.rejection(&[&document, "--theme", &theme, "--set", "title-page=true"]);
     assert!(stderr.contains("images.logo"), "{stderr}");
 }
+
+#[test]
+fn check_reports_layout_errors_without_writing_a_pdf() {
+    let sandbox = Sandbox::new("check-layout");
+    let word = "x".repeat(300);
+    let document = sandbox.write("doc.md", &format!("---\ntitle: T\n---\n{word}\n"));
+    let stderr = sandbox.rejection(&[&document]);
+    assert!(stderr.contains("cannot be broken"), "{stderr}");
+    assert!(!sandbox.root.join("doc.pdf").exists());
+}

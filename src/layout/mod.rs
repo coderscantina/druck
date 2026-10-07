@@ -51,7 +51,6 @@ use crate::image::Image;
 use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-pub use self::titles::check as check_title;
 pub use self::titles::images as title_images;
 
 /// The most layout passes spent on page numbers that change the layout they come from.
@@ -537,7 +536,11 @@ impl<'a> Flow<'a> {
                     class,
                 } => self.list(*at, *start, items, class.as_ref(), frame),
                 Block::Quote { blocks, .. } => {
-                    let style = &self.config.styles.quote;
+                    let style = if self.in_notes {
+                        &self.notes.quote
+                    } else {
+                        &self.config.styles.quote
+                    };
                     self.space(style.space_before.0);
                     let indent = style.indent.0;
                     let inner = Frame {
@@ -636,11 +639,15 @@ impl<'a> Flow<'a> {
     fn list_style(&self, class: Option<&Class>) -> (&'a Style, &'a [String], &'a Style) {
         let config = self.config;
         let lists = &config.lists;
-        let (style, bullets, marker) = match class.map(|class| self.custom(class)) {
+        let (style, bullets, marker) = match class.map(|class| (class, self.custom(class))) {
             None if self.in_notes => (&self.notes.list, &lists.bullets, &lists.marker),
             None => (&config.styles.list, &lists.bullets, &lists.marker),
-            Some(CustomStyle::List { style, bullets, marker }) => (
-                style,
+            Some((class, CustomStyle::List { style, bullets, marker })) => (
+                if self.in_notes {
+                    &self.notes.custom_lists[&class.name]
+                } else {
+                    style
+                },
                 bullets.as_ref().unwrap_or(&lists.bullets),
                 if marker.is_some() { marker } else { &lists.marker },
             ),

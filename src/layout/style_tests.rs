@@ -238,3 +238,16 @@ fn scales_lists_in_footnotes_to_the_footnote_size() {
     assert!((sizes[0] - config.styles.list.size.0).abs() < 1e-9);
     assert!((sizes[1] - config.styles.list.size.0 * ratio).abs() < 1e-9);
 }
+
+#[test]
+fn scales_custom_lists_and_quotations_in_footnotes_to_the_footnote_size() {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let body = "Text.[^n]\n\n[^n]: Note.\n\n    {.checks}\n    - Checked\n\n    > Quoted\n";
+    let pages = render(&config, &fonts, body).unwrap();
+    let runs = runs(&pages);
+    let ratio = config.styles.footnote.size.0 / config.styles.body.size.0;
+    let (list, quote) = (find(&runs, "Checked").3.size.0, find(&runs, "Quoted").3.size.0);
+    assert!((list - config.styles.list.size.0 * ratio).abs() < 1e-9, "{list}");
+    assert!((quote - config.styles.quote.size.0 * ratio).abs() < 1e-9, "{quote}");
+}

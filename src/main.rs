@@ -39,11 +39,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Validate a document, its theme, images, and bibliography without rendering.
+    /// Lay out a document and report every problem `render` would, without writing the PDF.
     Check {
         #[command(flatten)]
         input: InputArgs,
-        /// Print the resolved configuration as JSON.
+        /// Print the resolved configuration as JSON instead of laying out.
         #[arg(long)]
         print_config: bool,
     },
@@ -85,13 +85,11 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
     match cli.command {
         Command::Check { input, print_config } => {
             let (config, document) = load(&input)?;
-            find_installed(&config)?;
-            layout::check_title(&config, &document.source)?;
-            prepare(&config, &document)?;
             if print_config {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
                 println!("{json}");
             } else {
+                typeset(&config, &document)?;
                 println!("{}: document is valid", shown(&document.path));
             }
             Ok(())
@@ -102,9 +100,7 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 Some(path) => normalize(&document.working_dir.join(path)),
                 None => document.path.with_extension("pdf"),
             };
-            let installed = find_installed(&config)?;
-            let fonts = Fonts::load(&config, &installed)?;
-            let laid = render(&config, &fonts, &document)?;
+            let (fonts, laid) = typeset(&config, &document)?;
             let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang)
                 .map_err(|e| vec![Diagnostic::new(None, e)])?;
             let used: BTreeSet<_> = laid
@@ -167,18 +163,21 @@ fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Dia
     })
 }
 
-/// Lays out the prepared document.
-fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<page::Output, Vec<Diagnostic>> {
+/// Loads the fonts and lays out the document, reporting everything `render` reports before writing.
+fn typeset(config: &Config, document: &DocumentFile) -> Result<(Fonts, page::Output), Vec<Diagnostic>> {
+    let installed = find_installed(config)?;
+    let fonts = Fonts::load(config, &installed)?;
     let prepared = prepare(config, document)?;
-    layout::layout(
+    let laid = layout::layout(
         &prepared.content,
         &prepared.cited,
         &prepared.images,
         &prepared.theme_images,
         config,
-        fonts,
+        &fonts,
         &document.source,
-    )
+    )?;
+    Ok((fonts, laid))
 }
 
 /// Reads and checks the BibTeX file the configuration names, if any. `load` has checked that it exists.
