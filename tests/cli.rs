@@ -329,19 +329,19 @@ fn uses_font_files_relative_to_the_document() {
 #[test]
 fn reports_unsupported_content_with_its_location_and_writes_nothing() {
     let sandbox = Sandbox::new("unsupported");
-    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n| a |\n| - |\n| b |\n\n---\n");
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n~~gone~~\n\n---\n");
     let run = sandbox.run(&["render", &document]);
 
     assert_eq!(run.code, 1);
     assert!(
         run.stderr
-            .contains(&format!("{document}:7:1: tables are not supported yet")),
+            .contains(&format!("{document}:7:1: strikethrough is not supported")),
         "{}",
         run.stderr
     );
     assert!(
         run.stderr
-            .contains(&format!("{document}:11:1: thematic breaks are not supported")),
+            .contains(&format!("{document}:9:1: thematic breaks are not supported")),
         "{}",
         run.stderr
     );

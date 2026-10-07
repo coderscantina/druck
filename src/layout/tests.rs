@@ -840,3 +840,344 @@ fn reports_an_image_whose_caption_leaves_no_room() {
         errors[0].message
     );
 }
+
+/// A table at source line `line` with a header row and body rows of plain text cells. Row `i` is at
+/// line `line + 2 + i`.
+fn table(line: u64, header: &[&str], rows: &[Vec<String>], caption: &str) -> Block {
+    let row = |line: u64, cells: Vec<String>| crate::document::Row {
+        at: Location { line, column: 1 },
+        cells: cells
+            .into_iter()
+            .map(|text| crate::document::Cell {
+                at: Location { line, column: 3 },
+                content: vec![text_inline(&text)],
+            })
+            .collect(),
+    };
+    Block::Table {
+        at: Location { line, column: 1 },
+        align: vec![None; header.len()],
+        header: row(line, header.iter().map(|text| text.to_string()).collect()),
+        rows: rows
+            .iter()
+            .enumerate()
+            .map(|(index, cells)| row(line + 2 + index as u64, cells.clone()))
+            .collect(),
+        caption: if caption.is_empty() {
+            Vec::new()
+        } else {
+            vec![text_inline(caption)]
+        },
+    }
+}
+
+/// `count` rows whose first cell is `R{index}` and whose second cell wraps to a few lines.
+fn long_rows(count: usize) -> Vec<Vec<String>> {
+    (0..count)
+        .map(|index| {
+            let words = &PROSE[..40 + (index * 37) % 160];
+            vec![format!("R{index}"), words.to_owned()]
+        })
+        .collect()
+}
+
+/// The page index of every placed line containing `text`.
+fn pages_with(pages: &[Page], text: &str) -> Vec<usize> {
+    pages
+        .iter()
+        .enumerate()
+        .flat_map(|(index, page)| {
+            placed(page)
+                .into_iter()
+                .filter(|line| line.text.contains(text))
+                .map(move |_| index)
+        })
+        .collect()
+}
+
+#[test]
+fn natural_widths_fit_and_wide_columns_share_the_rest() {
+    let config = config();
+    let padding = config.tables.cell_padding.0;
+    let short = vec![vec!["a".to_owned(), "b".to_owned()]];
+    let pages = render(vec![table(1, &["Key", "Value"], &short, "")]).unwrap();
+    let rules: Vec<Rect> = pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Rect { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    let width = config.page.text_width().0;
+    assert!(rules[0].width.0 < width / 4.0, "a short table keeps its natural width");
+    assert!(close(
+        rules[0].x.0 - config.page.margin_inner.0,
+        (width - rules[0].width.0) / 2.0
+    ));
+
+    let rows = vec![vec!["Short".to_owned(), PROSE.to_owned(), PROSE.to_owned()]];
+    let pages = render(vec![table(1, &["K", "A", "B"], &rows, "")]).unwrap();
+    let lines = placed(&pages[0]);
+    let starts: Vec<f64> = pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Text { x, run, .. } if run.text == "Short" || run.text == "The" => Some(x.0),
+            _ => None,
+        })
+        .collect();
+    let left = config.page.margin_inner.0 + padding;
+    assert!(close(starts[0], left), "the narrow column starts the table");
+    let (a, b) = (starts[1] - starts[0], starts[2] - starts[1]);
+    assert!(
+        a < b && b > width / 3.0,
+        "the wide columns share the rest equally: {a} {b}"
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.right <= config.page.margin_inner.0 + width + 0.01)
+    );
+}
+
+#[test]
+fn reports_a_word_too_wide_for_the_narrowest_columns_at_its_cell() {
+    let rows = vec![vec!["x".repeat(60), "y".repeat(60), "z".repeat(60)]];
+    let errors = render(vec![table(4, &["A", "B", "C"], &rows, "")]).unwrap_err();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].location, Some((6, 3)));
+    assert!(
+        errors[0].message.contains("with every column at its narrowest"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn a_row_is_as_tall_as_its_tallest_cell_with_padding_and_rule() {
+    let config = config();
+    let style = &config.styles.table_cell;
+    let line = style.size.0 * style.line_height;
+    let rows = vec![
+        vec!["One".to_owned(), PROSE.to_owned()],
+        vec!["Two".to_owned(), "Short.".to_owned()],
+    ];
+    let pages = render(vec![table(1, &["A", "B"], &rows, "")]).unwrap();
+    let rules: Vec<f64> = pages[0]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Rect { rect, .. } => Some(rect.y.0),
+            _ => None,
+        })
+        .collect();
+    let wrapped = placed(&pages[0])
+        .iter()
+        .filter(|placed| placed.y > rules[1] && placed.y < rules[2])
+        .count();
+    let tables = &config.tables;
+
+    assert_eq!(rules.len(), 4, "above and below the header, below each row");
+    assert!(wrapped > 1);
+    let expected = wrapped as f64 * line + 2.0 * tables.cell_padding.0 + tables.rule_thickness.0;
+    assert!(
+        close(rules[2] - rules[1], expected),
+        "{} against {expected}",
+        rules[2] - rules[1]
+    );
+    assert!(close(
+        rules[3] - rules[2],
+        line + 2.0 * tables.cell_padding.0 + tables.rule_thickness.0
+    ));
+}
+
+#[test]
+fn a_long_table_breaks_between_rows_and_repeats_its_header() {
+    let rows = long_rows(80);
+    let blocks = vec![numbered(0), table(10, &["Head", "Text"], &rows, "Long."), numbered(1)];
+    let pages = render(blocks).unwrap();
+    let headers = pages_with(&pages, "Head Text");
+
+    let mut row_pages: Vec<usize> = pages
+        .iter()
+        .enumerate()
+        .filter(|(_, page)| placed(page).iter().any(|line| line.text.starts_with('R')))
+        .map(|(index, _)| index)
+        .collect();
+    row_pages.dedup();
+
+    assert!(row_pages.len() > 2);
+    assert_eq!(headers, row_pages, "the header is on every page with rows");
+    for index in 0..80 {
+        let marker = format!("R{index} ");
+        let found: Vec<usize> = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page, content)| {
+                placed(content)
+                    .into_iter()
+                    .filter(|line| line.text.starts_with(&marker))
+                    .map(move |line| (page, line))
+            })
+            .map(|(page, _)| page)
+            .collect();
+        assert_eq!(found.len(), 1, "row {index} starts once");
+    }
+    for (page, content) in pages.iter().enumerate().skip(1) {
+        if headers.contains(&page) {
+            let lines = placed(content);
+            assert_eq!(lines[0].text, "Head Text", "page {page} starts with the header");
+            assert!(
+                lines[1].text.starts_with('R'),
+                "a row follows the header on page {page}"
+            );
+        }
+    }
+    assert_eq!(pages_with(&pages, "Table 1: Long.").len(), 1);
+    assert_eq!(pages_with(&pages, "Table 1: Long.")[0], headers[0]);
+}
+
+#[test]
+fn a_table_in_columns_takes_the_column_width_and_repeats_its_header_in_the_next_column() {
+    let width = super::pages::column_width(&config().page);
+    let rows = long_rows(30);
+    let pages = render(vec![columns(1, vec![table(2, &["Head", "Text"], &rows, "")])]).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let headers: Vec<&Placed> = lines.iter().filter(|line| line.text == "Head Text").collect();
+
+    assert_eq!(headers.len(), 2, "one header per column");
+    assert!(!headers[0].in_second_column(page) && headers[1].in_second_column(page));
+    assert_eq!(headers[0].y, headers[1].y, "both columns start with the header");
+    let rules = page.items.iter().filter_map(|item| match item {
+        Item::Rect { rect, .. } => Some(rect.width.0),
+        _ => None,
+    });
+    assert!(rules.into_iter().all(|rule| rule <= width + 0.01));
+}
+
+#[test]
+fn a_full_width_table_sits_between_balanced_columns_that_resume_below() {
+    let config = config();
+    let rows = vec![vec!["Wide".to_owned(), PROSE.to_owned()]];
+    let full = Block::FullWidth {
+        at: Location { line: 50, column: 1 },
+        blocks: vec![table(51, &["Head", "Text"], &rows, "Across.")],
+    };
+    let section = columns(1, vec![numbered(0), numbered(1), full, numbered(2), numbered(3)]);
+    let pages = render(vec![section]).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let caption = lines.iter().position(|line| line.text == "Table 1: Across.").unwrap();
+    let row = lines.iter().position(|line| line.text.starts_with("Wide")).unwrap();
+    let (first, second) = column_bottoms(page, &lines[..caption]);
+
+    assert_eq!(pages.len(), 1);
+    assert_eq!(reading_order(&pages), [0, 1, 2, 3]);
+    assert!((first - second).abs() <= body_line() + 1e-6);
+    assert!(lines[caption].y > first.max(second));
+    assert!(lines[row].right - lines[row].left > config.page.text_width().0 / 2.0);
+    let after = &lines[row + 1..];
+    assert!(after.iter().any(|line| line.in_second_column(page)));
+    assert!(
+        after
+            .iter()
+            .filter(|line| line.text.contains('P'))
+            .all(|line| line.y > lines[row].y)
+    );
+}
+
+#[test]
+fn a_note_referenced_in_a_cell_goes_on_the_page_of_its_row() {
+    for count in [40, 45, 50] {
+        let mut rows = long_rows(count);
+        let noted = count - 5;
+        let row = |index: usize, cells: Vec<String>| {
+            let at = Location {
+                line: 20 + index as u64,
+                column: 1,
+            };
+            let mut content: Vec<Vec<Inline>> = cells.into_iter().map(|text| vec![text_inline(&text)]).collect();
+            if index == noted {
+                content[1].push(Inline::FootnoteRef(0));
+            }
+            crate::document::Row {
+                at,
+                cells: content
+                    .into_iter()
+                    .map(|content| crate::document::Cell { at, content })
+                    .collect(),
+            }
+        };
+        let Block::Table { at, align, header, .. } = table(18, &["Head", "Text"], &[], "") else {
+            unreachable!()
+        };
+        let rows = rows
+            .drain(..)
+            .enumerate()
+            .map(|(index, cells)| row(index, cells))
+            .collect();
+        let block = Block::Table {
+            at,
+            align,
+            header,
+            rows,
+            caption: Vec::new(),
+        };
+        let pages = render_with_notes(vec![block], vec![note(90, "Cell note.")]).unwrap();
+        let reference = pages_with(&pages, &format!("R{noted} "));
+        assert_eq!(pages_with(&pages, "Cell note."), reference, "{count} rows");
+    }
+}
+
+#[test]
+fn reports_a_row_taller_than_the_page_with_its_header() {
+    let tall = vec![vec!["Tall".to_owned(), PROSE.repeat(40)]];
+    let mut rows = long_rows(2);
+    rows.extend(tall);
+    let errors = render(vec![table(3, &["A", "B"], &rows, "")]).unwrap_err();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].location, Some((7, 1)));
+    assert!(
+        errors[0]
+            .message
+            .starts_with("this table row with the repeated header is"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn tables_are_numbered_apart_from_figures() {
+    let images = [svg(50.0, 20.0)];
+    let rows = vec![vec!["a".to_owned()]];
+    let blocks = vec![
+        table(1, &["H"], &rows, "First."),
+        figure(5, 0, vec![text_inline("Image.")]),
+        table(7, &["H"], &rows, ""),
+        table(11, &["H"], &rows, "Second."),
+    ];
+    let pages = render_with_images(blocks, Vec::new(), &images).unwrap();
+    let captions: Vec<String> = placed(&pages[0])
+        .into_iter()
+        .map(|line| line.text)
+        .filter(|text| text.contains(": "))
+        .collect();
+
+    assert_eq!(captions, ["Table 1: First.", "Figure 1: Image.", "Table 2: Second."]);
+}
+
+#[test]
+fn repeated_table_layout_is_identical() {
+    let blocks = || {
+        vec![
+            numbered(0),
+            columns(2, vec![table(3, &["Head", "Text"], &long_rows(40), "Cols.")]),
+        ]
+    };
+    let first = format!("{:?}", render(blocks()).unwrap());
+    assert_eq!(first, format!("{:?}", render(blocks()).unwrap()));
+}

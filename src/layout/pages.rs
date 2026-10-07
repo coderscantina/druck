@@ -15,11 +15,14 @@
 //! the first column and then the second, split where both columns are most even. The next region
 //! starts below the taller column. Column regions take part in the search like any other lines:
 //! their balanced height counts toward the page, and the cost of their column break toward its cost.
+//!
+//! A table's rows are lines like any other. Where a page or column starts at one of its rows, the
+//! table's header row is set again above it, and its height counts toward that page or column.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use super::{Break, FlowLine, translate};
+use super::{Break, FlowLine, Line, translate};
 use crate::config::resolved::{Config, PageGeometry};
 use crate::config::source::Source;
 use crate::config::values::Pt;
@@ -68,6 +71,18 @@ pub(super) fn line_break(index: usize, count: usize) -> Break {
     Break::Allowed(cost)
 }
 
+/// A table in the flow, whose header row repeats where a page or column starts inside it.
+#[derive(Debug)]
+pub(super) struct Table {
+    /// The table's lines: caption, header row, and body rows.
+    pub lines: Range<usize>,
+    /// The rows a page or column may start at, which then get the header above them.
+    pub rows: Range<usize>,
+    /// A copy of the header row.
+    pub header: Line,
+    pub at: Location,
+}
+
 /// Everything that goes on the pages.
 pub(super) struct Content {
     pub body: Vec<FlowLine>,
@@ -75,6 +90,8 @@ pub(super) struct Content {
     pub keeps: Vec<(Range<usize>, Location)>,
     /// Line ranges set in two columns, in order.
     pub columns: Vec<Range<usize>>,
+    /// Tables in order.
+    pub tables: Vec<Table>,
     /// The lines of each footnote, in reference order.
     pub notes: Vec<Vec<FlowLine>>,
     /// The continuation marker of each footnote.
@@ -87,6 +104,7 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
         mut body,
         keeps,
         columns,
+        tables,
         notes,
         continued,
     } = content;
@@ -94,15 +112,26 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
     let overhead = footnotes.gap.0 + footnotes.separator_thickness.0;
     let notes = Notes::new(notes, continued, overhead, footnotes.spacing.0);
     let body_line = config.styles.body.size.0 * config.styles.body.line_height;
-    let composer = Composer::new(&body, &columns, &notes, config.page.text_height().0, body_line);
-    composer.check(&keeps, source)?;
+    let mut headers = vec![None; body.len()];
+    for table in &tables {
+        headers[table.rows.clone()].fill(Some(&table.header));
+    }
+    let composer = Composer::new(
+        &body,
+        &columns,
+        &headers,
+        &notes,
+        config.page.text_height().0,
+        body_line,
+    );
+    composer.check(&keeps, &tables, source)?;
     let plans = composer.search().ok_or_else(|| {
         vec![Diagnostic::new(
             Some(source.clone()),
             "no page breaks satisfy the layout constraints",
         )]
     })?;
-    Ok(render(&plans, &mut body, notes, config))
+    Ok(render(&plans, &mut body, &headers, notes, config))
 }
 
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
@@ -242,6 +271,8 @@ struct Composer<'a> {
     space: Vec<f64>,
     /// The column run of each line, or `None` for a full-width line.
     runs: Vec<Option<Range<usize>>>,
+    /// The header row set above each line when a page or column starts there.
+    headers: &'a [Option<&'a Line>],
     notes: &'a Notes,
     height: f64,
     /// A body line's height, the unit for measuring short pages.
@@ -249,7 +280,14 @@ struct Composer<'a> {
 }
 
 impl<'a> Composer<'a> {
-    fn new(body: &'a [FlowLine], columns: &[Range<usize>], notes: &'a Notes, height: f64, line: f64) -> Self {
+    fn new(
+        body: &'a [FlowLine],
+        columns: &[Range<usize>],
+        headers: &'a [Option<&'a Line>],
+        notes: &'a Notes,
+        height: f64,
+        line: f64,
+    ) -> Self {
         let mut through = Vec::with_capacity(body.len() + 1);
         let mut top = Vec::with_capacity(body.len() + 1);
         let mut space = Vec::with_capacity(body.len() + 1);
@@ -272,15 +310,26 @@ impl<'a> Composer<'a> {
             top,
             space,
             runs,
+            headers,
             notes,
             height,
             line,
         }
     }
 
+    /// The height of the header row set above line `index` when a page or column starts there.
+    fn repeat(&self, index: usize) -> f64 {
+        self.headers[index].map_or(0.0, |header| header.height)
+    }
+
     /// Reports content that must stay on one page but cannot, with the first line of each of its
     /// footnotes, and footnote lines too tall for a page of their own.
-    fn check(&self, keeps: &[(Range<usize>, Location)], source: &Source) -> Result<(), Vec<Diagnostic>> {
+    fn check(
+        &self,
+        keeps: &[(Range<usize>, Location)],
+        tables: &[Table],
+        source: &Source,
+    ) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
         let mut error = |at: Location, message: String| {
             errors.push(Diagnostic::new(Some(source.clone()), message).at(at.line, at.column));
@@ -288,9 +337,11 @@ impl<'a> Composer<'a> {
         let mut start = 0;
         let mut natural = 0.0;
         for (index, line) in self.body.iter().enumerate() {
-            if index > start {
-                natural += line.space_before;
-            }
+            natural += if index > start {
+                line.space_before
+            } else {
+                self.repeat(index)
+            };
             natural += line.line.height;
             if line.after == Break::Never && index + 1 < self.body.len() {
                 continue;
@@ -311,8 +362,11 @@ impl<'a> Composer<'a> {
                 } else {
                     ""
                 };
+                let table = tables.iter().find(|table| table.lines.start == start);
                 let (at, what) = match keep {
                     Some((_, at)) => (*at, "this keep group"),
+                    None if self.headers[start].is_some() => (line.at, "this table row with the repeated header"),
+                    None if let Some(table) = table => (table.at, "the start of this table up to its first row"),
                     None if index > start => (self.body[start].at, "this heading and the text kept with it"),
                     None => (line.at, "this line"),
                 };
@@ -405,8 +459,13 @@ impl<'a> Composer<'a> {
             pages.push((start, placed, state.cost + NOTE_PAGE + split, 0.0));
         }
 
-        // Natural height, stretch bound, and column break cost of the regions finished so far.
-        let (mut natural, mut stretch, mut cost) = (0.0, 0.0, 0.0);
+        // Natural height, stretch bound, and column break cost of the regions finished so far. A page
+        // starting inside a full-width table begins with its header; in columns, balancing adds it.
+        let header = match self.runs.get(start) {
+            Some(None) => self.repeat(start),
+            _ => 0.0,
+        };
+        let (mut natural, mut stretch, mut cost) = (header, 0.0, 0.0);
         for (index, line) in self.body.iter().enumerate().skip(start) {
             let end = index + 1;
             let last = end == self.body.len();
@@ -521,7 +580,7 @@ impl Composer<'_> {
             if to == from {
                 return (0.0, 0.0);
             }
-            let height = self.top[to] - self.top[from] - self.body[from].space_before;
+            let height = self.repeat(from) + self.top[to] - self.top[from] - self.body[from].space_before;
             (height, STRETCH * (self.space[to] - self.space[from + 1]))
         };
         let split = |at: usize| {
@@ -590,8 +649,15 @@ impl Composer<'_> {
     }
 }
 
-/// Positions the planned pages. Body lines are moved out of `body`.
-fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Config) -> Vec<Page> {
+/// Positions the planned pages. Body lines are moved out of `body`. `headers` holds the header row to
+/// repeat above each body line where a page or column starts.
+fn render(
+    plans: &[Plan],
+    body: &mut [FlowLine],
+    headers: &[Option<&Line>],
+    mut notes: Notes,
+    config: &Config,
+) -> Vec<Page> {
     let geometry = &config.page;
     let footnotes = &config.footnotes;
     let height = geometry.text_height().0;
@@ -619,7 +685,9 @@ fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Conf
                 y += body[first].space_before * (1.0 + STRETCH * plan.stretch);
             }
             match region {
-                Region::Full(lines) => y = stack(&mut items, body, lines.clone(), left, y, plan.stretch),
+                Region::Full(lines) => {
+                    y = stack(&mut items, body, headers, lines.clone(), left, y, plan.stretch);
+                }
                 Region::Columns(columns) => {
                     // Each column stretches to the region's height if its spaces allow, else stays natural.
                     let height = columns.height + plan.stretch * columns.grow;
@@ -632,7 +700,7 @@ fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Conf
                             0.0
                         };
                         let x = left + index as f64 * second_column;
-                        stack(&mut items, body, lines, x, y, ratio);
+                        stack(&mut items, body, headers, lines, x, y, ratio);
                     }
                     y += height;
                 }
@@ -688,9 +756,22 @@ fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Conf
     pages
 }
 
-/// Places body lines from `y` down, dropping the space above the first one and stretching the others
-/// by `ratio` of their bound. Returns the bottom of the last line.
-fn stack(items: &mut Vec<Item>, body: &mut [FlowLine], lines: Range<usize>, x: f64, mut y: f64, ratio: f64) -> f64 {
+/// Places body lines from `y` down, after the repeated header row if the first one has one, dropping
+/// the space above the first line and stretching the others by `ratio` of their bound. Returns the
+/// bottom of the last line.
+fn stack(
+    items: &mut Vec<Item>,
+    body: &mut [FlowLine],
+    headers: &[Option<&Line>],
+    lines: Range<usize>,
+    x: f64,
+    mut y: f64,
+    ratio: f64,
+) -> f64 {
+    if let Some(Some(header)) = headers.get(lines.start).filter(|_| !lines.is_empty()) {
+        items.extend(header.items.iter().cloned().map(|item| translate(item, x, y)));
+        y += header.height;
+    }
     for index in lines.clone() {
         let line = &mut body[index];
         if index > lines.start {
@@ -747,7 +828,7 @@ mod tests {
         let notes = notes.iter().map(|&count| loose(count, &[])).collect();
         let continued = (0..body.len()).map(|_| loose(1, &[])).collect();
         let notes = Notes::new(notes, continued, 5.0, 0.0);
-        let plans = Composer::new(body, &[], &notes, PAGE, 10.0)
+        let plans = Composer::new(body, &[], &vec![None; body.len()], &notes, PAGE, 10.0)
             .search()
             .expect("breaks exist");
         plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect()

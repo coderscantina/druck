@@ -69,6 +69,16 @@ pub enum Block {
         image: usize,
         caption: Vec<Inline>,
     },
+    /// A pipe table. The header row and every body row have one cell per column.
+    Table {
+        at: Location,
+        /// The alignment of each column; `None` keeps the alignment of the cell style.
+        align: Vec<Option<ColumnAlign>>,
+        header: Row,
+        rows: Vec<Row>,
+        /// The caption from a `: Caption` paragraph directly after the table, empty for none.
+        caption: Vec<Inline>,
+    },
     /// `::: keep`: content that stays on one page.
     Keep {
         at: Location,
@@ -88,6 +98,27 @@ pub enum Block {
     PageBreak {
         at: Location,
     },
+}
+
+/// A table row with its cells in column order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub at: Location,
+    pub cells: Vec<Cell>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cell {
+    pub at: Location,
+    pub content: Vec<Inline>,
+}
+
+/// A column alignment set in a table's delimiter row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnAlign {
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Clone, PartialEq)]

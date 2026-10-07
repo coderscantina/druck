@@ -5,10 +5,12 @@
 //! chooses line breaks for each whole paragraph; [`pages`] chooses page and column breaks for the
 //! whole flow and places footnotes.
 //!
-//! An image is one line as tall as the image, kept with the lines of its caption.
+//! An image is one line as tall as the image, kept with the lines of its caption. A table row is
+//! one line; see [`table`].
 
 mod pages;
 mod paragraph;
+mod table;
 #[cfg(test)]
 mod tests;
 
@@ -39,6 +41,8 @@ pub fn layout(
         source,
         images,
         figures: 0,
+        tables: 0,
+        table_lines: Vec::new(),
         lines: Vec::new(),
         space: 0.0,
         after_paragraph: false,
@@ -49,6 +53,7 @@ pub fn layout(
     let body = flow.run(&document.blocks, Frame::full(&config.styles.body));
     let keeps = std::mem::take(&mut flow.keeps);
     let columns = std::mem::take(&mut flow.columns);
+    let tables = std::mem::take(&mut flow.table_lines);
     let mut notes = Vec::with_capacity(document.footnotes.len());
     let mut continued = Vec::with_capacity(document.footnotes.len());
     for (index, footnote) in document.footnotes.iter().enumerate() {
@@ -63,6 +68,7 @@ pub fn layout(
             body,
             keeps,
             columns,
+            tables,
             notes,
             continued,
         },
@@ -72,7 +78,7 @@ pub fn layout(
 }
 
 /// A line of content. Item coordinates are relative to the text area's left edge and the line's top.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Line {
     height: f64,
     baseline: f64,
@@ -127,6 +133,10 @@ struct Flow<'a> {
     images: &'a [Image],
     /// The number of captioned images so far, which numbers the next caption.
     figures: usize,
+    /// The number of captioned tables so far.
+    tables: usize,
+    /// The tables set so far, whose headers repeat on continuation pages and columns.
+    table_lines: Vec<pages::Table>,
     lines: Vec<FlowLine>,
     /// Space requested before the next line. Adjacent spaces collapse to the larger one.
     space: f64,
@@ -247,6 +257,22 @@ impl<'a> Flow<'a> {
                         line.after = Break::Forced;
                     }
                     continue;
+                }
+                Block::Table {
+                    at,
+                    align,
+                    header,
+                    rows,
+                    caption,
+                } => {
+                    let block = table::TableBlock {
+                        at: *at,
+                        align,
+                        header,
+                        rows,
+                        caption,
+                    };
+                    self.table(block, frame);
                 }
                 Block::Columns { blocks, .. } => self.columns(blocks, frame),
                 Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
@@ -380,24 +406,9 @@ impl<'a> Flow<'a> {
             Vec::new()
         } else {
             self.figures += 1;
-            let label = format!(
-                "{} {}{}",
-                self.config.labels.figure, self.figures, self.config.caption_separator
-            );
-            let label = Inline::Text {
-                text: label,
-                style: InlineStyle::default(),
-            };
-            let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
-            let lang = self.config.document.lang;
-            let inline = &self.config.inline;
-            let measure = width - 2.0 * style.indent.0;
-            match paragraph::lines(&content, style, inline, self.fonts, lang, measure, 0.0) {
-                Ok(lines) => lines,
-                Err(problem) => {
-                    self.errors.push(self.error(at, problem.to_string()));
-                    return;
-                }
+            match self.caption_lines(at, &self.config.labels.figure, self.figures, caption, width) {
+                Some(lines) => lines,
+                None => return,
             }
         };
 
@@ -449,6 +460,33 @@ impl<'a> Flow<'a> {
             self.push(translate_line(line, dx), at, after);
         }
         self.space(style.space_after.0);
+    }
+
+    /// The lines of a caption numbered `number` with `label`, set at `width` in the caption style, or
+    /// `None` after reporting why it cannot be set.
+    fn caption_lines(
+        &mut self,
+        at: Location,
+        label: &str,
+        number: usize,
+        caption: &[Inline],
+        width: f64,
+    ) -> Option<Vec<Line>> {
+        let style = &self.config.styles.caption;
+        let label = Inline::Text {
+            text: format!("{label} {number}{}", self.config.caption_separator),
+            style: InlineStyle::default(),
+        };
+        let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
+        let lang = self.config.document.lang;
+        let measure = width - 2.0 * style.indent.0;
+        match paragraph::lines(&content, style, &self.config.inline, self.fonts, lang, measure, 0.0) {
+            Ok(lines) => Some(lines),
+            Err(problem) => {
+                self.errors.push(self.error(at, problem));
+                None
+            }
+        }
     }
 
     /// The height of the lines at the end of the flow that the next line must stay with, such as a

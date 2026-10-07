@@ -8,18 +8,19 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Footnote, ImageFile, Inline, InlineStyle, Location};
+use crate::document::{Block, Cell, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, Location, Row};
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
+/// Tables become [`Block::Table`], with a `: Caption` paragraph after the table as its caption.
 /// Every construct that cannot be rendered yet is reported with its location. The result is
 /// either the complete document or every such diagnostic, never a document with content dropped.
 pub fn parse(body: &str, first_line: u64, source: &Source) -> Result<Document, Vec<Diagnostic>> {
-    // Tables, strikethrough, and task lists are enabled only so they can be recognised and reported.
+    // Strikethrough and task lists are enabled only so they can be recognised and reported.
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let directives = directive_lines(body, options);
@@ -112,6 +113,19 @@ struct LeafImage {
     closed: bool,
 }
 
+/// A table whose rows are being collected.
+struct TableState {
+    at: Location,
+    align: Vec<Option<ColumnAlign>>,
+    header: Option<Row>,
+    rows: Vec<Row>,
+    in_header: bool,
+    /// The start of the current row and the byte range of its source text without the line ending.
+    row_at: Location,
+    row_source: Range<usize>,
+    cells: Vec<Cell>,
+}
+
 struct CodeBlock {
     at: Location,
     first_line: u64,
@@ -129,6 +143,7 @@ struct Builder<'a> {
     blocks: Vec<Vec<Block>>,
     containers: Vec<Container>,
     leaf: Option<Leaf>,
+    table: Option<TableState>,
     code: Option<CodeBlock>,
     emphasis: u32,
     strong: u32,
@@ -162,6 +177,7 @@ impl<'a> Builder<'a> {
             blocks: vec![Vec::new()],
             containers: Vec::new(),
             leaf: None,
+            table: None,
             code: None,
             emphasis: 0,
             strong: 0,
@@ -360,15 +376,52 @@ impl<'a> Builder<'a> {
         else {
             return;
         };
-        self.push_block(match (level, image) {
+        let block = match (level, image) {
             (Some(level), _) => Block::Heading { at, level, content },
             (None, Some(image)) => Block::Image {
                 at: image.at,
                 image: image.index,
                 caption: content,
             },
-            (None, None) => Block::Paragraph { at, content },
-        });
+            (None, None) => {
+                let mut content = content;
+                if strip_caption_marker(&mut content) {
+                    self.table_caption(at, content);
+                    return;
+                }
+                Block::Paragraph { at, content }
+            }
+        };
+        self.push_block(block);
+    }
+
+    /// Attaches a `: Caption` paragraph to the table directly before it.
+    fn table_caption(&mut self, at: Location, content: Vec<Inline>) {
+        let follows_table = matches!(
+            self.blocks.last().and_then(|blocks| blocks.last()),
+            Some(Block::Table { caption, .. }) if caption.is_empty()
+        );
+        if !follows_table {
+            self.report_at(at, "a table caption must directly follow its table");
+            return;
+        }
+        let footnotes: Vec<Location> = content
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::FootnoteRef(index) => Some(self.references[*index].1),
+                _ => None,
+            })
+            .collect();
+        for footnote in footnotes {
+            self.report_at(footnote, "a table caption cannot hold footnotes");
+        }
+        let label = plain_text(&content);
+        if label.trim_end().ends_with('}') && label.contains("{#") {
+            self.report_at(at, "table labels are not supported yet");
+        }
+        if let Some(Block::Table { caption, .. }) = self.blocks.last_mut().and_then(|blocks| blocks.last_mut()) {
+            *caption = content;
+        }
     }
 
     fn close_implicit_leaf(&mut self) {
@@ -439,7 +492,7 @@ impl<'a> Builder<'a> {
             return;
         }
         match event {
-            Event::Start(tag) => self.start(tag, offset),
+            Event::Start(tag) => self.start(tag, range),
             Event::End(tag) => self.end(tag),
             Event::Text(text) => match self.code.as_mut() {
                 Some(code) => code.text.push_str(&text),
@@ -475,6 +528,11 @@ impl<'a> Builder<'a> {
             self.report_at(at, "a footnote cannot reference another footnote");
             return;
         }
+        if self.table.as_ref().is_some_and(|table| table.in_header) {
+            let message = "a table header cannot hold footnotes, because it repeats on every page";
+            self.report_at(at, message);
+            return;
+        }
         let key = label.to_lowercase();
         if let Some(&index) = self.referenced.get(&key) {
             let first = self.references[index].1.line;
@@ -507,7 +565,9 @@ impl<'a> Builder<'a> {
     fn image(&mut self, offset: usize, path: &str, title: &str) {
         let in_footnote = self.containers.iter().any(|c| matches!(c, Container::Footnote { .. }));
         let leaf = self.leaf.as_ref();
-        let problem = if in_footnote {
+        let problem = if self.table.is_some() {
+            Some("images are not allowed in table cells")
+        } else if in_footnote {
             Some("images are not allowed in footnotes")
         } else if leaf.is_some_and(|leaf| leaf.level.is_some()) {
             Some("images are not allowed in headings")
@@ -557,7 +617,8 @@ impl<'a> Builder<'a> {
         self.skip = 1;
     }
 
-    fn start(&mut self, tag: Tag<'_>, offset: usize) {
+    fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
+        let offset = range.start;
         match tag {
             Tag::Paragraph => self.open_leaf(offset, None, false),
             Tag::Heading { level, .. } => self.open_leaf(offset, Some(level as u8), false),
@@ -598,7 +659,47 @@ impl<'a> Builder<'a> {
             Tag::Strikethrough => self.report(offset, "strikethrough is not supported"),
             Tag::Image { dest_url, title, .. } => self.image(offset, &dest_url, &title),
             Tag::HtmlBlock => self.skip_reported(offset, "raw HTML is not rendered"),
-            Tag::Table(_) => self.skip_reported(offset, "tables are not supported yet"),
+            Tag::Table(align) => {
+                if self.containers.iter().any(|c| matches!(c, Container::Footnote { .. })) {
+                    self.skip_reported(offset, "tables are not allowed in footnotes");
+                    return;
+                }
+                self.close_implicit_leaf();
+                let at = self.location(offset);
+                self.table = Some(TableState {
+                    at,
+                    align: align.into_iter().map(column_align).collect(),
+                    header: None,
+                    rows: Vec::new(),
+                    in_header: false,
+                    row_at: at,
+                    row_source: offset..offset,
+                    cells: Vec::new(),
+                });
+            }
+            Tag::TableHead | Tag::TableRow => {
+                let row_at = self.location(offset);
+                let end = offset + self.body[range].trim_end().len();
+                if let Some(table) = self.table.as_mut() {
+                    table.in_header = matches!(tag, Tag::TableHead);
+                    table.row_at = row_at;
+                    table.row_source = offset..end;
+                    table.cells.clear();
+                }
+            }
+            Tag::TableCell => {
+                // A padded cell starts after the row, and a cell starts before its leading spaces.
+                let end = self.table.as_ref().map_or(offset, |table| table.row_source.end);
+                let start = offset.min(end);
+                let start = start + (self.body[start..end].len() - self.body[start..end].trim_start().len());
+                self.leaf = Some(Leaf {
+                    at: self.location(start),
+                    level: None,
+                    implicit: false,
+                    content: Vec::new(),
+                    image: None,
+                });
+            }
             Tag::FootnoteDefinition(label) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
@@ -610,6 +711,32 @@ impl<'a> Builder<'a> {
             }
             // Remaining tags need extensions that are not enabled.
             _ => {}
+        }
+    }
+
+    /// Keeps the finished body row, unless it is a caption written without a blank line before it.
+    /// pulldown-cmark drops cells beyond the header's without an event, so they are counted in
+    /// the source.
+    fn end_table_row(&mut self) {
+        let Some(table) = self.table.as_mut() else {
+            return;
+        };
+        let row = Row {
+            at: table.row_at,
+            cells: std::mem::take(&mut table.cells),
+        };
+        let too_many = cell_count(&self.body[table.row_source.clone()]) > table.align.len();
+        let caption = matches!(row.cells.split_first(), Some((first, rest))
+            if starts_with_caption_marker(&first.content) && rest.iter().all(|cell| cell.content.is_empty()));
+        let at = row.at;
+        if !caption {
+            table.rows.push(row);
+        }
+        if too_many {
+            self.report_at(at, "this row has more cells than the table header");
+        }
+        if caption {
+            self.report_at(at, "leave a blank line between a table and its caption");
         }
     }
 
@@ -657,6 +784,39 @@ impl<'a> Builder<'a> {
                     }
                 }
             }
+            TagEnd::TableCell => {
+                if let (Some(Leaf { at, content, .. }), Some(table)) = (self.leaf.take(), self.table.as_mut()) {
+                    table.cells.push(Cell { at, content });
+                }
+            }
+            TagEnd::TableHead => {
+                if let Some(table) = self.table.as_mut() {
+                    table.header = Some(Row {
+                        at: table.row_at,
+                        cells: std::mem::take(&mut table.cells),
+                    });
+                    table.in_header = false;
+                }
+            }
+            TagEnd::TableRow => self.end_table_row(),
+            TagEnd::Table => {
+                if let Some(TableState {
+                    at,
+                    align,
+                    header: Some(header),
+                    rows,
+                    ..
+                }) = self.table.take()
+                {
+                    self.push_block(Block::Table {
+                        at,
+                        align,
+                        header,
+                        rows,
+                        caption: Vec::new(),
+                    });
+                }
+            }
             TagEnd::Emphasis => self.emphasis -= 1,
             TagEnd::Strong => self.strong -= 1,
             TagEnd::Link => {
@@ -675,6 +835,56 @@ impl<'a> Builder<'a> {
 const ALONE: &str = "an image must stand alone in its paragraph";
 const BROKEN_IMAGE: &str = "this image is not valid Markdown: write ![Caption](file.png), with <> around a path \
     that has spaces; a caption cannot hold footnotes";
+
+fn column_align(align: Alignment) -> Option<ColumnAlign> {
+    match align {
+        Alignment::None => None,
+        Alignment::Left => Some(ColumnAlign::Left),
+        Alignment::Center => Some(ColumnAlign::Center),
+        Alignment::Right => Some(ColumnAlign::Right),
+    }
+}
+
+/// The number of cells a table row's source line holds, counting unescaped pipes. One leading and
+/// one trailing pipe only frame the row.
+fn cell_count(line: &str) -> usize {
+    let line = line.trim();
+    let (mut pipes, mut escaped, mut last_is_pipe) = (0, false, false);
+    for c in line.chars() {
+        last_is_pipe = c == '|' && !escaped;
+        pipes += usize::from(last_is_pipe);
+        escaped = c == '\\' && !escaped;
+    }
+    pipes + 1 - usize::from(line.starts_with('|')) - usize::from(last_is_pipe)
+}
+
+fn starts_with_caption_marker(content: &[Inline]) -> bool {
+    matches!(content.first(), Some(Inline::Text { text, style }) if !style.code && text.starts_with(": "))
+}
+
+/// Removes the `: ` that starts a table caption and returns whether there was one.
+fn strip_caption_marker(content: &mut Vec<Inline>) -> bool {
+    if !starts_with_caption_marker(content) {
+        return false;
+    }
+    if let Some(Inline::Text { text, .. }) = content.first_mut() {
+        text.drain(..2);
+        if text.is_empty() {
+            content.remove(0);
+        }
+    }
+    true
+}
+
+fn plain_text(content: &[Inline]) -> String {
+    content
+        .iter()
+        .filter_map(|inline| match inline {
+            Inline::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
 
 fn fence_name(fence: Fence) -> &'static str {
     match fence {
@@ -870,7 +1080,6 @@ mod tests {
             ("<div>\nhi\n</div>", "raw HTML is not rendered"),
             ("a <b>x</b>", "raw HTML is not rendered"),
             ("---", "thematic breaks are not supported"),
-            ("| a |\n|---|\n| b |", "tables are not supported yet"),
             ("- [ ] todo", "task lists are not supported"),
             ("~~gone~~", "strikethrough is not supported"),
         ];
@@ -1116,5 +1325,198 @@ mod tests {
             );
         }
         assert!(parse("a \\[^x] b", 1, &source()).is_ok());
+    }
+
+    fn cell(line: u64, column: u64, content: Vec<Inline>) -> Cell {
+        Cell {
+            at: at(line, column),
+            content,
+        }
+    }
+
+    fn table(body: &str) -> Block {
+        blocks(body).remove(0)
+    }
+
+    #[test]
+    fn parses_tables_with_alignment_styles_and_padded_cells() {
+        let em = InlineStyle {
+            emphasis: true,
+            ..Default::default()
+        };
+        let code = InlineStyle {
+            code: true,
+            ..Default::default()
+        };
+        let link = InlineStyle {
+            link: Some("https://a.b/".into()),
+            ..Default::default()
+        };
+        let body = "| A | B | C | D |\n|:--|:-:|--:|---|\n| *x* | `y` | [z](https://a.b/) | w |\n| short |\n";
+        assert_eq!(
+            table(body),
+            Block::Table {
+                at: at(1, 1),
+                align: vec![
+                    Some(ColumnAlign::Left),
+                    Some(ColumnAlign::Center),
+                    Some(ColumnAlign::Right),
+                    None
+                ],
+                header: Row {
+                    at: at(1, 1),
+                    cells: vec![
+                        cell(1, 3, vec![plain("A")]),
+                        cell(1, 7, vec![plain("B")]),
+                        cell(1, 11, vec![plain("C")]),
+                        cell(1, 15, vec![plain("D")]),
+                    ],
+                },
+                rows: vec![
+                    Row {
+                        at: at(3, 1),
+                        cells: vec![
+                            cell(3, 3, vec![text("x", em)]),
+                            cell(3, 9, vec![text("y", code)]),
+                            cell(3, 15, vec![text("z", link)]),
+                            cell(3, 35, vec![plain("w")]),
+                        ],
+                    },
+                    Row {
+                        at: at(4, 1),
+                        cells: vec![
+                            cell(4, 3, vec![plain("short")]),
+                            cell(4, 10, Vec::new()),
+                            cell(4, 10, Vec::new()),
+                            cell(4, 10, Vec::new()),
+                        ],
+                    },
+                ],
+                caption: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn takes_the_paragraph_after_a_table_as_its_caption() {
+        let em = InlineStyle {
+            emphasis: true,
+            ..Default::default()
+        };
+        let blocks = blocks("| a |\n|---|\n| b |\n\n: The *table*\n\nAfter\n");
+        assert_eq!(blocks.len(), 2);
+        let Block::Table { caption, .. } = &blocks[0] else {
+            panic!("table")
+        };
+        assert_eq!(caption, &vec![plain("The "), text("table", em)]);
+        assert_eq!(blocks[1], paragraph(7, 1, "After"));
+    }
+
+    #[test]
+    fn parses_tables_in_lists_quotes_and_layout_containers() {
+        let body = "::: columns\n| a |\n|---|\n:::\n\n- | a |\n  |---|\n  | b |\n\n> | a |\n> |---|\n";
+        let blocks = blocks(body);
+        let Block::Columns { blocks: inner, .. } = &blocks[0] else {
+            panic!("columns")
+        };
+        assert!(matches!(
+            inner[0],
+            Block::Table {
+                at: Location { line: 2, column: 1 },
+                ..
+            }
+        ));
+        let Block::List { items, .. } = &blocks[1] else {
+            panic!("list")
+        };
+        let Block::Table { rows, .. } = &items[0][0] else {
+            panic!("table")
+        };
+        assert_eq!(rows[0].cells, vec![cell(8, 5, vec![plain("b")])]);
+        let Block::Quote { blocks: quoted, .. } = &blocks[2] else {
+            panic!("quote")
+        };
+        assert!(matches!(
+            quoted[0],
+            Block::Table {
+                at: Location { line: 10, column: 3 },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn reports_table_errors() {
+        let cases = [
+            (
+                "| a |\n|---|\n| b | c |",
+                (3, 1),
+                "this row has more cells than the table header",
+            ),
+            (
+                "| a |\n|---|\n| b | c \\| d |\n| e |",
+                (3, 1),
+                "this row has more cells than the table header",
+            ),
+            (
+                "| a |\n|---|\n| ![i](i.png) |",
+                (3, 3),
+                "images are not allowed in table cells",
+            ),
+            (
+                "| a[^n] |\n|---|\n| b |\n\n[^n]: n",
+                (1, 4),
+                "a table header cannot hold footnotes, because it repeats on every page",
+            ),
+            (
+                "a[^n]\n\n[^n]: | a |\n    |---|",
+                (3, 7),
+                "tables are not allowed in footnotes",
+            ),
+            (
+                "text\n\n: Caption",
+                (3, 1),
+                "a table caption must directly follow its table",
+            ),
+            (
+                "| a |\n|---|\n\n: One\n\n: Two",
+                (6, 1),
+                "a table caption must directly follow its table",
+            ),
+            (
+                "| a |\n|---|\n\n: Caption {#tbl-a}",
+                (4, 1),
+                "table labels are not supported yet",
+            ),
+            (
+                "| a |\n|---|\n\n: Caption[^n]\n\n[^n]: n",
+                (4, 10),
+                "a table caption cannot hold footnotes",
+            ),
+            (
+                "| a |\n|---|\n| b |\n: Caption",
+                (4, 1),
+                "leave a blank line between a table and its caption",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn numbers_footnotes_in_table_cells_in_reading_order() {
+        let body = "A[^a]\n\n| h |\n|---|\n| b[^b] |\n\nC[^c]\n\n[^a]: a\n\n[^b]: b\n\n[^c]: c\n";
+        let document = parse(body, 1, &source()).unwrap();
+        let Block::Table { rows, .. } = &document.blocks[1] else {
+            panic!("table")
+        };
+        assert_eq!(rows[0].cells[0].content, vec![plain("b"), Inline::FootnoteRef(1)]);
+        let notes: Vec<_> = document.footnotes.iter().map(|note| note.at.line).collect();
+        assert_eq!(notes, vec![9, 11, 13]);
     }
 }
