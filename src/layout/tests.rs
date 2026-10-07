@@ -255,25 +255,6 @@ fn hyphenation_across_style_changes_keeps_each_style() {
 }
 
 #[test]
-fn a_hyphen_of_the_text_at_a_line_end_extracts_as_a_non_breaking_hyphen() {
-    let config = config();
-    let words = "state-of-the-art e-mail typographical ".repeat(12);
-    let lines = set(
-        &[text(&words, InlineStyle::default())],
-        &config.styles.body,
-        Lang::En,
-        200.0,
-    );
-    let ends: Vec<&str> = lines.iter().map(|line| line[line.len() - 1].1.text.as_str()).collect();
-
-    assert!(ends.iter().any(|end| end.ends_with('\u{2011}')), "{ends:?}");
-    assert!(
-        ends.iter().any(|end| end.starts_with("typo") && end.ends_with('-')),
-        "{ends:?}"
-    );
-}
-
-#[test]
 fn tracked_ragged_lines_end_at_their_last_glyph() {
     let config = config();
     let style = Style {

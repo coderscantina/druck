@@ -255,7 +255,7 @@ impl Prepared<'_> {
                 let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
                 start = mark.at;
                 let indent = if index == 0 { first_indent } else { 0.0 };
-                let mut items = position(
+                let items = position(
                     runs,
                     &self.spaces,
                     style.align,
@@ -265,12 +265,6 @@ impl Prepared<'_> {
                     baseline,
                     self.inline.link_underline,
                 );
-                if !mark.hyphen
-                    && let Some(Item::Text { run, .. }) =
-                        items.iter_mut().rev().find(|item| matches!(item, Item::Text { .. }))
-                {
-                    keep_final_hyphen(run);
-                }
                 Line {
                     height,
                     baseline,
@@ -682,21 +676,6 @@ fn position(
         x += width;
     }
     items
-}
-
-/// Makes a hyphen of the text that ends a line extract as a non-breaking hyphen (U+2011). PDF
-/// readers take a hyphen, soft hyphen, or U+2010 at a line end for an added one and drop it when
-/// they join the lines, which would turn "state-of-the-|art" into "state-of-theart". Added
-/// hyphens keep their `-`, so readers join those words as intended.
-fn keep_final_hyphen(run: &mut ShapedRun) {
-    let Some(hyphen) = run.text.strip_suffix(['-', '\u{2010}']).map(str::len) else {
-        return;
-    };
-    run.text.truncate(hyphen);
-    run.text.push('\u{2011}');
-    if let Some(glyph) = run.glyphs.iter_mut().rev().find(|glyph| glyph.text.start == hyphen) {
-        glyph.text.end = run.text.len();
-    }
 }
 
 /// The baseline offset from the top of a line of `height`, centering the font's ascender and descender.
