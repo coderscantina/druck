@@ -13,7 +13,7 @@
 //! A sentence ends with a period unless it already ends with `.`, `?`, `!`, or a link.
 
 use crate::config::theme::Lang;
-use crate::document::{Inline, InlineStyle};
+use crate::document::{Inline, InlineStyle, Link};
 
 use super::entry::{Entry, Kind, Lead, ThesisKind};
 use super::words::{Words, words};
@@ -62,7 +62,7 @@ impl Sentence {
         self.push(
             url,
             InlineStyle {
-                link: Some(url.to_owned()),
+                link: Some(Link::Url(url.to_owned())),
                 ..InlineStyle::default()
             },
         );
