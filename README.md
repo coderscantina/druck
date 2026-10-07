@@ -2,7 +2,9 @@
 
 A native Rust Markdown-to-PDF renderer for carefully typeset articles, reports, and short manuscripts.
 
-The CLI renders prose, headings, lists, quotations, and code to PDF. Line and page breaking are still simple; tables, images, footnotes, citations, and layout directives arrive in later milestones.
+The CLI renders complete documents to PDF: paragraph-wide line breaking with English and German hyphenation, scored page breaks, footnotes, one and two columns, images, tables, title pages, contents, cross-references, and citations from BibTeX. Release acceptance (milestone 10) is still open.
+
+Kyber's own license is not chosen yet, so do not distribute builds. Third-party licenses are listed in [the notices](THIRD_PARTY_NOTICES.md).
 
 ```sh
 cargo run -- render samples/en.md -o en.pdf
@@ -15,6 +17,7 @@ cargo run -- check report.md --theme my-theme.json --set toc=true --print-config
 - [Phase 1 milestones](docs/PHASE_1_MILESTONES.md): implementation sequence and completion gates.
 - [Progress](docs/PROGRESS.md): current state and next action.
 - [Decisions](docs/DECISIONS.md): settled implementation choices.
+- [Release](docs/RELEASE.md): building, checking, and packaging a release.
 - [Phase 2 public crate/API](docs/RUST_CRATE_API_PHASE_2.md): native client integration after phase 1.
 
 ## Starting an implementation session
