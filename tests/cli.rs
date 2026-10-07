@@ -28,7 +28,13 @@ impl Sandbox {
         let root = std::env::temp_dir().join(format!("druck-cli-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("cwd")).expect("create sandbox");
-        let root = root.canonicalize().expect("canonical sandbox path");
+        // Resolves symlinks like macOS's `/var`. Windows canonical paths gain a `\\?\` prefix
+        // the binary's working directory lacks, and its temp directory needs no resolving.
+        let root = if cfg!(windows) {
+            root
+        } else {
+            root.canonicalize().expect("canonical sandbox path")
+        };
         Self {
             cwd: root.join("cwd"),
             root,
@@ -82,6 +88,11 @@ fn run_in(cwd: &Path, args: &[&str]) -> Run {
         stdout: String::from_utf8(output.stdout).expect("utf-8 stdout"),
         stderr: String::from_utf8(output.stderr).expect("utf-8 stderr"),
     }
+}
+
+/// The path with the platform's separators, as the binary reports it.
+fn native(path: &str) -> PathBuf {
+    Path::new(path).components().collect()
 }
 
 fn assert_pt(config: &Value, pointer: &str, expected: f64) {
@@ -152,14 +163,14 @@ fn loads_a_document_with_a_partial_theme_and_tracks_resource_origins() {
     let document = format!("{FIXTURES}/doc.md");
     let config = sandbox.config(&[&document]);
 
-    let theme_dir = format!("{FIXTURES}/themes");
+    let fixtures = native(FIXTURES);
     assert_eq!(
         config["fonts"]["Fixture Serif"]["regular"],
-        json!({"origin": "theme", "dir": theme_dir, "path": "fonts/dummy.otf", "index": 0})
+        json!({"origin": "theme", "dir": fixtures.join("themes"), "path": "fonts/dummy.otf", "index": 0})
     );
     assert_eq!(
         config["bibliography-file"],
-        json!({"origin": "document", "dir": FIXTURES, "path": "refs.bib"})
+        json!({"origin": "document", "dir": fixtures, "path": "refs.bib"})
     );
     assert_eq!(config["fonts"]["Libertinus Mono"]["regular"]["origin"], "bundled");
     assert_eq!(config["styles"]["body"]["font"], "Fixture Serif");
