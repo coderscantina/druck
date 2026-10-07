@@ -27,7 +27,7 @@ Front matter cannot redefine templates (title slots, headers, footers). That bel
 
 ### Metadata
 
-Metadata is plain text. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
+Metadata is plain text. A number or boolean is read as its text, so `date: 2024` needs no quotes; in `meta` and `--set`, a decimal such as `1.50` reads as `1.5`, so quote it to keep the zero. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
 
 | Key | Type | Effect |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ Metadata is plain text. It is inserted into templates as text only: `*word*` sta
 
 Metadata fills the title block at the start of the first page, or the separate title page with `title-page: true`. See [document structure](#document-structure).
 
-`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Numbers must be quoted, as in `offer: "2026-117"`. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
+`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
 
 ```yaml
 meta:
@@ -100,7 +100,7 @@ Notes:
 
 - A single `margins` length sets all four sides. A map sets only the sides it lists.
 - Lengths use `pt`, `mm`, `cm`, `in`, or `em`. See [measurements](THEMES.md#measurements). `font-size` must be an absolute length because `em` sizes refer to it.
-- `fonts.*` changes the font tokens. A theme only follows them if its styles reference `$fonts.body`, `$fonts.heading`, and `$fonts.mono`. The bundled theme does.
+- `fonts.*` changes the font tokens. A theme only follows them if its styles reference `$fonts.body`, `$fonts.heading`, and `$fonts.mono`. The bundled theme does. A font setting that no style references prints a `warning:` line and has no effect.
 - Settings are checked like theme values. A font family must exist in the theme, in `font-files`, or among the installed fonts, and must have the faces the styles request. A missing installed family, weight, or style is an error naming what was searched for. A font whose license restricts embedding is embedded with a warning.
 
 ## Command line
@@ -110,7 +110,7 @@ kyber check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
 kyber render <doc.md> [-o PATH]
 ```
 
-`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, and reports problems. `--print-config` prints the resolved configuration as JSON.
+`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, parses the Markdown body, reads the images and the `.bib` file, resolves citations, and reports the same problems as `render` up to layout. Problems that only layout finds, such as a word wider than its line, show up in `render`. `--print-config` prints the resolved configuration as JSON.
 
 `render` validates the same way, then parses the Markdown, lays it out, and writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
@@ -172,7 +172,7 @@ The following are reported as errors with their line and column, and no PDF is w
 
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
-A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
+A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` does not lay out the document, so it does not find these.
 
 ## Pages
 
@@ -200,7 +200,7 @@ An image stands alone in its paragraph. Its description becomes the caption:
 
 An image keeps its place in the text. There are no floats and text never wraps around an image. The image is centered and its caption follows below it. The two stay together: when they do not fit in the rest of a page or column, both move to the next column or page, and the page or column they leave ends short.
 
-Raster images count one pixel as one point (72 per inch), SVG images use 96 pixels per inch. An image appears at that natural size unless it is too large. Then it shrinks, keeping its proportions, to the width of the text area or, inside `columns`, of the column. It also shrinks until it fits the height of a page together with its caption and a heading directly above it. Images never grow beyond their natural size. Put an image in a `full-width` block to give it the whole text width inside a column section.
+A PNG or JPEG with a stored density (PNG `pHYs` in meters, JPEG JFIF, else JPEG EXIF resolution) appears at its pixels divided by that density, so a 144 dpi screenshot is half as wide as its pixel count in points. Without a density, raster images count one pixel as one point (72 per inch). Aspect-only JFIF values do not count. SVG images use 96 pixels per inch. An image appears at that natural size unless it is too large. Then it shrinks, keeping its proportions, to the width of the text area or, inside `columns`, of the column. It also shrinks until it fits the height of a page together with its caption and a heading directly above it. Images never grow beyond their natural size. Put an image in a `full-width` block to give it the whole text width inside a column section.
 
 Errors name the image's line and file: a missing or unreadable file, a malformed or unsupported image, and an image whose caption fills the whole page. An image inside a heading, a link, or a footnote is an error, and so is text in the same paragraph as an image. A paragraph that starts like an image but is not valid image syntax is an error too, rather than being printed as text.
 
@@ -222,7 +222,7 @@ Tables are pipe tables as on GitHub, or [list tables](#list-tables) for cells wi
 - Cells hold text with emphasis, strong text, inline code, links, and footnote references. Write `\|` for a pipe inside a cell, also inside code.
 - A row with fewer cells than the header gets empty cells. A row with more cells is an error.
 - Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
-- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table. Tables are numbered apart from figures. A table without a caption has no number.
+- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table, as wide as the table and starting at its left edge. Tables are numbered apart from figures. A table without a caption has no number.
 - A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references).
 
 Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.

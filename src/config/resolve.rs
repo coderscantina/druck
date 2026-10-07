@@ -4,7 +4,7 @@
 //! earlier value. The merged result is then checked for references and combinations.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
@@ -98,6 +98,8 @@ struct Resolver<'a> {
     errors: RefCell<Vec<Diagnostic>>,
     /// Families not defined in `fonts`, with the faces requested and the first property requesting each.
     installed: RefCell<BTreeMap<String, BTreeMap<Face, String>>>,
+    /// Font tokens that a style uses, directly or through other tokens.
+    used_font_tokens: RefCell<BTreeSet<TokenName>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -114,6 +116,7 @@ impl<'a> Resolver<'a> {
             },
             errors: RefCell::new(Vec::new()),
             installed: RefCell::new(BTreeMap::new()),
+            used_font_tokens: RefCell::new(BTreeSet::new()),
         };
         resolver.tokens = Tokens {
             fonts: resolver.token_table(&theme.tokens.fonts),
@@ -252,9 +255,55 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// Records a font token and the tokens it refers to.
+    fn mark_font_token_used(&self, token: &TokenName) {
+        let mut used = self.used_font_tokens.borrow_mut();
+        let mut next = Some(token);
+        while let Some(token) = next.take() {
+            if !used.insert(token.clone()) {
+                break;
+            }
+            if let Some(Spec::Token(target)) = self.theme.tokens.fonts.get(token) {
+                next = Some(target);
+            }
+        }
+    }
+
+    /// A warning for each font token that front matter or an override sets while no style uses it.
+    fn unused_font_warnings(&self, document: &SettingsInput, overrides: &SettingsInput) -> Vec<Diagnostic> {
+        let used = self.used_font_tokens.borrow();
+        let mut warnings = Vec::new();
+        for token in ["body", "heading", "mono"] {
+            let is_set = |input: &SettingsInput| {
+                input.settings.fonts.as_ref().is_some_and(|fonts| match token {
+                    "body" => fonts.body.is_some(),
+                    "heading" => fonts.heading.is_some(),
+                    _ => fonts.mono.is_some(),
+                })
+            };
+            let input = if is_set(overrides) {
+                overrides
+            } else if is_set(document) {
+                document
+            } else {
+                continue;
+            };
+            if !used.contains(token) {
+                let message = format!("no style uses the $fonts.{token} token, so this setting has no effect");
+                warnings.push(
+                    Diagnostic::warning(Some(input.source.clone()), message).property(Some(format!("fonts.{token}"))),
+                );
+            }
+        }
+        warnings
+    }
+
     /// A font family name with the requested face. A family defined in `fonts` must have the face; any
     /// other family is recorded for lookup among installed fonts.
     fn font(&self, spec: &Spec<FontName>, property: &str, weight: Weight, style: FontStyle) -> Option<String> {
+        if let Spec::Token(token) = spec {
+            self.mark_font_token_used(token);
+        }
         let name = self.value(&self.tokens.fonts, spec, property)?.0;
         let face = Face { weight, style };
         let Some(family) = self.theme.fonts.get(&name) else {
@@ -962,6 +1011,7 @@ impl<'a> Resolver<'a> {
             title_page: title_page?,
             pages: pages?,
             labels: theme.labels.get(theme.document.lang).clone(),
+            warnings: self.unused_font_warnings(document, overrides),
         })
     }
 }

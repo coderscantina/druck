@@ -52,6 +52,7 @@ use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
 
 pub use self::titles::check as check_title;
+pub use self::titles::images as title_images;
 
 /// The most layout passes spent on page numbers that change the layout they come from.
 const PASSES: usize = 5;
@@ -734,7 +735,10 @@ impl<'a> Flow<'a> {
             ..frame
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
-        self.space(style.space_before.0);
+        let outermost = frame.list_depth == 0;
+        if outermost {
+            self.space(style.space_before.0);
+        }
         for (index, item) in items.iter().enumerate() {
             if index > 0 {
                 self.space(item_spacing.0);
@@ -763,7 +767,9 @@ impl<'a> Flow<'a> {
         if style.keep_with_next && self.lines.len() > start_line {
             self.keep_last();
         }
-        self.space(style.space_after.0);
+        if outermost {
+            self.space(style.space_after.0);
+        }
     }
 
     /// Sets a column section at the column width, which divides the prose width. Full-width blocks inside
@@ -820,10 +826,12 @@ impl<'a> Flow<'a> {
         let width = self.width(frame);
         let caption = match figure {
             None => Vec::new(),
-            Some(figure) => match self.caption_lines(at, &self.config.labels.figure, figure.number, caption, width) {
-                Some(lines) => lines,
-                None => return,
-            },
+            Some(figure) => {
+                match self.caption_lines(at, &self.config.labels.figure, figure.number, caption, width, false) {
+                    Some(lines) => lines,
+                    None => return,
+                }
+            }
         };
 
         // A figure is spaced like its caption: the caption's space after it, and its space before
@@ -881,7 +889,8 @@ impl<'a> Flow<'a> {
     }
 
     /// The lines of a caption numbered `number` with `label`, set at `width` in the caption style, or
-    /// `None` after reporting why it cannot be set.
+    /// `None` after reporting why it cannot be set. With `widen`, a width that is too narrow for the
+    /// caption's longest word grows to fit it.
     fn caption_lines(
         &mut self,
         at: Location,
@@ -889,6 +898,7 @@ impl<'a> Flow<'a> {
         number: usize,
         caption: &[Inline],
         width: f64,
+        widen: bool,
     ) -> Option<Vec<Line>> {
         let style = &self.config.styles.caption;
         let label = Inline::Text {
@@ -896,7 +906,19 @@ impl<'a> Flow<'a> {
             style: InlineStyle::default(),
         };
         let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
-        match self.set(&content, style, width - 2.0 * style.indent.0, 0.0) {
+        let mut width = width - 2.0 * style.indent.0;
+        if widen {
+            let lang = self.config.document.lang;
+            let resolved = self.resolve(&content);
+            match paragraph::prepare(&resolved, style, &self.config.inline, self.fonts, lang) {
+                Ok(prepared) => width = width.max(prepared.minimum().0 + 1e-6),
+                Err(problem) => {
+                    self.errors.push(self.error(at, problem));
+                    return None;
+                }
+            }
+        }
+        match self.set(&content, style, width, 0.0) {
             Ok(lines) => Some(lines),
             Err(problem) => {
                 self.errors.push(self.error(at, problem));

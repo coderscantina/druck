@@ -591,3 +591,83 @@ fn reports_citations_without_a_bibliography_or_entry_at_their_location() {
     );
     assert!(!sandbox.root.join("doc.pdf").exists());
 }
+
+#[test]
+fn check_reads_the_body_and_the_bibliography_without_writing_a_pdf() {
+    let bib = "@book{bad, title = {T}}\n";
+    let (sandbox, document, bib) = citation_sandbox("check-body", "Text [@bad].\n", bib);
+    let stderr = sandbox.rejection(&[&document]);
+    assert!(
+        stderr.contains(&format!("{bib}:1:1: entry `bad` is missing")),
+        "{stderr}"
+    );
+
+    let document = sandbox.write("body.md", "# A\n\nText [^missing].\n");
+    let stderr = sandbox.rejection(&[&document]);
+    assert!(stderr.contains(&format!("{document}:3:")), "{stderr}");
+    assert!(!sandbox.root.join("body.pdf").exists());
+}
+
+#[test]
+fn accepts_numbers_for_text_settings_in_front_matter_and_set() {
+    let sandbox = Sandbox::new("numbers");
+    let document = sandbox.write("doc.md", "---\nmeta:\n  offer: 2026\n---\nText.\n");
+    let config = sandbox.config(&[&document, "--set", "date=2024", "--set", "title=1.50"]);
+    assert_eq!(config["metadata"]["date"], "2024");
+    assert_eq!(config["metadata"]["title"], "1.50");
+    assert_eq!(config["metadata"]["meta"]["offer"], "2026");
+}
+
+#[test]
+fn warns_about_font_settings_no_style_uses() {
+    let sandbox = Sandbox::new("unused-font");
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({
+            "version": 1,
+            "styles": {"code-block": {"font": "Libertinus Mono"}},
+            "inline": {"code": {"font": "Libertinus Mono"}},
+        }),
+    );
+    let document = sandbox.write("doc.md", "---\nfonts:\n  mono: Libertinus Mono\n---\nText.\n");
+    let run = sandbox.run(&["check", &document, "--theme", &theme]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(
+        run.stderr.contains("warning: ") && run.stderr.contains("fonts.mono: no style uses the $fonts.mono token"),
+        "{}",
+        run.stderr
+    );
+    let run = sandbox.run(&["check", &document]);
+    assert!(!run.stderr.contains("warning"), "{}", run.stderr);
+}
+
+#[test]
+fn shows_normalized_paths_relative_to_the_working_directory() {
+    let sandbox = Sandbox::new("paths");
+    fs::create_dir(sandbox.cwd.join("doc")).unwrap();
+    fs::write(
+        sandbox.cwd.join("doc/a.md"),
+        "---\ntheme: ../missing.json\n---\nText.\n",
+    )
+    .unwrap();
+    let stderr = sandbox.rejection(&["doc/../doc/a.md"]);
+    assert!(stderr.starts_with("error: missing.json:"), "{stderr}");
+    assert!(!stderr.contains(".."), "{stderr}");
+}
+
+#[test]
+fn decodes_only_theme_images_the_title_layout_shows() {
+    let sandbox = Sandbox::new("theme-images");
+    sandbox.write("broken.png", "not an image");
+    let slot = json!({"image": "logo", "width": "2cm", "style": "title"});
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({"version": 1, "images": {"logo": "broken.png"}, "title-page": {"groups": [{"anchor": "top-left", "slots": [slot]}]}}),
+    );
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\nText.\n");
+    let run = sandbox.run(&["check", &document, "--theme", &theme]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+
+    let stderr = sandbox.rejection(&[&document, "--theme", &theme, "--set", "title-page=true"]);
+    assert!(stderr.contains("images.logo"), "{stderr}");
+}

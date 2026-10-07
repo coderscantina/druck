@@ -200,6 +200,25 @@ fn a_wide_table_wider_than_the_prose_starts_where_the_prose_starts() {
 }
 
 #[test]
+fn a_caption_starts_at_the_table_and_is_no_wider_than_it() {
+    let body = "| Column header | Another header |\n|---|---|\n| a | b |\n\n: A caption that is longer than the table is wide.\n";
+    let (_, pages) = render(body);
+    let page = &pages[0];
+    let rule = rects(page)[0];
+    let first = find(page, "Table");
+    assert!(close(first.0, rule.x.0), "{} against {}", first.0, rule.x.0);
+    let caption_end = runs(page)
+        .into_iter()
+        .filter(|(_, y, _)| *y < first.1 + 1.0)
+        .map(|(x, _, run)| x + run.width.0)
+        .fold(0.0, f64::max);
+    assert!(
+        caption_end <= rule.x.0 + rule.width.0 + 0.01,
+        "{caption_end} past {rule:?}"
+    );
+}
+
+#[test]
 fn band_slots_take_custom_styles_with_capitals_and_tracking() {
     let (config, pages) = render("Text.\n");
     let (_, _, run) = find(&pages[0], "PAGE 1");

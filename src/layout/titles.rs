@@ -18,7 +18,7 @@
 //! breaks are spaces.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::paragraph;
 use super::{Break, Flow, Frame, Line, translate_line};
@@ -58,6 +58,18 @@ pub fn check(config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
         })
         .collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
+/// The theme images that the title layout in use shows.
+pub fn images(config: &Config) -> HashSet<&Resource> {
+    active(config)
+        .into_iter()
+        .flat_map(|(_, slots)| slots)
+        .filter_map(|slot| match &slot.content {
+            SlotContent::Image { image, .. } => Some(image),
+            SlotContent::Text(_) => None,
+        })
+        .collect()
 }
 
 /// The property prefix and slots of each part of the title layout in use.

@@ -143,7 +143,7 @@ A font whose license (the OS/2 `fsType` field) restricts embedding or subsetting
 
 Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: the nearest weight first, then the requested style. For weights from 400 to 500, the weights up to 500 are tried first, then lighter ones, then heavier ones; below 400 lighter ones come first, above 500 heavier ones, as in CSS. So bold-italic falls back to bold, then italic, and italic falls back to regular. Strong text sets weight 700, or keeps a heavier weight of its style. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering with the default theme never depends on installed fonts.
 
-`images` maps a name to a file path. Title slots refer to images by that name. Images in the document body are not part of the theme; they resolve relative to the document.
+`images` maps a name to a file path. Title slots refer to images by that name. Only the images that the title layout in use shows are read, so an unused image is not decoded. Images in the document body are not part of the theme; they resolve relative to the document.
 
 Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `kyber check` reports missing ones.
 
@@ -182,6 +182,8 @@ Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
 
 ## Custom styles
+
+The `space-before` and `space-after` of the `list` style apply to a list that is not inside another list, and collapse with the space of neighbouring blocks to the larger value. The default theme sets both to `$spacing.block`, as for quotations and code. Items of a nested list follow their parent item at `lists.item-spacing`.
 
 `custom-styles` names styles that documents apply to headings, paragraphs, lists, and table rows and cells with `{.name}`, see [authoring](AUTHORING.md#custom-styles). Title and band slots may name them too. Each is based on another style and lists only what it changes:
 
@@ -230,7 +232,7 @@ Captions use `styles.caption`. A caption reads "Figure 1: " and then the image d
 
 Images are centered in their frame. Their size and placement have no theme settings; see [authoring](AUTHORING.md#images-and-captions).
 
-Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the width of its frame, and spaced like figure captions.
+Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the table's own width from its left edge, and spaced like figure captions.
 
 ## Tables
 
@@ -245,7 +247,7 @@ Header cells use `styles.table-header` and body cells `styles.table-cell`. A row
 
 Rule thicknesses use the table cell size for `em`. The default theme draws all three as hairlines in the `rule` color. A row style's `rule-below` replaces the rule below that row, see [custom styles](#custom-styles); totals rows without rules use `"rule-below": "none"`.
 
-Columns take their natural width when the table fits, else they share the width as described in [authoring](AUTHORING.md#tables). A table narrower than its frame is centered in it. A table listed in `page.wide` that fits in the prose width is centered there; a wider one starts where the prose starts and takes the width it needs, up to the frame. Its caption is set across the same width.
+Columns take their natural width when the table fits, else they share the width as described in [authoring](AUTHORING.md#tables). A table narrower than its frame is centered in it. A table listed in `page.wide` that fits in the prose width is centered there; a wider one starts where the prose starts and takes the width it needs, up to the frame.
 
 There are no vertical rules. A table is spaced like a figure: the caption style's `space-after` above and below it, and its `space-before` between the caption and the table. The header row, with its rules, repeats at the top of each page or column a table continues in.
 

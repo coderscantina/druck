@@ -13,6 +13,8 @@ pub struct Diagnostic {
     /// Dotted property path, such as `styles.body.size`.
     pub property: Option<String>,
     pub message: String,
+    /// A warning does not stop the run.
+    pub warning: bool,
 }
 
 impl Diagnostic {
@@ -22,6 +24,14 @@ impl Diagnostic {
             location: None,
             property: None,
             message: message.into(),
+            warning: false,
+        }
+    }
+
+    pub fn warning(source: Option<Source>, message: impl Into<String>) -> Self {
+        Self {
+            warning: true,
+            ..Self::new(source, message)
         }
     }
 
@@ -38,7 +48,7 @@ impl Diagnostic {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("error: ")?;
+        f.write_str(if self.warning { "warning: " } else { "error: " })?;
         if let Some(source) = &self.source {
             write!(f, "{source}")?;
             if let Some((line, column)) = self.location {

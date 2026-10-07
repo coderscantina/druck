@@ -652,7 +652,37 @@ Not started.
 
 ### Configuration and CLI
 
-Not started.
+#### Text settings accept numbers
+
+`title`, `subtitle`, `date`, and `abstract` in front matter already read any scalar as its source text, because serde-saphyr hands the raw text to a `String`. `author` and `meta` values deserialize through a visitor, where serde-saphyr offers only the parsed number, so `1.50` becomes `1.5`; those visitors accept integers, floats, and booleans as text. `--set` parses values into `serde_json::Value`, which also loses the text, so for the four plain text keys a number or boolean keeps its trimmed source text. Consequence: quote a decimal in `meta` or `author` to keep trailing zeros.
+
+#### Check runs everything before layout
+
+`kyber check` calls the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images. Layout and font loading stay out, so `check` stays quick and needs no fonts. Consequence: fixtures used with `check` need a valid `.bib` file.
+
+#### Theme images follow the title layout
+
+Only images in the slots of the title layout in use are decoded: the title page groups with `document.title-page`, else the title block when it shows. Header and footer slots hold no images. The file existence check still covers every theme image.
+
+#### Unused font settings warn
+
+Resolution records the font tokens that styles use, following token-to-token references, and warns for a `fonts.*` setting from front matter or `--set` whose token nothing uses. Warnings are diagnostics with a `warning` flag, kept in `Config` and printed after loading. The latest layer that sets a token gets the warning.
+
+#### Table captions at table width
+
+Every table's caption is set at the table's width from its left edge, pipe and list tables alike, wide or not. Before, a caption spanned the frame or, for wide tables, the placement width, so a narrow centered table had a caption wider than itself. A long caption now wraps more over a narrow table. The caption's anchor for references moved to the table's left edge too. This replaces the milestone 13 rule for wide tables.
+
+#### List spacing
+
+The default theme sets the `list` style's `space-before` and `space-after` to `$spacing.block`, the token quotations and code blocks use, so a list after a paragraph and lists of different kinds in a row have a gap. Paragraphs have no spacing token of their own in the default theme (they use an indent). The layout applies list spacing only to a list outside other lists, so a nested list sits at item spacing under its parent item instead of a block gap. Lists in footnotes and in table cells start a new nesting, so they get the spacing against their neighbours in the note or cell; the cell edges drop it (checked in the offer sample), footnotes were not inspected. The sample PDFs `de`, `en`, `offer`, `pagination`, and `typography` changed and keep their page counts.
+
+#### Raster density
+
+The stored density sets a raster image's natural size, each axis on its own, so non-square pixels keep their shape. PNG uses `pHYs` when its unit is the meter. JPEG uses JFIF when its units are inches or centimeters, else the EXIF resolution tags (inches or centimeters, inches by default), found by a small marker scan in `src/image/density.rs`. Files without a usable density keep one point per pixel, so existing images do not change size. This replaces the earlier decision that density is ignored (milestone 06).
+
+#### Paths in messages
+
+Document, theme, bibliography, and resource paths are normalized lexically, with no canonicalization, so symlinks stay as written. Messages print paths inside the working directory relative to it, and others in full. The base is process-wide state set once by the CLI (`show_relative_to`), so `Source` and `Resource` display code needs no extra argument.
 
 ### References and structure
 

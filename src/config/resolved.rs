@@ -15,6 +15,7 @@ use super::theme::{
     Align, Anchor, DocumentDefaults, Face, FontStyle, LabelSet, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
+use crate::diagnostic::Diagnostic;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -41,6 +42,9 @@ pub struct Config {
     pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,
     pub labels: LabelSet,
+    /// Problems that do not stop the run.
+    #[serde(skip)]
+    pub warnings: Vec<Diagnostic>,
 }
 
 impl Config {

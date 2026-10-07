@@ -73,6 +73,28 @@ pub struct FrontMatter {
     pub font_files: Option<BTreeMap<String, FontFamily>>,
 }
 
+/// Implements the visitor methods that read a number or boolean as its text, so `date: 2024` and
+/// `offer: 2026` need no quotes. A float prints as its value, so `1.50` reads as `1.5`.
+macro_rules! scalar_text {
+    ($value:ty) => {
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<$value, E> {
+            self.visit_str(&value.to_string())
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<$value, E> {
+            self.visit_str(&value.to_string())
+        }
+
+        fn visit_f64<E: de::Error>(self, value: f64) -> Result<$value, E> {
+            self.visit_str(&value.to_string())
+        }
+
+        fn visit_bool<E: de::Error>(self, value: bool) -> Result<$value, E> {
+            self.visit_str(&value.to_string())
+        }
+    };
+}
+
 /// One author or a list of authors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Authors(pub Vec<String>);
@@ -91,6 +113,8 @@ impl<'de> Deserialize<'de> for Authors {
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Authors, E> {
                 Ok(Authors(vec![value.to_owned()]))
             }
+
+            scalar_text!(Authors);
 
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Authors, A::Error> {
                 let mut names = Vec::new();
@@ -127,6 +151,8 @@ impl<'de> Deserialize<'de> for MetaValue {
             fn visit_str<E: de::Error>(self, value: &str) -> Result<MetaValue, E> {
                 Ok(MetaValue::Text(value.to_owned()))
             }
+
+            scalar_text!(MetaValue);
 
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<MetaValue, A::Error> {
                 let mut lines = Vec::new();
@@ -207,6 +233,9 @@ pub struct FontsSetting {
     #[serde(default, deserialize_with = "non_null")]
     pub mono: Option<Spec<FontName>>,
 }
+
+/// Settings that hold text. A number or boolean given for one is read as its source text.
+pub const TEXT_SETTINGS: [&str; 4] = ["title", "subtitle", "date", "abstract"];
 
 impl FrontMatter {
     /// The settings as a partial theme value, merged after the selected theme.
@@ -418,6 +447,19 @@ mod tests {
         assert!(parse("meta:\n  my client: ACME\n").is_err());
         assert!(parse("meta:\n  client: {name: ACME}\n").is_err());
         assert!(parse("client: ACME\n").is_err());
+    }
+
+    #[test]
+    fn reads_numbers_and_booleans_as_text_for_authors_and_meta() {
+        let front = parse("author: 42\nmeta:\n  offer: 2026\n  ratio: 1.5\n  flag: true\n").unwrap();
+        assert_eq!(front.author, Some(Authors(vec!["42".into()])));
+        assert_eq!(front.meta["offer"], MetaValue::Text("2026".into()));
+        assert_eq!(front.meta["ratio"], MetaValue::Text("1.5".into()));
+        assert_eq!(front.meta["flag"], MetaValue::Text("true".into()));
+        assert_eq!(
+            parse("title: 1.50\ndate: 2024\n").unwrap().date.as_deref(),
+            Some("2024")
+        );
     }
 
     #[test]
