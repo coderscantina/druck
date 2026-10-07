@@ -40,6 +40,8 @@ Metadata is plain text. A number or boolean is read as its text, so `date: 2024`
 
 Metadata fills the title block at the start of the first page, or the separate title page with `title-page: true`. See [document structure](#document-structure).
 
+The PDF's document properties take the title, authors, and language. Without a `title`, the first level 1 heading is the PDF title, but no title block is set from it. The subject is the `abstract`, or else the `subtitle`. A `date` written as `2026-10-07` also becomes the creation date; any other text does not.
+
 `meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
 
 ```yaml

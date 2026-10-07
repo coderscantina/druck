@@ -112,7 +112,7 @@ Settled layout rules that later milestones keep:
 
 ### PDF and CLI
 
-The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. `druck render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
+The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. Superseded in part by [PDF document info](#2026-10-07-pdf-document-info). `druck render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
 
 ## 2026-10-06: Milestone 03 paragraph composition
 
@@ -811,6 +811,16 @@ The CLI accepts a bare theme name in front matter or `--theme` and loads `<name>
 Personal themes were installed in `~/.config/druck/themes`, with metadata instructions in its `README.md`. `coderscantina` follows the supplied offer with Bad faces instantiated from the installed variable fonts, because installed lookup currently sees only their default faces. The original fonts are unchanged. `latex-1`, `latex-2`, and `latex-3` remain separate: their body sizes are respectively 12, 11, and 10 TeX points, their side margins differ, and the third has a full-width institutional title above two-column prose. They use bundled Libertinus at the owner's request. Columns belong to the document directive. These themes and the personal Bad assets are not binary resources or tracked repository files.
 
 The current layout cannot reproduce two reference details through themes alone: cover and body margins share one frame, and leading space on the first title-block slot is dropped at a page top. The theme notes record those limits. Fixing them is a follow-up, outside named lookup.
+
+## 2026-10-07: PDF document info
+
+The document info and XMP metadata now take more from the document, still without reading the clock, so the same input and version give the same bytes. See [`document_info`](../src/pdf.rs).
+
+- **Title:** front matter `title`, else the text of the first level 1 heading among the top-level blocks, without number, styles, or notes. Untitled PDFs otherwise show their file name in viewers. Headings in quotes or columns are not searched, and a document whose first H1 is a section such as "Introduction" gets that as its title; a front matter `title` overrides it.
+- **Subject:** `abstract`, else `subtitle`, with whitespace and blank lines collapsed to single spaces.
+- **Creation date:** only when `date` is exactly `YYYY-MM-DD` and the day exists. Free text such as "7 October 2026" writes no date and is not an error. krilla writes the same value as the modification date, as midnight UTC.
+- **Creator and producer:** `Druck <version>` and `Coder's Cantina Druck <version>`, from the crate version, following the vendor-first pattern of Adobe and Microsoft. A reverse-DNS identifier was rejected because viewers show these fields as text. PDFs therefore differ between releases.
+- **Keywords** are not written. Markdown has nothing to infer them from; an explicit front matter key would be a separate decision.
 
 ## Recording a decision
 
