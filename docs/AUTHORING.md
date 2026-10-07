@@ -49,16 +49,17 @@ Paths are relative to the document.
 | `bibliography` | path | BibTeX file for citations, see [citations](#citations-and-bibliography). |
 | `font-files` | map | Adds font families, see below. |
 
-`font-files` maps a family name to files, in the same shape as theme `fonts`:
+`font-files` maps a family name to files, in the same shape as theme `fonts`, including other weights and faces of collections (see [fonts](THEMES.md#fonts-and-images)):
 
 ```yaml
 font-files:
   My Serif:
     regular: fonts/MySerif-Regular.otf
     italic: fonts/MySerif-Italic.otf
+    500: fonts/MySerif-Medium.otf
 ```
 
-Use the family name in `fonts.body`, `fonts.heading`, or `fonts.mono` to select it.
+Use the family name in `fonts.body`, `fonts.heading`, or `fonts.mono` to select it. A family in `font-files` wins over an installed family with the same name. A name that neither the theme nor `font-files` defines, such as `fonts: {body: Avenir Next}`, is looked up among the fonts installed on the machine.
 
 ### Settings
 
@@ -86,7 +87,7 @@ Notes:
 - A single `margins` length sets all four sides. A map sets only the sides it lists.
 - Lengths use `pt`, `mm`, `cm`, `in`, or `em`. See [measurements](THEMES.md#measurements). `font-size` must be an absolute length because `em` sizes refer to it.
 - `fonts.*` changes the font tokens. A theme only follows them if its styles reference `$fonts.body`, `$fonts.heading`, and `$fonts.mono`. The bundled theme does.
-- Settings are checked like theme values. A font family must exist in the theme or in `font-files`, and must have the faces the styles request.
+- Settings are checked like theme values. A font family must exist in the theme, in `font-files`, or among the installed fonts, and must have the faces the styles request. A missing installed family, weight, or style is an error naming what was searched for. A font whose license restricts embedding is embedded with a warning.
 
 ## Command line
 
@@ -145,6 +146,7 @@ The body is CommonMark. These constructs render:
 - [Tables](#tables) with captions.
 - [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 - [Labels and cross-references](#labels-and-cross-references) to headings, figures, and tables.
+- [Custom styles](#custom-styles) from the theme on headings, paragraphs, and lists.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
@@ -343,9 +345,38 @@ These are errors with their location:
 
 - A reference to a label that is not defined, and a label defined twice.
 - A label with the wrong prefix for what it names, or a name with other characters.
-- A label on an image without a caption, or on a heading together with classes or other attributes.
+- A label on an image without a caption, or on a heading together with attributes other than one [style](#custom-styles).
 - A reference in a heading or inside a link.
 - Brackets that hold more than the reference or `, page`, as in `[@sec:a; @sec:b]`.
+
+## Custom styles
+
+A theme can define named styles in `custom-styles`, see [themes](THEMES.md#custom-styles). Apply one with `{.name}`:
+
+```markdown
+Scope {.eyebrow}
+
+# What is included {#sec:scope .wide-heading}
+
+{.checks}
+- Layout of all chapters
+- Two rounds of corrections
+
+### 2. Agree on the design {.step}
+```
+
+- At the end of a heading, alone or together with its label, as in `{#sec:scope .wide-heading}`.
+- At the end of a paragraph's last line.
+- On a line of its own directly before a list, also inside a list item before a nested list. The line may follow the text of a paragraph without a blank line; then it styles the list, not the paragraph.
+
+A style is for one kind of block: a style based on a heading style for headings, one based on `list` for lists, and any other for paragraphs. Which kind a style is, and what it changes, is up to the theme. Common uses are a small spaced label kept with the heading below it, a list with check marks, and step headings whose typed number hangs in front of the text.
+
+Write `\{.name}` for text that should keep the braces. These are errors with their location:
+
+- A style the theme does not define, or one for another kind of block.
+- `{.name}` on a line of its own that no list follows.
+- `{.name}` alone on a list item or as the only content of a paragraph that is not on a line of its own.
+- More than one style, or other attributes, on a heading.
 
 ## Citations and bibliography
 

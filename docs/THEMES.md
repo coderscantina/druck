@@ -38,7 +38,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `pages.title`, `pages.first`, `pages.odd`, `pages.even` | Remove the variant, so the fallback order applies. |
 | `pages.<variant>.header`, `pages.<variant>.footer` | No header or footer on that variant. |
 | `pages.<variant>.<header or footer>.left`, `center`, `right` | The slot is empty. |
-| `fonts.<family>.italic`, `bold`, `bold-italic` | The family has no such face. |
+| `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
 `pages.body` itself cannot be null, and `fonts.<family>.regular` is required.
 
@@ -53,6 +53,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `tokens` | Named fonts, sizes, spacing, and colors. |
 | `page` | Page size, margins, column gap, header and footer offsets. |
 | `styles` | One style per block element. |
+| `custom-styles` | Named styles that documents apply with `{.name}`. |
 | `inline` | Inline code, links, footnote markers. |
 | `lists` | Indent, item spacing, bullets per level. |
 | `tables` | Cell padding and rules. |
@@ -80,7 +81,7 @@ Value formats:
 
 | Group | Literal |
 | --- | --- |
-| `fonts` | A family name defined in `fonts`. |
+| `fonts` | A family name defined in `fonts`, or an installed family. |
 | `sizes` | A length. |
 | `spacing` | A length. |
 | `colors` | `#rrggbb`. |
@@ -113,7 +114,7 @@ Font sizes must be greater than zero.
 
 ## Fonts and images
 
-`fonts` maps a family name to up to four faces:
+`fonts` maps a family name to its faces. A face is named by its weight and style:
 
 ```json
 "fonts": {
@@ -121,14 +122,25 @@ Font sizes must be greater than zero.
     "regular": "fonts/SourceSerif-Regular.otf",
     "italic": "fonts/SourceSerif-Italic.otf",
     "bold": "fonts/SourceSerif-Bold.otf",
-    "bold-italic": null
+    "bold-italic": null,
+    "300": "fonts/SourceSerif-Light.otf",
+    "300-italic": "fonts/SourceSerif-LightItalic.otf",
+    "600": { "file": "fonts/SourceSerif.ttc", "index": 2 }
   }
 }
 ```
 
-Only `regular` is required. A style that requests a face its family lacks is an error. A style asks for the `bold` face with `"weight": "bold"`, the `italic` face with `"style": "italic"`, and `bold-italic` with both. Inline code uses the regular face.
+- `regular`, `italic`, `bold`, and `bold-italic` are weight 400 and 700, upright and italic. Other weights from 100 to 900 in steps of 100 are written as the number, with `-italic` for the italic face. Write `regular` and `bold` rather than `400` and `700`, so every face has one name and a later layer replaces it.
+- A face is a file path, or `{ "file": ..., "index": n }` for the face at index `n`, counting from 0, of a collection (`.ttc`, `.otc`).
+- Only `regular` is required. A style that requests a face its family lacks is an error.
 
-Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: bold-italic falls back to bold, then italic, then regular; italic and bold fall back to regular. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering never depends on system fonts.
+A style asks for a face with `weight` and `style`, for example `"weight": 500, "style": "italic"` for `500-italic`. Inline code uses the regular face.
+
+A family name that `fonts` does not define is looked up among the fonts installed on the machine, by its family name, ignoring case. This includes faces in font collections. A family defined in `fonts`, also through front matter `font-files`, wins over an installed one with the same name. Every face a style requests must be installed; a missing family, weight, or style is an error naming what was searched for, and no PDF is written. Installed faces with a condensed or expanded width are used only if the family has no normal width. Kyber scans the installed fonts only when a style names such a family, so documents using the bundled and file fonts never depend on the machine.
+
+A font whose license (the OS/2 `fsType` field) restricts embedding or subsetting is still embedded, with a warning that names its file. The license is yours to check.
+
+Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: the nearest weight first, then the requested style. For weights from 400 to 500, the weights up to 500 are tried first, then lighter ones, then heavier ones; below 400 lighter ones come first, above 500 heavier ones, as in CSS. So bold-italic falls back to bold, then italic, and italic falls back to regular. Strong text sets weight 700, or keeps a heavier weight of its style. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering with the default theme never depends on installed fonts.
 
 `images` maps a name to a file path. Title slots refer to images by that name. Images in the document body are not part of the theme; they resolve relative to the document.
 
@@ -142,13 +154,20 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 | --- | --- |
 | `font` | Font name or `$fonts.x`. |
 | `size` | Length or `$sizes.x`. |
-| `weight` | `regular`, `bold`. |
+| `weight` | 100 to 900 in steps of 100, or `regular` (400) and `bold` (700). |
 | `style` | `normal`, `italic`. |
 | `color` | `#rrggbb` or `$colors.x`. |
 | `line-height` | 0.8 to 3. |
 | `align` | `justify`, `left`, `center`, `right`. |
 | `hyphenate` | `true`, `false`. |
 | `space-before`, `space-after`, `indent`, `first-line-indent` | Length or `$spacing.x`. |
+| `tracking` | Letter spacing in em of the style's size, from -0.2 to 1. Default `0`. |
+| `uppercase` | `true` sets the text in capitals. Default `false`. |
+| `keep-with-next` | `true` keeps the block on the page or in the column of the next block. Default `false`. |
+
+`tracking` adds space after every character, spaces included. Tracked text sets no ligatures, so "fi" stays two spaced letters. `uppercase` follows Unicode case mapping, so "Straße" becomes "STRASSE"; the PDF text is the capitals. Inline code keeps its case and spacing. Both apply wherever the style sets text that can wrap: blocks, title slots, table cells, and contents entries. Header and footer bands, list markers, and contents page numbers ignore them.
+
+A block with `keep-with-next` never ends a page or column without the next block, as a heading never does. Headings always keep with what follows.
 
 `align: justify` chooses line breaks for the whole paragraph, stretches or shrinks interword spaces to fill each line except the last, and lets punctuation at the line edges hang slightly into the margins. The other alignments keep natural spaces and also choose breaks for the whole paragraph, so ragged lines come out even. `hyphenate: true` hyphenates words in the document language; code is never hyphenated. Details are in [decisions](DECISIONS.md#2026-10-06-milestone-03-paragraph-composition).
 
@@ -157,6 +176,35 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
+
+## Custom styles
+
+`custom-styles` names styles that documents apply to headings, paragraphs, and lists with `{.name}`, see [authoring](AUTHORING.md#custom-styles). Each is based on another style and lists only what it changes:
+
+```json
+"custom-styles": {
+  "eyebrow": {
+    "based-on": "body",
+    "size": "$sizes.small",
+    "weight": 500,
+    "uppercase": true,
+    "tracking": 0.12,
+    "keep-with-next": true,
+    "first-line-indent": "0pt"
+  },
+  "checks": { "based-on": "list", "bullets": ["✔"] },
+  "step": { "based-on": "heading-3", "number-gap": "0.6em" }
+}
+```
+
+- `based-on` names a built-in style from `styles` or another custom style. The fields given replace those of the base; the others come from it. A chain of custom styles is followed to its built-in style. An unknown base is an error, and so are custom styles based on each other in a cycle.
+- The built-in style at the end of the chain decides what the style applies to: a heading style makes it a heading style, `list` a list style, and any other a paragraph style. Applying a style to another kind of block is an error at the attribute.
+- Names use ASCII letters, digits, `-`, and `_`, and cannot be the name of a built-in style.
+- `bullets` is allowed on list styles. It replaces `lists.bullets` for a list in that style, one marker per nesting level as there. Numbered lists keep their numbers.
+- `number-gap` is allowed on heading styles. A heading in that style that starts with a number its author typed, such as "2." followed by a space, sets the number in front and the text after the gap, so every line of the heading starts at the same place. Such a heading is not numbered automatically, and it does not count toward the numbers of other headings.
+- Spaces between blocks collapse to the larger, so a heading's `space-before` also separates it from a kept paragraph above it. For a label directly above a heading, give the label the space above and the heading a small `space-before`.
+
+There are no selectors and no cascade: a style applies only where the document names it.
 
 ## Footnotes
 
