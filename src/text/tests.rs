@@ -2,35 +2,79 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::*;
-use crate::config::source::Origin;
+use crate::config::source::{Origin, Resource};
 
-fn bundled(path: &str) -> Resource {
-    Resource {
-        origin: Origin::Bundled,
-        path: format!("fonts/{path}"),
+fn bundled(path: &str) -> FaceFile {
+    FaceFile {
+        resource: Resource {
+            origin: Origin::Bundled,
+            path: format!("fonts/{path}"),
+        },
+        index: 0,
     }
 }
 
-fn files(family: FontFiles) -> BTreeMap<String, FontFiles> {
-    BTreeMap::from([("Test".to_owned(), family)])
+/// A family of bundled files by face name, such as `("bold", "LibertinusSerif-Bold.otf")`.
+fn family(faces: &[(&str, &str)]) -> FontFiles {
+    faces
+        .iter()
+        .map(|(face, path)| (face.parse().expect("face name"), bundled(path)))
+        .collect()
 }
 
 fn serif() -> FontFiles {
-    FontFiles {
-        regular: bundled("LibertinusSerif-Regular.otf"),
-        italic: Some(bundled("LibertinusSerif-Italic.otf")),
-        bold: Some(bundled("LibertinusSerif-Bold.otf")),
-        bold_italic: Some(bundled("LibertinusSerif-BoldItalic.otf")),
-    }
+    family(&[
+        ("regular", "LibertinusSerif-Regular.otf"),
+        ("italic", "LibertinusSerif-Italic.otf"),
+        ("bold", "LibertinusSerif-Bold.otf"),
+        ("bold-italic", "LibertinusSerif-BoldItalic.otf"),
+    ])
 }
 
 fn load(family: FontFiles) -> Fonts {
-    Fonts::from_files(&files(family)).unwrap_or_else(|e| panic!("{e:?}"))
+    Fonts::from_files(&BTreeMap::from([("Test".to_owned(), family)])).unwrap_or_else(|e| panic!("{e:?}"))
 }
 
 fn shape(fonts: &Fonts, text: &str) -> ShapedRun {
-    let face = fonts.face("Test", Weight::Regular, FontStyle::Normal);
+    let face = fonts.face("Test", Weight::REGULAR, FontStyle::Normal);
     fonts.shape(text, face, Pt(10.0), Lang::En)
+}
+
+/// A font collection holding `fonts`, each a complete OpenType file, in order.
+pub(crate) fn collection(fonts: &[&[u8]]) -> Vec<u8> {
+    let mut offsets = Vec::new();
+    let mut end = 12 + 4 * fonts.len();
+    for font in fonts {
+        offsets.push(end);
+        end += font.len().next_multiple_of(4);
+    }
+    let mut data = b"ttcf".to_vec();
+    data.extend(0x0001_0000u32.to_be_bytes());
+    data.extend((fonts.len() as u32).to_be_bytes());
+    for offset in &offsets {
+        data.extend((*offset as u32).to_be_bytes());
+    }
+    // Table offsets count from the start of the collection.
+    for (font, base) in fonts.iter().zip(offsets) {
+        let mut font = font.to_vec();
+        for record in table_records(&font).collect::<Vec<_>>() {
+            let old = u32::from_be_bytes(font[record + 8..record + 12].try_into().unwrap());
+            font[record + 8..record + 12].copy_from_slice(&(old + base as u32).to_be_bytes());
+        }
+        font.resize(font.len().next_multiple_of(4), 0);
+        data.extend(font);
+    }
+    data
+}
+
+/// The byte offsets of the table records of an OpenType file.
+fn table_records(font: &[u8]) -> impl Iterator<Item = usize> {
+    let count = u16::from_be_bytes([font[4], font[5]]) as usize;
+    (0..count).map(|table| 12 + 16 * table)
+}
+
+fn leak(data: Vec<u8>) -> &'static [u8] {
+    Vec::leak(data)
 }
 
 #[test]
@@ -62,52 +106,122 @@ fn kerning_narrows_a_pair() {
 }
 
 #[test]
+fn tracking_spaces_every_character_and_sets_no_ligatures() {
+    let fonts = load(serif());
+    let face = fonts.face("Test", Weight::REGULAR, FontStyle::Normal);
+    let tracked = |tracking| fonts.shape_tracked("fi", face, Pt(10.0), Lang::En, tracking);
+    let (narrow, wide) = (tracked(0.1), tracked(0.2));
+    assert_eq!(narrow.glyphs.len(), 2);
+    // One more point after each of the two letters at 10pt.
+    assert!((wide.width.0 - narrow.width.0 - 2.0).abs() < 1e-9);
+    assert!((wide.glyphs[0].x_advance.0 - narrow.glyphs[0].x_advance.0 - 1.0).abs() < 1e-9);
+}
+
+#[test]
 fn missing_faces_fall_back() {
-    let regular = bundled("LibertinusSerif-Regular.otf");
-    let bold = Some(bundled("LibertinusSerif-Bold.otf"));
-    let italic = Some(bundled("LibertinusSerif-Italic.otf"));
-    let none = FontFiles {
-        regular: regular.clone(),
-        italic: None,
-        bold: bold.clone(),
-        bold_italic: None,
-    };
-    let fonts = load(none);
+    let fonts = load(family(&[
+        ("regular", "LibertinusSerif-Regular.otf"),
+        ("bold", "LibertinusSerif-Bold.otf"),
+    ]));
     let face = |weight, style| fonts.face("Test", weight, style);
     assert_eq!(
-        face(Weight::Bold, FontStyle::Italic),
-        face(Weight::Bold, FontStyle::Normal)
+        face(Weight::BOLD, FontStyle::Italic),
+        face(Weight::BOLD, FontStyle::Normal)
     );
     assert_eq!(
-        face(Weight::Regular, FontStyle::Italic),
-        face(Weight::Regular, FontStyle::Normal)
+        face(Weight::REGULAR, FontStyle::Italic),
+        face(Weight::REGULAR, FontStyle::Normal)
     );
 
-    let only_italic = FontFiles {
-        regular,
-        italic,
-        bold: None,
-        bold_italic: None,
-    };
-    let fonts = load(only_italic);
+    let fonts = load(family(&[
+        ("regular", "LibertinusSerif-Regular.otf"),
+        ("italic", "LibertinusSerif-Italic.otf"),
+    ]));
     assert_eq!(
-        fonts.face("Test", Weight::Bold, FontStyle::Italic),
-        fonts.face("Test", Weight::Regular, FontStyle::Italic)
+        fonts.face("Test", Weight::BOLD, FontStyle::Italic),
+        fonts.face("Test", Weight::REGULAR, FontStyle::Italic)
     );
     assert_ne!(
-        fonts.face("Test", Weight::Bold, FontStyle::Italic),
-        fonts.face("Test", Weight::Regular, FontStyle::Normal)
+        fonts.face("Test", Weight::BOLD, FontStyle::Italic),
+        fonts.face("Test", Weight::REGULAR, FontStyle::Normal)
     );
 }
 
 #[test]
-fn bundled_faces_cover_german_and_english_text() {
-    let mono = FontFiles {
-        regular: bundled("LibertinusMono-Regular.otf"),
-        italic: None,
-        bold: None,
-        bold_italic: None,
+fn matches_the_nearest_weight_and_then_the_style() {
+    // The files do not matter here, only the faces they are listed for.
+    let fonts = load(family(&[
+        ("300", "LibertinusSerif-Regular.otf"),
+        ("500", "LibertinusSerif-Italic.otf"),
+        ("bold", "LibertinusSerif-Bold.otf"),
+        ("300-italic", "LibertinusSerif-BoldItalic.otf"),
+    ]));
+    let face = |weight: u16, style| fonts.face("Test", Weight::of_font(weight), style);
+    let exact = |weight: u16, style| {
+        fonts.families["Test"]
+            .iter()
+            .find(|(f, _)| {
+                *f == Face {
+                    weight: Weight::of_font(weight),
+                    style,
+                }
+            })
+            .unwrap()
+            .1
     };
+    let (normal, italic) = (FontStyle::Normal, FontStyle::Italic);
+    assert_eq!(face(400, normal), exact(500, normal), "400 tries up to 500 first");
+    assert_eq!(face(600, normal), exact(700, normal), "above 500 heavier first");
+    assert_eq!(
+        face(200, normal),
+        exact(300, normal),
+        "below 400 lighter first, then heavier"
+    );
+    assert_eq!(face(900, normal), exact(700, normal));
+    assert_eq!(face(500, italic), exact(500, normal), "the weight before the style");
+    assert_eq!(face(300, italic), exact(300, italic));
+}
+
+#[test]
+fn loads_a_face_of_a_collection_by_its_index() {
+    let regular = bundled::font("fonts/LibertinusSerif-Regular.otf").unwrap();
+    let bold = bundled::font("fonts/LibertinusSerif-Bold.otf").unwrap();
+    let data = leak(collection(&[regular, bold]));
+    let file = FaceFile {
+        index: 1,
+        ..bundled("Serif.ttc")
+    };
+    let face = parse(data, &file).expect("second face parses");
+    assert_eq!(face.buzz.weight().to_number(), 700);
+    assert!(face.file.starts_with("face 1 of"), "{}", face.file);
+    assert!(parse(data, &FaceFile { index: 2, ..file }).is_err());
+}
+
+#[test]
+fn restricted_embedding_is_a_warning_naming_the_file() {
+    let mut data = bundled::font("fonts/LibertinusMono-Regular.otf").unwrap().to_vec();
+    let os2 = table_records(&data)
+        .find(|&record| &data[record..record + 4] == b"OS/2")
+        .expect("an OS/2 table");
+    let table = u32::from_be_bytes(data[os2 + 8..os2 + 12].try_into().unwrap()) as usize;
+    // fsType, at offset 8 of the OS/2 table: restricted license embedding.
+    data[table + 8..table + 10].copy_from_slice(&2u16.to_be_bytes());
+    let file = bundled("Restricted.otf");
+    let fonts = Fonts {
+        faces: vec![parse(leak(data), &file).unwrap()],
+        families: BTreeMap::new(),
+    };
+    let warning = fonts.embedding_warning(FaceId(0)).expect("a warning");
+    assert!(
+        warning.contains("Restricted.otf") && warning.contains("fsType"),
+        "{warning}"
+    );
+    assert_eq!(load(serif()).embedding_warning(FaceId(0)), None);
+}
+
+#[test]
+fn bundled_faces_cover_german_and_english_text() {
+    let mono = family(&[("regular", "LibertinusMono-Regular.otf")]);
     let text = "äöüÄÖÜß „“ ‚‘ – — ’ “ ” … abc XYZ 019";
     for family in [serif(), mono] {
         let run = shape(&load(family), text);
@@ -117,17 +231,16 @@ fn bundled_faces_cover_german_and_english_text() {
 
 #[test]
 fn missing_font_file_names_the_property() {
-    let missing = Resource {
-        origin: Origin::WorkingDir(PathBuf::from("/nonexistent-kyber-dir")),
-        path: "nope.otf".to_owned(),
+    let missing = FaceFile {
+        resource: Resource {
+            origin: Origin::WorkingDir(PathBuf::from("/nonexistent-kyber-dir")),
+            path: "nope.otf".to_owned(),
+        },
+        index: 0,
     };
-    let family = FontFiles {
-        regular: bundled("LibertinusSerif-Regular.otf"),
-        italic: Some(missing),
-        bold: None,
-        bold_italic: None,
-    };
-    let Err(errors) = Fonts::from_files(&files(family)) else {
+    let mut files = family(&[("regular", "LibertinusSerif-Regular.otf")]);
+    files.insert("italic".parse().unwrap(), missing);
+    let Err(errors) = Fonts::from_files(&BTreeMap::from([("Test".to_owned(), files)])) else {
         panic!("loading should fail");
     };
     assert_eq!(errors.len(), 1);
@@ -137,13 +250,8 @@ fn missing_font_file_names_the_property() {
 
 #[test]
 fn unknown_bundled_path_is_an_error() {
-    let family = FontFiles {
-        regular: bundled("Nope.otf"),
-        italic: None,
-        bold: None,
-        bold_italic: None,
-    };
-    let Err(errors) = Fonts::from_files(&files(family)) else {
+    let files = family(&[("regular", "Nope.otf")]);
+    let Err(errors) = Fonts::from_files(&BTreeMap::from([("Test".to_owned(), files)])) else {
         panic!("loading should fail");
     };
     assert_eq!(errors[0].property.as_deref(), Some("fonts.Test.regular"));

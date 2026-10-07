@@ -10,6 +10,9 @@
 //! `[@sec:name, page]` for the page. An `@key` or `[@key]` without one of the three prefixes is a
 //! citation, see [`syntax`]; inside link text it stays text. References and citations are read from
 //! the source text, so an escaped `\@` stays text.
+//!
+//! A custom style is applied with `{.name}` at the end of a heading or paragraph, or on a line of its
+//! own directly before a list. A heading may combine it with its label, as in `{#sec:name .name}`.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -20,8 +23,8 @@ use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
 use crate::document::{
-    Block, Cell, Citation, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link, Location,
-    Reference, Row,
+    Block, Cell, Citation, Class, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link,
+    Location, Reference, Row,
 };
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
@@ -93,6 +96,7 @@ enum Container {
         at: Location,
         start: Option<u64>,
         items: Vec<Vec<Block>>,
+        class: Option<Class>,
     },
     Item,
     /// `None` for an unknown directive name, which has been reported.
@@ -118,6 +122,10 @@ struct Leaf {
     image: Option<LeafImage>,
     /// The label of a heading or figure.
     label: Option<String>,
+    /// The custom style of a heading.
+    class: Option<Class>,
+    /// The source offset where the last text event ended, which locates a trailing `{.name}`.
+    text_end: usize,
 }
 
 struct LeafImage {
@@ -186,6 +194,8 @@ struct Builder<'a> {
     bibliography: Option<Location>,
     /// Source text before this offset was read as a label, reference, or citation, so text events in it are skipped.
     consumed: usize,
+    /// A `{.name}` on a line of its own, waiting for the list it must precede.
+    pending_class: Option<Class>,
 }
 
 impl<'a> Builder<'a> {
@@ -219,12 +229,14 @@ impl<'a> Builder<'a> {
             citations: Vec::new(),
             bibliography: None,
             consumed: 0,
+            pending_class: None,
         }
     }
 
     fn finish(mut self) -> Result<Document, Vec<Diagnostic>> {
         let end = self.body.len();
         self.directives_before(end..end);
+        self.misplaced_class();
         while let Some(Container::Directive { at, fence }) = self.containers.pop() {
             if let Some(fence) = fence {
                 self.report_at(at, format!("\"::: {}\" is never closed", fence_name(fence)));
@@ -294,6 +306,7 @@ impl<'a> Builder<'a> {
     }
 
     fn directive(&mut self, offset: usize, text: &str) {
+        self.misplaced_class();
         let at = self.location(offset);
         let name = text.trim_start_matches(':').trim();
         let open: Vec<Option<Fence>> = self
@@ -417,6 +430,8 @@ impl<'a> Builder<'a> {
             content: Vec::new(),
             image: None,
             label: None,
+            class: None,
+            text_end: offset,
         });
     }
 
@@ -427,6 +442,8 @@ impl<'a> Builder<'a> {
             content,
             image,
             label,
+            class,
+            text_end,
             ..
         }) = self.leaf.take()
         else {
@@ -438,6 +455,7 @@ impl<'a> Builder<'a> {
                 level,
                 content,
                 label,
+                class,
             },
             (None, Some(image)) => {
                 if label.is_some() && content.is_empty() {
@@ -459,10 +477,73 @@ impl<'a> Builder<'a> {
                     self.table_caption(at, content);
                     return;
                 }
-                Block::Paragraph { at, content }
+                let class = match self.take_class(&mut content, text_end) {
+                    Some((class, true)) => {
+                        self.pending_class = Some(class);
+                        None
+                    }
+                    Some((class, false)) if content.is_empty() => {
+                        let message = format!(
+                            "{{.{}}} needs text before it, or a line of its own directly before a list",
+                            class.name
+                        );
+                        self.report_at(class.at, message);
+                        return;
+                    }
+                    class => class.map(|(class, _)| class),
+                };
+                if content.is_empty() {
+                    return;
+                }
+                Block::Paragraph { at, content, class }
             }
         };
         self.push_block(block);
+    }
+
+    /// Removes a `{.name}` attribute from the end of a paragraph whose last text event ended at
+    /// `text_end`, and returns it with whether it stands on a line of its own.
+    fn take_class(&self, content: &mut Vec<Inline>, text_end: usize) -> Option<(Class, bool)> {
+        let Some(Inline::Text { text, style }) = content.last_mut() else {
+            return None;
+        };
+        let open = text.rfind("{.").filter(|_| !style.code)?;
+        let name = text[open + 2..].strip_suffix('}')?;
+        if name.is_empty() || label_name_length(name) != name.len() {
+            return None;
+        }
+        let attribute = &text[open..];
+        let start = text_end.checked_sub(attribute.len())?;
+        let escapes = self.body[..start].len() - self.body[..start].trim_end_matches('\\').len();
+        if self.body.get(start..text_end) != Some(attribute) || escapes % 2 == 1 {
+            return None;
+        }
+        let line_start = self.body[..start].rfind('\n').map_or(0, |newline| newline + 1);
+        let own_line = self.body[line_start..start]
+            .trim_start_matches([' ', '\t', '>'])
+            .is_empty();
+        let class = Class {
+            name: name.to_owned(),
+            at: self.location(start),
+        };
+        text.truncate(open);
+        text.truncate(text.trim_end().len());
+        if text.is_empty() {
+            content.pop();
+        }
+        Some((class, own_line))
+    }
+
+    /// Reports a `{.name}` on a line of its own that no list follows.
+    fn misplaced_class(&mut self) {
+        if let Some(class) = self.pending_class.take() {
+            let message = format!(
+                "{{.{}}} on a line of its own must directly precede a list; to style a paragraph or heading, \
+                 write it at the end of its text",
+                class.name
+            );
+            self.report_at(class.at, message);
+        }
     }
 
     /// Attaches a `: Caption` paragraph to the table directly before it.
@@ -602,6 +683,9 @@ impl<'a> Builder<'a> {
             let end = range.start + self.body[range.clone()].trim_end().len();
             self.directives_before(range.start..end);
         }
+        if !matches!(event, Event::Start(Tag::List(_))) {
+            self.misplaced_class();
+        }
         match event {
             Event::Start(_) => self.depth += 1,
             Event::End(_) => self.depth -= 1,
@@ -621,7 +705,13 @@ impl<'a> Builder<'a> {
             Event::End(tag) => self.end(tag),
             Event::Text(text) => match self.code.as_mut() {
                 Some(code) => code.text.push_str(&text),
-                None => self.text(&text, range),
+                None => {
+                    let end = range.end;
+                    self.text(&text, range);
+                    if let Some(leaf) = self.leaf.as_mut() {
+                        leaf.text_end = end;
+                    }
+                }
             },
             Event::Code(text) => self.push_text(offset, &text, true),
             // A citation group may span lines.
@@ -921,14 +1011,27 @@ impl<'a> Builder<'a> {
                 attrs,
             } => {
                 self.open_leaf(offset, Some(level as u8), false);
-                if !classes.is_empty() || !attrs.is_empty() {
-                    self.report(offset, "a heading takes only a label, as in # Heading {#sec:name}");
+                let brace = self.body[range].rfind('{').map_or(offset, |index| offset + index);
+                if !attrs.is_empty() || classes.len() > 1 {
+                    let message = "a heading takes a label and one style, as in # Heading {#sec:name .style}";
+                    self.report(brace, message);
                 }
-                if let Some(id) = id {
-                    let label = self.define(self.location(offset), &id, LabelKind::Section);
-                    if let Some(leaf) = self.leaf.as_mut() {
-                        leaf.label = label;
+                let class = match classes.first() {
+                    Some(name) if label_name_length(name) != name.len() => {
+                        let message = format!("style name \"{name}\" may contain only letters, digits, - and _");
+                        self.report(brace, message);
+                        None
                     }
+                    Some(name) => Some(Class {
+                        name: name.to_string(),
+                        at: self.location(brace),
+                    }),
+                    None => None,
+                };
+                let label = id.and_then(|id| self.define(self.location(offset), &id, LabelKind::Section));
+                if let Some(leaf) = self.leaf.as_mut() {
+                    leaf.label = label;
+                    leaf.class = class;
                 }
             }
             Tag::BlockQuote(_) => {
@@ -939,10 +1042,12 @@ impl<'a> Builder<'a> {
             Tag::List(start) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                let class = self.pending_class.take();
                 self.containers.push(Container::List {
                     at,
                     start,
                     items: Vec::new(),
+                    class,
                 });
             }
             Tag::Item => {
@@ -1008,6 +1113,8 @@ impl<'a> Builder<'a> {
                     content: Vec::new(),
                     image: None,
                     label: None,
+                    class: None,
+                    text_end: start,
                 });
             }
             Tag::FootnoteDefinition(label) => {
@@ -1068,8 +1175,19 @@ impl<'a> Builder<'a> {
                 }
             }
             TagEnd::List(_) => {
-                if let Some(Container::List { at, start, items }) = self.containers.pop() {
-                    self.push_block(Block::List { at, start, items });
+                if let Some(Container::List {
+                    at,
+                    start,
+                    items,
+                    class,
+                }) = self.containers.pop()
+                {
+                    self.push_block(Block::List {
+                        at,
+                        start,
+                        items,
+                        class,
+                    });
                 }
             }
             TagEnd::CodeBlock => {
@@ -1255,6 +1373,7 @@ mod tests {
         Block::Paragraph {
             at: at(line, column),
             content: vec![plain(value)],
+            class: None,
         }
     }
 
@@ -1277,12 +1396,14 @@ mod tests {
                     level: 1,
                     content: vec![plain("Title")],
                     label: None,
+                    class: None,
                 },
                 Block::Heading {
                     at: at(3, 1),
                     level: 2,
                     content: vec![plain("Setext")],
                     label: None,
+                    class: None,
                 },
                 paragraph(6, 1, "Text"),
                 Block::Quote {
@@ -1312,6 +1433,7 @@ mod tests {
                     at: at(1, 1),
                     start: Some(3),
                     items: vec![vec![paragraph(1, 4, "one")], vec![paragraph(2, 4, "two")]],
+                    class: None,
                 },
                 Block::List {
                     at: at(4, 1),
@@ -1321,9 +1443,11 @@ mod tests {
                         Block::List {
                             at: at(5, 3),
                             start: None,
-                            items: vec![vec![paragraph(5, 5, "b")]]
+                            items: vec![vec![paragraph(5, 5, "b")]],
+                            class: None,
                         },
                     ]],
+                    class: None,
                 },
             ]
         );
@@ -1459,6 +1583,7 @@ mod tests {
                         caption: Vec::new(),
                         label: None,
                     }]],
+                    class: None,
                 },
                 Block::Image {
                     at: at(5, 1),
@@ -1605,6 +1730,7 @@ mod tests {
                     Inline::FootnoteRef(1),
                     plain("."),
                 ],
+                class: None,
             }]
         );
         assert_eq!(
@@ -1905,9 +2031,9 @@ mod tests {
                 "\"fig:a\" is not a label for a heading: write {#sec:name} with letters, digits, - and _",
             ),
             (
-                "# A {#sec:a .wide}\n",
-                (1, 1),
-                "a heading takes only a label, as in # Heading {#sec:name}",
+                "# A {#sec:a .wide data=x}\n",
+                (1, 5),
+                "a heading takes a label and one style, as in # Heading {#sec:name .style}",
             ),
             (
                 "# A {#sec:a}\n\n# B {#sec:a}\n",
@@ -1954,6 +2080,64 @@ mod tests {
         }
     }
 
+    fn class(name: &str, line: u64, column: u64) -> Option<Class> {
+        Some(Class {
+            name: name.to_owned(),
+            at: at(line, column),
+        })
+    }
+
+    #[test]
+    fn reads_styles_at_the_end_of_headings_and_paragraphs_and_before_lists() {
+        let body = "# Step {#sec:s .step}\n\nKicker {.eyebrow}\n\n{.checks}\n- a\n\nIntro:\n{.checks}\n- b\n  {.dashes}\n  - c\n\nNot \\{.x}\n";
+        let blocks = blocks(body);
+        assert!(matches!(&blocks[0], Block::Heading { label: Some(l), class: c, .. }
+            if l == "sec:s" && *c == class("step", 1, 8)));
+        assert_eq!(
+            blocks[1],
+            Block::Paragraph {
+                at: at(3, 1),
+                content: vec![plain("Kicker")],
+                class: class("eyebrow", 3, 8),
+            }
+        );
+        assert!(matches!(&blocks[2], Block::List { class: c, .. } if *c == class("checks", 5, 1)));
+        assert_eq!(blocks[3], paragraph(8, 1, "Intro:"));
+        let Block::List { class: c, items, .. } = &blocks[4] else {
+            panic!("a list")
+        };
+        assert_eq!(*c, class("checks", 9, 1));
+        assert!(matches!(&items[0][1], Block::List { class: c, .. } if *c == class("dashes", 11, 3)));
+        assert_eq!(blocks[5], paragraph(14, 1, "Not {.x}"));
+    }
+
+    #[test]
+    fn reports_misplaced_style_attributes_at_their_location() {
+        let own_line = "{.x} on a line of its own must directly precede a list; to style a paragraph or heading, \
+            write it at the end of its text";
+        let cases = [
+            ("{.x}\n\nText\n", (1, 1), own_line),
+            ("- a\n{.x}\n- b\n", (2, 1), own_line),
+            (
+                "# A {.a .b}\n",
+                (1, 5),
+                "a heading takes a label and one style, as in # Heading {#sec:name .style}",
+            ),
+            (
+                "- {.x}\n",
+                (1, 3),
+                "{.x} needs text before it, or a line of its own directly before a list",
+            ),
+        ];
+        for (body, location, message) in cases {
+            assert_eq!(
+                diagnostics(body, 1),
+                vec![(Some(location), message.to_string())],
+                "{body:?}"
+            );
+        }
+    }
+
     fn citation(index: usize) -> Inline {
         Inline::Citation {
             index,
@@ -1984,6 +2168,7 @@ mod tests {
                     text("ask @f", link),
                     plain("."),
                 ],
+                class: None,
             }
         );
         let keys: Vec<_> = document

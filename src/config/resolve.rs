@@ -11,10 +11,10 @@ use serde_json::Value;
 use super::front_matter::FrontMatter;
 use super::layer::{PropertyError, check_theme_layer, default_theme_value, deserialize_theme};
 use super::merge::Merged;
-use super::resolved::{self, Config, FontFiles, PageGeometry, SlotContent, Style};
+use super::resolved::{self, Config, CustomStyle, FaceFile, FontFiles, PageGeometry, SlotContent, Style};
 use super::source::{Resource, Source};
 use super::template::{Placeholder, Template};
-use super::theme::{self, BlockStyle, FontStyle, PageSize, PaperSize, Theme, TitleSlot, Weight};
+use super::theme::{self, BlockStyle, Face, FontFile, FontStyle, PageSize, PaperSize, Theme, TitleSlot, Weight};
 use super::values::{Color, FontName, Length, Pt, Size, Spacing, Spec, TokenKind, TokenName};
 use crate::diagnostic::Diagnostic;
 
@@ -94,6 +94,8 @@ struct Resolver<'a> {
     sources: &'a [Source],
     tokens: Tokens,
     errors: RefCell<Vec<Diagnostic>>,
+    /// Families not defined in `fonts`, with the faces requested and the first property requesting each.
+    installed: RefCell<BTreeMap<String, BTreeMap<Face, String>>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -109,6 +111,7 @@ impl<'a> Resolver<'a> {
                 colors: TokenTable(BTreeMap::new()),
             },
             errors: RefCell::new(Vec::new()),
+            installed: RefCell::new(BTreeMap::new()),
         };
         resolver.tokens = Tokens {
             fonts: resolver.token_table(&theme.tokens.fonts),
@@ -214,36 +217,26 @@ impl<'a> Resolver<'a> {
         self.value(&self.tokens.colors, spec, property)
     }
 
-    /// A font family name defined in `fonts` with the requested face.
+    /// A font family name with the requested face. A family defined in `fonts` must have the face; any
+    /// other family is recorded for lookup among installed fonts.
     fn font(&self, spec: &Spec<FontName>, property: &str, weight: Weight, style: FontStyle) -> Option<String> {
         let name = self.value(&self.tokens.fonts, spec, property)?.0;
-        let token = match spec {
-            Spec::Token(token) => format!("tokens.fonts.{token}"),
-            Spec::Literal(_) => String::new(),
-        };
-        let via = match spec {
-            Spec::Token(_) => format!(" (via {spec})"),
-            Spec::Literal(_) => String::new(),
-        };
+        let face = Face { weight, style };
         let Some(family) = self.theme.fonts.get(&name) else {
-            self.error_among(
-                property,
-                &[&token],
-                format!("font family \"{name}\"{via} is not defined in fonts"),
-            );
-            return None;
+            let mut installed = self.installed.borrow_mut();
+            let faces = installed.entry(name.clone()).or_default();
+            faces.entry(face).or_insert_with(|| property.to_owned());
+            return Some(name);
         };
-        let has_face = match (weight, style) {
-            (Weight::Regular, FontStyle::Normal) => true,
-            (Weight::Regular, FontStyle::Italic) => family.italic.is_some(),
-            (Weight::Bold, FontStyle::Normal) => family.bold.is_some(),
-            (Weight::Bold, FontStyle::Italic) => family.bold_italic.is_some(),
-        };
-        if !has_face {
+        if family.0.get(&face).is_none_or(Option::is_none) {
+            let (token, via) = match spec {
+                Spec::Token(token) => (format!("tokens.fonts.{token}"), format!(" (via {spec})")),
+                Spec::Literal(_) => (String::new(), String::new()),
+            };
             self.error_among(
                 property,
                 &[&token, &format!("fonts.{name}")],
-                format!("font family \"{name}\"{via} has no {} face", face_name(weight, style)),
+                format!("font family \"{name}\"{via} has no {face} face"),
             );
             return None;
         }
@@ -271,8 +264,9 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn block(&self, name: &str, raw: &BlockStyle, body: Pt) -> Option<Style> {
-        let property = |field: &str| format!("styles.{name}.{field}");
+    /// Resolves a block style whose fields are properties under `path`, such as `styles.body`.
+    fn block(&self, path: &str, raw: &BlockStyle, body: Pt) -> Option<Style> {
+        let property = |field: &str| format!("{path}.{field}");
         let font = self.font(&raw.font, &property("font"), raw.weight, raw.style);
         let size = self
             .value(&self.tokens.sizes, &raw.size, &property("size"))
@@ -299,7 +293,127 @@ impl<'a> Resolver<'a> {
             line_height: raw.line_height.get(),
             align: raw.align,
             hyphenate: raw.hyphenate,
+            tracking: raw.tracking.get(),
+            uppercase: raw.uppercase,
+            keep_with_next: raw.keep_with_next,
         })
+    }
+
+    /// Resolves the custom styles. A custom style follows its `based-on` chain to a built-in style,
+    /// which decides the kind of block it applies to.
+    fn custom_styles(&self, body: Pt) -> Option<BTreeMap<String, CustomStyle>> {
+        let custom = &self.theme.custom_styles;
+        let mut resolved = BTreeMap::new();
+        let mut valid = true;
+        for (name, style) in custom {
+            let path = format!("custom-styles.{name}");
+            let problem = if is_class_name(name) {
+                self.theme
+                    .styles
+                    .named(name)
+                    .map(|_| format!("custom style \"{name}\" has the name of a built-in style"))
+            } else {
+                Some(format!(
+                    "custom style name \"{name}\" may contain only ASCII letters, digits, - and _"
+                ))
+            };
+            if let Some(message) = problem {
+                self.error(&path, message);
+                valid = false;
+                continue;
+            }
+
+            // The chain from this style to its built-in base.
+            let mut chain = vec![(name.as_str(), style)];
+            let base = loop {
+                let (current, style) = chain[chain.len() - 1];
+                let next = style.based_on.as_str();
+                if let Some(base) = self.theme.styles.named(next) {
+                    break Some((next, base));
+                }
+                if let Some(start) = chain.iter().position(|(n, _)| *n == next) {
+                    // A cycle is reported once, at its first member in name order.
+                    let cycle: Vec<_> = chain[start..].iter().map(|(n, _)| *n).collect();
+                    if cycle.iter().min() == Some(&name.as_str()) {
+                        let names = cycle.join(" -> ");
+                        self.error(
+                            &format!("{path}.based-on"),
+                            format!("custom styles are based on each other: {names} -> {next}"),
+                        );
+                    }
+                    break None;
+                }
+                match custom.get_key_value(next) {
+                    Some((key, style)) => chain.push((key.as_str(), style)),
+                    None => {
+                        if chain.len() == 1 {
+                            self.error(
+                                &format!("custom-styles.{current}.based-on"),
+                                format!("based-on \"{next}\" is neither a built-in nor a custom style"),
+                            );
+                        }
+                        break None;
+                    }
+                }
+            };
+            let Some((base_name, base)) = base else {
+                valid = false;
+                continue;
+            };
+
+            let raw = chain
+                .iter()
+                .rev()
+                .fold(base.clone(), |raw, (_, style)| style.apply(&raw));
+            let bullets = chain.iter().find_map(|(_, style)| style.bullets.clone());
+            let number_gap = chain.iter().find_map(|(_, style)| style.number_gap.clone());
+            let Some(resolved_style) = self.block(&path, &raw, body) else {
+                valid = false;
+                continue;
+            };
+            let heading = base_name.starts_with("heading-");
+            if bullets.is_some() && base_name != "list" {
+                self.error(&format!("{path}.bullets"), "bullets apply only to styles based on list");
+            }
+            if number_gap.is_some() && !heading {
+                self.error(
+                    &format!("{path}.number-gap"),
+                    "number-gap applies only to styles based on a heading style",
+                );
+            }
+            if bullets
+                .as_ref()
+                .is_some_and(|b| b.is_empty() || b.iter().any(|b| b.trim().is_empty()))
+            {
+                self.error(
+                    &format!("{path}.bullets"),
+                    "bullets must list at least one non-empty marker",
+                );
+            }
+            let number_gap = match number_gap {
+                None => None,
+                Some(gap) => match self.spacing(&gap, &format!("{path}.number-gap"), resolved_style.size) {
+                    Some(gap) => Some(gap),
+                    None => {
+                        valid = false;
+                        continue;
+                    }
+                },
+            };
+            let style = match base_name {
+                "list" => CustomStyle::List {
+                    style: resolved_style,
+                    bullets,
+                },
+                _ if heading => CustomStyle::Heading {
+                    style: resolved_style,
+                    number_gap,
+                },
+                _ => CustomStyle::Paragraph { style: resolved_style },
+            };
+            resolved.insert(name.clone(), style);
+        }
+        valid.then_some(resolved)
     }
 
     fn page(&self, body: Pt) -> Option<PageGeometry> {
@@ -372,19 +486,26 @@ impl<'a> Resolver<'a> {
     }
 
     fn fonts(&self) -> BTreeMap<String, FontFiles> {
-        let face = |family: &str, face: &str, path: &theme::ResourcePath| {
-            self.resource(&format!("/fonts/{}/{face}", escape(family)), path)
+        let face_file = |family: &str, face: Face, file: &FontFile| {
+            let pointer = format!("/fonts/{}/{face}", escape(family));
+            let pointer = match file {
+                FontFile::Path(_) => pointer,
+                FontFile::Collection(_) => format!("{pointer}/file"),
+            };
+            FaceFile {
+                resource: self.resource(&pointer, file.path()),
+                index: file.index(),
+            }
         };
         self.theme
             .fonts
             .iter()
-            .map(|(name, files)| {
-                let files = FontFiles {
-                    regular: face(name, "regular", &files.regular),
-                    italic: files.italic.as_ref().map(|p| face(name, "italic", p)),
-                    bold: files.bold.as_ref().map(|p| face(name, "bold", p)),
-                    bold_italic: files.bold_italic.as_ref().map(|p| face(name, "bold-italic", p)),
-                };
+            .map(|(name, family)| {
+                let files = family
+                    .0
+                    .iter()
+                    .filter_map(|(face, file)| Some((*face, face_file(name, *face, file.as_ref()?))))
+                    .collect();
                 (name.clone(), files)
             })
             .collect()
@@ -503,9 +624,10 @@ impl<'a> Resolver<'a> {
         let body = self.body_size()?;
         let page = self.page(body);
         let styles = (theme.styles.clone())
-            .try_map(|name, raw| Ok::<_, ()>(self.block(name, &raw, body)))
+            .try_map(|name, raw| Ok::<_, ()>(self.block(&format!("styles.{name}"), &raw, body)))
             .and_then(|styles| styles.try_map(|_, style| style.ok_or(())))
             .ok();
+        let custom_styles = self.custom_styles(body);
         let images: BTreeMap<_, _> = theme
             .images
             .iter()
@@ -524,7 +646,7 @@ impl<'a> Resolver<'a> {
                 code_font: self.font(
                     &inline.code.font,
                     "inline.code.font",
-                    Weight::Regular,
+                    Weight::REGULAR,
                     FontStyle::Normal,
                 )?,
                 code_size: self.value(&self.tokens.sizes, &inline.code.size, "inline.code.size")?.0,
@@ -625,8 +747,10 @@ impl<'a> Resolver<'a> {
             bibliography_file,
             page,
             fonts: self.fonts(),
+            installed_fonts: self.installed.take(),
             images,
             styles: styles?,
+            custom_styles: custom_styles?,
             inline: inline?,
             lists: lists?,
             tables: tables?,
@@ -645,13 +769,9 @@ impl<'a> Resolver<'a> {
     }
 }
 
-fn face_name(weight: Weight, style: FontStyle) -> &'static str {
-    match (weight, style) {
-        (Weight::Regular, FontStyle::Normal) => "regular",
-        (Weight::Regular, FontStyle::Italic) => "italic",
-        (Weight::Bold, FontStyle::Normal) => "bold",
-        (Weight::Bold, FontStyle::Italic) => "bold-italic",
-    }
+/// Whether a custom style name can be written as `{.name}`: ASCII letters, digits, `-`, and `_`.
+fn is_class_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn escape(key: &str) -> String {
@@ -746,5 +866,102 @@ mod tests {
         let (property, message) = rejection(theme);
         assert_eq!(property, "styles.body.font");
         assert_eq!(message, "font family \"Plain\" has no bold face");
+    }
+
+    #[test]
+    fn takes_numeric_weights_with_regular_and_bold_as_aliases() {
+        let theme = json!({
+            "version": 1,
+            "fonts": {"Sans": {"regular": "r.otf", "bold": "b.otf", "500": "m.otf", "300-italic": "li.otf"}},
+            "styles": {
+                "body": {"font": "Sans", "weight": 400},
+                "quote": {"font": "Sans", "weight": 300, "style": "italic"},
+                "caption": {"font": "Sans", "weight": 500},
+                "heading-1": {"font": "Sans", "weight": 700},
+            },
+        });
+        let config = resolve(inputs(theme)).expect("theme resolves");
+        assert_eq!(config.styles.body.weight, Weight::REGULAR);
+        assert_eq!(config.styles.heading_1.weight, Weight::BOLD);
+        assert_eq!(config.styles.caption.weight.get(), 500);
+        assert_eq!(
+            config.fonts["Sans"][&"300-italic".parse().unwrap()].resource.path,
+            "li.otf"
+        );
+
+        let (property, message) = rejection(json!({"version": 1, "styles": {"body": {"weight": 450}}}));
+        assert_eq!(property, "styles.body.weight");
+        assert!(message.contains("from 100 to 900 in steps of 100"), "{message}");
+    }
+
+    #[test]
+    fn records_families_outside_fonts_for_lookup_among_installed_fonts() {
+        let theme = json!({
+            "version": 1,
+            "tokens": {"fonts": {"heading": "Avenir Next"}},
+            "styles": {"heading-1": {"weight": 500}},
+        });
+        let config = resolve(inputs(theme)).expect("theme resolves");
+        let faces = &config.installed_fonts["Avenir Next"];
+        assert_eq!(faces[&"500".parse().unwrap()], "styles.heading-1.font");
+        assert_eq!(faces[&"bold".parse().unwrap()], "styles.heading-2.font");
+        assert!(!config.installed_fonts.contains_key("Libertinus Serif"));
+    }
+
+    #[test]
+    fn resolves_custom_styles_through_their_based_on_chain() {
+        let theme = json!({
+            "version": 1,
+            "custom-styles": {
+                "eyebrow": {"based-on": "body", "size": "8pt", "uppercase": true, "tracking": 0.1, "keep-with-next": true},
+                "dark-eyebrow": {"based-on": "eyebrow", "color": "#000000"},
+                "checks": {"based-on": "list", "bullets": ["✓"]},
+                "step": {"based-on": "heading-2", "number-gap": "1em"},
+            },
+        });
+        let config = resolve(inputs(theme)).expect("theme resolves");
+        let custom = &config.custom_styles;
+        let CustomStyle::Paragraph { style } = &custom["dark-eyebrow"] else {
+            panic!("a paragraph style")
+        };
+        assert_eq!((style.size, style.uppercase, style.tracking), (Pt(8.0), true, 0.1));
+        assert!(style.keep_with_next);
+        assert_eq!(style.color, Color([0, 0, 0]));
+        assert!(matches!(&custom["checks"], CustomStyle::List { bullets: Some(b), .. } if b == &["✓"]));
+        let CustomStyle::Heading { style, number_gap } = &custom["step"] else {
+            panic!("a heading style")
+        };
+        assert_eq!(*number_gap, Some(style.size));
+        assert_eq!(style.weight, config.styles.heading_2.weight);
+    }
+
+    #[test]
+    fn rejects_unknown_bases_and_cycles_in_custom_styles() {
+        let (property, message) = rejection(json!({"version": 1, "custom-styles": {"a": {"based-on": "bdoy"}}}));
+        assert_eq!(property, "custom-styles.a.based-on");
+        assert_eq!(message, "based-on \"bdoy\" is neither a built-in nor a custom style");
+
+        let theme = json!({"version": 1, "custom-styles": {
+            "a": {"based-on": "b"}, "b": {"based-on": "a"}, "c": {"based-on": "a"},
+        }});
+        let (property, message) = rejection(theme);
+        assert_eq!(property, "custom-styles.a.based-on");
+        assert_eq!(message, "custom styles are based on each other: a -> b -> a");
+    }
+
+    #[test]
+    fn rejects_bullets_and_number_gaps_on_other_kinds_of_style() {
+        let (property, message) = rejection(json!({
+            "version": 1,
+            "custom-styles": {"x": {"based-on": "body", "bullets": ["✓"]}},
+        }));
+        assert_eq!(property, "custom-styles.x.bullets");
+        assert_eq!(message, "bullets apply only to styles based on list");
+
+        let (property, _) = rejection(json!({
+            "version": 1,
+            "custom-styles": {"x": {"based-on": "list", "number-gap": "1em"}},
+        }));
+        assert_eq!(property, "custom-styles.x.number-gap");
     }
 }

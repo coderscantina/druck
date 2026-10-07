@@ -190,30 +190,28 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::config::resolved::FontFiles;
+    use crate::config::resolved::FaceFile;
     use crate::config::source::{Origin, Resource};
-    use crate::config::theme::{FontStyle, Weight};
+    use crate::config::theme::{Face, FontStyle, Weight};
     use crate::config::values::Pt;
     use crate::page::{Page, Position};
 
     fn fonts() -> Fonts {
-        let regular = Resource {
-            origin: Origin::Bundled,
-            path: "fonts/LibertinusSerif-Regular.otf".to_owned(),
+        let regular = FaceFile {
+            resource: Resource {
+                origin: Origin::Bundled,
+                path: "fonts/LibertinusSerif-Regular.otf".to_owned(),
+            },
+            index: 0,
         };
-        let files = FontFiles {
-            regular,
-            italic: None,
-            bold: None,
-            bold_italic: None,
-        };
+        let files = BTreeMap::from([(Face::REGULAR, regular)]);
         Fonts::from_files(&BTreeMap::from([("Serif".to_owned(), files)])).expect("bundled font")
     }
 
     #[test]
     fn writes_a_pdf_with_text_and_link() {
         let fonts = fonts();
-        let face = fonts.face("Serif", Weight::Regular, FontStyle::Normal);
+        let face = fonts.face("Serif", Weight::REGULAR, FontStyle::Normal);
         let run = fonts.shape("Effizienz finden für Straße", face, Pt(12.0), Lang::De);
         let rect = Rect {
             x: Pt(10.0),

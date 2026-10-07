@@ -4,13 +4,14 @@
 //! surrounding text, which is only known during layout.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::Serialize;
 
 use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
-use super::theme::{Align, DocumentDefaults, FontStyle, LabelSet, PageVariants, Styles, TemplateStyle, Weight};
+use super::theme::{Align, DocumentDefaults, Face, FontStyle, LabelSet, PageVariants, Styles, TemplateStyle, Weight};
 use super::values::{Color, Length, Pt};
 
 #[derive(Debug, Clone, Serialize)]
@@ -21,8 +22,12 @@ pub struct Config {
     pub bibliography_file: Option<Resource>,
     pub page: PageGeometry,
     pub fonts: BTreeMap<String, FontFiles>,
+    /// Font families that `fonts` does not define, to be looked up among installed fonts: each face a
+    /// style requests, with the first property that requests it.
+    pub installed_fonts: BTreeMap<String, BTreeMap<Face, String>>,
     pub images: BTreeMap<String, Resource>,
     pub styles: Styles<Style>,
+    pub custom_styles: BTreeMap<String, CustomStyle>,
     pub inline: InlineStyles,
     pub lists: Lists,
     pub tables: Tables,
@@ -40,15 +45,9 @@ impl Config {
     /// Every resource reference with the property that names it.
     pub fn resources(&self) -> Vec<(String, &Resource)> {
         let fonts = self.fonts.iter().flat_map(|(family, files)| {
-            let faces = [
-                ("regular", Some(&files.regular)),
-                ("italic", files.italic.as_ref()),
-                ("bold", files.bold.as_ref()),
-                ("bold-italic", files.bold_italic.as_ref()),
-            ];
-            faces
-                .into_iter()
-                .filter_map(move |(face, file)| Some((format!("fonts.{family}.{face}"), file?)))
+            files
+                .iter()
+                .map(move |(face, file)| (format!("fonts.{family}.{face}"), &file.resource))
         });
         let images = self
             .images
@@ -87,16 +86,18 @@ impl PageGeometry {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct FontFiles {
-    pub regular: Resource,
-    pub italic: Option<Resource>,
-    pub bold: Option<Resource>,
-    pub bold_italic: Option<Resource>,
+/// The files of a family's faces.
+pub type FontFiles = BTreeMap<Face, FaceFile>;
+
+/// A font file and the index of the face in it, which is 0 unless the file is a collection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FaceFile {
+    #[serde(flatten)]
+    pub resource: Resource,
+    pub index: u32,
 }
 
-/// A resolved block style. `font` is a key of [`Config::fonts`].
+/// A resolved block style. `font` is a key of [`Config::fonts`] or [`Config::installed_fonts`].
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Style {
@@ -112,6 +113,53 @@ pub struct Style {
     pub space_after: Pt,
     pub indent: Pt,
     pub first_line_indent: Pt,
+    /// Letter spacing in em.
+    pub tracking: f64,
+    pub uppercase: bool,
+    pub keep_with_next: bool,
+}
+
+/// A custom style by the kind of block it applies to, which its built-in base decides.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+pub enum CustomStyle {
+    Paragraph { style: Style },
+    Heading { style: Style, number_gap: Option<Pt> },
+    List { style: Style, bullets: Option<Vec<String>> },
+}
+
+impl CustomStyle {
+    pub fn style(&self) -> &Style {
+        match self {
+            Self::Paragraph { style } | Self::Heading { style, .. } | Self::List { style, .. } => style,
+        }
+    }
+
+    pub fn kind(&self) -> BlockKind {
+        match self {
+            Self::Paragraph { .. } => BlockKind::Paragraph,
+            Self::Heading { .. } => BlockKind::Heading,
+            Self::List { .. } => BlockKind::List,
+        }
+    }
+}
+
+/// The kind of block a custom style applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockKind {
+    Paragraph,
+    Heading,
+    List,
+}
+
+impl fmt::Display for BlockKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Paragraph => "a paragraph",
+            Self::Heading => "a heading",
+            Self::List => "a list",
+        })
+    }
 }
 
 /// Inline styles. Their `em` lengths refer to the surrounding text size.

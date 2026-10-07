@@ -102,7 +102,7 @@ fn loads_a_document_with_a_partial_theme_and_tracks_resource_origins() {
     let theme_dir = format!("{FIXTURES}/themes");
     assert_eq!(
         config["fonts"]["Fixture Serif"]["regular"],
-        json!({"origin": "theme", "dir": theme_dir, "path": "fonts/dummy.otf"})
+        json!({"origin": "theme", "dir": theme_dir, "path": "fonts/dummy.otf", "index": 0})
     );
     assert_eq!(
         config["bibliography-file"],
@@ -157,7 +157,7 @@ fn objects_merge_by_field_arrays_replace_and_permitted_nulls_are_kept() {
     let config = sandbox.config(&[&document, "--theme", &theme]);
 
     assert_pt(&config, "/styles/heading-1/size", 21.0);
-    assert_eq!(config["styles"]["heading-1"]["weight"], "bold");
+    assert_eq!(config["styles"]["heading-1"]["weight"], 700);
     assert_eq!(config["lists"]["bullets"], json!(["*"]));
     assert_eq!(config["pages"]["first"], Value::Null);
 }

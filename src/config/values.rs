@@ -289,6 +289,33 @@ impl<'de> Deserialize<'de> for LineHeight {
     }
 }
 
+/// Letter spacing in em of the element's font size, added after every character. Negative values tighten.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Tracking(f64);
+
+impl Tracking {
+    pub const MIN: f64 = -0.2;
+    pub const MAX: f64 = 1.0;
+
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Tracking {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = f64::deserialize(deserializer)?;
+        if !(Self::MIN..=Self::MAX).contains(&value) {
+            return Err(de::Error::custom(format!(
+                "tracking {value} must be a number of em from {} to {}",
+                Self::MIN,
+                Self::MAX
+            )));
+        }
+        Ok(Self(value))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

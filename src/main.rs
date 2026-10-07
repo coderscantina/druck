@@ -6,13 +6,14 @@ mod config;
 mod diagnostic;
 mod document;
 mod image;
+mod installed;
 mod layout;
 mod markdown;
 mod page;
 mod pdf;
 mod text;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -22,7 +23,7 @@ use serde_json::{Map, Value};
 
 use config::front_matter::{self, FrontMatter};
 use config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
-use config::resolved::Config;
+use config::resolved::{Config, FontFiles};
 use config::source::{Origin, Resource, Source};
 use diagnostic::Diagnostic;
 use image::Image;
@@ -84,6 +85,7 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
     match cli.command {
         Command::Check { input, print_config } => {
             let (config, document) = load(&input)?;
+            find_installed(&config)?;
             layout::check_title(&config, &document.source)?;
             if print_config {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
@@ -99,10 +101,23 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 Some(path) => document.working_dir.join(path),
                 None => document.path.with_extension("pdf"),
             };
-            let fonts = Fonts::load(&config)?;
+            let installed = find_installed(&config)?;
+            let fonts = Fonts::load(&config, &installed)?;
             let laid = render(&config, &fonts, &document)?;
             let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang)
                 .map_err(|e| vec![Diagnostic::new(None, e)])?;
+            let used: BTreeSet<_> = laid
+                .pages
+                .iter()
+                .flat_map(|page| &page.items)
+                .filter_map(|item| match item {
+                    page::Item::Text { run, .. } => Some(run.face),
+                    _ => None,
+                })
+                .collect();
+            for warning in used.into_iter().filter_map(|face| fonts.embedding_warning(face)) {
+                eprintln!("warning: {warning}");
+            }
             std::fs::write(&output, pdf)
                 .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", output.display()))])?;
             let count = laid.pages.len();
@@ -332,6 +347,15 @@ fn load_theme(path: &Path) -> Result<ThemeInput, Vec<Diagnostic>> {
         vec![Diagnostic::new(Some(source.clone()), message).at(e.line() as u64, e.column() as u64)]
     })?;
     Ok(ThemeInput { source, value })
+}
+
+/// Looks up the font families the configuration does not define among installed fonts. The installed
+/// fonts are scanned only when a style names such a family.
+fn find_installed(config: &Config) -> Result<BTreeMap<String, FontFiles>, Vec<Diagnostic>> {
+    if config.installed_fonts.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    installed::lookup(&installed::system(), &config.installed_fonts)
 }
 
 /// Checks that every file-based resource exists. Bundled resources ship with the binary.

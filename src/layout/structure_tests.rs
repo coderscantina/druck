@@ -55,7 +55,7 @@ fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]
     let bibliography =
         bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
     let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source())?;
-    let fonts = Fonts::load(config).expect("bundled fonts");
+    let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
     layout(&document, &cited, images, &HashMap::new(), config, &fonts, &source())
 }
 

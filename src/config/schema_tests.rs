@@ -148,6 +148,46 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             json!({"version": 1, "images": {"logo": "https://example.com/a.png"}}),
             false,
         ),
+        (
+            "faces of other weights and a collection face",
+            json!({"version": 1, "fonts": {"X": {"regular": {"file": "x.ttc", "index": 2}, "500": "m.otf", "300-italic": null}}}),
+            true,
+        ),
+        (
+            "a numeric face key for regular",
+            json!({"version": 1, "fonts": {"X": {"regular": "x.otf", "400": "y.otf"}}}),
+            false,
+        ),
+        (
+            "a collection face without index",
+            json!({"version": 1, "fonts": {"X": {"regular": {"file": "x.ttc"}}}}),
+            false,
+        ),
+        (
+            "numeric weight",
+            json!({"version": 1, "styles": {"body": {"weight": 300, "tracking": -0.05}}}),
+            true,
+        ),
+        (
+            "weight between steps",
+            json!({"version": 1, "styles": {"body": {"weight": 350}}}),
+            false,
+        ),
+        (
+            "tracking out of range",
+            json!({"version": 1, "styles": {"body": {"tracking": 2}}}),
+            false,
+        ),
+        (
+            "custom style",
+            json!({"version": 1, "custom-styles": {"checks": {"based-on": "list", "bullets": ["✓"]}}}),
+            true,
+        ),
+        (
+            "custom style without base",
+            json!({"version": 1, "custom-styles": {"eyebrow": {"uppercase": true}}}),
+            false,
+        ),
     ];
     for (name, layer, valid) in cases {
         assert_eq!(validator.is_valid(&layer), valid, "schema verdict for {name}");

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use crate::bibliography::Reference;
-use crate::config::resolved::Config;
+use crate::config::resolved::{Config, CustomStyle};
 use crate::document::{Block, Document, Inline, Location};
 
 /// Numbers, anchors, and labels of a document.
@@ -159,13 +159,27 @@ impl Walk<'_> {
                     level,
                     content,
                     label,
+                    class,
                 } => {
                     let level = *level;
                     let depth = usize::from(level);
-                    self.counters[depth - 1] += 1;
-                    self.counters[depth..].fill(0);
                     let document = &self.config.document;
-                    let number = (document.numbered_headings && level <= document.numbering_depth.get()).then(|| {
+                    // A heading in a style with a number gap carries the number its author typed.
+                    let typed = class.as_ref().is_some_and(|class| {
+                        matches!(
+                            self.config.custom_styles.get(&class.name),
+                            Some(CustomStyle::Heading {
+                                number_gap: Some(_),
+                                ..
+                            })
+                        )
+                    });
+                    let numbered = document.numbered_headings && level <= document.numbering_depth.get() && !typed;
+                    if !typed {
+                        self.counters[depth - 1] += 1;
+                        self.counters[depth..].fill(0);
+                    }
+                    let number = numbered.then(|| {
                         let parts: Vec<String> = self.counters[..depth].iter().map(usize::to_string).collect();
                         parts.join(".")
                     });
