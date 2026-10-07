@@ -1,7 +1,10 @@
 name: CI
 
+# Tag pushes and the release commit from scripts/release.sh run only the
+# release workflow. The commit before the release commit is the one CI checks.
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:
@@ -9,6 +12,7 @@ permissions:
 
 jobs:
   check:
+    if: ${{ !startsWith(github.event.head_commit.message, '🔖 release') }}
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -36,6 +40,7 @@ jobs:
   # working directory. Fonts and hyphenation data are bundled, so the result
   # must not depend on what the runner has installed.
   render:
+    if: ${{ !startsWith(github.event.head_commit.message, '🔖 release') }}
     name: render samples on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
