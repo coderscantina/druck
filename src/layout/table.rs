@@ -151,14 +151,14 @@ impl<'a> Flow<'a> {
             None => Vec::new(),
             Some(number) => {
                 let label = &config.labels.table;
-                match self.caption_lines(table.at, label, number.number, table.caption, place) {
+                match self.caption_lines(table.at, label, number.number, table.caption, table_width, true) {
                     Some(lines) => lines,
                     None => return,
                 }
             }
         };
         if let (Some(number), Some(line)) = (table.number, caption.first_mut()) {
-            line.items.push(anchor_item(number.anchor, frame.left));
+            line.items.push(anchor_item(number.anchor, left));
         }
 
         // Column edges, from the left edge of the table to its right edge.
@@ -221,7 +221,7 @@ impl<'a> Flow<'a> {
         let style = &config.styles.caption;
         let start = self.lines.len();
         self.space(style.space_after.0);
-        let dx = frame.left + style.indent.0;
+        let dx = left + style.indent.0;
         for line in caption {
             self.push(translate_line(line, dx), table.at, Break::Never);
         }

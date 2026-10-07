@@ -1210,7 +1210,7 @@ fn reports_a_row_taller_than_the_page_with_its_header() {
 #[test]
 fn tables_are_numbered_apart_from_figures() {
     let images = [svg(50.0, 20.0)];
-    let rows = vec![vec!["a".to_owned()]];
+    let rows = vec![vec!["A cell as wide as a caption".to_owned()]];
     let blocks = vec![
         table(1, &["H"], &rows, "First."),
         figure(5, 0, vec![text_inline("Image.")]),

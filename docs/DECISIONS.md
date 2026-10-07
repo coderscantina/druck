@@ -668,9 +668,13 @@ Only images in the slots of the title layout in use are decoded: the title page 
 
 Resolution records the font tokens that styles use, following token-to-token references, and warns for a `fonts.*` setting from front matter or `--set` whose token nothing uses. Warnings are diagnostics with a `warning` flag, kept in `Config` and printed after loading. The latest layer that sets a token gets the warning.
 
+#### Table captions at table width
+
+Every table's caption is set at the table's width from its left edge, pipe and list tables alike, wide or not. Before, a caption spanned the frame or, for wide tables, the placement width, so a narrow centered table had a caption wider than itself. A long caption now wraps more over a narrow table. The caption's anchor for references moved to the table's left edge too. This replaces the milestone 13 rule for wide tables.
+
 #### List spacing
 
-The default theme sets the `list` style's `space-before` and `space-after` to `$spacing.block`, the token quotations and code blocks use, so a list after a paragraph and lists of different kinds in a row have a gap. Paragraphs have no spacing token of their own in the default theme (they use an indent). The layout applies list spacing only to a list outside other lists, so a nested list sits at item spacing under its parent item instead of a block gap. Lists in footnotes and in table cells start a new nesting, so they get the spacing against their neighbours in the note or cell, and the cell and note edges still drop it (checked in the offer sample). The sample PDFs `de`, `en`, `offer`, `pagination`, and `typography` changed and keep their page counts.
+The default theme sets the `list` style's `space-before` and `space-after` to `$spacing.block`, the token quotations and code blocks use, so a list after a paragraph and lists of different kinds in a row have a gap. Paragraphs have no spacing token of their own in the default theme (they use an indent). The layout applies list spacing only to a list outside other lists, so a nested list sits at item spacing under its parent item instead of a block gap. Lists in footnotes and in table cells start a new nesting, so they get the spacing against their neighbours in the note or cell; the cell edges drop it (checked in the offer sample), footnotes were not inspected. The sample PDFs `de`, `en`, `offer`, `pagination`, and `typography` changed and keep their page counts.
 
 #### Raster density
 

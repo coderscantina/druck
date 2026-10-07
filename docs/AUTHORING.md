@@ -222,7 +222,7 @@ Tables are pipe tables as on GitHub, or [list tables](#list-tables) for cells wi
 - Cells hold text with emphasis, strong text, inline code, links, and footnote references. Write `\|` for a pipe inside a cell, also inside code.
 - A row with fewer cells than the header gets empty cells. A row with more cells is an error.
 - Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
-- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table. Tables are numbered apart from figures. A table without a caption has no number.
+- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table, as wide as the table and starting at its left edge. Tables are numbered apart from figures. A table without a caption has no number.
 - A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references).
 
 Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.

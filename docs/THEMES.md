@@ -229,7 +229,7 @@ Captions use `styles.caption`. A caption reads "Figure 1: " and then the image d
 
 Images are centered in their frame. Their size and placement have no theme settings; see [authoring](AUTHORING.md#images-and-captions).
 
-Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the width of its frame, and spaced like figure captions.
+Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the table's own width from its left edge, and spaced like figure captions.
 
 ## Tables
 
@@ -244,7 +244,7 @@ Header cells use `styles.table-header` and body cells `styles.table-cell`. A row
 
 Rule thicknesses use the table cell size for `em`. The default theme draws all three as hairlines in the `rule` color. A row style's `rule-below` replaces the rule below that row, see [custom styles](#custom-styles); totals rows without rules use `"rule-below": "none"`.
 
-Columns take their natural width when the table fits, else they share the width as described in [authoring](AUTHORING.md#tables). A table narrower than its frame is centered in it. A table listed in `page.wide` that fits in the prose width is centered there; a wider one starts where the prose starts and takes the width it needs, up to the frame. Its caption is set across the same width.
+Columns take their natural width when the table fits, else they share the width as described in [authoring](AUTHORING.md#tables). A table narrower than its frame is centered in it. A table listed in `page.wide` that fits in the prose width is centered there; a wider one starts where the prose starts and takes the width it needs, up to the frame.
 
 There are no vertical rules. A table is spaced like a figure: the caption style's `space-after` above and below it, and its `space-before` between the caption and the table. The header row, with its rules, repeats at the top of each page or column a table continues in.
 
