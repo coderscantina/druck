@@ -38,6 +38,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `pages.title`, `pages.first`, `pages.odd`, `pages.even` | Remove the variant, so the fallback order applies. |
 | `pages.<variant>.header`, `pages.<variant>.footer` | No header or footer on that variant. |
 | `page.text-width` | Prose uses the whole margin frame. |
+| `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
 `pages.body` itself cannot be null, and `fonts.<family>.regular` is required.
@@ -165,9 +166,9 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 | `uppercase` | `true` sets the text in capitals. Default `false`. |
 | `keep-with-next` | `true` keeps the block on the page or in the column of the next block. Default `false`. |
 
-`tracking` adds space after every character, spaces included. Tracked text sets no ligatures, so "fi" stays two spaced letters. `uppercase` follows Unicode case mapping, so "Straße" becomes "STRASSE"; the PDF text is the capitals. Inline code keeps its case and spacing. Both apply wherever the style sets text that can wrap: blocks, title slots, table cells, and contents entries. Header and footer bands, list markers, and contents page numbers ignore them.
+`tracking` adds space after every character, spaces included. Tracked text sets no ligatures, so "fi" stays two spaced letters. `uppercase` follows Unicode case mapping, so "Straße" becomes "STRASSE"; the PDF text is the capitals. Inline code keeps its case and spacing. Both apply wherever the style sets text: blocks, title slots, header and footer slots, table cells, and contents entries. List markers and contents page numbers ignore them.
 
-A block with `keep-with-next` never ends a page or column without the next block, as a heading never does. Headings always keep with what follows.
+A block with `keep-with-next` never ends a page or column without the next block, as a heading never does. Headings always keep with what follows. A table row in such a style stays with the next row.
 
 `align: justify` chooses line breaks for the whole paragraph, stretches or shrinks interword spaces to fill each line except the last, and lets punctuation at the line edges hang slightly into the margins. The other alignments keep natural spaces and also choose breaks for the whole paragraph, so ragged lines come out even. `hyphenate: true` hyphenates words in the document language; code is never hyphenated. Details are in [decisions](DECISIONS.md#2026-10-06-milestone-03-paragraph-composition).
 
@@ -179,7 +180,7 @@ Space between blocks (`space-before` and `space-after`) may grow by up to half i
 
 ## Custom styles
 
-`custom-styles` names styles that documents apply to headings, paragraphs, and lists with `{.name}`, see [authoring](AUTHORING.md#custom-styles). Each is based on another style and lists only what it changes:
+`custom-styles` names styles that documents apply to headings, paragraphs, lists, and table rows and cells with `{.name}`, see [authoring](AUTHORING.md#custom-styles). Title and band slots may name them too. Each is based on another style and lists only what it changes:
 
 ```json
 "custom-styles": {
@@ -198,9 +199,10 @@ Space between blocks (`space-before` and `space-after`) may grow by up to half i
 ```
 
 - `based-on` names a built-in style from `styles` or another custom style. The fields given replace those of the base; the others come from it. A chain of custom styles is followed to its built-in style. An unknown base is an error, and so are custom styles based on each other in a cycle.
-- The built-in style at the end of the chain decides what the style applies to: a heading style makes it a heading style, `list` a list style, and any other a paragraph style. Applying a style to another kind of block is an error at the attribute.
+- The built-in style at the end of the chain decides what the style applies to: a heading style makes it a heading style, `list` a list style, and any other a paragraph style. Table rows and cells take paragraph styles. Applying a style to another kind of block is an error at the attribute.
 - Names use ASCII letters, digits, `-`, and `_`, and cannot be the name of a built-in style.
 - `bullets` is allowed on list styles. It replaces `lists.bullets` for a list in that style, one marker per nesting level as there. Numbered lists keep their numbers.
+- `rule-below` is allowed on paragraph styles: `none`, `header`, or `row`. A table row in that style draws no rule below it, or the header or row rule instead of its own. Cells and paragraphs in the style ignore it.
 - `number-gap` is allowed on heading styles. A heading in that style that starts with a number its author typed, such as "2." followed by a space, sets the number in front and the text after the gap, so every line of the heading starts at the same place. Such a heading is not numbered automatically, and it does not count toward the numbers of other headings.
 - Spaces between blocks collapse to the larger, so a heading's `space-before` also separates it from a kept paragraph above it. For a label directly above a heading, give the label the space above and the heading a small `space-before`.
 
@@ -229,13 +231,18 @@ Table captions read "Table 1: " and then the caption text, with the `table` labe
 
 ## Tables
 
-Header cells use `styles.table-header` and body cells `styles.table-cell`. A column aligned in the Markdown overrides the style's `align` for that column; other columns keep it. `hyphenate` decides whether long words in cells may break, which also lowers the narrowest width a column can take. The styles' spacing and indent fields do not apply inside cells.
+Header cells use `styles.table-header` and body cells `styles.table-cell`. A row's custom style replaces them for its cells, and a cell's own custom style replaces the row's. A column aligned in the Markdown, or with the `align` attribute of a list table, overrides the style's `align` for the cells of that column that have no style of their own; other columns keep it. `hyphenate` decides whether long words in cells may break, which also lowers the narrowest width a column can take. In a cell the style's `indent` narrows the text, and spacing applies between the paragraphs and lists of a list table cell, but not above the first or below the last. Lists in cells use the `list` style or their own custom style.
 
 | Key | Effect |
 | --- | --- |
 | `tables.cell-padding` | Space on every side between a cell's text and its edges. |
-| `tables.rule-thickness` | The rules above and below the header row and below each body row. `0pt` draws none. |
-| `tables.rule-color` | The color of those rules. |
+| `tables.top-rule` | The rule above the header row: `{ "thickness": ..., "color": ... }`, or `null` for none. |
+| `tables.header-rule` | The rule below the header row, or `null`. |
+| `tables.row-rule` | The rule below each body row, or `null`. |
+
+Rule thicknesses use the table cell size for `em`. The default theme draws all three as hairlines in the `rule` color. A row style's `rule-below` replaces the rule below that row, see [custom styles](#custom-styles); totals rows without rules use `"rule-below": "none"`.
+
+Columns take their natural width when the table fits, else they share the width as described in [authoring](AUTHORING.md#tables). A table narrower than its frame is centered in it. A table listed in `page.wide` that fits in the prose width is centered there; a wider one starts where the prose starts and takes the width it needs, up to the frame. Its caption is set across the same width.
 
 There are no vertical rules. A table is spaced like a figure: the caption style's `space-after` above and below it, and its `space-before` between the caption and the table. The header row, with its rules, repeats at the top of each page or column a table continues in.
 
@@ -283,7 +290,7 @@ A line break in slot text starts a new line, so `"Studio\nMain Street 1"` sets t
 | `text` | Slot text with placeholders. Use this or `image`, not both. |
 | `image` | A name from the theme `images` map. |
 | `width` | Image width. Required for image slots, an error on text slots. It may not exceed the prose width in the title block, or the group width on the title page. |
-| `style` | One of `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `body`. Default `body`. |
+| `style` | One of `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `body`, or the name of a custom style. Default `body`. |
 | `required` | Default `false`. |
 | `space-before` | Default `0pt`. May not exceed the text height. |
 
@@ -316,7 +323,7 @@ Each page variant has a `header` and a `footer`: an array of slot groups, or `nu
 | Field | Meaning |
 | --- | --- |
 | `text` | Slot text with placeholders. Required. |
-| `style` | One of the title slot styles. Default: the `header` or `footer` style. |
+| `style` | One of the title slot styles or a custom style. Default: the `header` or `footer` style. Tracking and capitals apply, so a custom style based on `footer` can set spaced capitals. |
 | `required` | Default `false`. |
 | `space-before` | Space above the slot's first line, default `0pt`. `em` refers to the slot style size. |
 

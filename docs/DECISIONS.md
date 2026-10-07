@@ -539,7 +539,7 @@ Decided with the owner against a reference offer PDF: a cover with a metadata bl
 
 - **Tracking** is a unitless number of em from -0.2 to 1 rather than a length, so tightening is possible and the basis is always the style's size. It follows every character, spaces included, also the last one of a line. Tracked text sets no ligatures.
 - **Uppercase** uses Unicode case mapping before shaping, so "ß" becomes "SS" and hyphenation sees the capitals. Inline code keeps its case and spacing.
-- Header and footer bands ignore both, since milestone 12 rebuilds them; see the follow-ups.
+- Header and footer bands ignored both until [milestone 13](#slots) let band slots name custom styles.
 
 ### Custom styles
 
@@ -594,9 +594,49 @@ Front matter gains `meta`, a map of text or lists of text, merged per key so `--
 
 ### Consequences
 
-- A wide table narrower than the frame is centered in the frame, which looks off beside narrow left-set prose (tables 2 and 3 in [the offer sample](../samples/offer.md)). Milestone 13's column widths, or aligning narrow wide tables to the inner edge, would address it.
+- A wide table narrower than the frame is centered in the frame, which looks off beside narrow left-set prose. Superseded by [milestone 13](#wide-tables-narrower-than-the-frame).
 - Figures and tables inside `columns` still take the column width even when listed in `wide`; an author who wants them wide uses `full-width`.
 - The sample [offer](../samples/offer.md) with [its theme](../samples/themes/business.json) selects the theme in front matter, so `scripts/render-samples.sh` renders it once.
+
+## 2026-10-07: Milestone 13 rich tables
+
+### List table syntax
+
+`::: table` holds one list: an item per row, each with a nested list holding an item per cell; the first row is the header. Attributes go at the start of an item, `{.name}` on rows and `{.name span=n}` on cells, read from the source like other attributes so `\{` stays text. They may stand alone on the item's line. A row item may hold nothing but its cell list, and cells hold only paragraphs and lists (nested lists included), because headings would enter the outline, and images, code, quotations, and tables in cells would need their own measuring for little use in business documents. Short rows are errors rather than padded, as decided in the amendment.
+
+The caption follows the closing `:::` as a `: Caption {#tbl:x}` paragraph, so it attaches exactly as for pipe tables. It also attaches when written inside the directive after the list, which needed no extra code.
+
+Directive attributes are `{key="value" ...}` after the name, with spaces separating `align` and `widths` entries. Only `table` takes them; any other directive with attributes is an error. A pipe table inside `::: table` takes the attributes too, since the directive only checks that it holds one table; this gives pipe tables `*` widths at no cost.
+
+The document model has one table: `Block::Table` with `columns` (alignment and `auto` or `*` width), rows with an optional class, and cells holding blocks, a span, and an optional class. A pipe table cell is one paragraph.
+
+### Widths, spans, and styles
+
+`auto` columns are fitted as in milestone 07 within what the minimum widths of the `*` columns leave; `*` columns then share the rest equally, each at least its minimum. Without `widths` all columns are `auto`, which is the milestone 07 rule exactly. A spanning cell is measured separately and widens the columns it spans equally where it needs more minimum or natural width than they have; this keeps a group row's long label from wrapping in a table of short columns.
+
+A cell's style is its own class, else the row's, else `table-header` or `table-cell`. Column alignment overrides the row style but not a cell's own class, so a totals label can be right-aligned in a left-aligned column while the amount keeps its column's alignment. A spanning cell takes its first column's alignment. Row and cell classes must be paragraph styles, checked with the other classes before layout.
+
+Cells are laid out by the ordinary block flow in a frame of the cell's width, so lists, list styles, spacing between blocks, and footnote references behave as in the body. A cell of a single paragraph, which every pipe table cell is, is shaped once for measuring and setting as before; going through the flow shaped it twice and made the table benchmark 40% slower.
+
+### Rules
+
+`tables.rule-thickness` and `tables.rule-color` are replaced by `top-rule`, `header-rule`, and `row-rule`, each `{thickness, color}` or `null`. The existing output drew a rule above the header too, so it needed its own setting to stay byte-identical; the default theme sets all three to the old hairline. Schema version 1 is unreleased, so the old keys were removed, as with the band shape in milestone 12. A paragraph style's `rule-below` is `none`, `header`, or `row`, so a row can drop its rule or take the heavier one; a single-value `none` was rejected as an odd enum for no saving. It is accepted only on paragraph styles and read only where the style styles a row.
+
+`keep-with-next` on a row style keeps the row with the next one, which group rows need so they never end a page alone. This follows the style property's meaning for blocks; it was not in the brief.
+
+### Wide tables narrower than the frame
+
+A table in `page.wide` that fits within the prose width is centered in the prose width; a wider one starts where the prose starts and takes the width it needs. Its caption is set across the same width. Centering across the frame put narrow tables off-axis beside left-set prose. Non-wide tables keep centering in their frame, so existing samples are unchanged.
+
+On mirrored even pages a wide line now moves right with the prose as far as the frame allows: `FlowLine::wide` holds the frame width the line leaves free, and the composer shifts it by the smaller of that and the prose shift. A table as wide as the frame does not move, as before.
+
+### Slots
+
+Title and band slot `style` is a built-in slot style name or a custom style name (`SlotStyle`), resolved and checked with the theme. Bands now apply the style's tracking and capitals. Tracked text still adds space after its last letter, so right-aligned tracked band text sits slightly left, as recorded in milestone 11.
+
+### Reference comparison
+
+An offer theme with installed Avenir Next (Gotham, the reference font, is not installed) set the reference's cost table pages from Markdown outside the repository. Page breaks fell after the same rows as in the reference, on three pages, with the same header, group rows, muted detail lists, note row, and totals. Differences: Avenir Next runs wider than Gotham; detail lines hyphenated where the reference does not (a theme choice, `hyphenate: false`); the list markers of Avenir Next are larger than the reference's small bullets; group rows in the reference have more space above. No layout feature was missing.
 
 ## Recording a decision
 

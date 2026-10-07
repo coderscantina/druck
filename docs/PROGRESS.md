@@ -6,7 +6,9 @@ Milestone 09 is complete. Documents cite works from a local BibTeX file with `[@
 
 Milestones 11 and 12 are complete and merged. The [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07 added milestones 11 to 13; release acceptance (10) waits until they are complete. Themes can now use installed fonts (looked up by the CLI only, collection faces included) with weights 100 to 900, tracking, capitals, keep-with-next, and custom styles applied with `{.name}` ([decisions](DECISIONS.md#2026-10-07-milestone-11-installed-fonts-and-custom-styles)). They can set prose narrower than wide blocks, unmirrored margins, title pages and bands made of anchored slot groups, `meta` values, and `{pages}` ([decisions](DECISIONS.md#2026-10-07-milestone-12-page-geometry-covers-and-bands)).
 
-Current milestone: [13: Rich tables](milestones/13-rich-tables.md).
+Milestone 13 is complete. A `::: table` directive holds a list table whose cells hold paragraphs and lists, with `{span=n}` cells, `{.name}` on rows and cells, and `align` and `widths` attributes where `*` columns fill the frame. Themes set `top-rule`, `header-rule`, and `row-rule`, and a row style's `rule-below` drops or changes the rule below its row. Title and band slots may name custom styles, and bands apply tracking and capitals. A wide table narrower than the frame starts with the prose instead of centering across the frame ([decisions](DECISIONS.md#2026-10-07-milestone-13-rich-tables), [authoring](AUTHORING.md#list-tables)).
+
+Current milestone: [10: Release acceptance](milestones/10-release-acceptance.md).
 
 ## Milestone status
 
@@ -22,15 +24,17 @@ Current milestone: [13: Rich tables](milestones/13-rich-tables.md).
 - [ ] 10: Release acceptance and distribution.
 - [x] 11: Installed fonts and custom styles.
 - [x] 12: Page geometry, covers, and bands.
-- [ ] 13: Rich tables.
+- [x] 13: Rich tables.
 
 ## Resume note
 
-For milestone 13: 11 and 12 were built in parallel and merged. `samples/typography.md` shows the milestone 11 styles and `samples/offer.md` the milestone 12 geometry; 13 should merge them into one offer sample with a cost table. Slot styles are still the fixed `TemplateStyle` list, so bands ignore tracking and capitals until 13 lets slots name custom styles. Fold the centered-wide-table follow-up into 13's column work. The notes for milestone 10 below still apply.
+Next: milestone 10, release acceptance, still blocked on the owner's choice of Kyber's license. Milestones 11 to 13 are complete; `samples/offer.md` with `samples/themes/business.json` now shows all three and joins the acceptance review.
 
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: Kyber's own license (the owner's decision; distribution is blocked until then), the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Milestone 13, on 2026-10-07 on the same machine: `cargo test -q` passed 199 unit and 23 integration tests; `cargo clippy --all-targets -q` and `cargo fmt --check` were clean; no dependency changed. `scripts/render-samples.sh` with a release build of `31c1e4f` and of the milestone 13 tree, compared with `cmp`, gave byte-identical PDFs for all renders except `offer.pdf`, which changed on purpose (new content, and wide tables now start with the prose). New tests cover parsing list tables with attributes, spans, row and cell styles, block cells, and captions; ten parser errors at their locations; slot styles naming custom styles, an unknown slot style, and `rule-below` on a list style; schema cases for the rules and slot styles; and in layout `*` and `auto` widths with column and cell alignment, the theme rules and their opt-out, a spanning cell widening its columns, a repeated header over three pages, a kept group row, wide placement, and band capitals with tracking. The 34-copy `samples/tables.md` benchmark (93 pages) took 0.30 s and 42 MB against 0.29 s and 40 MB for `31c1e4f`, with identical output. `samples/offer.md` (5 pages) was rasterized with `pdftoppm -r 80 -png` and every page inspected: cover labels in tracked capitals, eyebrows kept with their headings, the cost table over pages 2 to 4 with its header in small spaced capitals repeated, group rows kept with their first item, muted detail lists, the note row, totals without rules, and narrow wide tables flush with the prose. The reference offer comparison with installed Avenir Next is recorded in [decisions](DECISIONS.md#reference-comparison).
 
 Milestones 11 and 12, on 2026-10-07 on the same machine: after merging both, `cargo test -q` passed 189 unit and 23 integration tests, and `cargo clippy --all-targets -q` and `cargo fmt --check` were clean. `scripts/render-samples.sh` with a release build of the amendment commit (`a4fe54e`, its own script and samples) and of the merged tree gave byte-identical PDFs for all nine existing renders. Avenir Next and Helvetica Neue embedded from the system `.ttc` files with the right six faces, and a misspelled family or a missing face was an error with no PDF written. `samples/offer.md` (4 pages) and `samples/typography.md` (2 pages) were rendered from the merged tree and inspected: the cover's metadata block and title, the three-column footer with "Page 1/4", narrow prose beside a frame-wide table, eyebrows kept with their headings, ✔ and • lists, and hanging step numbers.
 
@@ -67,8 +71,9 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
-- A wide table narrower than the frame is centered across the frame, which looks off beside narrow left-set prose (`samples/offer.md`). Planned for milestone 13.
-- Band slots ignore tracking and capitals until slots can name custom styles in milestone 13.
+- List table cells hold only paragraphs and lists; code, quotations, and images in cells would need their own measuring. Row spans stay out of scope.
+- List markers take the list style's size and face, so a detail list cannot have smaller bullets than its text.
+- A wide table's caption is set across the table's placement width; a non-wide table's caption still spans its frame (see the follow-up on captions below).
 - Tracking adds space after the last letter of a line, so tracked right-aligned text sits slightly left.
 - `meta` numbers must be quoted, like `date`. `margins.mirror` is theme-only, not a front matter setting.
 - When no first line of a ragged paragraph fits within tolerance, the breaker's second pass caps badness at 10 000, so all very loose first lines tie and the earliest break wins. A bibliography entry whose URL does not fit after the first line can then break after its first word: "Knuth," alone in the custom-theme report, "The Unicode Standard, Version / 16.0" in the German numeric one. Uncapped badness in the second pass, or an emergency stretch, in [the breaker](../src/layout/paragraph/breaking.rs) would fix it; it changes milestone 03 behaviour, so it was left.

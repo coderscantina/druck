@@ -208,7 +208,7 @@ SVG text uses the bundled Libertinus fonts, never the fonts installed on the mac
 
 ## Tables
 
-Tables are pipe tables as on GitHub. The second line sets each column's alignment: `:--` left, `:-:` centered, `--:` right, and `---` the alignment of the theme's cell style. A paragraph directly after the table that starts with a colon and a space is its caption:
+Tables are pipe tables as on GitHub, or [list tables](#list-tables) for cells with lists and spans. The second line of a pipe table sets each column's alignment: `:--` left, `:-:` centered, `--:` right, and `---` the alignment of the theme's cell style. A paragraph directly after the table that starts with a colon and a space is its caption:
 
 ```markdown
 | Year | Event               | Pages |
@@ -229,7 +229,38 @@ Column widths come from the cell text. A table whose cells all fit on one line k
 
 A table can run over several pages and columns. Pages and columns break only between rows, never inside a row. The header row is repeated at the top of each page or column the table continues in, and the caption stays with the start of the table. A row is as tall as its tallest cell, and a row that does not fit on a page together with the repeated header is an error at the row. Notes referenced in a cell go at the foot of that row's page.
 
-A table inside `full-width` spans the text area; the columns above it are balanced and resume below it. These are errors: an image in a cell, a footnote reference in the header row (the header repeats, so the note would have no single page), and a table inside a footnote. Merged cells are not supported.
+A table inside `full-width` spans the text area; the columns above it are balanced and resume below it. These are errors: an image in a cell, a footnote reference in the header row (the header repeats, so the note would have no single page), and a table inside a footnote. Pipe tables cannot merge cells; list tables can span columns.
+
+### List tables
+
+A `::: table` directive holds a list table: a list with one item per row, and in each row a nested list with one item per cell. The first row is the header. Cells hold paragraphs and lists, so an item can have a title line with a list of details below it:
+
+```markdown
+::: table {align="left right" widths="* auto"}
+- - Item
+  - Amount
+- {.group}
+  - {span=2} Theme and design
+- - Theme in the corporate design
+
+    {.detail}
+    - Tokens for the corporate colours and typefaces
+    - Cover and running footers
+  - 2 280.00
+- {.total}
+  - {.sum-label} Total
+  - 2 280.00
+:::
+
+: Estimated costs {#tbl:costs}
+```
+
+- `align` lists `left`, `center`, or `right` for each column, and `widths` lists `*` or `auto`. Both are optional, separated by spaces, and need one entry per column. Without `widths` every column is `auto`, which fits its content as for pipe tables. A `*` column takes the width the `auto` columns leave, shared equally among `*` columns, so a table with one fills its frame.
+- `{span=n}` at the start of a cell makes it span `n` columns. The cells of every row must span as many columns as the header's; otherwise the row is an error. Rows cannot span.
+- `{.name}` at the start of a row item styles all its cells, and at the start of a cell item, alone or with a span as in `{.name span=2}`, that cell. A cell's own style wins over its row's, and the column's alignment applies only to cells without a style of their own. Styles for rows and cells are paragraph styles; one with `rule-below` changes the rule below its row, see [themes](THEMES.md#custom-styles).
+- The attributes may stand alone on the item's line, with the cells or text on the lines below.
+- A caption, label, repeated header, rows that never split, and the errors for rows too tall work as for pipe tables. A cell spanning columns widens them where its text needs it.
+- These are errors with their location: text in a row item outside its cells, a cell holding anything but paragraphs and lists, other attributes, and content in the directive besides the list. `align` or `widths` with the wrong number of entries is an error at the directive.
 
 ## Footnotes
 
@@ -290,12 +321,13 @@ Content kept on one page.
 | `full-width` | A block across the whole text area inside `columns`. The columns before it are balanced first. |
 | `keep` | Keeps the content together on one page. If it cannot fit, that is reported, not silently split. |
 | `page-break` | Starts a new page. |
+| `table` | A list table, see [list tables](#list-tables). |
 | `bibliography` | Places the bibliography here instead of at the end, see [citations](#citations-and-bibliography). |
 
 Rules:
 
 - A directive line starts at the beginning of a line, outside lists, quotations, and footnotes. It needs no blank line around it.
-- An opening line is colons, a space, and a directive name.
+- An opening line is colons, a space, and a directive name. Only `table` takes attributes after its name.
 - A line of only colons closes the innermost open container.
 - `page-break` and `bibliography` stand alone. They have no body and no closing line.
 - `columns` cannot nest.
@@ -385,9 +417,10 @@ Scope {.eyebrow}
 
 - At the end of a heading, alone or together with its label, as in `{#sec:scope .wide-heading}`.
 - At the end of a paragraph's last line.
+- At the start of a row or cell item of a [list table](#list-tables).
 - On a line of its own directly before a list, also inside a list item before a nested list. The line may follow the text of a paragraph without a blank line; then it styles the list, not the paragraph.
 
-A style is for one kind of block: a style based on a heading style for headings, one based on `list` for lists, and any other for paragraphs. Which kind a style is, and what it changes, is up to the theme. Common uses are a small spaced label kept with the heading below it, a list with check marks, and step headings whose typed number hangs in front of the text.
+A style is for one kind of block: a style based on a heading style for headings, one based on `list` for lists, and any other for paragraphs and table rows and cells. Which kind a style is, and what it changes, is up to the theme. Common uses are a small spaced label kept with the heading below it, a list with check marks, and step headings whose typed number hangs in front of the text.
 
 Write `\{.name}` for text that should keep the braces. These are errors with their location:
 
