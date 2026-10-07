@@ -269,7 +269,7 @@ The inner margin sits on the left of odd pages and mirrors on even pages.
 | `page` | Page references, as in "page 7". |
 | `contents` | The table of contents heading. |
 | `abstract` | The heading above an `abstract` title slot. |
-| `references` | The bibliography heading. |
+| `references` | The bibliography heading, also in the table of contents, bookmarks, and running headers. |
 | `continued` | The continuation of a footnote on the next page. |
 
 A reference joins the label and the number with a no-break space. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
@@ -284,6 +284,17 @@ With `document.toc` the body starts, after the title block, with the `contents` 
 | `toc.leader` | Whether a row of dots leads from the entry text to its page number. |
 
 The page number is right aligned at the edge of the text area, in a column at least three digits wide. Leader dots sit on a grid shared by all entries, so they line up. Each entry links to its heading.
+
+## Bibliography
+
+A document that cites sets a bibliography: the `references` label as an unnumbered heading in the `heading-1` style, then one entry per cited work in the `bibliography` style. `document.citation-style` chooses `author-date` or `numeric`; front matter can override it.
+
+| Key | Effect |
+| --- | --- |
+| `bibliography.hanging-indent` | Indent of an entry's lines after its first. |
+| `bibliography.entry-spacing` | Minimum space between entries. The style's own `space-before` and `space-after` also apply around each entry, and the larger space wins. |
+
+Links in entries use `inline.link`, and so do citations, which link to their entry. Entry content and ordering are described in [authoring](AUTHORING.md#citations-and-bibliography).
 
 ## Resources and distribution
 

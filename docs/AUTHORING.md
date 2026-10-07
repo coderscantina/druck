@@ -46,7 +46,7 @@ Paths are relative to the document.
 | Key | Type | Effect |
 | --- | --- | --- |
 | `theme` | path | The theme file to use. `--theme` overrides it. |
-| `bibliography` | path | BibTeX file for citations. |
+| `bibliography` | path | BibTeX file for citations, see [citations](#citations-and-bibliography). |
 | `font-files` | map | Adds font families, see below. |
 
 `font-files` maps a family name to files, in the same shape as theme `fonts`:
@@ -272,16 +272,18 @@ Content kept on one page.
 | `full-width` | A block across the whole text area inside `columns`. The columns before it are balanced first. |
 | `keep` | Keeps the content together on one page. If it cannot fit, that is reported, not silently split. |
 | `page-break` | Starts a new page. |
+| `bibliography` | Places the bibliography here instead of at the end, see [citations](#citations-and-bibliography). |
 
 Rules:
 
 - A directive line starts at the beginning of a line, outside lists, quotations, and footnotes. It needs no blank line around it.
 - An opening line is colons, a space, and a directive name.
 - A line of only colons closes the innermost open container.
-- `page-break` stands alone. It has no body and no closing line.
+- `page-break` and `bibliography` stand alone. They have no body and no closing line.
 - `columns` cannot nest.
 - `full-width` is only allowed directly inside `columns`.
-- `page-break` is not allowed inside `keep`. Inside `columns` it ends the page, see [columns](#columns).
+- `page-break` and `bibliography` are not allowed inside `keep`. Inside `columns` a page break ends the page, see [columns](#columns).
+- `bibliography` appears at most once.
 - `columns` is not allowed inside `keep`. Put keep groups inside the columns instead.
 - Directive lines inside fenced code blocks are code, not directives.
 - Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line. So is a directive line between the items of a list or inside another block.
@@ -290,7 +292,7 @@ Rules:
 
 Embedded HTML is not rendered.
 
-Citations (`[@key]`) are documented with the milestone that implements them. Until then an `@key` without a `sec:`, `fig:`, or `tbl:` prefix stays text.
+An `@key` without a `sec:`, `fig:`, or `tbl:` prefix is a citation, see [citations](#citations-and-bibliography).
 
 ## Document structure
 
@@ -344,3 +346,94 @@ These are errors with their location:
 - A label on an image without a caption, or on a heading together with classes or other attributes.
 - A reference in a heading or inside a link.
 - Brackets that hold more than the reference or `, page`, as in `[@sec:a; @sec:b]`.
+
+## Citations and bibliography
+
+Set `bibliography` to a BibTeX file, relative to the document. With `--set bibliography=refs.bib` the path is relative to the working directory. Cite a work with an at sign and its key:
+
+```markdown
+Paragraphs are broken as a whole [@knuthplass1981], and hyphenation
+follows patterns [@liang1983, p. 37; @knuth1984]. @bringhurst2004 [pp. 25-26]
+calls the result rhythm.
+```
+
+| Written | Author-date | Numeric |
+| --- | --- | --- |
+| `[@liang1983]` | (Liang 1983) | [2] |
+| `[@liang1983; @knuth1984]` | (Liang 1983; Knuth 1984) | [2, 3] |
+| `[@liang1983, p. 37]` | (Liang 1983, p. 37) | [2, p. 37] |
+| `@liang1983` | Liang (1983) | Liang [2] |
+| `@bringhurst2004 [pp. 25-26]` | Bringhurst (2004, pp. 25–26) | Bringhurst [4, pp. 25–26] |
+
+`citation-style: author-date` or `numeric` in the front matter chooses the style; the default theme uses author-date. The words follow `lang`: "and" becomes "und", "p." becomes "S.".
+
+### Citation syntax
+
+- A key is letters, digits, and `_`, with `-`, `:`, `.`, `/`, or `+` between them. Keys that start with `sec:`, `fig:`, or `tbl:` are cross-references, never citations.
+- A citation in brackets starts with `@` and ends at the first `]`. Several keys are separated by `;`. The brackets may span lines.
+- A locator follows a key after a comma: `p.`, `pp.`, or `S.`, then a page or a range of two pages made of letters and digits, as in `p. 12`, `pp. 3-5`, `S. xiv`. The range gets an en dash. A no-break space keeps the label with the page. `pp.` is used for a range and `p.` for one page, whichever was written.
+- A narrative citation is `@key` where a word starts: at the start of a line, after a space, or after an opening bracket or quotation mark. A locator follows it in brackets after one space on the same line: `@key [p. 12]`.
+- An `@` after a letter or digit, as in an e-mail address, is no citation. Write `\@` for an at sign that starts a word and should stay text. In link text and inline code, `@` is always text.
+
+### Author-date style
+
+- A citation names the authors: one by family name, two as "Smith and Jones", three or more as "Smith et al.". Without authors, the editors stand in, then a report's institution, then the title.
+- Two cited works with the same name and year get a letter after the year, in bibliography order: "Knuth 1984a", "Knuth 1984b".
+- A web resource without a year shows "n.d." ("o. J." in German).
+- The bibliography is sorted by the name that leads each entry, with umlauts sorted as "ae", "oe", "ue", then by year, title, and key.
+
+### Numeric style
+
+- Works are numbered in the order they are first cited, reading the text from the start. A citation in a footnote counts where the footnote is referenced.
+- Numbers in a citation are sorted, and runs of three or more become a range: [1–3, 5]. With a locator each work is listed apart: [1, p. 12; 3].
+- The bibliography lists the works in number order, each with its label, as in "[1]".
+
+### The bibliography
+
+A document that cites gets a bibliography: an unnumbered top-level heading with the theme's `references` label ("References", "Literatur" in German), then one entry for each work cited, each listed once. Works in the BibTeX file that are not cited are left out. The heading is in the table of contents, the PDF bookmarks, and running headers like any other top-level heading.
+
+The bibliography goes at the end of the document. `::: bibliography` on a line of its own places it there instead, for example before an appendix, or inside `::: columns` to set it in two columns. Without citations there is no bibliography, even with the directive.
+
+Entries use the theme's `bibliography` style. Each entry's later lines hang by `bibliography.hanging-indent`, entries are `bibliography.entry-spacing` apart, and they break across pages and columns like paragraphs. Every citation is a link to the entry of the first work it shows.
+
+An entry reads the same in both styles:
+
+1. The lead and the year: `Smith, Ada and Bob Jones (2024).` The first author's name is inverted. Editors get "(Ed.)" or "(Eds.)" ("Hrsg." in German).
+2. The title, unless it already leads. Books, theses, and reports set it in italics.
+3. The details of the entry type:
+   - article: `*Journal* 12(3), 45–67.`
+   - book: the edition, as in `2nd ed.` (`2. Aufl.`) for `edition = {2}`, other text as written; then `Address: Publisher.`
+   - conference paper: `In: *Proceedings*, 45–67.`, then `Address: Publisher.`
+   - thesis: `PhD thesis, School.` (`Master's thesis`, `Thesis`); a `type` field replaces the wording.
+   - report: `Technical report 42, Institution, Address.`; the institution is left out when it leads.
+   - web resource: the publisher or organization, and after the URL `Accessed 2024-05-05.` (`Abgerufen am`) from `urldate`.
+4. The DOI as a `https://doi.org/` link, else the URL. Web resources show the URL first.
+
+URLs and DOIs never break inside, so one wider than the line, which happens most in narrow columns, is an error at its entry.
+
+### Entry types and fields
+
+| Type | Required | Also used |
+| --- | --- | --- |
+| `article` | author, title, journal, year | volume, number, pages, doi, url |
+| `book` | author or editor, title, publisher, year | edition, address, doi, url |
+| `inproceedings`, `conference` | author, title, booktitle, year | pages, publisher, address, doi, url |
+| `phdthesis`, `mastersthesis`, `thesis` | author, title, school (or institution), year | type, doi, url |
+| `techreport`, `report` | title, institution, year | author, type, number, address, doi, url |
+| `online`, `misc` | title, url | author, year, publisher (or organization), urldate |
+
+Other fields are ignored, including the BibLaTeX fields `date`, `journaltitle`, and `location`; use `year`, `journal`, and `address`. Entry types and field names are not case-sensitive. `@comment` and `@preamble` are skipped. Names are separated by `and`; `and others` reads as "et al.", and a name in braces, such as `{World Health Organization}`, stays whole.
+
+Text may use the LaTeX escapes for accents and umlauts (`{\"a}`, `\'e`, `` \`a ``, `\^o`), `{\ss}`, escaped `\&`, `\%`, `\$`, `\#`, `\_`, `--` and `---` for dashes, `~` for a no-break space, and braces, which are removed. `url` and `doi` are taken as written. Month names such as `jan` may stand without braces.
+
+### Errors
+
+These are errors, reported with their location:
+
+- A citation without a `bibliography` setting, at the first citation.
+- A key that is not in the bibliography, at the key.
+- Brackets that start like a citation but cannot be read, such as an unknown locator in `[@key, see below]`, and brackets that mix a citation with a cross-reference, as in `[@key; @sec:intro]`. Write them apart.
+- A citation in a heading.
+- A second `::: bibliography`, or one inside `keep`.
+- A bibliography file that does not exist, by the `bibliography` setting.
+- In the BibTeX file, at its line and column: syntax errors, unsupported entry types, keys defined twice, missing required fields, other LaTeX commands, `@string` macros, and `crossref`.

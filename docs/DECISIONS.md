@@ -57,7 +57,7 @@ Each page uses the first variant present in its chain. Title page: `title`, `bod
 
 ### Layout directives
 
-Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions) for figures and [milestone 07](#2026-10-07-milestone-07-multipage-tables) for tables; label and cross-reference syntax in [milestone 08](#labels-and-cross-references); citation syntax is decided in milestone 09.
+Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions) for figures and [milestone 07](#2026-10-07-milestone-07-multipage-tables) for tables; label and cross-reference syntax in [milestone 08](#labels-and-cross-references); citation syntax in the [milestone 09 groundwork](#citation-syntax) and [milestone 09](#citations-in-the-document).
 
 ### CLI
 
@@ -426,7 +426,7 @@ Every pass lays out the whole document again, shaping included. Measured on 2026
 
 ## 2026-10-07: Milestone 09 citation groundwork
 
-Built in parallel with milestone 08, as new files in [src/bibliography/](../src/bibliography/mod.rs) that nothing calls yet. The module carries `#![allow(dead_code, unused_imports)]` until milestone 09 wires it into the parser and layout. Required fields per entry type are in the module's doc comment and go into [authoring](AUTHORING.md) with that work.
+Built in parallel with milestone 08, as new files in [src/bibliography/](../src/bibliography/mod.rs). [Milestone 09](#2026-10-07-milestone-09-citations-and-bibliography) wired it into the parser and layout and removed its `allow` attribute. Required fields per entry type are in the module's doc comment and in [authoring](AUTHORING.md#entry-types-and-fields).
 
 ### Reader
 
@@ -438,17 +438,59 @@ Only BibTeX fields are read: `year`, `journal`, `address`. BibLaTeX's `date`, `j
 
 `[@a]`, `[@a; @b]`, `[@a, p. 12]`, narrative `@a` and `@a [p. 12]`. Locators are `p.`, `pp.`, or `S.` with one page or a range; output is normalized per language ("pp. 3–5", "S. 3–5"). Narrative `@key` counts after the start of text, whitespace, or an opening bracket or quote, so `a@b.de` is not a citation but `ask @mike` is, and fails as a missing key. Keys with a `sec:`, `fig:`, or `tbl:` prefix are never citations. A bracket group that starts with `@` but cannot be read is returned as invalid so the integrator reports it.
 
-Open for milestone 09: a bracket group mixing a cross-reference label and a citation key is currently left as plain text. It should be an error, since otherwise the citation silently disappears into text.
+Resolved in [milestone 09](#error-rules): a bracket group mixing a cross-reference label and a citation key is an error.
 
 ### Styles
 
-Entries read the same in both styles: lead (authors inverted for the first, else editors, else a report's institution, else the title), year in parentheses, title (italic for book, thesis, report), type details, then DOI or URL as a link. Numeric adds an `[n]` label and orders by first citation; author-date sorts by lead with umlauts folded, then year, title, key, and disambiguates equal labels and years with a, b. Author-date citations read "(Smith 2024, p. 12)" and "Smith (2024)", with "and"/"und" for two authors and "et al." for three or more. Numeric citations read "[1, p. 12]", collapse runs to "[1–3, 5]", and narrative "Smith [1]". Given names print as written; English editions print as written ("2nd"), German numeric editions get an ordinal period ("2. Aufl.").
+Entries read the same in both styles: lead (authors inverted for the first, else editors, else a report's institution, else the title), year in parentheses, title (italic for book, thesis, report), type details, then DOI or URL as a link. Numeric adds an `[n]` label and orders by first citation; author-date sorts by lead with umlauts folded, then year, title, key, and disambiguates equal labels and years with a, b. Author-date citations read "(Smith 2024, p. 12)" and "Smith (2024)", with "and"/"und" for two authors and "et al." for three or more. Numeric citations read "[1, p. 12]", collapse runs to "[1–3, 5]", and narrative "Smith [1]". Given names print as written. Editions written as a number get the language's ordinal since [milestone 09](#formatting-changes): "2nd ed.", "2. Aufl.".
 
 `finish` is a second step after collecting every citation, because year suffixes depend on the whole document.
 
 ### Diagnostics
 
-`Source` has no bibliography variant yet, so `.bib` errors use `Source::Document(path)`, which prints the path with line and column. Milestone 09 should add `Source::Bibliography`.
+Resolved in [milestone 09](#error-rules): `.bib` errors use `Source::Bibliography`.
+
+## 2026-10-07: Milestone 09 citations and bibliography
+
+### Citations in the document
+
+The parser reads citations from the source text like cross-references and stores them in `Document::citations`: the parsed citation and the location of each key. Inline content holds `Inline::Citation`, an index into that list. A citation's text depends on every other citation (numbers, a and b suffixes), so [citations.rs](../src/citations.rs) formats them after parsing: it adds them to `Citations` in reading order, the body in order with a footnote's content at its reference, and calls `finish`. Layout replaces each citation with its text, as it does for cross-references, so the inline model stays flat.
+
+A bracket group starts at a `[` text event whose source starts with `@` and ends at the first `]`; `syntax::find` reads exactly that slice. It may span lines, and soft breaks inside it are skipped. A narrative citation is read with `syntax::find` on the rest of its source line, so the citation syntax decides whether the `@` starts a word, and a locator in brackets must start on the same line. Citations in link text stay text, and citations in headings are errors, like cross-references, because heading text feeds the table of contents, bookmarks, and running headers.
+
+### Placement and the heading
+
+The bibliography goes at the end of the document. `::: bibliography` places it elsewhere; it stands alone like `page-break`, appears at most once, is not allowed in `keep`, and works inside `columns` and `full-width`. Without the directive the parser adds `Block::Bibliography` at the end of a document that cites, so structure and layout have one code path. A document without citations has no bibliography, even with the directive.
+
+The heading is the theme's `references` label in the `heading-1` style, unnumbered. [Structure](../src/layout/structure.rs) records it as a level 1 heading without a number, so it is in the table of contents, the outline, and `{section}` without special cases, and the numbers of other headings do not change. This follows LaTeX's starred section with a contents line.
+
+[Entries](../src/layout/bibliography.rs) are paragraphs in the `bibliography` style with a negative first-line indent of `hanging-indent`, as table of contents entries hang, at least `entry-spacing` apart, and break with the usual widow and orphan costs. A numeric entry starts with its label and a space. There is no separate label column; later lines hang by `hanging-indent` whatever the label width. Entries are laid out in every layout pass like other content, and add no shown page numbers, so they need no extra settling pass.
+
+### Linking
+
+Each entry's first line has an anchor. Every citation links to the entry of the first work it shows: the lowest number in the numeric style, the first work written in the author-date style. One link per citation keeps `Rendered` a string per citation; per-work links inside a group would need per-item output.
+
+### Error rules
+
+- A citation without a `bibliography` setting is an error at the first citation.
+- A key that is not in the bibliography is an error at the key. `MissingKey` now carries the item's position instead of a byte range, which the parser has already turned into a location.
+- A bracket group that starts like a citation but cannot be read is an error at the group. A group that mixes a citation key with a cross-reference label is an error in either order: `syntax` returns it as invalid when a citation key comes first, and the cross-reference parser rejects anything but `]` or `, page]` after a label.
+- `Source::Bibliography(path)` identifies the `.bib` file. Its origin is the file's directory, like the document's. Reader errors use it with line and column. `Entry` and `Reference` carry the entry's position, so layout errors in an entry, such as a URL wider than a column or a missing glyph, are reported at the entry in the `.bib` file.
+- A missing `.bib` file is reported by the existing resource check with the `bibliography` property. `render` reads the file once whenever it is configured, so a broken `.bib` fails even before anything cites it. `check` does not read it, as it does not parse the body.
+
+### Formatting changes
+
+- A locator joins its label and page with a no-break space: "p. 12".
+- An edition written as a number gets the ordinal of the language: "2nd ed.", "2. Aufl.". Before, English printed "2 ed.", so a `.bib` file shared by English and German documents read badly in one of them.
+
+### Measurements
+
+Measured on 2026-10-07 on an Apple M1 Pro with 32 GB, see [progress](PROGRESS.md#verification). Documents with citations and a bibliography settle in the same passes as without: two with a table of contents, one without. The English sample text with 1 560 added citations sets 111 pages in 0.45 to 0.49 s, against 103 pages in 0.42 s without them.
+
+### Consequences
+
+- Bibliography entries expose a breaker limit: when no first line fits within tolerance, the second pass caps badness at 10 000, so all very loose first lines tie and the earliest break wins. An entry whose URL does not fit after the first line can then break after its first word. An uncapped second pass or an emergency stretch would fix it in [the breaker](../src/layout/paragraph/breaking.rs).
+- URLs and DOIs never break, so long ones do not fit narrow columns. Allowing breaks after `/` in link text that spells its URL would lift that.
 
 ## Recording a decision
 
