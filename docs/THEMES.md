@@ -165,10 +165,13 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 | `tracking` | Letter spacing in em of the style's size, from -0.2 to 1. Default `0`. |
 | `uppercase` | `true` sets the text in capitals. Default `false`. |
 | `keep-with-next` | `true` keeps the block on the page or in the column of the next block. Default `false`. |
+| `number-gap` | Only on `heading-1` to `heading-6`. The space between an automatic heading number and the text. `null`, as in the default theme, sets one space after the number. |
 
 `tracking` adds space after every character, spaces included. Tracked text sets no ligatures, so "fi" stays two spaced letters. `uppercase` follows Unicode case mapping, so "Straße" becomes "STRASSE"; the PDF text is the capitals. Inline code keeps its case and spacing. Both apply wherever the style sets text: blocks, title slots, header and footer slots, table cells, and contents entries. List markers and contents page numbers ignore them.
 
 A block with `keep-with-next` never ends a page or column without the next block, as a heading never does. Headings always keep with what follows. A table row in such a style stays with the next row.
+
+With `number-gap` on a heading style, the automatic number is set hanging and the heading text starts the gap after it on every line. Table of contents entries, bookmarks, and running headers still show "1.2 Title". Custom styles based on the heading style inherit the gap.
 
 `align: justify` chooses line breaks for the whole paragraph, stretches or shrinks interword spaces to fill each line except the last, and lets punctuation at the line edges hang slightly into the margins. The other alignments keep natural spaces and also choose breaks for the whole paragraph, so ragged lines come out even. `hyphenate: true` hyphenates words in the document language; code is never hyphenated. Details are in [decisions](DECISIONS.md#2026-10-06-milestone-03-paragraph-composition).
 
@@ -210,7 +213,7 @@ There are no selectors and no cascade: a style applies only where the document n
 
 ## Footnotes
 
-Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across the prose width:
+Footnote text uses `styles.footnote`. Lists and code in a note use `styles.list`, `lists.*`, and `styles.code-block` scaled by the footnote size over the body size, so a 9 pt note under 11 pt text sets them at 9/11 of their sizes, spacing, and indents. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across the prose width:
 
 | Key | Effect |
 | --- | --- |
@@ -375,6 +378,7 @@ With `document.toc` the body starts, after the title block, with the `contents` 
 | --- | --- |
 | `toc.level-indent` | Indent per heading level below the first. Lines after an entry's first are indented by one level more. |
 | `toc.leader` | Whether a row of dots leads from the entry text to its page number. |
+| `toc.level-styles` | A list of style names, built-in or custom, for the entries of level 1, 2, and so on. The last one repeats for deeper levels. Absent or empty, every entry uses `toc-entry`. |
 
 The page number is right aligned at the edge of the text area, in a column at least three digits wide. Leader dots sit on a grid shared by all entries, so they line up. Each entry links to its heading.
 

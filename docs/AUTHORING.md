@@ -274,7 +274,7 @@ Kyber weighs all breaks together.[^weigh]
     A second paragraph of the same note.
 ```
 
-Notes are numbered 1, 2, 3 in the order of their references. The number appears raised after the reference and at the start of the note. Notes are set at the foot of the page that holds their reference, below a short rule. A note too long for that page continues at the foot of the next one, under its number and "(continued)" ("(Fortsetzung)" in German). Labels are matched without regard to case.
+Notes are numbered 1, 2, 3 in the order of their references. The number appears raised after the reference and at the start of the note. Notes are set at the foot of the page that holds their reference, below a short rule. A note too long for that page continues at the foot of the next one, under its number and "(continued)" ("(Fortsetzung)" in German). Labels are matched without regard to case. Lists and code in a note are set smaller by the same ratio as the note text.
 
 These are errors:
 
@@ -282,6 +282,7 @@ These are errors:
 - A second reference to the same note. Each note is referenced once.
 - Two definitions with the same label.
 - A reference inside a footnote.
+- A heading inside a footnote.
 
 ## Columns
 
@@ -356,7 +357,7 @@ A theme may place several groups of slots on the title page, such as an address 
 
 ### Numbered headings
 
-Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. `numbered-headings: false` turns numbering off.
+Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. A number is followed by one space unless the theme sets `number-gap` on the heading style, which sets the number hanging. `numbered-headings: false` turns numbering off.
 
 ### Table of contents
 
@@ -452,7 +453,8 @@ calls the result rhythm.
 ### Citation syntax
 
 - A key is letters, digits, and `_`, with `-`, `:`, `.`, `/`, or `+` between them. Keys that start with `sec:`, `fig:`, or `tbl:` are cross-references, never citations.
-- A citation in brackets starts with `@` and ends at the first `]`. Several keys are separated by `;`. The brackets may span lines.
+- A citation in brackets holds at least one `@key` and ends at the first `]`. Several keys are separated by `;`. The brackets may span lines. A bracket without any `@key` is text.
+- Text before a key is its prefix: `[see @smith2024, p. 3; also @lee2022]` reads "(see Smith 2024, p. 3; also Lee et al. 2022)". Each work in a group takes its own prefix. In the numeric style the prefix stays inside the brackets: "[see 1, p. 3; also 2]". A prefix is plain text, and it is not part of the link. A narrative citation takes no prefix.
 - A locator follows a key after a comma: `p.`, `pp.`, or `S.`, then a page or a range of two pages made of letters and digits, as in `p. 12`, `pp. 3-5`, `S. xiv`. The range gets an en dash. A no-break space keeps the label with the page. `pp.` is used for a range and `p.` for one page, whichever was written.
 - A narrative citation is `@key` where a word starts: at the start of a line, after a space, or after an opening bracket or quotation mark. A locator follows it in brackets after one space on the same line: `@key [p. 12]`.
 - An `@` after a letter or digit, as in an e-mail address, is no citation. Write `\@` for an at sign that starts a word and should stay text. In link text and inline code, `@` is always text.
@@ -467,8 +469,8 @@ calls the result rhythm.
 ### Numeric style
 
 - Works are numbered in the order they are first cited, reading the text from the start. A citation in a footnote counts where the footnote is referenced.
-- Numbers in a citation are sorted, and runs of three or more become a range: [1–3, 5]. With a locator each work is listed apart: [1, p. 12; 3].
-- The bibliography lists the works in number order, each with its label, as in "[1]".
+- Numbers in a citation are sorted, and runs of three or more become a range: [1–3, 5]. With a locator or a prefix each work is listed apart, in the order written: [1, p. 12; 3].
+- The bibliography lists the works in number order, each with its label, as in "[1]". The labels stand in a column as wide as the widest one, and the text of every entry starts after it, also on later lines. `bibliography.hanging-indent` does not apply.
 
 ### The bibliography
 
@@ -476,7 +478,7 @@ A document that cites gets a bibliography: an unnumbered top-level heading with 
 
 The bibliography goes at the end of the document. `::: bibliography` on a line of its own places it there instead, for example before an appendix, or inside `::: columns` to set it in two columns. Without citations there is no bibliography, even with the directive.
 
-Entries use the theme's `bibliography` style. Each entry's later lines hang by `bibliography.hanging-indent`, entries are `bibliography.entry-spacing` apart, and they break across pages and columns like paragraphs. Every citation is a link to the entry of the first work it shows.
+Entries use the theme's `bibliography` style. Each entry's later lines hang by `bibliography.hanging-indent`, entries are `bibliography.entry-spacing` apart, and they break across pages and columns like paragraphs. Each work in a citation is a link to its own entry, so "(Smith 2024; Lee 2022)" has two links and "[1, 3]" has two. In a range such as "[1–3]" the first and last number link.
 
 An entry reads the same in both styles:
 

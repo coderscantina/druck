@@ -656,7 +656,15 @@ Not started.
 
 ### References and structure
 
-Not started.
+Follow-up fixes to milestones 04, 08, 09, and 11.
+
+- **Citation links per work.** The formatter returns each citation as pieces of text, and a piece that shows a work carries the position of that work in the bibliography. Layout links each piece to its entry. In author-date style a work's piece is its name, year, and locator, without separators or brackets. In numeric style a range such as "1–3" links its first and last number, since the middle ones are not shown. A prefix stays outside the link. This replaced one target per citation.
+- **Numeric label column.** A numeric bibliography sets its labels in a column as wide as the widest label plus half an em, the gap list markers use, and the entry text after it on every line, like LaTeX's `thebibliography`. Labels are left aligned. `bibliography.hanging-indent` applies to author-date entries only. The label is shaped separately from the text, so the entry text is not preceded by a space.
+- **Heading number gap.** `number-gap` is allowed on `heading-1` to `heading-6` as a style field, so the theme can set it per level. Layout sets the automatic number hanging and the text after the gap, the same way it sets a typed number in a custom style. Without it one space follows the number, so the default theme is unchanged. The number text in contents entries, bookmarks, and running headers does not change, because `Heading::title` still joins number and text with a space. A custom style based on a heading style inherits the gap for its automatic numbers, and its own `number-gap` still means that the author types the number.
+- **Footnote lists and code.** Inside a note, `list`, `lists.indent`, `lists.item-spacing`, and `code-block` are scaled by footnote size over body size: font size, spacing, and indents. A ratio keeps the theme's proportions; sizes in em of the footnote style would have needed new theme fields. Custom list styles and quotations inside notes stay at their own size.
+- **Citation prefixes.** In a bracket, text before the first `@key` of an item is its prefix, as in Pandoc: `[see @a, p. 3; also @b]`. A key counts at a word start, so `[mail me@x.org]` is text, and a bracket without any `@key` is text. Prefixes are per item. In author-date style the output is "(see Smith 2024, p. 3; also Lee 2022)". In numeric style the prefix goes inside the brackets, before the number: "[see 1, p. 3; also 2]". Numbers are sorted and grouped into ranges only when no item has a locator or a prefix, so the order the author wrote is kept. Suffixes after the locator are not supported.
+- **Contents level styles.** `toc.level-styles` lists style names, built-in or custom, for the entries of level 1, 2, and so on, and the last repeats for deeper levels. Absent or empty means `toc-entry` for all, so the default theme is unchanged. The indent per level and the leader still come from `toc.level-indent` and `toc.leader`, measured in the `toc-entry` size. An unknown name is an error at its list position.
+- **Headings in footnotes.** The parser rejects them at the heading, like tables and images in footnotes. Layout no longer has a path for them.
 
 ## Recording a decision
 
