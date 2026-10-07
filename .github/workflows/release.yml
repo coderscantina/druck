@@ -39,6 +39,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      # The scripts need Python 3.11 or newer, the Linux images ship 3.10.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Render samples with the release binary
