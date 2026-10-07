@@ -280,15 +280,17 @@ fn render(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
 }
 
 #[test]
-fn renders_the_english_and_german_samples() {
+fn renders_the_samples() {
     let sandbox = Sandbox::new("samples");
-    for lang in ["en", "de"] {
-        let output = sandbox.root.join(format!("{lang}.pdf"));
-        let document = format!("{REPO}/samples/{lang}.md");
+    for name in ["en", "de", "pagination"] {
+        let output = sandbox.root.join(format!("{name}.pdf"));
+        let document = format!("{REPO}/samples/{name}.md");
         let pdf = render(&sandbox, &[&document, "-o", output.to_str().unwrap()], &output);
         let pdf = String::from_utf8_lossy(&pdf);
-        assert!(pdf.contains("/FontFile3"), "{lang}: fonts are embedded");
-        assert!(pdf.contains("/URI"), "{lang}: the link is clickable");
+        assert!(pdf.contains("/FontFile3"), "{name}: fonts are embedded");
+        if name != "pagination" {
+            assert!(pdf.contains("/URI"), "{name}: the link is clickable");
+        }
     }
 }
 

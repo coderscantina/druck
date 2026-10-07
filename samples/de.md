@@ -41,7 +41,7 @@ Zeilen:  „gleichmäßig“
 
 ## Seiten
 
-Ein Dokument von einigen Seiten zeigt, wie der Text von einer Seite zur nächsten fließt. Die Ränder gerader und ungerader Seiten sind gespiegelt, sodass der innere Rand am Bund liegt. Seitenumbrüche sind in diesem Meilenstein vorläufig: Eine Seite endet an der ersten Zeile, die nicht mehr passt.
+Ein Dokument von einigen Seiten zeigt, wie der Text von einer Seite zur nächsten fließt. Die Ränder gerader und ungerader Seiten sind gespiegelt, sodass der innere Rand am Bund liegt. Seitenumbrüche werden für das ganze Dokument gewählt: Eine Überschrift wandert mit ihrem Text auf die nächste Seite, statt allein am Fuß einer Seite zu stehen.
 
 Die Gestaltung einer Seite beginnt mit ihren Proportionen. Ein zu breiter Satzspiegel ermüdet das Auge, das weit zurückwandern muss, um den Anfang der nächsten Zeile zu finden; ein zu schmaler zerlegt den Text in Bruchstücke und erzwingt häufige Trennungen. Die meisten Buchgestalter wählen eine Zeilenlänge von etwa sechzig bis siebzig Zeichen.
 

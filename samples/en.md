@@ -54,9 +54,9 @@ fn main() {
 
 ## Pages
 
-A document of a few pages shows how text flows from one page to the next. The margins of odd and even pages mirror each other, so the inner margin sits next to the binding. Page breaks are temporary in this milestone: a page ends at the first line that does not fit, and headings may still be left alone at the bottom of a page.
+A document of a few pages shows how text flows from one page to the next. The margins of odd and even pages mirror each other, so the inner margin sits next to the binding. Page breaks are chosen for the whole document: a heading moves to the next page with its text rather than being left alone at the bottom of a page.
 
-Short lines at the end of a paragraph are allowed. Single lines stranded at the top or bottom of a page are a matter for the page composer, which arrives after paragraph composition is in place. The text below repeats a few paragraphs so that the document spans several pages.
+Short lines at the end of a paragraph are allowed. Single lines stranded at the top or bottom of a page are avoided where a better break exists. The text below repeats a few paragraphs so that the document spans several pages.
 
 The design of a page begins with its proportions. A text block that is too wide tires the eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the text into fragments and forces frequent hyphenation. Most book typographers settle on a measure of about sixty to seventy characters, which this default theme approaches at its body size.
 
