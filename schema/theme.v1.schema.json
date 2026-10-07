@@ -830,23 +830,27 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "file",
-            "index"
+            "file"
           ],
+          "anyOf": [{"required": ["index"]}, {"required": ["variable"]}],
           "properties": {
             "file": {
-              "description": "A font collection file (.ttc, .otc).",
+              "description": "An OpenType or TrueType font file, including collections.",
               "$ref": "#/$defs/resourcePath"
             },
             "index": {
               "type": "integer",
               "minimum": 0,
-              "description": "The index of the face in the collection, from 0."
+              "description": "The index of the face in the collection, from 0. Defaults to 0 for variable files."
+            },
+            "variable": {
+              "const": true,
+              "description": "Supply all supported weights and italic instances from this file."
             }
           }
         }
       ],
-      "description": "A font file, or a face of a collection by its index."
+      "description": "A font file, a collection face, or a variable file supplying multiple faces."
     },
     "fontFace": {
       "anyOf": [

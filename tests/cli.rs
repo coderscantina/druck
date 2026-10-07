@@ -357,6 +357,58 @@ fn renders_the_samples() {
 }
 
 #[test]
+fn renders_variable_weights_and_italics_and_rejects_unavailable_faces() {
+    let sandbox = Sandbox::new("variable-fonts");
+    fs::copy(
+        format!("{FIXTURES}/fonts/PublicSans.ttf"),
+        sandbox.root.join("Regular.ttf"),
+    )
+    .unwrap();
+    fs::copy(
+        format!("{FIXTURES}/fonts/PublicSans-Italic.ttf"),
+        sandbox.root.join("Italic.ttf"),
+    )
+    .unwrap();
+    let document = sandbox.write("doc.md", "---\nfont-files:\n  Variable:\n    regular: {file: Regular.ttf, variable: true}\n    italic: {file: Italic.ttf, variable: true}\nfonts: {body: Variable, heading: Variable}\n---\n# Variable fonts\n\nRegular with **bold**, *italic*, and ***bold italic*** text.\n\nLight text. {.light}\n\nBlack text. {.black}\n");
+    let theme = sandbox.theme(
+        "theme.json",
+        json!({"version": 1, "custom-styles": {
+            "light": {"based-on": "body", "weight": 100}, "black": {"based-on": "body", "weight": 900}
+        }}),
+    );
+    let output = sandbox.root.join("variable.pdf");
+    let args = [&document, "--theme", &theme, "-o", output.to_str().unwrap()];
+    let first = render(&sandbox, &args, &output);
+    assert!(String::from_utf8_lossy(&first).contains("/FontFile2"));
+    assert_eq!(first, render(&sandbox, &args, &output));
+
+    let missing = sandbox.write(
+        "missing.md",
+        "---\nfont-files:\n  Variable:\n    regular: {file: Regular.ttf, variable: true}\n---\nText.\n",
+    );
+    let theme = sandbox.theme(
+        "missing.json",
+        json!({"version": 1, "styles": {"body": {"font": "Variable", "style": "italic"}}}),
+    );
+    let output = sandbox.root.join("missing.pdf");
+    let result = sandbox.run(&["render", &missing, "--theme", &theme, "-o", output.to_str().unwrap()]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result.stderr.contains("styles.body.font") && result.stderr.contains("no italic face"),
+        "{}",
+        result.stderr
+    );
+    assert!(!output.exists());
+
+    let invalid = sandbox.write("invalid.md", &format!("---\nfont-files:\n  Variable:\n    regular: {{file: {REPO}/fonts/LibertinusSerif-Regular.otf, variable: true}}\n---\nText.\n"));
+    assert!(
+        sandbox
+            .rejection(&[&invalid])
+            .contains("marked variable but has no variation axes")
+    );
+}
+
+#[test]
 fn renders_the_report_with_navigation_in_both_themes_the_same_every_time() {
     let sandbox = Sandbox::new("report");
     let document = format!("{REPO}/samples/report.md");

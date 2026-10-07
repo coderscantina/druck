@@ -76,13 +76,28 @@ fn family_faces(database: &Database, family: &str) -> FontFiles {
                 Style::Italic | Style::Oblique => FontStyle::Italic,
             },
         };
-        files.entry(key).or_insert_with(|| FaceFile {
-            resource: Resource {
-                origin: Origin::Installed,
-                path: path.to_owned(),
-            },
-            index: face.index,
-        });
+        let supported = database
+            .with_face_data(face.id, |data, index| {
+                let font = rustybuzz::Face::from_slice(data, index)?;
+                Some(if font.is_variable() {
+                    crate::text::variations::faces(&font, key)
+                } else {
+                    vec![key]
+                })
+            })
+            .flatten()
+            .unwrap_or_default();
+        for key in supported {
+            files.entry(key).or_insert_with(|| FaceFile {
+                resource: Resource {
+                    origin: Origin::Installed,
+                    path: path.to_owned(),
+                },
+                index: face.index,
+                // Lookup already expanded this file to its supported instances.
+                variable: false,
+            });
+        }
     }
     files
 }
@@ -124,6 +139,43 @@ mod tests {
     }
 
     #[test]
+    fn discovers_variable_weight_ranges_and_separate_italic_files() {
+        let mut database = Database::new();
+        database.load_fonts_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fonts"));
+        let found = lookup(&database, &requests("Public Sans", &["300", "900-italic"])).unwrap();
+        let faces = &found["Public Sans"];
+        assert_eq!(faces.len(), 18);
+        assert!(faces[&face("300")].resource.path.ends_with("PublicSans.ttf"));
+        assert!(
+            faces[&face("900-italic")]
+                .resource
+                .path
+                .ends_with("PublicSans-Italic.ttf")
+        );
+        let fonts = crate::text::Fonts::from_files(&found).unwrap_or_else(|errors| panic!("{errors:?}"));
+        let light = fonts.face("Public Sans", Weight::of_font(300), FontStyle::Normal);
+        let black = fonts.face("Public Sans", Weight::of_font(900), FontStyle::Normal);
+        assert_ne!(
+            fonts
+                .shape(
+                    "Hamburg",
+                    light,
+                    crate::config::values::Pt(12.0),
+                    crate::config::theme::Lang::En
+                )
+                .width,
+            fonts
+                .shape(
+                    "Hamburg",
+                    black,
+                    crate::config::values::Pt(12.0),
+                    crate::config::theme::Lang::En
+                )
+                .width
+        );
+    }
+
+    #[test]
     fn reports_a_missing_family_or_face_with_what_was_searched_for() {
         let errors = lookup(&fixture(), &requests("Nope Sans", &["500"])).unwrap_err();
         assert_eq!(errors[0].property.as_deref(), Some("styles.body.font"));
@@ -152,9 +204,8 @@ mod tests {
         std::fs::write(&path, collection(&[regular, bold])).unwrap();
         let mut database = Database::new();
         database.load_fonts_dir(&dir);
-        std::fs::remove_dir_all(&dir).unwrap();
-
         let found = lookup(&database, &requests("Libertinus Serif", &["bold"])).expect("installed");
+        std::fs::remove_dir_all(&dir).unwrap();
         let bold = &found["Libertinus Serif"][&face("bold")];
         assert_eq!(bold.index, 1);
         assert!(bold.resource.path.ends_with("Serif.ttc"), "{bold:?}");

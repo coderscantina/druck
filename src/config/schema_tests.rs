@@ -113,6 +113,22 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             true,
         ),
         (
+            "variable file and italic collection",
+            json!({"version": 1, "fonts": {"X": {"regular": {"file": "x.ttf", "variable": true},
+                "italic": {"file": "x.ttc", "index": 1, "variable": true}}}}),
+            true,
+        ),
+        (
+            "variable flag is false",
+            json!({"version": 1, "fonts": {"X": {"regular": {"file": "x.ttf", "index": 0, "variable": false}}}}),
+            false,
+        ),
+        (
+            "null variable index",
+            json!({"version": 1, "fonts": {"X": {"regular": {"file": "x.ttf", "variable": true, "index": null}}}}),
+            false,
+        ),
+        (
             "null on required field",
             json!({"version": 1, "styles": {"body": {"size": null}}}),
             false,

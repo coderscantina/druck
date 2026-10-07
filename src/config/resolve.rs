@@ -98,6 +98,7 @@ struct Resolver<'a> {
     errors: RefCell<Vec<Diagnostic>>,
     /// Families not defined in `fonts`, with the faces requested and the first property requesting each.
     installed: RefCell<BTreeMap<String, BTreeMap<Face, String>>>,
+    requested: RefCell<BTreeMap<String, BTreeMap<Face, String>>>,
     /// Font tokens that a style uses, directly or through other tokens.
     used_font_tokens: RefCell<BTreeSet<TokenName>>,
 }
@@ -116,6 +117,7 @@ impl<'a> Resolver<'a> {
             },
             errors: RefCell::new(Vec::new()),
             installed: RefCell::new(BTreeMap::new()),
+            requested: RefCell::new(BTreeMap::new()),
             used_font_tokens: RefCell::new(BTreeSet::new()),
         };
         resolver.tokens = Tokens {
@@ -322,7 +324,15 @@ impl<'a> Resolver<'a> {
             faces.entry(face).or_insert_with(|| property.to_owned());
             return Some(name);
         };
-        if family.0.get(&face).is_none_or(Option::is_none) {
+        self.requested
+            .borrow_mut()
+            .entry(name.clone())
+            .or_default()
+            .entry(face)
+            .or_insert_with(|| property.to_owned());
+        if matches!(family.0.get(&face), Some(None))
+            || (!family.0.contains_key(&face) && !family.0.values().flatten().any(FontFile::variable))
+        {
             let (token, via) = match spec {
                 Spec::Token(token) => (format!("tokens.fonts.{token}"), format!(" (via {spec})")),
                 Spec::Literal(_) => (String::new(), String::new()),
@@ -646,6 +656,7 @@ impl<'a> Resolver<'a> {
             FaceFile {
                 resource: self.resource(&pointer, file.path()),
                 index: file.index(),
+                variable: file.variable(),
             }
         };
         self.theme
@@ -1034,6 +1045,21 @@ impl<'a> Resolver<'a> {
             page,
             fonts: self.fonts(),
             installed_fonts: self.installed.take(),
+            requested_fonts: self.requested.take(),
+            excluded_fonts: theme
+                .fonts
+                .iter()
+                .map(|(name, family)| {
+                    (
+                        name.clone(),
+                        family
+                            .0
+                            .iter()
+                            .filter_map(|(face, file)| file.is_none().then_some(*face))
+                            .collect(),
+                    )
+                })
+                .collect(),
             images,
             styles: styles?,
             custom_styles: custom_styles?,
@@ -1206,6 +1232,24 @@ mod tests {
         let (property, message) = rejection(theme);
         assert_eq!(property, "styles.body.font");
         assert_eq!(message, "font family \"Plain\" has no bold face");
+    }
+
+    #[test]
+    fn defers_variable_faces_to_font_loading_but_respects_explicit_null() {
+        let theme = json!({"version": 1,
+            "fonts": {"Variable": {"regular": {"file": "variable.ttf", "variable": true}}},
+            "styles": {"body": {"font": "Variable", "weight": 300}}});
+        let config = resolve(inputs(theme.clone())).expect("axis ranges checked when loading");
+        assert!(config.fonts["Variable"][&Face::REGULAR].variable);
+        assert_eq!(
+            config.requested_fonts["Variable"][&"300".parse().unwrap()],
+            "styles.body.font"
+        );
+        let mut theme = theme;
+        theme["fonts"]["Variable"]["300"] = Value::Null;
+        let (property, message) = rejection(theme);
+        assert_eq!(property, "styles.body.font");
+        assert_eq!(message, "font family \"Variable\" has no 300 face");
     }
 
     #[test]

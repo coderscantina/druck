@@ -216,6 +216,7 @@ mod tests {
                 path: "fonts/LibertinusSerif-Regular.otf".to_owned(),
             },
             index: 0,
+            variable: false,
         };
         let files = BTreeMap::from([(Face::REGULAR, regular)]);
         Fonts::from_files(&BTreeMap::from([("Serif".to_owned(), files)])).expect("bundled font")

@@ -116,7 +116,7 @@ impl TryFrom<BTreeMap<Face, Option<FontFile>>> for FontFamily {
     }
 }
 
-/// A font file, or one face of a collection (`.ttc`, `.otc`) by its index from 0.
+/// A font file, a collection face by index, or a variable file supplying multiple faces.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum FontFile {
@@ -125,10 +125,40 @@ pub enum FontFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "FontOptions")]
 pub struct CollectionFace {
     pub file: ResourcePath,
     pub index: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub variable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FontOptions {
+    file: ResourcePath,
+    #[serde(default, deserialize_with = "non_null")]
+    index: Option<u32>,
+    #[serde(default, deserialize_with = "non_null")]
+    variable: Option<bool>,
+}
+
+impl TryFrom<FontOptions> for CollectionFace {
+    type Error = &'static str;
+
+    fn try_from(value: FontOptions) -> Result<Self, Self::Error> {
+        if value.variable == Some(false) {
+            return Err("variable must be true when supplied");
+        }
+        if value.index.is_none() && value.variable.is_none() {
+            return Err("a font file object needs index or variable: true");
+        }
+        Ok(Self {
+            file: value.file,
+            index: value.index.unwrap_or(0),
+            variable: value.variable.unwrap_or(false),
+        })
+    }
 }
 
 impl FontFile {
@@ -144,6 +174,10 @@ impl FontFile {
             Self::Collection(face) => face.index,
         }
     }
+
+    pub fn variable(&self) -> bool {
+        matches!(self, Self::Collection(face) if face.variable)
+    }
 }
 
 impl<'de> Deserialize<'de> for FontFile {
@@ -156,7 +190,7 @@ impl<'de> Deserialize<'de> for FontFile {
             type Value = FontFile;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a font file path, or a map of file and index for a face of a collection")
+                f.write_str("a font path, or a map with file and index or variable: true")
             }
 
             fn visit_str<E: de::Error>(self, path: &str) -> Result<FontFile, E> {

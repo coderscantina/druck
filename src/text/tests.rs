@@ -11,6 +11,7 @@ fn bundled(path: &str) -> FaceFile {
             path: format!("fonts/{path}"),
         },
         index: 0,
+        variable: false,
     }
 }
 
@@ -191,10 +192,10 @@ fn loads_a_face_of_a_collection_by_its_index() {
         index: 1,
         ..bundled("Serif.ttc")
     };
-    let face = parse(data, &file).expect("second face parses");
+    let face = parse(data, &file, Face::REGULAR).expect("second face parses");
     assert_eq!(face.buzz.weight().to_number(), 700);
     assert!(face.file.starts_with("face 1 of"), "{}", face.file);
-    assert!(parse(data, &FaceFile { index: 2, ..file }).is_err());
+    assert!(parse(data, &FaceFile { index: 2, ..file }, Face::REGULAR).is_err());
 }
 
 #[test]
@@ -208,7 +209,7 @@ fn restricted_embedding_is_a_warning_naming_the_file() {
     data[table + 8..table + 10].copy_from_slice(&2u16.to_be_bytes());
     let file = bundled("Restricted.otf");
     let fonts = Fonts {
-        faces: vec![parse(leak(data), &file).unwrap()],
+        faces: vec![parse(leak(data), &file, Face::REGULAR).unwrap()],
         families: BTreeMap::new(),
     };
     let warning = fonts.embedding_warning(FaceId(0)).expect("a warning");
@@ -237,6 +238,7 @@ fn missing_font_file_names_the_property() {
             path: "nope.otf".to_owned(),
         },
         index: 0,
+        variable: false,
     };
     let mut files = family(&[("regular", "LibertinusSerif-Regular.otf")]);
     files.insert("italic".parse().unwrap(), missing);
@@ -255,4 +257,120 @@ fn unknown_bundled_path_is_an_error() {
         panic!("loading should fail");
     };
     assert_eq!(errors[0].property.as_deref(), Some("fonts.Test.regular"));
+}
+
+pub(crate) fn variable_file(italic: bool) -> FaceFile {
+    FaceFile {
+        resource: Resource {
+            origin: Origin::WorkingDir(PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/fonts"
+            ))),
+            path: if italic {
+                "PublicSans-Italic.ttf"
+            } else {
+                "PublicSans.ttf"
+            }
+            .to_owned(),
+        },
+        index: 0,
+        variable: true,
+    }
+}
+
+#[test]
+fn variable_files_supply_weights_and_separate_italics_with_matching_pdf_instances() {
+    let fonts = load(BTreeMap::from([
+        (Face::REGULAR, variable_file(false)),
+        ("italic".parse().unwrap(), variable_file(true)),
+    ]));
+    assert_eq!(fonts.families["Test"].len(), 18);
+    let mut widths = Vec::new();
+    for weight in [100, 400, 700, 900] {
+        for style in [FontStyle::Normal, FontStyle::Italic] {
+            let id = fonts.face("Test", Weight::of_font(weight), style);
+            let run = fonts.shape("Hamburg", id, Pt(12.0), Lang::En);
+            assert!(run.glyphs.iter().all(|glyph| glyph.id != 0));
+            widths.push(run.width);
+            let path = variable_file(style == FontStyle::Italic).resource.file().unwrap();
+            let expected = krilla::text::Font::new_variable(
+                std::fs::read(path).unwrap().into(),
+                0,
+                &[(krilla::text::Tag::new(b"wght"), weight as f32)],
+            )
+            .unwrap();
+            assert_eq!(fonts.pdf_font(id), &expected);
+        }
+    }
+    assert_ne!(widths[0], widths[6], "weight changes measured advances");
+
+    let mut files = BTreeMap::from([(Face::REGULAR, variable_file(false))]);
+    files.insert("bold".parse().unwrap(), bundled("LibertinusSerif-Bold.otf"));
+    let fonts = load(files);
+    let id = fonts.face("Test", Weight::BOLD, FontStyle::Normal);
+    assert!(fonts.faces[id.0].file.contains("LibertinusSerif-Bold"));
+}
+
+/// Replaces the fixture's weight axis in memory to exercise italic and bounded ranges.
+fn with_axis(tag: &[u8; 4], min: f32, default: f32, max: f32) -> &'static [u8] {
+    let mut data = include_bytes!("../../tests/fixtures/fonts/PublicSans.ttf").to_vec();
+    let record = table_records(&data)
+        .find(|&record| &data[record..record + 4] == b"fvar")
+        .unwrap();
+    let table = u32::from_be_bytes(data[record + 8..record + 12].try_into().unwrap()) as usize;
+    let axis = table + u16::from_be_bytes(data[table + 4..table + 6].try_into().unwrap()) as usize;
+    data[axis..axis + 4].copy_from_slice(tag);
+    for (offset, value) in [(4, min), (8, default), (12, max)] {
+        data[axis + offset..axis + offset + 4].copy_from_slice(&((value * 65536.0) as i32).to_be_bytes());
+    }
+    leak(data)
+}
+
+#[test]
+fn italic_axis_supplies_both_styles_and_sets_the_same_coordinates_for_pdf() {
+    let data = with_axis(b"ital", 0.0, 0.0, 1.0);
+    let font = rustybuzz::Face::from_slice(data, 0).unwrap();
+    let faces = variations::faces(&font, Face::REGULAR);
+    assert_eq!(faces.len(), 2);
+    let normal = parse(data, &variable_file(false), faces[0]).unwrap();
+    let italic = parse(data, &variable_file(false), faces[1]).unwrap();
+    assert_ne!(normal.buzz.variation_coordinates(), italic.buzz.variation_coordinates());
+    let expected = krilla::text::Font::new_variable(data.into(), 0, &[(krilla::text::Tag::new(b"ital"), 1.0)]).unwrap();
+    assert_eq!(italic.font, expected);
+}
+
+#[test]
+fn variable_ranges_are_respected_instead_of_clamped() {
+    let data = with_axis(b"wght", 300.0, 400.0, 700.0);
+    let font = rustybuzz::Face::from_slice(data, 0).unwrap();
+    let faces = variations::faces(&font, Face::REGULAR);
+    let weights: Vec<_> = faces.iter().map(|face| face.weight.get()).collect();
+    assert_eq!(weights, [300, 400, 500, 600, 700]);
+    let result = parse(
+        data,
+        &variable_file(false),
+        Face {
+            weight: Weight::of_font(900),
+            style: FontStyle::Normal,
+        },
+    );
+    assert!(result.err().unwrap().contains("outside 300 to 700"));
+}
+
+#[test]
+fn variable_collection_uses_the_selected_face() {
+    let normal = include_bytes!("../../tests/fixtures/fonts/PublicSans.ttf");
+    let italic = include_bytes!("../../tests/fixtures/fonts/PublicSans-Italic.ttf");
+    let data = leak(collection(&[normal, italic]));
+    let file = FaceFile {
+        index: 1,
+        ..variable_file(true)
+    };
+    let face = "900-italic".parse().unwrap();
+    let loaded = parse(data, &file, face).unwrap();
+    assert!(loaded.buzz.is_italic());
+    assert_eq!(variations::faces(&loaded.buzz, face).len(), 9);
+    let expected =
+        krilla::text::Font::new_variable(data.into(), 1, &[(krilla::text::Tag::new(b"wght"), 900.0)]).unwrap();
+    assert_eq!(loaded.font, expected);
 }

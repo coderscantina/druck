@@ -3,6 +3,7 @@
 pub mod bundled;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod variations;
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
@@ -40,7 +41,29 @@ impl Fonts {
     /// `config.installed_fonts`. Bundled faces are compiled into the binary; others are read from
     /// their files. Errors name the resource and property.
     pub fn load(config: &Config, installed: &BTreeMap<String, FontFiles>) -> Result<Self, Vec<Diagnostic>> {
-        Self::from_files(config.fonts.iter().chain(installed))
+        let mut fonts = Self::from_files(config.fonts.iter().chain(installed))?;
+        for (family, excluded) in &config.excluded_fonts {
+            fonts
+                .families
+                .get_mut(family)
+                .expect("configured family")
+                .retain(|(face, _)| !excluded.contains(face));
+        }
+        let mut errors = Vec::new();
+        for (family, requests) in &config.requested_fonts {
+            for (face, property) in requests {
+                if !fonts.families[family].iter().any(|(loaded, _)| loaded == face) {
+                    errors.push(
+                        Diagnostic::new(
+                            None,
+                            format!("font family \"{family}\" has no {face} face in its files or variable axis ranges"),
+                        )
+                        .property(Some(property.clone())),
+                    );
+                }
+            }
+        }
+        if errors.is_empty() { Ok(fonts) } else { Err(errors) }
     }
 
     pub(crate) fn from_files<'a>(
@@ -53,12 +76,44 @@ impl Fonts {
         let mut files: HashMap<PathBuf, &'static [u8]> = HashMap::new();
         let mut errors = Vec::new();
         for (name, family) in families {
-            let mut loaded = Vec::with_capacity(family.len());
+            let mut instances = BTreeMap::new();
             for (face, file) in family {
-                match read(file, &mut files).and_then(|data| parse(data, file)) {
+                let result = read(file, &mut files).and_then(|data| {
+                    if !file.variable {
+                        instances.insert(*face, (data, file));
+                        return Ok(());
+                    }
+                    let font = rustybuzz::Face::from_slice(data, file.index)
+                        .ok_or_else(|| format!("{} is not a parsable font", file.resource))?;
+                    if !font.is_variable() {
+                        return Err(format!(
+                            "{} is marked variable but has no variation axes",
+                            file.resource
+                        ));
+                    }
+                    let supported = variations::faces(&font, *face);
+                    if supported.is_empty() {
+                        return Err(format!("{} has no supported weight or italic instances", file.resource));
+                    }
+                    for instance in supported {
+                        if instance.style == face.style && family.get(&instance).is_none_or(|entry| entry.variable) {
+                            instances.insert(instance, (data, file));
+                        } else {
+                            instances.entry(instance).or_insert((data, file));
+                        }
+                    }
+                    Ok(())
+                });
+                if let Err(message) = result {
+                    errors.push(Diagnostic::new(None, message).property(Some(format!("fonts.{name}.{face}"))));
+                }
+            }
+            let mut loaded = Vec::with_capacity(instances.len());
+            for (face, (data, file)) in instances {
+                match parse(data, file, face) {
                     Ok(parsed) => {
                         fonts.faces.push(parsed);
-                        loaded.push((*face, FaceId(fonts.faces.len() - 1)));
+                        loaded.push((face, FaceId(fonts.faces.len() - 1)));
                     }
                     Err(message) => {
                         let property = format!("fonts.{name}.{face}");
@@ -217,14 +272,20 @@ fn read(file: &FaceFile, files: &mut HashMap<PathBuf, &'static [u8]>) -> Result<
 }
 
 /// Parses the face of `file` in `data`.
-fn parse(data: &'static [u8], file: &FaceFile) -> Result<Loaded, String> {
+fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, String> {
     let resource = &file.resource;
     let invalid = || match file.index {
         0 => format!("{resource} is not a parsable OpenType or TrueType font"),
         index => format!("{resource} has no parsable face at index {index}"),
     };
-    let buzz = rustybuzz::Face::from_slice(data, file.index).ok_or_else(invalid)?;
-    let font = krilla::text::Font::new(data.into(), file.index).ok_or_else(invalid)?;
+    let mut buzz = rustybuzz::Face::from_slice(data, file.index).ok_or_else(invalid)?;
+    let coordinates = variations::coordinates(&buzz, face).map_err(|message| format!("{resource}: {message}"))?;
+    buzz.set_variations(&coordinates);
+    let pdf_coordinates: Vec<_> = coordinates
+        .iter()
+        .map(|variation| (krilla::text::Tag::new(&variation.tag.to_bytes()), variation.value))
+        .collect();
+    let font = krilla::text::Font::new_variable(data.into(), file.index, &pdf_coordinates).ok_or_else(invalid)?;
     let restricted = buzz.permissions() == Some(rustybuzz::ttf_parser::Permissions::Restricted)
         || !buzz.is_subsetting_allowed()
         || !buzz.is_outline_embedding_allowed();

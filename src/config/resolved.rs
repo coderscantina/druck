@@ -28,6 +28,12 @@ pub struct Config {
     /// Font families that `fonts` does not define, to be looked up among installed fonts: each face a
     /// style requests, with the first property that requests it.
     pub installed_fonts: BTreeMap<String, BTreeMap<Face, String>>,
+    /// File font faces requested by styles, checked again after variable files are expanded.
+    #[serde(skip)]
+    pub requested_fonts: BTreeMap<String, BTreeMap<Face, String>>,
+    /// Explicit null faces take priority over variable instances.
+    #[serde(skip)]
+    pub excluded_fonts: BTreeMap<String, Vec<Face>>,
     pub images: BTreeMap<String, Resource>,
     pub styles: Styles<Style>,
     pub custom_styles: BTreeMap<String, CustomStyle>,
@@ -186,12 +192,14 @@ pub struct Watermark {
 /// The files of a family's faces.
 pub type FontFiles = BTreeMap<Face, FaceFile>;
 
-/// A font file and the index of the face in it, which is 0 unless the file is a collection.
+/// A font file and face index, with optional expansion into supported variable instances.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FaceFile {
     #[serde(flatten)]
     pub resource: Resource,
     pub index: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub variable: bool,
 }
 
 /// A resolved block style. `font` is a key of [`Config::fonts`] or [`Config::installed_fonts`].
