@@ -1,6 +1,6 @@
 //! Fonts and text shaping: loads the configured faces and turns text into positioned glyphs.
 
-mod bundled;
+pub mod bundled;
 #[cfg(test)]
 mod tests;
 

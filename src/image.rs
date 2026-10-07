@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use krilla::image::Image as RasterImage;
@@ -14,17 +15,18 @@ use usvg::{ImageHrefResolver, Options, Tree};
 use zune_jpeg::JpegDecoder;
 
 use crate::config::values::Pt;
+use crate::text::bundled;
 
 /// CSS pixels are 96 per inch and PDF points 72 per inch.
 const PT_PER_SVG_PX: f64 = 0.75;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
-/// The fonts SVG text can use. `crate::text::bundled` is private to the text module, so these are included again.
-const BUNDLED_FONTS: [&[u8]; 5] = [
-    include_bytes!("../fonts/LibertinusSerif-Regular.otf"),
-    include_bytes!("../fonts/LibertinusSerif-Italic.otf"),
-    include_bytes!("../fonts/LibertinusSerif-Bold.otf"),
-    include_bytes!("../fonts/LibertinusSerif-BoldItalic.otf"),
-    include_bytes!("../fonts/LibertinusMono-Regular.otf"),
+/// The bundled fonts SVG text can use.
+const SVG_FONTS: [&str; 5] = [
+    "fonts/LibertinusSerif-Regular.otf",
+    "fonts/LibertinusSerif-Italic.otf",
+    "fonts/LibertinusSerif-Bold.otf",
+    "fonts/LibertinusSerif-BoldItalic.otf",
+    "fonts/LibertinusMono-Regular.otf",
 ];
 const UNSUPPORTED: &str = "unsupported image format; use PNG, JPEG, or SVG";
 
@@ -184,7 +186,7 @@ fn raster(image: RasterImage) -> Result<Image, String> {
 }
 
 fn decode_svg(data: &[u8]) -> Result<Image, String> {
-    let tree = parse_svg(data).map_err(|e| malformed(Format::Svg, e))?;
+    let tree = parse_svg(data)?;
     let size = tree.size();
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return Err("image has no area".to_owned());
@@ -196,29 +198,34 @@ fn decode_svg(data: &[u8]) -> Result<Image, String> {
     })
 }
 
-fn parse_svg(data: &[u8]) -> Result<Tree, usvg::Error> {
-    Tree::from_data(data, &svg_options())
-}
-
-/// Options that keep SVG output independent of the machine: bundled fonts only, and no file access.
-/// Images embedded as data URLs still work.
-fn svg_options() -> Options<'static> {
-    Options {
+/// Parses SVG with only the bundled fonts, so output is independent of the machine. Images embedded as
+/// data URLs work; a reference to another file is an error, since it would neither be read nor drawn.
+fn parse_svg(data: &[u8]) -> Result<Tree, String> {
+    let external = AtomicBool::new(false);
+    let options = Options {
         font_family: "Libertinus Serif".to_owned(),
         fontdb: bundled_fontdb().clone(),
         image_href_resolver: ImageHrefResolver {
-            resolve_string: Box::new(|_, _| None),
+            resolve_string: Box::new(|_, _| {
+                external.store(true, Ordering::Relaxed);
+                None
+            }),
             ..ImageHrefResolver::default()
         },
         ..Options::default()
+    };
+    let tree = Tree::from_data(data, &options).map_err(|e| malformed(Format::Svg, e))?;
+    if external.load(Ordering::Relaxed) {
+        return Err("an SVG image cannot refer to other files; embed its images as data URLs".to_owned());
     }
+    Ok(tree)
 }
 
 fn bundled_fontdb() -> &'static Arc<Database> {
     static DATABASE: OnceLock<Arc<Database>> = OnceLock::new();
     DATABASE.get_or_init(|| {
         let mut database = Database::new();
-        for bytes in BUNDLED_FONTS {
+        for bytes in SVG_FONTS.into_iter().filter_map(bundled::font) {
             database.load_font_source(Source::Binary(Arc::new(bytes)));
         }
         database.set_serif_family("Libertinus Serif");
@@ -257,6 +264,15 @@ mod tests {
                 .starts_with("malformed PNG image: ")
         );
         assert!(decode("broken.svg").unwrap_err().starts_with("malformed SVG image: "));
+    }
+
+    #[test]
+    fn rejects_svg_that_refers_to_other_files() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="a.png" width="5" height="5"/></svg>"#;
+        assert_eq!(
+            Image::decode(svg.as_bytes().to_vec(), "svg").unwrap_err(),
+            "an SVG image cannot refer to other files; embed its images as data URLs"
+        );
     }
 
     #[test]
