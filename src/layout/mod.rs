@@ -715,7 +715,10 @@ impl<'a> Flow<'a> {
             ..frame
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
-        self.space(style.space_before.0);
+        let outermost = frame.list_depth == 0;
+        if outermost {
+            self.space(style.space_before.0);
+        }
         for (index, item) in items.iter().enumerate() {
             if index > 0 {
                 self.space(lists.item_spacing.0);
@@ -744,7 +747,9 @@ impl<'a> Flow<'a> {
         if style.keep_with_next && self.lines.len() > start_line {
             self.keep_last();
         }
-        self.space(style.space_after.0);
+        if outermost {
+            self.space(style.space_after.0);
+        }
     }
 
     /// Sets a column section at the column width, which divides the prose width. Full-width blocks inside

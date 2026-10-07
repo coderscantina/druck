@@ -180,6 +180,8 @@ Space between blocks (`space-before` and `space-after`) may grow by up to half i
 
 ## Custom styles
 
+The `space-before` and `space-after` of the `list` style apply to a list that is not inside another list, and collapse with the space of neighbouring blocks to the larger value. The default theme sets both to `$spacing.block`, as for quotations and code. Items of a nested list follow their parent item at `lists.item-spacing`.
+
 `custom-styles` names styles that documents apply to headings, paragraphs, lists, and table rows and cells with `{.name}`, see [authoring](AUTHORING.md#custom-styles). Title and band slots may name them too. Each is based on another style and lists only what it changes:
 
 ```json

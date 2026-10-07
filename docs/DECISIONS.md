@@ -668,6 +668,10 @@ Only images in the slots of the title layout in use are decoded: the title page 
 
 Resolution records the font tokens that styles use, following token-to-token references, and warns for a `fonts.*` setting from front matter or `--set` whose token nothing uses. Warnings are diagnostics with a `warning` flag, kept in `Config` and printed after loading. The latest layer that sets a token gets the warning.
 
+#### List spacing
+
+The default theme sets the `list` style's `space-before` and `space-after` to `$spacing.block`, the token quotations and code blocks use, so a list after a paragraph and lists of different kinds in a row have a gap. Paragraphs have no spacing token of their own in the default theme (they use an indent). The layout applies list spacing only to a list outside other lists, so a nested list sits at item spacing under its parent item instead of a block gap. Lists in footnotes and in table cells start a new nesting, so they get the spacing against their neighbours in the note or cell, and the cell and note edges still drop it (checked in the offer sample). The sample PDFs `de`, `en`, `offer`, `pagination`, and `typography` changed and keep their page counts.
+
 #### Raster density
 
 The stored density sets a raster image's natural size, each axis on its own, so non-square pixels keep their shape. PNG uses `pHYs` when its unit is the meter. JPEG uses JFIF when its units are inches or centimeters, else the EXIF resolution tags (inches or centimeters, inches by default), found by a small marker scan in `src/image/density.rs`. Files without a usable density keep one point per pixel, so existing images do not change size. This replaces the earlier decision that density is ignored (milestone 06).
