@@ -7,7 +7,9 @@
   },
   "tokens": {
     "colors": {
-      "accent": "#1f4e5f"
+      "accent": "#1f4e5f",
+      "muted": "#6b6b6b",
+      "rule": "#c8c8c8"
     }
   },
   "page": {
@@ -25,9 +27,81 @@
   "styles": {
     "title": { "align": "left", "color": "$colors.accent" },
     "subtitle": { "align": "left" },
-    "heading-1": { "color": "$colors.accent" },
+    "heading-1": { "color": "$colors.accent", "space-before": "0.3em" },
     "heading-2": { "color": "$colors.accent" },
-    "body": { "align": "left", "first-line-indent": "0pt", "space-after": "0.6em" }
+    "body": { "align": "left", "first-line-indent": "0pt", "space-after": "0.6em" },
+    "table-header": {
+      "size": "7pt",
+      "uppercase": true,
+      "tracking": 0.14
+    }
+  },
+  "tables": {
+    "cell-padding": "0.45em",
+    "top-rule": null,
+    "header-rule": { "thickness": "1.2pt", "color": "$colors.text" },
+    "row-rule": { "thickness": "0.4pt", "color": "$colors.rule" }
+  },
+  "custom-styles": {
+    "eyebrow": {
+      "based-on": "body",
+      "size": "$sizes.small",
+      "weight": "bold",
+      "color": "$colors.accent",
+      "hyphenate": false,
+      "uppercase": true,
+      "tracking": 0.12,
+      "keep-with-next": true,
+      "space-before": "2em",
+      "space-after": "0pt"
+    },
+    "cover-label": {
+      "based-on": "body",
+      "size": "7pt",
+      "color": "$colors.muted",
+      "uppercase": true,
+      "tracking": 0.16,
+      "space-after": "0pt"
+    },
+    "footer-label": {
+      "based-on": "footer",
+      "uppercase": true,
+      "tracking": 0.1
+    },
+    "detail": {
+      "based-on": "list",
+      "size": "$sizes.small",
+      "color": "$colors.muted",
+      "space-before": "0.2em"
+    },
+    "group": {
+      "based-on": "table-cell",
+      "weight": "bold",
+      "uppercase": true,
+      "tracking": 0.06,
+      "keep-with-next": true
+    },
+    "note": {
+      "based-on": "table-cell",
+      "style": "italic",
+      "color": "$colors.muted"
+    },
+    "total": {
+      "based-on": "table-cell",
+      "rule-below": "none"
+    },
+    "grand-total": {
+      "based-on": "total",
+      "weight": "bold"
+    },
+    "sum-label": {
+      "based-on": "table-cell",
+      "align": "right"
+    },
+    "grand-label": {
+      "based-on": "grand-total",
+      "align": "right"
+    }
   },
   "title-page": {
     "groups": [
@@ -36,8 +110,10 @@
         "width": "58mm",
         "align": "left",
         "slots": [
-          { "text": "{meta.client}" },
-          { "text": "Offer {meta.offer}\n{date}", "space-before": "1.5em", "required": true }
+          { "text": "Prepared for", "style": "cover-label" },
+          { "text": "{meta.client}", "space-before": "0.4em" },
+          { "text": "Offer", "style": "cover-label", "space-before": "1.8em" },
+          { "text": "{meta.offer}\n{date}", "space-before": "0.4em", "required": true }
         ]
       },
       {
@@ -45,7 +121,8 @@
         "width": "112mm",
         "align": "left",
         "slots": [
-          { "text": "{title}", "style": "title", "required": true },
+          { "text": "Kyber Example Studio", "style": "cover-label" },
+          { "text": "{title}", "style": "title", "required": true, "space-before": "0.6em" },
           { "text": "{subtitle}", "style": "subtitle", "space-before": "0.8em" }
         ]
       }
@@ -72,7 +149,10 @@
           "anchor": "top-right",
           "width": "40mm",
           "align": "right",
-          "slots": [{ "text": "Page {page}|{pages}" }]
+          "slots": [
+            { "text": "Offer {meta.offer}", "style": "footer-label" },
+            { "text": "Page {page}|{pages}" }
+          ]
         }
       ]
     }
