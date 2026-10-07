@@ -10,7 +10,7 @@ use serde::Serialize;
 use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
-use super::theme::{Align, DocumentDefaults, FontStyle, LabelSet, PageVariants, Styles, TemplateStyle, Weight};
+use super::theme::{Align, Anchor, DocumentDefaults, FontStyle, LabelSet, Styles, TemplateStyle, Weight, WideBlock};
 use super::values::{Color, Length, Pt};
 
 #[derive(Debug, Clone, Serialize)]
@@ -31,7 +31,7 @@ pub struct Config {
     pub bibliography: Bibliography,
     pub toc: Toc,
     pub title_block: TitleBlock,
-    pub title_page: Vec<TitleSlot>,
+    pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,
     pub labels: LabelSet,
 }
@@ -62,7 +62,8 @@ impl Config {
     }
 }
 
-/// Page dimensions and the text area. Odd pages put the inner margin on the left.
+/// Page dimensions and the text area, the margin frame. Odd pages put the inner margin on the left,
+/// and so do even pages unless margins mirror.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PageGeometry {
@@ -72,6 +73,11 @@ pub struct PageGeometry {
     pub margin_bottom: Pt,
     pub margin_inner: Pt,
     pub margin_outer: Pt,
+    pub mirror: bool,
+    /// The width of prose, from the inner edge of the frame.
+    pub prose_width: Pt,
+    /// Block kinds set across the frame instead of the prose width.
+    pub wide: Vec<WideBlock>,
     pub column_gap: Pt,
     pub header_offset: Pt,
     pub footer_offset: Pt,
@@ -85,6 +91,65 @@ impl PageGeometry {
     pub fn text_height(&self) -> Pt {
         Pt(self.height.0 - self.margin_top.0 - self.margin_bottom.0)
     }
+
+    /// The left margin of the page at physical `index`, counted from 0.
+    pub fn left_margin(&self, index: usize) -> Pt {
+        if index.is_multiple_of(2) || !self.mirror {
+            self.margin_inner
+        } else {
+            self.margin_outer
+        }
+    }
+
+    /// How far prose moves right on the page at `index` to start at the inner edge of the frame.
+    pub fn prose_shift(&self, index: usize) -> f64 {
+        if index.is_multiple_of(2) || !self.mirror {
+            0.0
+        } else {
+            self.text_width().0 - self.prose_width.0
+        }
+    }
+}
+
+/// Slots stacked in a box anchored to the margin frame. Offsets point into the frame.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Group<S> {
+    pub anchor: Anchor,
+    pub x: Pt,
+    pub y: Pt,
+    pub width: Pt,
+    /// Overrides the alignment of the slot styles.
+    pub align: Option<Align>,
+    pub slots: Vec<S>,
+}
+
+/// Header and footer slot groups per page variant.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PageVariants {
+    pub title: Option<PageVariant>,
+    pub first: Option<PageVariant>,
+    pub odd: Option<PageVariant>,
+    pub even: Option<PageVariant>,
+    pub body: PageVariant,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct PageVariant {
+    pub header: Option<Vec<Group<BandSlot>>>,
+    pub footer: Option<Vec<Group<BandSlot>>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BandSlot {
+    pub text: Template,
+    /// `None` uses the band's own style.
+    pub style: Option<TemplateStyle>,
+    pub required: bool,
+    pub space_before: Pt,
 }
 
 #[derive(Debug, Clone, Serialize)]

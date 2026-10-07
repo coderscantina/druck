@@ -1,5 +1,5 @@
 //! Document structures: title blocks and pages, page variants, headers and footers, numbering,
-//! the table of contents, cross-references, and settling page numbers.
+//! the table of contents, cross-references, settling page numbers, and page geometry.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -123,6 +123,12 @@ fn band(page: &Page, y: f64) -> Vec<String> {
     runs.into_iter().map(|run| run.1).collect()
 }
 
+/// A group across the frame with one slot, as the left, center, or right slot of a band was.
+fn group(align: &str, text: &str) -> Value {
+    let anchor = if align == "right" { "top-right" } else { "top-left" };
+    json!({"anchor": anchor, "align": align, "slots": [{"text": text}]})
+}
+
 /// The physical page number of anchor `id`.
 fn page_of(output: &Output, id: usize) -> usize {
     output.anchors[id].page + 1
@@ -176,7 +182,7 @@ fn a_title_page_stands_alone_and_body_pages_follow_its_parity() {
 fn a_required_title_slot_without_a_value_is_an_error() {
     let error = check_title(&config("title-page: true\nauthor: Ada", theme()), &source()).unwrap_err();
     assert_eq!(error.len(), 1);
-    assert_eq!(error[0].property.as_deref(), Some("title-page.slots.0.text"));
+    assert_eq!(error[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
     assert_eq!(
         error[0].message,
         "this required slot needs {title}; set title in the front matter"
@@ -192,8 +198,7 @@ fn a_required_title_slot_without_a_value_is_an_error() {
 
 #[test]
 fn page_variants_follow_the_fallback_order_and_physical_parity() {
-    let variant =
-        |name: &str| json!({"header": {"left": null, "center": {"text": name}, "right": null}, "footer": null});
+    let variant = |name: &str| json!({"header": [group("center", name)], "footer": null});
     let pages = json!({"version": 1, "pages": {
         "title": variant("title"), "first": variant("first"), "odd": variant("odd"), "even": null,
         "body": variant("body"),
@@ -214,9 +219,10 @@ fn page_variants_follow_the_fallback_order_and_physical_parity() {
 
 #[test]
 fn headers_show_the_section_and_subsection_of_each_page_and_footers_the_page() {
+    let marks = json!([group("left", "{section}"), group("right", "{subsection}")]);
     let theme = json!({"version": 1, "pages": {"first": null, "body": {
-        "header": {"left": {"text": "{section}"}, "center": null, "right": {"text": "{subsection}"}},
-        "footer": {"left": null, "center": {"text": "{page}"}, "right": null},
+        "header": marks,
+        "footer": [group("center", "{page}")],
     }}});
     let config = config("{}", theme);
     let body = "Lead.\n\n# One\n\n## One A\n\nText.\n\n::: page-break\nText.\n\n## One B\n\nText.\n\n\
@@ -238,10 +244,10 @@ fn headers_show_the_section_and_subsection_of_each_page_and_footers_the_page() {
 
     // A required slot without a value names the slot and the page.
     let required = json!({"version": 1, "pages": {"first": null, "body": {
-        "header": {"left": {"text": "{section}", "required": true}, "center": null, "right": null},
+        "header": [{"anchor": "top-left", "slots": [{"text": "{section}", "required": true}]}],
     }}});
     let errors = render_images(&self::config("{}", required), "Lead.\n\n::: page-break\n# One", &[]).unwrap_err();
-    assert_eq!(errors[0].property.as_deref(), Some("pages.body.header.left"));
+    assert_eq!(errors[0].property.as_deref(), Some("pages.body.header.0.slots.0"));
     assert_eq!(
         errors[0].message,
         "this required slot has no value for {section} on page 1"
@@ -574,5 +580,248 @@ fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the
     assert!(
         lines[heading..after].iter().any(|line| line.2 > middle),
         "entries fill the second column"
+    );
+}
+
+const MM: f64 = 72.0 / 25.4;
+
+/// The left and right edge of the run that reads `text` on `page`, else of the line that does.
+fn extent(page: &Page, text: &str) -> (f64, f64) {
+    let run = page.items.iter().find_map(|item| match item {
+        Item::Text { x, run, .. } if run.text == text => Some((x.0, x.0 + run.width.0)),
+        _ => None,
+    });
+    run.unwrap_or_else(|| {
+        let y = baseline(page, text);
+        let runs = page.items.iter().filter_map(|item| match item {
+            Item::Text { x, y: at, run, .. } if at.0 == y => Some((x.0, x.0 + run.width.0)),
+            _ => None,
+        });
+        runs.fold((f64::MAX, f64::MIN), |(left, right), run| {
+            (left.min(run.0), right.max(run.1))
+        })
+    })
+}
+
+/// The baseline of the run that reads `text` on `page`.
+fn run_baseline(page: &Page, text: &str) -> f64 {
+    let run = page.items.iter().find_map(|item| match item {
+        Item::Text { y, run, .. } if run.text == text => Some(y.0),
+        _ => None,
+    });
+    run.unwrap_or_else(|| panic!("no run {text:?} in {:?}", texts(page)))
+}
+
+fn rules(page: &Page) -> Vec<Rect> {
+    let rects = page.items.iter().filter_map(|item| match item {
+        Item::Rect { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    rects.collect()
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.01
+}
+
+#[test]
+fn margins_mirror_on_even_pages_unless_mirroring_is_off() {
+    for mirror in [true, false] {
+        let margins = json!({"inner": "40mm", "outer": "20mm", "mirror": mirror});
+        let config = config(
+            "numbered-headings: false",
+            json!({"version": 1, "page": {"margins": margins}}),
+        );
+        let output = render(&config, "# One\n\nOne.\n\n::: page-break\n# Two");
+        let geometry = &config.page;
+        let even = if mirror {
+            geometry.margin_outer.0
+        } else {
+            geometry.margin_inner.0
+        };
+        assert!(close(extent(&output.pages[0], "One.").0, geometry.margin_inner.0));
+        let heading = lines(&output.pages[1])
+            .into_iter()
+            .find(|line| line.0 > geometry.margin_top.0);
+        assert!(close(heading.expect("heading").1, even), "mirror {mirror}");
+        assert!(
+            close(extent(&output.pages[1], "Two").0, even),
+            "the header follows the margins"
+        );
+        let (left, right) = extent(&output.pages[1], "2");
+        let middle = even + geometry.text_width().0 / 2.0;
+        assert!(close((left + right) / 2.0, middle), "the footer follows the margins");
+    }
+}
+
+#[test]
+fn prose_keeps_the_text_width_from_the_inner_edge_and_wide_blocks_span_the_frame() {
+    let page = json!({"margins": {"inner": "30mm", "outer": "20mm"}, "text-width": "100mm"});
+    let config = config("{}", json!({"version": 1, "page": page}));
+    let geometry = &config.page;
+    let (frame, prose) = (geometry.text_width().0, 100.0 * MM);
+    let table = format!(
+        "| Key | Value |\n| --- | --- |\n| A | {} |",
+        "Wide cell text. ".repeat(12)
+    );
+    let body = format!("{PROSE}\n\n{table}\n\n::: columns\n{PROSE}\n:::\n\n::: page-break\n{PROSE}\n\n{table}");
+    let output = render(&config, &body);
+
+    for (index, page) in output.pages.iter().enumerate() {
+        // The inner edge is on the left of page 1 and on the right of page 2.
+        let left = geometry.left_margin(index).0;
+        let prose_left = left + geometry.prose_shift(index);
+        assert!(close(prose_left - left, if index == 0 { 0.0 } else { frame - prose }));
+        let first = extent(page, &texts(page)[0]);
+        assert!(
+            close(first.0, prose_left),
+            "prose starts at the inner edge on page {}",
+            index + 1
+        );
+        for text in texts(page).iter().filter(|text| PROSE.contains(text.as_str())) {
+            let (start, end) = extent(page, text);
+            assert!(start > prose_left - 3.0 && end < prose_left + prose + 3.0, "{text:?}");
+        }
+        let widest = rules(page).iter().map(|rule| rule.width.0).fold(0.0, f64::max);
+        assert!(close(widest, frame), "the table spans the frame on page {}", index + 1);
+        assert!(rules(page).iter().all(|rule| close(rule.x.0, left)));
+    }
+
+    // Wide blocks widen only where prose is set directly: a code line wider than the prose width fits
+    // at the top level but not in a list.
+    let code = "x".repeat(70);
+    assert!(render_images(&config, &format!("```\n{code}\n```"), &[]).is_ok());
+    let errors = render_images(&config, &format!("- Item\n\n  ```\n  {code}\n  ```"), &[]).unwrap_err();
+    assert!(errors[0].message.starts_with("code line is"), "{}", errors[0].message);
+}
+
+#[test]
+fn title_page_groups_sit_at_their_anchor_and_offset() {
+    let group = |anchor: &str| {
+        let align = if anchor.ends_with("right") { "right" } else { "left" };
+        json!({"anchor": anchor, "offset": {"x": "10mm", "y": "20mm"}, "width": "50mm", "align": align,
+            "slots": [{"text": anchor, "style": "date"}]})
+    };
+    let anchors = [
+        "top-left",
+        "top-right",
+        "middle-left",
+        "middle-right",
+        "bottom-left",
+        "bottom-right",
+    ];
+    let groups: Vec<_> = anchors.into_iter().map(group).collect();
+    let config = config(
+        "title-page: true",
+        json!({"version": 1, "title-page": {"groups": groups}}),
+    );
+    let output = render(&config, "Text.");
+    let page = &output.pages[0];
+
+    let geometry = &config.page;
+    let (left, width, height) = (
+        geometry.margin_inner.0,
+        geometry.text_width().0,
+        geometry.text_height().0,
+    );
+    let line = config.styles.date.size.0 * config.styles.date.line_height;
+    // Line boxes: the top one starts 20mm below the frame's top, the bottom one ends 20mm above its
+    // bottom, and the middle one is centered 20mm below the frame's middle.
+    let top = run_baseline(page, "top-left");
+    assert!(close(run_baseline(page, "middle-left") - top, (height - line) / 2.0));
+    assert!(close(
+        run_baseline(page, "bottom-left") - top,
+        height - 2.0 * 20.0 * MM - line
+    ));
+    for vertical in ["top", "middle", "bottom"] {
+        let (start, _) = extent(page, &format!("{vertical}-left"));
+        assert!(close(start, left + 10.0 * MM));
+        let (_, end) = extent(page, &format!("{vertical}-right"));
+        assert!(close(end, left + width - 10.0 * MM));
+        let right = run_baseline(page, &format!("{vertical}-right"));
+        assert_eq!(run_baseline(page, &format!("{vertical}-left")), right);
+    }
+}
+
+#[test]
+fn band_groups_stack_multi_line_slots_and_meta_lists_at_the_band_baseline() {
+    let footer = json!([
+        {"anchor": "top-left", "width": "50mm", "slots": [
+            {"text": "{meta.company}"},
+            {"text": "{meta.address}"},
+            {"text": "{meta.missing}"},
+        ]},
+        {"anchor": "middle-left", "offset": {"x": "60mm"}, "width": "40mm", "slots": [{"text": "One\nTwo\nThree"}]},
+        {"anchor": "top-right", "width": "30mm", "align": "right", "slots": [{"text": "Page {page}|{pages}"}]},
+    ]);
+    let theme = json!({"version": 1, "pages": {"first": null, "body": {
+        "header": [{"anchor": "bottom-left", "slots": [{"text": "Upper\nLower"}]}],
+        "footer": footer,
+    }}});
+    let front = "meta:\n  company: Example Ltd\n  address: [Main Street 1, \"\", 1010 Vienna]";
+    let config = config(front, theme);
+    let output = render(&config, "One.\n\n::: page-break\nTwo.\n\n::: page-break\nThree.");
+    let page = &output.pages[0];
+
+    let geometry = &config.page;
+    let header = geometry.margin_top.0 - geometry.header_offset.0;
+    let footer = geometry.margin_top.0 + geometry.text_height().0 + geometry.footer_offset.0;
+    assert_eq!(
+        run_baseline(page, "Lower"),
+        header,
+        "a bottom anchor puts the last baseline on the band's"
+    );
+    assert!(run_baseline(page, "Upper") < header);
+    assert_eq!(
+        run_baseline(page, "Example Ltd"),
+        footer,
+        "a top anchor puts the first baseline on the band's"
+    );
+    let address = [run_baseline(page, "Main Street 1"), run_baseline(page, "1010 Vienna")];
+    assert!(
+        close(address[0] - footer, address[1] - address[0]),
+        "one line per entry, blank entries dropped"
+    );
+    let middle = (run_baseline(page, "One") + run_baseline(page, "Three")) / 2.0;
+    assert!(
+        close(middle, footer),
+        "a middle anchor centers the lines on the band's baseline"
+    );
+    assert!(close(extent(page, "One").0, geometry.margin_inner.0 + 60.0 * MM));
+
+    let totals: Vec<_> = output
+        .pages
+        .iter()
+        .filter_map(|page| {
+            page.items.iter().find_map(|item| match item {
+                Item::Text { run, .. } if run.text.starts_with("Page") => Some(run.text.clone()),
+                _ => None,
+            })
+        })
+        .collect();
+    assert_eq!(totals, ["Page 1|3", "Page 2|3", "Page 3|3"]);
+    let (_, end) = extent(page, "Page 1|3");
+    assert!(close(end, geometry.margin_inner.0 + geometry.text_width().0));
+}
+
+#[test]
+fn a_missing_meta_value_omits_its_slot_unless_it_is_required() {
+    let theme = json!({"version": 1, "title-page": {"groups": [{"anchor": "top-left", "slots": [
+        {"text": "{meta.client}", "required": true},
+        {"text": "Ref. {meta.ref}"},
+        {"text": "{title}"},
+    ]}]}});
+    let front = "title: Offer\ntitle-page: true";
+    let output = render(
+        &config(&format!("{front}\nmeta: {{client: ACME}}"), theme.clone()),
+        "Text.",
+    );
+    assert_eq!(texts(&output.pages[0]), ["ACME", "Offer"]);
+
+    let errors = check_title(&config(front, theme), &source()).unwrap_err();
+    assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
+    assert_eq!(
+        errors[0].message,
+        "this required slot needs {meta.client}; set meta.client in the front matter"
     );
 }

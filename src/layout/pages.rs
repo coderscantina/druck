@@ -51,9 +51,9 @@ const NOTE_PAGE: f64 = 10_000.0;
 /// so a region gets one line uneven rather than strand a line, but not two.
 const UNEVEN: f64 = 3000.0;
 
-/// The width of each of two columns.
+/// The width of each of two columns in the prose width.
 pub(super) fn column_width(page: &PageGeometry) -> f64 {
-    (page.text_width().0 - page.column_gap.0) / 2.0
+    (page.prose_width.0 - page.column_gap.0) / 2.0
 }
 
 /// The rule after line `index` of a block of `count` lines.
@@ -671,15 +671,13 @@ fn render(
     let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
     for plan in plans {
-        let left = if (first + pages.len()).is_multiple_of(2) {
-            geometry.margin_inner.0
-        } else {
-            geometry.margin_outer.0
-        };
+        let index = first + pages.len();
+        let left = geometry.left_margin(index).0;
+        let shift = geometry.prose_shift(index);
         let top = geometry.margin_top.0;
         let mut items = Vec::new();
         let place = |items: &mut Vec<Item>, line: Vec<Item>, y: f64| {
-            items.extend(line.into_iter().map(|item| translate(item, left, top + y)));
+            items.extend(line.into_iter().map(|item| translate(item, left + shift, top + y)));
         };
 
         let mut y = top;
@@ -693,7 +691,8 @@ fn render(
             }
             match region {
                 Region::Full(lines) => {
-                    y = stack(&mut items, body, headers, lines.clone(), left, y, plan.stretch);
+                    let x = (left, shift);
+                    y = stack(&mut items, body, headers, lines.clone(), x, y, plan.stretch);
                 }
                 Region::Columns(columns) => {
                     // Each column stretches to the region's height if its spaces allow, else stays natural.
@@ -706,7 +705,7 @@ fn render(
                         } else {
                             0.0
                         };
-                        let x = left + index as f64 * second_column;
+                        let x = (left + index as f64 * second_column, shift);
                         stack(&mut items, body, headers, lines, x, y, ratio);
                     }
                     y += height;
@@ -718,7 +717,7 @@ fn render(
         if end > start {
             let mut y = height - notes.area(start, end) + footnotes.gap.0;
             let rule = Rect {
-                x: Pt(left),
+                x: Pt(left + shift),
                 y: Pt(top + y),
                 width: footnotes.separator_width,
                 height: footnotes.separator_thickness,
@@ -764,18 +763,20 @@ fn render(
 }
 
 /// Places body lines from `y` down, after the repeated header row if the first one has one, dropping
-/// the space above the first line and stretching the others by `ratio` of their bound. Returns the
-/// bottom of the last line.
+/// the space above the first line and stretching the others by `ratio` of their bound. `x` is the left
+/// edge and how far prose lines move right from it. Returns the bottom of the last line.
 fn stack(
     items: &mut Vec<Item>,
     body: &mut [FlowLine],
     headers: &[Option<&Line>],
     lines: Range<usize>,
-    x: f64,
+    (x, shift): (f64, f64),
     mut y: f64,
     ratio: f64,
 ) -> f64 {
+    let left = |line: &FlowLine| if line.wide { x } else { x + shift };
     if let Some(Some(header)) = headers.get(lines.start).filter(|_| !lines.is_empty()) {
+        let x = left(&body[lines.start]);
         items.extend(header.items.iter().cloned().map(|item| translate(item, x, y)));
         y += header.height;
     }
@@ -784,6 +785,7 @@ fn stack(
         if index > lines.start {
             y += line.space_before * (1.0 + STRETCH * ratio);
         }
+        let x = left(line);
         let placed = std::mem::take(&mut line.line.items);
         items.extend(placed.into_iter().map(|item| translate(item, x, y)));
         y += line.line.height;
@@ -810,6 +812,7 @@ mod tests {
             space_before: 0.0,
             after,
             at: Location { line: 1, column: 1 },
+            wide: false,
         }
     }
 

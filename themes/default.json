@@ -68,8 +68,11 @@
       "top": "$spacing.margin-vertical",
       "bottom": "$spacing.margin-vertical",
       "inner": "$spacing.margin-side",
-      "outer": "$spacing.margin-side"
+      "outer": "$spacing.margin-side",
+      "mirror": true
     },
+    "text-width": null,
+    "wide": ["table", "figure", "code-block"],
     "column-gap": "$spacing.column-gap",
     "header-offset": "12mm",
     "footer-offset": "12mm"
@@ -509,36 +512,41 @@
     "space-after": "2em"
   },
   "title-page": {
-    "slots": [
+    "groups": [
       {
-        "text": "{title}",
-        "style": "title",
-        "required": true,
-        "space-before": "8em"
-      },
-      {
-        "text": "{subtitle}",
-        "style": "subtitle",
-        "required": false,
-        "space-before": "1em"
-      },
-      {
-        "text": "{author}",
-        "style": "author",
-        "required": false,
-        "space-before": "5em"
-      },
-      {
-        "text": "{date}",
-        "style": "date",
-        "required": false,
-        "space-before": "1.5em"
-      },
-      {
-        "text": "{abstract}",
-        "style": "abstract",
-        "required": false,
-        "space-before": "5em"
+        "anchor": "top-left",
+        "slots": [
+          {
+            "text": "{title}",
+            "style": "title",
+            "required": true,
+            "space-before": "8em"
+          },
+          {
+            "text": "{subtitle}",
+            "style": "subtitle",
+            "required": false,
+            "space-before": "1em"
+          },
+          {
+            "text": "{author}",
+            "style": "author",
+            "required": false,
+            "space-before": "5em"
+          },
+          {
+            "text": "{date}",
+            "style": "date",
+            "required": false,
+            "space-before": "1.5em"
+          },
+          {
+            "text": "{abstract}",
+            "style": "abstract",
+            "required": false,
+            "space-before": "5em"
+          }
+        ]
       }
     ]
   },
@@ -549,34 +557,31 @@
     },
     "first": {
       "header": null,
-      "footer": {
-        "left": null,
-        "center": {
-          "text": "{page}",
-          "required": false
-        },
-        "right": null
-      }
+      "footer": [
+        {
+          "anchor": "top-left",
+          "align": "center",
+          "slots": [{ "text": "{page}", "required": false }]
+        }
+      ]
     },
     "odd": null,
     "even": null,
     "body": {
-      "header": {
-        "left": {
-          "text": "{section}",
-          "required": false
-        },
-        "center": null,
-        "right": null
-      },
-      "footer": {
-        "left": null,
-        "center": {
-          "text": "{page}",
-          "required": false
-        },
-        "right": null
-      }
+      "header": [
+        {
+          "anchor": "bottom-left",
+          "align": "left",
+          "slots": [{ "text": "{section}", "required": false }]
+        }
+      ],
+      "footer": [
+        {
+          "anchor": "top-left",
+          "align": "center",
+          "slots": [{ "text": "{page}", "required": false }]
+        }
+      ]
     }
   },
   "labels": {

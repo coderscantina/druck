@@ -165,14 +165,41 @@
               "$ref": "#/$defs/spacingSpec"
             },
             "inner": {
-              "description": "Inner margin. Left on odd pages, right on even pages. em is relative to the body size.",
+              "description": "Inner margin. Left on odd pages, and right on even pages if margins mirror. em is relative to the body size.",
               "$ref": "#/$defs/spacingSpec"
             },
             "outer": {
               "description": "Outer margin. em is relative to the body size.",
               "$ref": "#/$defs/spacingSpec"
+            },
+            "mirror": {
+              "type": "boolean",
+              "description": "Whether even pages put the inner margin on the right. With false, inner is the left margin on every page."
             }
           }
+        },
+        "text-width": {
+          "description": "Width of prose, from the inner edge of the margin frame, or null for the frame width. em is relative to the body size.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spacingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wide": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "table",
+              "figure",
+              "code-block"
+            ]
+          },
+          "description": "Block kinds set across the whole margin frame when text-width is narrower. Inside lists, quotations, and columns they keep the width they are in."
         },
         "column-gap": {
           "description": "Gap between columns. em is relative to the body size.",
@@ -627,7 +654,7 @@
     },
     "template": {
       "type": "string",
-      "description": "Text with placeholders {title}, {subtitle}, {author}, {date}, {abstract}, {section}, {subsection}, {page}. Write {{ and }} for literal braces."
+      "description": "Text with placeholders {title}, {subtitle}, {author}, {date}, {abstract}, {section}, {subsection}, {page}, {pages}, and {meta.key} for an entry of the front matter meta map. A line break starts a new line. Write {{ and }} for literal braces."
     },
     "headingDepth": {
       "type": "integer",
@@ -763,60 +790,136 @@
       },
       "description": "Style of one block element."
     },
-    "bandSlot": {
+    "anchor": {
+      "enum": [
+        "top-left",
+        "top-right",
+        "middle-left",
+        "middle-right",
+        "bottom-left",
+        "bottom-right"
+      ],
+      "description": "The point of the margin frame a group is placed at: the top, middle, or bottom of its left or right edge. In headers and footers the band baseline takes the place of the frame's top, middle, and bottom."
+    },
+    "offset": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "x": {
+          "description": "Distance from the anchored left or right edge into the frame. Defaults to 0pt. em is relative to the body size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "y": {
+          "description": "Distance down from a top or middle anchor, or up from a bottom anchor. Defaults to 0pt. em is relative to the body size.",
+          "$ref": "#/$defs/spacingSpec"
+        }
+      },
+      "description": "Distance from the anchor into the frame."
+    },
+    "titleGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "slots"
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "offset": {
+          "$ref": "#/$defs/offset"
+        },
+        "width": {
+          "description": "Group width. Defaults to the frame width less the horizontal offset. em is relative to the body size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "align": {
+          "enum": [
+            "justify",
+            "left",
+            "center",
+            "right"
+          ],
+          "description": "Alignment of the group's lines. Defaults to the alignment of each slot's style."
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/titleSlot"
+          },
+          "description": "Ordered slots, stacked from the top."
+        }
+      },
+      "description": "Title slots stacked in a box anchored to the margin frame."
+    },
+    "bandGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "slots"
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "offset": {
+          "$ref": "#/$defs/offset"
+        },
+        "width": {
+          "description": "Group width. Defaults to the frame width less the horizontal offset. em is relative to the body size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "align": {
+          "enum": [
+            "justify",
+            "left",
+            "center",
+            "right"
+          ],
+          "description": "Alignment of the group's lines. Defaults to the alignment of each slot's style."
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bandSlot"
+          },
+          "description": "Ordered slots, stacked from the top."
+        }
+      },
+      "description": "Header or footer slots stacked at an anchor on the band baseline."
+    },
+    "bandSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
         "text": {
-          "description": "Slot text.",
+          "description": "Slot text, one line per line.",
           "$ref": "#/$defs/template"
+        },
+        "style": {
+          "description": "Block style for the slot. Defaults to the header or footer style.",
+          "$ref": "#/$defs/templateStyle"
         },
         "required": {
           "type": "boolean",
           "description": "Whether the slot must be non-empty; an empty required slot is an error."
+        },
+        "space-before": {
+          "description": "Space above the slot. em is relative to the slot style size. Defaults to 0pt.",
+          "$ref": "#/$defs/spacingSpec"
         }
       },
       "description": "One header or footer slot."
     },
     "band": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "left": {
-          "description": "The left slot, or null to leave it empty.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/bandSlot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "center": {
-          "description": "The center slot, or null to leave it empty.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/bandSlot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "right": {
-          "description": "The right slot, or null to leave it empty.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/bandSlot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bandGroup"
       },
-      "description": "Header or footer with three slots."
+      "description": "Slot groups of a header or footer. The list is replaced as a whole when a theme sets it."
     },
     "pageVariant": {
       "type": "object",
@@ -901,15 +1004,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "slots": {
+        "groups": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/titleSlot"
+            "$ref": "#/$defs/titleGroup"
           },
-          "description": "Ordered slots. The list is replaced as a whole when a theme sets it."
+          "description": "Anchored slot groups. The list is replaced as a whole when a theme sets it."
         }
       },
-      "description": "Ordered content slots."
+      "description": "Anchored slot groups."
     },
     "labelSet": {
       "type": "object",

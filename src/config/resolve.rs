@@ -311,19 +311,35 @@ impl<'a> Resolver<'a> {
                 self.spacing(&size.height, "page.size.height", body)?,
             ),
         };
+        let margin_inner = self.spacing(&page.margins.inner, "page.margins.inner", body)?;
+        let margin_outer = self.spacing(&page.margins.outer, "page.margins.outer", body)?;
+        let text_width = Pt(width.0 - margin_inner.0 - margin_outer.0);
+        let prose_width = match &page.text_width {
+            Some(spec) => self.spacing(spec, "page.text-width", body)?,
+            None => text_width,
+        };
         let geometry = PageGeometry {
             width,
             height,
             margin_top: self.spacing(&page.margins.top, "page.margins.top", body)?,
             margin_bottom: self.spacing(&page.margins.bottom, "page.margins.bottom", body)?,
-            margin_inner: self.spacing(&page.margins.inner, "page.margins.inner", body)?,
-            margin_outer: self.spacing(&page.margins.outer, "page.margins.outer", body)?,
+            margin_inner,
+            margin_outer,
+            mirror: page.margins.mirror,
+            prose_width,
+            wide: page.wide.clone(),
             column_gap: self.spacing(&page.column_gap, "page.column-gap", body)?,
             header_offset: self.spacing(&page.header_offset, "page.header-offset", body)?,
             footer_offset: self.spacing(&page.footer_offset, "page.footer-offset", body)?,
         };
-        let (text_width, text_height) = (geometry.text_width(), geometry.text_height());
+        let text_height = geometry.text_height();
         let width_parts = ["page.size", "page.margins.inner", "page.margins.outer"];
+        let prose_parts = [
+            "page.size",
+            "page.margins.inner",
+            "page.margins.outer",
+            "page.text-width",
+        ];
         let height_parts = ["page.size", "page.margins.top", "page.margins.bottom"];
         if text_width.0 <= 0.0 {
             self.error_among(
@@ -334,13 +350,22 @@ impl<'a> Resolver<'a> {
                     width.0
                 ),
             );
-        } else if geometry.column_gap.0 >= text_width.0 {
+        } else if prose_width.0 <= 0.0 || prose_width.0 > text_width.0 {
+            self.error_among(
+                "page.text-width",
+                &prose_parts,
+                format!(
+                    "text width must be greater than zero and at most the {:.1}pt between the margins",
+                    text_width.0
+                ),
+            );
+        } else if geometry.column_gap.0 >= prose_width.0 {
             self.error_among(
                 "page.column-gap",
-                &width_parts,
+                &prose_parts,
                 format!(
                     "column gap {:.1}pt leaves no column width in a {:.1}pt text area",
-                    geometry.column_gap.0, text_width.0
+                    geometry.column_gap.0, prose_width.0
                 ),
             );
         }
@@ -390,20 +415,23 @@ impl<'a> Resolver<'a> {
             .collect()
     }
 
+    /// Title slots named `{prefix}.slots`, set across `width`.
+    #[allow(clippy::too_many_arguments, reason = "the title block and each title page group")]
     fn title_slots(
         &self,
-        layout: &str,
+        prefix: &str,
         slots: &[TitleSlot],
         styles: Option<&theme::Styles<Style>>,
         images: &BTreeMap<String, Resource>,
         page: &PageGeometry,
+        width: Pt,
         body: Pt,
     ) -> Option<Vec<resolved::TitleSlot>> {
         let resolved: Vec<_> = slots
             .iter()
             .enumerate()
             .map(|(index, slot)| {
-                let property = |field: &str| format!("{layout}.slots.{index}{field}");
+                let property = |field: &str| format!("{prefix}.slots.{index}{field}");
                 let em = styles.map_or(body, |s| s.get(slot.style).size);
                 let content = match (&slot.text, &slot.image, &slot.width) {
                     (Some(text), None, None) => {
@@ -419,7 +447,7 @@ impl<'a> Resolver<'a> {
                         self.error(&property(".width"), "width applies only to image slots");
                         None
                     }
-                    (None, Some(name), Some(width)) => {
+                    (None, Some(name), Some(image_width)) => {
                         let image = images.get(name).cloned();
                         if image.is_none() {
                             self.error(
@@ -427,13 +455,13 @@ impl<'a> Resolver<'a> {
                                 format!("image \"{name}\" is not defined in images"),
                             );
                         }
-                        let width = self.spacing(width, &property(".width"), em);
-                        if width.is_some_and(|w| w.0 > page.text_width().0) {
-                            self.error(&property(".width"), "image width exceeds the text width");
+                        let image_width = self.spacing(image_width, &property(".width"), em);
+                        if image_width.is_some_and(|w| w.0 > width.0) {
+                            self.error(&property(".width"), "image width exceeds the width of its slots");
                         }
                         Some(SlotContent::Image {
                             image: image?,
-                            width: width?,
+                            width: image_width?,
                         })
                     }
                     (None, Some(_), None) => {
@@ -460,42 +488,117 @@ impl<'a> Resolver<'a> {
         resolved.into_iter().collect()
     }
 
-    fn check_placeholders(&self, text: &Template, property: &str, context: &str, rejected: fn(Placeholder) -> bool) {
-        for placeholder in text.placeholders().filter(|p| rejected(*p)) {
-            self.error(
-                property,
-                format!("{{{}}} is not available in {context}", placeholder.name()),
-            );
+    fn check_placeholders(&self, text: &Template, property: &str, context: &str, rejected: fn(&Placeholder) -> bool) {
+        for placeholder in text.placeholders().filter(|p| rejected(p)) {
+            self.error(property, format!("{{{placeholder}}} is not available in {context}"));
         }
     }
 
-    fn page_variants(&self) {
-        let pages = &self.theme.pages;
-        let variants = [
-            ("title", pages.title.as_ref()),
-            ("first", pages.first.as_ref()),
-            ("odd", pages.odd.as_ref()),
-            ("even", pages.even.as_ref()),
-            ("body", Some(&pages.body)),
-        ];
-        for (variant, page) in variants {
-            let Some(page) = page else { continue };
-            for (band, slots) in [("header", page.header.as_ref()), ("footer", page.footer.as_ref())] {
-                let Some(slots) = slots else { continue };
-                for (position, slot) in [
-                    ("left", &slots.left),
-                    ("center", &slots.center),
-                    ("right", &slots.right),
-                ] {
-                    if let Some(slot) = slot {
-                        let property = format!("pages.{variant}.{band}.{position}.text");
-                        self.check_placeholders(&slot.text, &property, "headers and footers", |p| {
-                            p == Placeholder::Abstract
-                        });
-                    }
+    /// Resolves the placement of slot groups named `{property}.{index}` and their slots with `slots`,
+    /// which gets each group's property and width.
+    fn groups<S, T>(
+        &self,
+        property: &str,
+        groups: &[theme::Group<S>],
+        page: &PageGeometry,
+        body: Pt,
+        slots: impl Fn(&str, &[S], Pt) -> Option<Vec<T>>,
+    ) -> Option<Vec<resolved::Group<T>>> {
+        let frame = page.text_width();
+        let resolved: Vec<_> = groups
+            .iter()
+            .enumerate()
+            .map(|(index, group)| {
+                let property = format!("{property}.{index}");
+                let x = self.spacing(&group.offset.x, &format!("{property}.offset.x"), body);
+                let y = self.spacing(&group.offset.y, &format!("{property}.offset.y"), body);
+                let width = match &group.width {
+                    Some(width) => self.spacing(width, &format!("{property}.width"), body),
+                    None => x.map(|x| Pt(frame.0 - x.0)),
+                };
+                if let (Some(x), Some(width)) = (x, width)
+                    && (width.0 <= 0.0 || x.0 + width.0 > frame.0)
+                {
+                    let message = format!(
+                        "the group needs a width greater than zero that fits with its offset in the {:.1}pt margin frame",
+                        frame.0
+                    );
+                    self.error_among(&property, &["page.size", "page.margins"], message);
                 }
-            }
-        }
+                let slots = slots(&property, &group.slots, width.unwrap_or(frame));
+                Some(resolved::Group {
+                    anchor: group.anchor,
+                    x: x?,
+                    y: y?,
+                    width: width?,
+                    align: group.align,
+                    slots: slots?,
+                })
+            })
+            .collect();
+        resolved.into_iter().collect()
+    }
+
+    /// A header or footer slot whose style has the size `em`.
+    fn band_slot(&self, property: &str, slot: &theme::BandSlot, em: Pt) -> Option<resolved::BandSlot> {
+        self.check_placeholders(&slot.text, &format!("{property}.text"), "headers and footers", |p| {
+            *p == Placeholder::Abstract
+        });
+        let space_before = self.spacing(&slot.space_before, &format!("{property}.space-before"), em);
+        Some(resolved::BandSlot {
+            text: slot.text.clone(),
+            style: slot.style,
+            required: slot.required,
+            space_before: space_before?,
+        })
+    }
+
+    fn page_variants(
+        &self,
+        page: &PageGeometry,
+        styles: Option<&theme::Styles<Style>>,
+        body: Pt,
+    ) -> Option<resolved::PageVariants> {
+        let pages = &self.theme.pages;
+        let variant = |name: &str, variant: &theme::PageVariant| {
+            let band = |band: &str, groups: &Option<theme::Band>, own: Option<&Style>| {
+                let Some(groups) = groups else { return Some(None) };
+                let property = format!("pages.{name}.{band}");
+                let slots = |property: &str, slots: &[theme::BandSlot], _| {
+                    let resolved: Vec<_> = slots
+                        .iter()
+                        .enumerate()
+                        .map(|(index, slot)| {
+                            let style = slot.style.map_or(own, |style| styles.map(|s| s.get(style)));
+                            let em = style.map_or(body, |s| s.size);
+                            self.band_slot(&format!("{property}.slots.{index}"), slot, em)
+                        })
+                        .collect();
+                    resolved.into_iter().collect()
+                };
+                self.groups(&property, groups, page, body, slots).map(Some)
+            };
+            Some(resolved::PageVariant {
+                header: band("header", &variant.header, styles.map(|s| &s.header))?,
+                footer: band("footer", &variant.footer, styles.map(|s| &s.footer))?,
+            })
+        };
+        let optional = |name: &str, page: &Option<theme::PageVariant>| match page {
+            Some(page) => variant(name, page).map(Some),
+            None => Some(None),
+        };
+        let title = optional("title", &pages.title);
+        let first = optional("first", &pages.first);
+        let odd = optional("odd", &pages.odd);
+        let even = optional("even", &pages.even);
+        let body = variant("body", &pages.body);
+        Some(resolved::PageVariants {
+            title: title?,
+            first: first?,
+            odd: odd?,
+            even: even?,
+            body: body?,
+        })
     }
 
     fn config(&self, document: &SettingsInput, overrides: &SettingsInput) -> Option<Config> {
@@ -606,10 +709,24 @@ impl<'a> Resolver<'a> {
             });
 
         let page = page?;
-        let title_block = self.title_slots("title-block", &theme.title_block.slots, s, &images, &page, body);
+        let title_block = self.title_slots(
+            "title-block",
+            &theme.title_block.slots,
+            s,
+            &images,
+            &page,
+            page.prose_width,
+            body,
+        );
         let title_block_space = self.spacing(&theme.title_block.space_after, "title-block.space-after", body);
-        let title_page = self.title_slots("title-page", &theme.title_page.slots, s, &images, &page, body);
-        self.page_variants();
+        let title_page = self.groups(
+            "title-page.groups",
+            &theme.title_page.groups,
+            &page,
+            body,
+            |property, slots, width| self.title_slots(property, slots, s, &images, &page, width, body),
+        );
+        let pages = self.page_variants(&page, s, body);
 
         let bibliography_file = [overrides, document].into_iter().find_map(|input| {
             let path = input.settings.bibliography.as_ref()?;
@@ -639,7 +756,7 @@ impl<'a> Resolver<'a> {
                 space_after: title_block_space?,
             },
             title_page: title_page?,
-            pages: theme.pages.clone(),
+            pages: pages?,
             labels: theme.labels.get(theme.document.lang).clone(),
         })
     }
@@ -730,10 +847,29 @@ mod tests {
 
     #[test]
     fn rejects_page_placeholders_in_title_slots() {
-        let theme = json!({"version": 1, "title-page": {"slots": [{"text": "Page {page}"}]}});
-        let (property, message) = rejection(theme);
-        assert_eq!(property, "title-page.slots.0.text");
-        assert_eq!(message, "{page} is not available in title slots");
+        let groups = json!([{"anchor": "top-left", "slots": [{"text": "Page {page} of {pages}"}]}]);
+        let errors = resolve(inputs(json!({"version": 1, "title-page": {"groups": groups}}))).unwrap_err();
+        let messages: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "{page} is not available in title slots",
+                "{pages} is not available in title slots"
+            ]
+        );
+        assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
+    }
+
+    #[test]
+    fn rejects_a_text_width_or_slot_group_wider_than_the_margin_frame() {
+        let (property, message) = rejection(json!({"version": 1, "page": {"text-width": "50cm"}}));
+        assert_eq!(property, "page.text-width");
+        assert!(message.starts_with("text width must be greater than zero"), "{message}");
+
+        let group = json!({"anchor": "top-right", "offset": {"x": "2cm"}, "width": "15cm", "slots": []});
+        let (property, message) = rejection(json!({"version": 1, "title-page": {"groups": [group]}}));
+        assert_eq!(property, "title-page.groups.0");
+        assert!(message.starts_with("the group needs a width"), "{message}");
     }
 
     #[test]

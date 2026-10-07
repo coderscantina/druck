@@ -11,6 +11,7 @@ use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value, json};
 
 use super::non_null;
+use super::template::is_meta_key;
 use super::theme::{CitationStyle, FontFamily, HeadingDepth, Lang, PageSize};
 use super::values::{FontName, LineHeight, Size, Spacing, Spec};
 
@@ -27,6 +28,9 @@ pub struct FrontMatter {
     pub date: Option<String>,
     #[serde(default, deserialize_with = "non_null", rename = "abstract")]
     pub abstract_: Option<String>,
+    /// Free metadata for `{meta.key}` slots.
+    #[serde(default, deserialize_with = "meta")]
+    pub meta: BTreeMap<String, MetaValue>,
 
     /// Theme file, relative to the document.
     #[serde(default, deserialize_with = "non_null")]
@@ -98,6 +102,53 @@ impl<'de> Deserialize<'de> for Authors {
         }
 
         deserializer.deserialize_any(AuthorsVisitor)
+    }
+}
+
+/// A `meta` value: text, or a list of lines.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum MetaValue {
+    Text(String),
+    Lines(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for MetaValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MetaVisitor;
+
+        impl<'de> Visitor<'de> for MetaVisitor {
+            type Value = MetaValue;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a text or a list of lines")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<MetaValue, E> {
+                Ok(MetaValue::Text(value.to_owned()))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<MetaValue, A::Error> {
+                let mut lines = Vec::new();
+                while let Some(line) = seq.next_element::<String>()? {
+                    lines.push(line);
+                }
+                Ok(MetaValue::Lines(lines))
+            }
+        }
+
+        deserializer.deserialize_any(MetaVisitor)
+    }
+}
+
+/// The `meta` map, whose keys must be usable in `{meta.key}`.
+fn meta<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, MetaValue>, D::Error> {
+    let map = BTreeMap::<String, MetaValue>::deserialize(deserializer)?;
+    match map.keys().find(|key| !is_meta_key(key)) {
+        Some(key) => Err(de::Error::custom(format!(
+            "meta key \"{key}\" must consist of letters, digits, \"-\", and \"_\""
+        ))),
+        None => Ok(map),
     }
 }
 
@@ -244,6 +295,7 @@ impl FrontMatter {
                 .unwrap_or_default(),
             date: later.date.clone().or_else(|| self.date.clone()),
             abstract_: later.abstract_.clone().or_else(|| self.abstract_.clone()),
+            meta: self.meta.clone().into_iter().chain(later.meta.clone()).collect(),
         }
     }
 }
@@ -258,6 +310,7 @@ pub struct Metadata {
     pub date: Option<String>,
     #[serde(rename = "abstract")]
     pub abstract_: Option<String>,
+    pub meta: BTreeMap<String, MetaValue>,
 }
 
 fn insert(object: &mut Map<String, Value>, pointer: &[&str], value: Value) {
@@ -348,6 +401,23 @@ mod tests {
         assert!(parse("headers: {}\n").is_err());
         assert!(parse("pages: {}\n").is_err());
         assert!(parse("lang: fr\n").is_err());
+    }
+
+    #[test]
+    fn reads_meta_text_and_lines_and_rejects_keys_no_slot_can_name() {
+        let front = parse("meta:\n  client: ACME\n  address: [Main St 1, Vienna]\n").unwrap();
+        assert_eq!(front.meta["client"], MetaValue::Text("ACME".into()));
+        assert_eq!(
+            front.meta["address"],
+            MetaValue::Lines(vec!["Main St 1".into(), "Vienna".into()])
+        );
+        let later = parse("meta:\n  client: Other\n").unwrap();
+        let meta = front.metadata_overridden_by(&later).meta;
+        assert_eq!(meta["client"], MetaValue::Text("Other".into()));
+        assert_eq!(meta.len(), 2, "overrides replace single entries");
+        assert!(parse("meta:\n  my client: ACME\n").is_err());
+        assert!(parse("meta:\n  client: {name: ACME}\n").is_err());
+        assert!(parse("client: ACME\n").is_err());
     }
 
     #[test]

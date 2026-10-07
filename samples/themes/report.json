@@ -41,27 +41,32 @@
     "leader": false
   },
   "title-page": {
-    "slots": [
-      { "image": "logo", "width": "22mm", "style": "title", "space-before": "4em" },
-      { "text": "{title}", "style": "title", "required": true, "space-before": "1.5em" },
-      { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" },
-      { "text": "{author}", "style": "author", "required": true, "space-before": "3em" },
-      { "text": "{date}", "style": "date", "space-before": "0.3em" },
-      { "text": "{abstract}", "style": "abstract", "space-before": "4em" }
+    "groups": [
+      {
+        "anchor": "top-left",
+        "slots": [
+          { "image": "logo", "width": "22mm", "style": "title", "space-before": "4em" },
+          { "text": "{title}", "style": "title", "required": true, "space-before": "1.5em" },
+          { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" },
+          { "text": "{author}", "style": "author", "required": true, "space-before": "3em" },
+          { "text": "{date}", "style": "date", "space-before": "0.3em" },
+          { "text": "{abstract}", "style": "abstract", "space-before": "4em" }
+        ]
+      }
     ]
   },
   "pages": {
     "first": {
       "header": null,
-      "footer": { "left": null, "center": { "text": "{page}" }, "right": null }
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
     },
     "odd": {
-      "header": { "left": null, "center": null, "right": { "text": "{section}" } },
-      "footer": { "left": null, "center": null, "right": { "text": "{page}" } }
+      "header": [{ "anchor": "bottom-right", "align": "right", "slots": [{ "text": "{section}" }] }],
+      "footer": [{ "anchor": "top-right", "align": "right", "slots": [{ "text": "{page}" }] }]
     },
     "even": {
-      "header": { "left": { "text": "{title}" }, "center": null, "right": null },
-      "footer": { "left": { "text": "{page}" }, "center": null, "right": null }
+      "header": [{ "anchor": "bottom-left", "align": "left", "slots": [{ "text": "{title}" }] }],
+      "footer": [{ "anchor": "top-left", "align": "left", "slots": [{ "text": "{page}" }] }]
     }
   },
   "labels": {

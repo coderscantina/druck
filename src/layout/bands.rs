@@ -2,7 +2,7 @@
 //!
 //! Each page uses the first variant present in its chain. The title page: `title`, `body`. The first
 //! body page: `first`, then `odd` or `even`, then `body`. Other pages: `odd` or `even`, then `body`.
-//! Parity and `{page}` both follow the physical page number, counted from 1 and including the title
+//! Parity, `{page}`, and `{pages}` follow the physical pages, counted from 1 and including the title
 //! page.
 //!
 //! `{section}` is the first level 1 heading that starts on the page, otherwise the last one on an
@@ -10,18 +10,25 @@
 //! section shown there, otherwise the last level 2 heading before the page if no level 1 heading
 //! came after it. Both show the heading's number and text.
 //!
-//! A slot without a value is left empty, unless it is required, which is an error naming the page.
-//! Slot text is set on one line. Slots that overlap or run past the text area are an error, since
-//! nothing is clipped.
+//! A band is a list of slot groups. A group's slots are stacked as title slots are, one line per line
+//! of their text, which is never wrapped. Groups are anchored to the band baseline across the margin
+//! frame: a top anchor puts the group's first baseline `y` below it, a bottom anchor its last baseline
+//! `y` above it, and a middle anchor centers its baselines `y` below it. Horizontally a group starts
+//! `x` inside the anchored side of the frame.
+//!
+//! A slot without a value is left out, unless it is required, which is an error naming the page. A
+//! line wider than its group and lines of different groups that overlap are errors, since nothing is
+//! clipped.
 
 use super::structure::Structure;
-use super::{text_item, titles};
-use crate::config::resolved::{Config, Style};
-use crate::config::template::Placeholder;
-use crate::config::theme::{Band, PageVariant};
+use super::{paragraph, text_item, titles};
+use crate::config::resolved::{BandSlot, Config, Group, PageVariant, Style};
+use crate::config::template::{Placeholder, Value};
+use crate::config::theme::{Align, Vertical};
+use crate::config::values::Color;
 use crate::diagnostic::Diagnostic;
 use crate::page::{Item, Page, Position};
-use crate::text::Fonts;
+use crate::text::{Fonts, ShapedRun};
 
 /// Draws the header and footer of every page. `anchors` are the final anchor positions.
 pub(super) fn draw(
@@ -39,21 +46,18 @@ pub(super) fn draw(
         .collect();
     let marks = marks(&headings, pages.len());
     let title_page = config.document.title_page;
+    let total = pages.len().to_string();
     let mut errors = Vec::new();
     for (index, page) in pages.iter_mut().enumerate() {
         let (name, variant) = variant(config, index, title_page);
         let number = (index + 1).to_string();
         let (section, subsection) = &marks[index];
-        let value = |placeholder| match placeholder {
-            Placeholder::Section => section.clone(),
-            Placeholder::Subsection => subsection.clone(),
-            Placeholder::Page => Some(number.clone()),
+        let value = |placeholder: &Placeholder| match placeholder {
+            Placeholder::Section => section.clone().map(Value::Text),
+            Placeholder::Subsection => subsection.clone().map(Value::Text),
+            Placeholder::Page => Some(Value::Text(number.clone())),
+            Placeholder::Pages => Some(Value::Text(total.clone())),
             other => titles::value(&config.metadata, other),
-        };
-        let left = if index.is_multiple_of(2) {
-            geometry.margin_inner.0
-        } else {
-            geometry.margin_outer.0
         };
         let bands = [
             (
@@ -69,18 +73,16 @@ pub(super) fn draw(
                 geometry.margin_top.0 + geometry.text_height().0 + geometry.footer_offset.0,
             ),
         ];
-        for (band_name, band, style, baseline) in bands {
-            let Some(band) = band else { continue };
-            let property = format!("pages.{name}.{band_name}");
-            let slots = BandSlots {
-                band,
+        for (band_name, groups, style, baseline) in bands {
+            let Some(groups) = groups else { continue };
+            let band = BandLines {
+                property: format!("pages.{name}.{band_name}"),
                 style,
-                property: &property,
                 page: index + 1,
-                left,
+                left: geometry.left_margin(index).0,
                 baseline,
             };
-            if let Err(error) = slots.draw(&mut page.items, &value, config, fonts) {
+            if let Err(error) = band.draw(groups, &mut page.items, &value, config, fonts) {
                 errors.push(error);
             }
         }
@@ -147,70 +149,137 @@ fn marks(headings: &[(usize, u8, String)], pages: usize) -> Vec<(Option<String>,
 }
 
 /// One header or footer on one page.
-struct BandSlots<'a> {
-    band: &'a Band,
+struct BandLines<'a> {
+    property: String,
+    /// The band's own style, for slots that name none.
     style: &'a Style,
-    property: &'a str,
     /// The physical page number.
     page: usize,
-    /// The left edge of the text area.
+    /// The left edge of the margin frame.
     left: f64,
     baseline: f64,
 }
 
-impl BandSlots<'_> {
+/// A shaped line of a group: its run and color, its x in the group, and its box from the group's
+/// first baseline.
+struct BandLine {
+    run: ShapedRun,
+    color: Color,
+    x: f64,
+    top: f64,
+    baseline: f64,
+    bottom: f64,
+}
+
+impl BandLines<'_> {
     fn draw(
         &self,
+        groups: &[Group<BandSlot>],
         items: &mut Vec<Item>,
-        value: &dyn Fn(Placeholder) -> Option<String>,
+        value: &dyn Fn(&Placeholder) -> Option<Value>,
         config: &Config,
         fonts: &Fonts,
     ) -> Result<(), Diagnostic> {
-        let style = self.style;
-        let face = fonts.face(&style.font, style.weight, style.style);
-        let width = config.page.text_width().0;
         let error = |property: String, message: String| Diagnostic::new(None, message).property(Some(property));
-        let mut extents = Vec::new();
-        for (position, slot) in [
-            ("left", &self.band.left),
-            ("center", &self.band.center),
-            ("right", &self.band.right),
-        ] {
-            let Some(slot) = slot else { continue };
-            let property = format!("{}.{position}", self.property);
-            let text = match slot.text.fill(value) {
-                Ok(text) => text.split_whitespace().collect::<Vec<_>>().join(" "),
+        let frame = config.page.text_width().0;
+        // Line boxes of all groups on the page, to find overlaps.
+        let mut boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
+        for (index, group) in groups.iter().enumerate() {
+            let property = format!("{}.{index}", self.property);
+            let lines = self.lines(group, &property, value, config, fonts)?;
+            let (Some(first), Some(last)) = (lines.first(), lines.last()) else {
+                continue;
+            };
+            let dy = match group.anchor.vertical() {
+                Vertical::Top => group.y.0,
+                Vertical::Middle => group.y.0 - (last.baseline - first.baseline) / 2.0,
+                Vertical::Bottom => -group.y.0 - (last.baseline - first.baseline),
+            };
+            let left = titles::group_left(group, frame);
+            for line in lines {
+                let x = left + line.x;
+                let y = self.baseline + dy;
+                let placed = (x, x + line.run.width.0, y + line.top, y + line.bottom);
+                if boxes
+                    .iter()
+                    .any(|b| b.0 < placed.1 && placed.0 < b.1 && b.2 < placed.3 && placed.2 < b.3)
+                {
+                    let message = format!(
+                        "two slot groups overlap on page {}; shorten their text or move the groups",
+                        self.page
+                    );
+                    return Err(error(self.property.clone(), message));
+                }
+                boxes.push(placed);
+                items.push(text_item(self.left + x, y + line.baseline, line.run, line.color));
+            }
+        }
+        Ok(())
+    }
+
+    /// The lines of a group's slots, each a line of its slot text, stacked from the first baseline at 0.
+    fn lines(
+        &self,
+        group: &Group<BandSlot>,
+        property: &str,
+        value: &dyn Fn(&Placeholder) -> Option<Value>,
+        config: &Config,
+        fonts: &Fonts,
+    ) -> Result<Vec<BandLine>, Diagnostic> {
+        let error = |property: String, message: String| Diagnostic::new(None, message).property(Some(property));
+        let width = group.width.0;
+        let mut lines: Vec<BandLine> = Vec::new();
+        for (index, slot) in group.slots.iter().enumerate() {
+            let property = format!("{property}.slots.{index}");
+            let style = slot.style.map_or(self.style, |style| config.styles.get(style));
+            let texts = match slot.text.fill(value) {
+                Ok(texts) => texts,
                 Err(missing) if slot.required => {
                     let message = format!(
-                        "this required slot has no value for {{{}}} on page {}",
-                        missing.name(),
+                        "this required slot has no value for {{{missing}}} on page {}",
                         self.page
                     );
                     return Err(error(property, message));
                 }
                 Err(_) => continue,
             };
-            let run = fonts.shape(&text, face, style.size, config.document.lang);
-            if let Some(problem) = super::paragraph::missing_glyph(&run) {
-                return Err(error(property, format!("{problem}, on page {}", self.page)));
+            let face = fonts.face(&style.font, style.weight, style.style);
+            let height = style.size.0 * style.line_height;
+            let offset = paragraph::baseline(height, &fonts.metrics(face, style.size));
+            let mut space = slot.space_before.0;
+            for text in texts.iter().filter(|text| !text.trim().is_empty()) {
+                let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                let run = fonts.shape(&text, face, style.size, config.document.lang);
+                if let Some(problem) = paragraph::missing_glyph(&run) {
+                    return Err(error(property, format!("{problem}, on page {}", self.page)));
+                }
+                if run.width.0 > width {
+                    let message = format!(
+                        "\"{text}\" is {:.1}pt wide, more than the {width:.1}pt of its group, on page {}; shorten the text",
+                        run.width.0, self.page
+                    );
+                    return Err(error(property, message));
+                }
+                let x = match group.align.unwrap_or(style.align) {
+                    Align::Left | Align::Justify => 0.0,
+                    Align::Center => (width - run.width.0) / 2.0,
+                    Align::Right => width - run.width.0,
+                };
+                let top = match lines.last() {
+                    Some(previous) => previous.bottom + space,
+                    None => -offset,
+                };
+                lines.push(BandLine {
+                    run,
+                    color: style.color,
+                    x,
+                    top,
+                    baseline: top + offset,
+                    bottom: top + height,
+                });
+                space = 0.0;
             }
-            let x = match position {
-                "left" => 0.0,
-                "center" => (width - run.width.0) / 2.0,
-                _ => width - run.width.0,
-            };
-            extents.push((x, x + run.width.0));
-            items.push(text_item(self.left + x, self.baseline, run, style.color));
         }
-        let overlaps = extents.windows(2).any(|pair| pair[0].1 > pair[1].0);
-        let outside = extents.iter().any(|&(start, end)| start < 0.0 || end > width);
-        if overlaps || outside {
-            let message = format!(
-                "the slots overlap or run past the {width:.1}pt text width on page {}; shorten their text",
-                self.page
-            );
-            return Err(error(self.property.to_owned(), message));
-        }
-        Ok(())
+        Ok(lines)
     }
 }

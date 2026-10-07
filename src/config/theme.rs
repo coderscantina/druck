@@ -136,6 +136,10 @@ pub struct Tokens {
 pub struct Page {
     pub size: PageSize,
     pub margins: Margins,
+    /// Prose width from the inner edge of the margin frame. `null` uses the frame width.
+    pub text_width: Option<Spec<Spacing>>,
+    /// Block kinds set across the whole frame when prose is narrower.
+    pub wide: Vec<WideBlock>,
     pub column_gap: Spec<Spacing>,
     /// Distance from the top of the text area to the header baseline.
     pub header_offset: Spec<Spacing>,
@@ -194,7 +198,7 @@ pub struct CustomPageSize {
     pub height: Spec<Spacing>,
 }
 
-/// Inner and outer margins mirror on even pages; on odd pages inner is left.
+/// Inner is the left margin on odd pages. With `mirror` it is the right one on even pages.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Margins {
@@ -202,6 +206,16 @@ pub struct Margins {
     pub bottom: Spec<Spacing>,
     pub inner: Spec<Spacing>,
     pub outer: Spec<Spacing>,
+    pub mirror: bool,
+}
+
+/// A block kind that may use the whole frame width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WideBlock {
+    Table,
+    Figure,
+    CodeBlock,
 }
 
 /// Block element styles. Generic so raw and resolved configuration share one element list.
@@ -416,11 +430,80 @@ pub struct TitleBlock {
     pub space_after: Spec<Spacing>,
 }
 
-/// Ordered content slots for the separate title page.
+/// Anchored slot groups for the separate title page.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TitleLayout {
-    pub slots: Vec<TitleSlot>,
+    pub groups: Vec<Group<TitleSlot>>,
+}
+
+/// Slots stacked in a box anchored to the margin frame. `em` lengths refer to the body size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Group<S> {
+    pub anchor: Anchor,
+    #[serde(default)]
+    pub offset: Offset,
+    /// Defaults to the frame width less the horizontal offset.
+    #[serde(default, deserialize_with = "non_null")]
+    pub width: Option<Spec<Spacing>>,
+    /// Defaults to the alignment of each slot's style.
+    #[serde(default, deserialize_with = "non_null")]
+    pub align: Option<Align>,
+    pub slots: Vec<S>,
+}
+
+/// A point on the margin frame: the top, middle, or bottom of its left or right edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Anchor {
+    TopLeft,
+    TopRight,
+    MiddleLeft,
+    MiddleRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Vertical {
+    Top,
+    Middle,
+    Bottom,
+}
+
+impl Anchor {
+    pub fn vertical(self) -> Vertical {
+        match self {
+            Self::TopLeft | Self::TopRight => Vertical::Top,
+            Self::MiddleLeft | Self::MiddleRight => Vertical::Middle,
+            Self::BottomLeft | Self::BottomRight => Vertical::Bottom,
+        }
+    }
+
+    pub fn is_right(self) -> bool {
+        matches!(self, Self::TopRight | Self::MiddleRight | Self::BottomRight)
+    }
+}
+
+/// Distance from the anchor into the frame: `x` from the anchored edge, `y` down from the top or
+/// middle, or up from the bottom.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Offset {
+    #[serde(default = "Spec::zero")]
+    pub x: Spec<Spacing>,
+    #[serde(default = "Spec::zero")]
+    pub y: Spec<Spacing>,
+}
+
+impl Default for Offset {
+    fn default() -> Self {
+        Self {
+            x: Spec::zero(),
+            y: Spec::zero(),
+        }
+    }
 }
 
 /// One title slot: either text or a theme image. `em` lengths refer to the slot style size.
@@ -486,21 +569,21 @@ pub struct PageVariant {
     pub footer: Option<Band>,
 }
 
-/// Fixed header or footer slots. `null` leaves a slot empty.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct Band {
-    pub left: Option<BandSlot>,
-    pub center: Option<BandSlot>,
-    pub right: Option<BandSlot>,
-}
+/// The slot groups of a header or footer.
+pub type Band = Vec<Group<BandSlot>>;
 
+/// One header or footer slot. `em` lengths refer to the slot style size.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct BandSlot {
     pub text: Template,
+    /// Defaults to the `header` or `footer` style.
+    #[serde(default, deserialize_with = "non_null")]
+    pub style: Option<TemplateStyle>,
     #[serde(default)]
     pub required: bool,
+    #[serde(default = "Spec::zero")]
+    pub space_before: Spec<Spacing>,
 }
 
 /// Generated text per document language.

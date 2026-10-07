@@ -82,6 +82,32 @@ fn schema_and_layer_check_agree_on_partial_themes() {
         ),
         ("permitted null", json!({"version": 1, "pages": {"first": null}}), true),
         (
+            "prose width and unmirrored margins",
+            json!({"version": 1, "page": {"text-width": "12cm", "wide": ["table"], "margins": {"mirror": false}}}),
+            true,
+        ),
+        (
+            "unknown wide block",
+            json!({"version": 1, "page": {"wide": ["quote"]}}),
+            false,
+        ),
+        (
+            "slot group",
+            json!({"version": 1, "pages": {"body": {"footer": [{"anchor": "top-right", "offset": {"x": "1em"},
+                "width": "4cm", "align": "right", "slots": [{"text": "{page}|{pages}", "space-before": "2pt"}]}]}}}),
+            true,
+        ),
+        (
+            "unknown anchor",
+            json!({"version": 1, "title-page": {"groups": [{"anchor": "center", "slots": []}]}}),
+            false,
+        ),
+        (
+            "band with left, center, and right slots",
+            json!({"version": 1, "pages": {"body": {"footer": {"left": null, "center": {"text": "{page}"}, "right": null}}}}),
+            false,
+        ),
+        (
             "null font face",
             json!({"version": 1, "fonts": {"X": {"regular": "x.otf", "bold": null}}}),
             true,

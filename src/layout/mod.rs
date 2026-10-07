@@ -34,9 +34,9 @@ use std::ops::Range;
 
 use self::structure::Structure;
 use crate::citations::Cited;
-use crate::config::resolved::{Config, Style};
+use crate::config::resolved::{Config, PageGeometry, Style};
 use crate::config::source::{Resource, Source};
-use crate::config::theme::{FontStyle, Weight};
+use crate::config::theme::{FontStyle, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Link, Location};
@@ -175,9 +175,10 @@ impl Pass<'_> {
             after_paragraph: false,
             keeps: Vec::new(),
             columns: Vec::new(),
+            wide: false,
             errors: Vec::new(),
         };
-        let frame = Frame::full(&config.styles.body);
+        let frame = Frame::prose(&config.styles.body, &config.page);
         if !config.document.title_page
             && let Some(slots) = titles::block(config)
         {
@@ -257,6 +258,9 @@ struct FlowLine {
     after: Break,
     /// The source of the line's block, for diagnostics.
     at: Location,
+    /// Whether the line spans the frame instead of the prose width, so it stays put where prose moves
+    /// to the inner edge.
+    wide: bool,
 }
 
 /// How a text block takes part in page breaking.
@@ -267,22 +271,28 @@ enum Role {
     Heading(Option<usize>),
 }
 
-/// The horizontal extent and paragraph style of the blocks being laid out.
+/// The horizontal extent and paragraph style of the blocks being laid out, as insets from the margin
+/// frame.
 #[derive(Clone, Copy)]
 struct Frame<'a> {
     left: f64,
     right: f64,
     style: &'a Style,
     list_depth: usize,
+    /// How much wider a wide block may be, on the right. Zero inside lists, quotations, and columns.
+    widen: f64,
 }
 
 impl<'a> Frame<'a> {
-    fn full(style: &'a Style) -> Self {
+    /// The prose width, from the left edge of the margin frame. Wide blocks in it span the frame.
+    fn prose(style: &'a Style, page: &PageGeometry) -> Self {
+        let inset = page.text_width().0 - page.prose_width.0;
         Self {
             left: 0.0,
-            right: 0.0,
+            right: inset,
             style,
             list_depth: 0,
+            widen: inset,
         }
     }
 }
@@ -314,6 +324,8 @@ struct Flow<'a> {
     keeps: Vec<(Range<usize>, Location)>,
     /// Line ranges set in two columns. A full-width block ends one run and starts the next.
     columns: Vec<Range<usize>>,
+    /// Whether a wide block is being set across the frame.
+    wide: bool,
     errors: Vec<Diagnostic>,
 }
 
@@ -362,9 +374,13 @@ impl<'a> Flow<'a> {
         self.unmarked(&[Block::Paragraph { at, content }])
     }
 
-    /// Lays out footnote content. Its own markers do not count as references.
+    /// Lays out footnote content at the prose width. Its own markers do not count as references.
     fn unmarked(&mut self, blocks: &[Block]) -> Vec<FlowLine> {
-        let mut lines = self.run(blocks, Frame::full(&self.config.styles.footnote));
+        let frame = Frame {
+            widen: 0.0,
+            ..Frame::prose(&self.config.styles.footnote, &self.config.page)
+        };
+        let mut lines = self.run(blocks, frame);
         for line in &mut lines {
             line.line.notes.clear();
         }
@@ -373,6 +389,22 @@ impl<'a> Flow<'a> {
 
     fn blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
         for block in blocks {
+            let kind = match block {
+                Block::Table { .. } => Some(WideBlock::Table),
+                Block::Image { .. } => Some(WideBlock::Figure),
+                Block::Code { .. } => Some(WideBlock::CodeBlock),
+                _ => None,
+            };
+            self.wide = frame.widen > 0.0 && kind.is_some_and(|kind| self.config.page.wide.contains(&kind));
+            let frame = if self.wide {
+                Frame {
+                    right: frame.right - frame.widen,
+                    widen: 0.0,
+                    ..frame
+                }
+            } else {
+                frame
+            };
             match block {
                 Block::Paragraph { at, content } => {
                     // Only a paragraph that continues another one gets a first-line indent.
@@ -406,6 +438,7 @@ impl<'a> Flow<'a> {
                         left: frame.left + indent,
                         right: frame.right + indent,
                         style,
+                        widen: 0.0,
                         ..frame
                     };
                     self.after_paragraph = false;
@@ -463,6 +496,7 @@ impl<'a> Flow<'a> {
                 Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
             }
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
+            self.wide = false;
         }
     }
 
@@ -563,6 +597,7 @@ impl<'a> Flow<'a> {
             left: frame.left + lists.indent.0,
             style,
             list_depth: frame.list_depth + 1,
+            widen: 0.0,
             ..frame
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
@@ -595,13 +630,15 @@ impl<'a> Flow<'a> {
         self.space(style.space_after.0);
     }
 
-    /// Sets a column section at the column width. Full-width blocks inside it are set across `frame`
-    /// and split the section into runs. Each layout change starts a new paragraph sequence and leaves
-    /// at least the column gap above and below the columns.
+    /// Sets a column section at the column width, which divides the prose width. Full-width blocks inside
+    /// it are set across `frame`, where wide blocks widen as outside columns, and split the section into
+    /// runs. Each layout change starts a new paragraph sequence and leaves at least the column gap above
+    /// and below the columns.
     fn columns(&mut self, blocks: &[Block], frame: Frame<'a>) {
         let page = &self.config.page;
         let column = Frame {
-            right: frame.right + page.text_width().0 - pages::column_width(page),
+            right: frame.right + page.prose_width.0 - pages::column_width(page),
+            widen: 0.0,
             ..frame
         };
         let mut start = self.change_layout();
@@ -797,6 +834,7 @@ impl<'a> Flow<'a> {
             space_before: std::mem::take(&mut self.space),
             after,
             at,
+            wide: self.wide,
         });
     }
 

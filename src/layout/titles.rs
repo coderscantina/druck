@@ -1,6 +1,6 @@
 //! Title blocks and title pages from theme slots and document metadata.
 //!
-//! The title layout in use is the `title-page` slots with `document.title-page`, else the
+//! The title layout in use is the `title-page` groups with `document.title-page`, else the
 //! `title-block` slots. A title block is set at the start of the body when the document has a value
 //! for at least one of its placeholders; a title page is always set when requested. Slots are set in
 //! order, each `space-before` below the previous one; slot styles add no spacing of their own. An
@@ -8,17 +8,25 @@
 //! style starts with the `abstract` label in the `abstract-heading` style and that style's
 //! `space-after`. The title block keeps `title-block.space-after` from the body.
 //!
-//! Values are inserted as text. Blank lines in a value separate paragraphs; other line breaks are spaces.
+//! Each title page group stacks its slots in a box as wide as the group, placed at its anchor on the
+//! margin frame: its top edge `y` below the frame's top, its middle `y` below the frame's middle, or its
+//! bottom edge `y` above the frame's bottom, and its left or right edge `x` inside the anchored side.
+//! The box includes the space above the first slot.
+//!
+//! Values are inserted as text. A line break in the slot text and each entry of a list value start a
+//! new line; empty lines are dropped. Within a value, blank lines separate paragraphs and other line
+//! breaks are spaces.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::paragraph;
 use super::{Break, Flow, Frame, Line, translate_line};
-use crate::config::front_matter::Metadata;
-use crate::config::resolved::{Config, SlotContent, Style, TitleSlot};
+use crate::config::front_matter::{MetaValue, Metadata};
+use crate::config::resolved::{Config, Group, SlotContent, Style, TitleSlot};
 use crate::config::source::{Resource, Source};
-use crate::config::template::Placeholder;
-use crate::config::theme::{Align, TemplateStyle};
+use crate::config::template::{Placeholder, Value};
+use crate::config::theme::{Align, TemplateStyle, Vertical};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
@@ -31,32 +39,39 @@ pub(super) const FRONT_MATTER: Location = Location { line: 1, column: 1 };
 
 /// Reports required slots of the title layout in use whose placeholders have no value.
 pub fn check(config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
-    let Some((layout, slots)) = active(config) else {
-        return Ok(());
-    };
-    let errors: Vec<_> = slots
-        .iter()
-        .enumerate()
-        .filter(|(_, slot)| slot.required)
-        .filter_map(|(index, slot)| {
+    let errors: Vec<_> = active(config)
+        .into_iter()
+        .flat_map(|(prefix, slots)| {
+            slots
+                .iter()
+                .enumerate()
+                .map(move |(index, slot)| (prefix.clone(), index, slot))
+        })
+        .filter(|(_, _, slot)| slot.required)
+        .filter_map(|(prefix, index, slot)| {
             let SlotContent::Text(text) = &slot.content else {
                 return None;
             };
             let missing = text.fill(|p| value(&config.metadata, p)).err()?;
-            let name = missing.name();
-            let message = format!("this required slot needs {{{name}}}; set {name} in the front matter");
-            Some(Diagnostic::new(Some(source.clone()), message).property(Some(format!("{layout}.slots.{index}.text"))))
+            let message = format!("this required slot needs {{{missing}}}; set {missing} in the front matter");
+            Some(Diagnostic::new(Some(source.clone()), message).property(Some(format!("{prefix}.slots.{index}.text"))))
         })
         .collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The name and slots of the title layout in use, if one is set.
-fn active(config: &Config) -> Option<(&'static str, &[TitleSlot])> {
+/// The property prefix and slots of each part of the title layout in use.
+fn active(config: &Config) -> Vec<(String, &[TitleSlot])> {
     if config.document.title_page {
-        Some(("title-page", &config.title_page))
+        let groups = config.title_page.iter().enumerate();
+        groups
+            .map(|(index, group)| (format!("title-page.groups.{index}"), group.slots.as_slice()))
+            .collect()
     } else {
-        block(config).map(|slots| ("title-block", slots))
+        block(config)
+            .map(|slots| ("title-block".to_owned(), slots))
+            .into_iter()
+            .collect()
     }
 }
 
@@ -71,20 +86,23 @@ pub(super) fn block(config: &Config) -> Option<&[TitleSlot]> {
 }
 
 /// The metadata value of a placeholder. Authors are joined with commas. Blank values count as missing.
-pub(super) fn value(metadata: &Metadata, placeholder: Placeholder) -> Option<String> {
-    let value = match placeholder {
+pub(super) fn value(metadata: &Metadata, placeholder: &Placeholder) -> Option<Value> {
+    let text = match placeholder {
         Placeholder::Title => metadata.title.clone(),
         Placeholder::Subtitle => metadata.subtitle.clone(),
         Placeholder::Author => Some(metadata.authors.join(", ")),
         Placeholder::Date => metadata.date.clone(),
         Placeholder::Abstract => metadata.abstract_.clone(),
-        Placeholder::Section | Placeholder::Subsection | Placeholder::Page => None,
+        Placeholder::Meta(key) => match metadata.meta.get(key)? {
+            MetaValue::Text(text) => Some(text.clone()),
+            MetaValue::Lines(lines) => return Some(Value::Lines(lines.clone())),
+        },
+        Placeholder::Section | Placeholder::Subsection | Placeholder::Page | Placeholder::Pages => None,
     };
-    value.filter(|value| !value.trim().is_empty())
+    text.filter(|text| !text.trim().is_empty()).map(Value::Text)
 }
 
-/// The title page: the `title-page` slots stacked from the top of the text area, keeping the space
-/// above the first slot.
+/// The title page: each `title-page` group placed at its anchor on the margin frame.
 pub(super) fn page(
     config: &Config,
     fonts: &Fonts,
@@ -93,20 +111,32 @@ pub(super) fn page(
 ) -> Result<Page, Vec<Diagnostic>> {
     let geometry = &config.page;
     let error = |message: String| vec![Diagnostic::new(Some(source.clone()), message)];
-    let lines = slots(&config.title_page, config, fonts, theme_images, geometry.text_width().0).map_err(error)?;
-    let height: f64 = lines.iter().map(|(space, line)| space + line.height).sum();
-    if height > geometry.text_height().0 {
-        return Err(error(format!(
-            "the title page content is {height:.1}pt high, more than the {:.1}pt text area",
-            geometry.text_height().0
-        )));
-    }
-    let (left, mut y) = (geometry.margin_inner.0, geometry.margin_top.0);
+    let (frame_width, frame_height) = (geometry.text_width().0, geometry.text_height().0);
     let mut items = Vec::new();
-    for (space, line) in lines {
-        y += space;
-        items.extend(line.items.into_iter().map(|item| super::translate(item, left, y)));
-        y += line.height;
+    for (index, group) in config.title_page.iter().enumerate() {
+        let lines = slots(&group.slots, group.align, config, fonts, theme_images, group.width.0).map_err(error)?;
+        let height: f64 = lines.iter().map(|(space, line)| space + line.height).sum();
+        let top = match group.anchor.vertical() {
+            Vertical::Top => group.y.0,
+            Vertical::Middle => (frame_height - height) / 2.0 + group.y.0,
+            Vertical::Bottom => frame_height - group.y.0 - height,
+        };
+        if top < -1e-9 || top + height > frame_height + 1e-9 {
+            let message = format!(
+                "this group is {height:.1}pt high and runs past the {frame_height:.1}pt text area from its anchor"
+            );
+            let property = format!("title-page.groups.{index}");
+            return Err(vec![
+                Diagnostic::new(Some(source.clone()), message).property(Some(property)),
+            ]);
+        }
+        let left = geometry.left_margin(0).0 + group_left(group, frame_width);
+        let mut y = geometry.margin_top.0 + top;
+        for (space, line) in lines {
+            y += space;
+            items.extend(line.items.into_iter().map(|item| super::translate(item, left, y)));
+            y += line.height;
+        }
     }
     Ok(Page {
         width: geometry.width,
@@ -115,11 +145,20 @@ pub(super) fn page(
     })
 }
 
+/// The left edge of a group within a frame `frame_width` wide.
+pub(super) fn group_left<S>(group: &Group<S>, frame_width: f64) -> f64 {
+    if group.anchor.is_right() {
+        frame_width - group.x.0 - group.width.0
+    } else {
+        group.x.0
+    }
+}
+
 impl<'a> Flow<'a> {
     /// Sets the title block at the start of the body, kept on one page.
     pub(super) fn title(&mut self, slots: &[TitleSlot], frame: Frame<'a>) {
         let width = self.width(frame);
-        match self::slots(slots, self.config, self.fonts, self.theme_images, width) {
+        match self::slots(slots, None, self.config, self.fonts, self.theme_images, width) {
             Ok(lines) => {
                 let count = lines.len();
                 for (index, (space, line)) in lines.into_iter().enumerate() {
@@ -138,9 +177,11 @@ impl<'a> Flow<'a> {
     }
 }
 
-/// The lines of the slots that have values, each with the space above it. Lines are set across `width`.
+/// The lines of the slots that have values, each with the space above it. Lines are set across `width`,
+/// aligned by `align` if given, else by their style.
 fn slots(
     slots: &[TitleSlot],
+    align: Option<Align>,
     config: &Config,
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
@@ -148,34 +189,33 @@ fn slots(
 ) -> Result<Vec<(f64, Line)>, String> {
     let mut lines = Vec::new();
     for slot in slots {
-        let style = config.styles.get(slot.style);
+        let style = aligned(config.styles.get(slot.style), align);
         let start = lines.len();
         match &slot.content {
             SlotContent::Text(text) => {
-                let Ok(text) = text.fill(|p| value(&config.metadata, p)) else {
+                let Ok(filled) = text.fill(|p| value(&config.metadata, p)) else {
                     continue;
                 };
+                let mut set = Vec::new();
+                for line in &filled {
+                    set.extend(text_lines(line, &style, config, fonts, width)?);
+                }
                 if slot.style == TemplateStyle::Abstract {
-                    let heading = &config.styles.abstract_heading;
+                    let heading = aligned(&config.styles.abstract_heading, align);
                     let label = &config.labels.abstract_;
                     lines.extend(
-                        text_lines(label, heading, config, fonts, width)?
+                        text_lines(label, &heading, config, fonts, width)?
                             .into_iter()
                             .map(|l| (0.0, l)),
                     );
                     let gap = heading.space_after.0;
                     lines.extend(
-                        text_lines(&text, style, config, fonts, width)?
-                            .into_iter()
+                        set.into_iter()
                             .enumerate()
                             .map(|(index, line)| (if index == 0 { gap } else { 0.0 }, line)),
                     );
                 } else {
-                    lines.extend(
-                        text_lines(&text, style, config, fonts, width)?
-                            .into_iter()
-                            .map(|l| (0.0, l)),
-                    );
+                    lines.extend(set.into_iter().map(|l| (0.0, l)));
                 }
             }
             SlotContent::Image {
@@ -193,6 +233,14 @@ fn slots(
         }
     }
     Ok(lines)
+}
+
+/// `style` with its alignment replaced by `align`, if given.
+fn aligned(style: &Style, align: Option<Align>) -> Cow<'_, Style> {
+    match align {
+        Some(align) => Cow::Owned(Style { align, ..style.clone() }),
+        None => Cow::Borrowed(style),
+    }
 }
 
 /// Plain text in the slot's style. Each paragraph after the first gets the style's first-line indent.
