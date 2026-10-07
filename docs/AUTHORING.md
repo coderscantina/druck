@@ -73,6 +73,8 @@ font-files:
     500: fonts/MySerif-Medium.otf
 ```
 
+For a variable file, write `regular: {file: fonts/MySerif.ttf, variable: true}`. It supplies its supported weights through the theme's existing `weight` property. Add an `italic` entry in the same form for a separate italic variable file. Installed variable fonts are detected automatically. See [variable font behavior](THEMES.md#fonts-and-images) for axis ranges and defaults.
+
 Use the family name in `fonts.body`, `fonts.heading`, or `fonts.mono` to select it. A family in `font-files` wins over an installed family with the same name. A name that neither the theme nor `font-files` defines, such as `fonts: {body: Avenir Next}`, is looked up among the fonts installed on the machine.
 
 ### Settings

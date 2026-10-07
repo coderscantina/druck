@@ -148,6 +148,21 @@ Font sizes must be greater than zero.
 - A face is a file path, or `{ "file": ..., "index": n }` for the face at index `n`, counting from 0, of a collection (`.ttc`, `.otc`).
 - Only `regular` is required. A style that requests a face its family lacks is an error.
 
+Variable fonts can supply multiple faces from one file:
+
+```json
+"fonts": {
+  "Public Sans": {
+    "regular": { "file": "fonts/PublicSans.ttf", "variable": true },
+    "italic": { "file": "fonts/PublicSans-Italic.ttf", "variable": true }
+  }
+}
+```
+
+`variable: true` supplies weights from 100 to 900 in steps of 100 within the file's `wght` axis range. The existing style `weight` selects the instance. A file with an `ital` axis supplies upright and italic instances at 0 and 1 when those values are supported; otherwise its face entry determines the style, so a separate italic file belongs under `italic`. For collections, add `index`; it defaults to 0 for variable files. A file marked variable must contain variation axes. Explicit face entries, including `null`, override generated instances. A requested block face outside the supported range is an error; inline emphasis and strong text keep the usual nearest-face fallback. Other axes, including `opsz`, `wdth`, and `slnt`, stay at the font's defaults.
+
+Installed variable fonts are detected automatically and supply the same weight and italic instances.
+
 A style asks for a face with `weight` and `style`, for example `"weight": 500, "style": "italic"` for `500-italic`. Inline code uses the regular face.
 
 A family name that `fonts` does not define is looked up among the fonts installed on the machine, by its family name, ignoring case. This includes faces in font collections. A family defined in `fonts`, also through front matter `font-files`, wins over an installed one with the same name. Every face a style requests must be installed; a missing family, weight, or style is an error naming what was searched for, and no PDF is written. Installed faces with a condensed or expanded width are used only if the family has no normal width. Druck scans the installed fonts only when a style names such a family, so documents using the bundled and file fonts never depend on the machine.

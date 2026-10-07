@@ -2,6 +2,13 @@
 
 The product choices are authoritative in [the phase 1 briefing](BRIEFING.md) and [the phase 2 briefing](RUST_CRATE_API_PHASE_2.md). This file records implementation choices made within those contracts.
 
+## 2026-10-07: Variable font weights and italics
+
+- **File syntax:** keep the face map and add `{ "file": "font.ttf", "variable": true }` under `regular` or `italic`. `index` is optional for variable files and defaults to 0; collection objects without `variable` still require it. This avoids another family format and preserves resource origins. Explicit faces and `null` entries override generated instances.
+- **Instances:** expand the `wght` range into the existing 100 to 900 weight steps. An `ital` axis supplies 0 and 1 when supported; otherwise the face entry supplies the style, including separate italic variable files. Installed lookup reads axis ranges and exposes the same instances automatically. Block requests are checked after loading and fail when absent; inline emphasis and strong text retain nearest-face matching.
+- **Rendering:** use Rustybuzz 0.20.1 `set_variations` and Krilla 0.8.2 `Font::new_variable` with identical coordinates. Krilla's existing variable-font subsetter embeds static instances. No dependency or feature change is needed. Width, slant, optical size, named instances, arbitrary axes, and weights between the existing steps are deferred; their axes keep font defaults.
+- **Fixtures:** Public Sans upright and italic variable files under [test fixtures](../tests/fixtures/fonts/README.md), with their OFL license. They are test inputs, not bundled runtime fonts. The `ital` range test changes the fixture's axis in memory; visual acceptance uses the original upright and italic files.
+
 ## 2026-10-06: Milestone 01 foundation
 
 ### Project layout
