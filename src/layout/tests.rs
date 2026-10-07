@@ -1471,3 +1471,13 @@ fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
     assert!(bands(&pages[2]).contains(&"3".to_owned()));
     assert!(bands(&pages[4]).contains(&"5".to_owned()));
 }
+
+#[test]
+fn list_spacing_surrounds_the_list_and_items_keep_item_spacing() {
+    let config = config();
+    let lines = flow("Text.\n\n- one\n- two\n\nMore.\n");
+
+    assert!(config.styles.list.space_before.0 > 0.0);
+    assert!(lines[1].space_before >= config.styles.list.space_before.0);
+    assert_eq!(lines[2].space_before, config.lists.item_spacing.0);
+}

@@ -611,16 +611,24 @@ impl<'a> Flow<'a> {
         &self.config.custom_styles[&class.name]
     }
 
-    /// The style of a paragraph in `frame`: its custom style, or the frame's with the frame's alignment.
+    /// The style of a paragraph in `frame`: its custom style, or the frame's with the frame's alignment
+    /// and, in a list item, without block spacing.
     fn paragraph_style(&self, class: Option<&Class>, frame: &Frame<'a>) -> Cow<'a, Style> {
-        match (class, frame.align) {
-            (Some(class), _) => Cow::Borrowed(self.custom(class).style()),
+        let mut style = match (class, frame.align) {
+            (Some(class), _) => return Cow::Borrowed(self.custom(class).style()),
             (None, Some(align)) => Cow::Owned(Style {
                 align,
                 ..frame.style.clone()
             }),
             (None, None) => Cow::Borrowed(frame.style),
+        };
+        // A list item's text takes the list style, whose spacing belongs around the whole list.
+        if frame.list_depth > 0 {
+            let style = style.to_mut();
+            style.space_before = Pt(0.0);
+            style.space_after = Pt(0.0);
         }
+        style
     }
 
     /// The style, bullets, and marker style of a list: its custom style's, else the theme's. Markers
