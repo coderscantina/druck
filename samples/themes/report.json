@@ -1,0 +1,70 @@
+{
+  "$schema": "../../schema/theme.v1.schema.json",
+  "version": 1,
+  "document": {
+    "numbering-depth": 2
+  },
+  "images": {
+    "logo": "logo.svg"
+  },
+  "tokens": {
+    "colors": {
+      "accent": "#7a2a2a",
+      "muted": "#6b5f57"
+    }
+  },
+  "page": {
+    "margins": {
+      "top": "25mm",
+      "bottom": "28mm",
+      "inner": "32mm",
+      "outer": "22mm"
+    },
+    "header-offset": "10mm",
+    "footer-offset": "12mm"
+  },
+  "styles": {
+    "heading-1": { "color": "$colors.accent" },
+    "heading-2": { "color": "$colors.accent" },
+    "title": { "color": "$colors.accent", "align": "left" },
+    "subtitle": { "align": "left" },
+    "author": { "align": "left", "size": "$sizes.body" },
+    "date": { "align": "left" },
+    "abstract-heading": { "align": "left", "style": "italic", "weight": "regular" },
+    "abstract": { "indent": "0pt" },
+    "toc-heading": { "color": "$colors.accent" },
+    "caption": { "style": "italic" },
+    "header": { "style": "italic" }
+  },
+  "toc": {
+    "level-indent": "1.2em",
+    "leader": false
+  },
+  "title-page": {
+    "slots": [
+      { "image": "logo", "width": "22mm", "style": "title", "space-before": "4em" },
+      { "text": "{title}", "style": "title", "required": true, "space-before": "1.5em" },
+      { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" },
+      { "text": "{author}", "style": "author", "required": true, "space-before": "3em" },
+      { "text": "{date}", "style": "date", "space-before": "0.3em" },
+      { "text": "{abstract}", "style": "abstract", "space-before": "4em" }
+    ]
+  },
+  "pages": {
+    "first": {
+      "header": null,
+      "footer": { "left": null, "center": { "text": "{page}" }, "right": null }
+    },
+    "odd": {
+      "header": { "left": null, "center": null, "right": { "text": "{section}" } },
+      "footer": { "left": null, "center": null, "right": { "text": "{page}" } }
+    },
+    "even": {
+      "header": { "left": { "text": "{title}" }, "center": null, "right": null },
+      "footer": { "left": { "text": "{page}" }, "center": null, "right": null }
+    }
+  },
+  "labels": {
+    "en": { "figure": "Fig.", "section": "§" }
+  }
+}

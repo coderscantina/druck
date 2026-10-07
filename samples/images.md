@@ -4,8 +4,6 @@ author: Ada Example
 lang: en
 ---
 
-# Images and captions
-
 An image stands alone in its paragraph. Its description becomes the caption, numbered with the label of the document language, and the two stay together on one page and in one column. Images keep their place in the text: there are no floats, so an image appears exactly where the source puts it, and the text after it continues below its caption.
 
 ![A landscape drawn as a small raster image.](images/landscape.png)
@@ -24,7 +22,7 @@ That rigidity is why traditional systems let figures float to the top or bottom 
 
 The drawing above is an SVG of 1600 by 900 pixels, which is 1200 by 675 points, far wider than the text area. It is scaled down proportionally until it fits the width. Its text uses the bundled fonts, so it looks the same on every machine.
 
-## Images in columns
+# Images in columns
 
 Inside a column section an image takes the width of its column. An image that is wider is scaled down to fit, and a narrower one is centered in the column. When an image and its caption do not fit in the rest of a column, they move to the top of the next column, or to the next page.
 

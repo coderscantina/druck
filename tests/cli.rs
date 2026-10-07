@@ -295,6 +295,37 @@ fn renders_the_samples() {
 }
 
 #[test]
+fn renders_the_report_with_navigation_in_both_themes_the_same_every_time() {
+    let sandbox = Sandbox::new("report");
+    let document = format!("{REPO}/samples/report.md");
+    let theme = format!("{REPO}/samples/themes/report.json");
+    let output = sandbox.root.join("report.pdf");
+    let default = render(&sandbox, &[&document, "-o", "../report.pdf"], &output);
+    assert!(
+        default == render(&sandbox, &[&document, "-o", "../report.pdf"], &output),
+        "renders are identical"
+    );
+    let custom = render(
+        &sandbox,
+        &[&document, "--theme", &theme, "-o", "../report.pdf"],
+        &output,
+    );
+    for pdf in [default, custom] {
+        let pdf = String::from_utf8_lossy(&pdf);
+        assert!(pdf.contains("/Type/Outlines"), "headings are bookmarked");
+        assert!(pdf.contains("/Title(5.1 Page numbers that settle)"));
+        let internal = pdf
+            .split("<<")
+            .filter(|d| d.contains("/Subtype/Link") && d.contains("/Dest"))
+            .count();
+        assert!(
+            internal > 30,
+            "contents entries and references link inside the document: {internal}"
+        );
+    }
+}
+
+#[test]
 fn check_reports_a_required_title_slot_without_a_value() {
     let sandbox = Sandbox::new("required-slot");
     let document = sandbox.write("doc.md", "---\ntitle-page: true\nauthor: Ada\n---\nText.\n");

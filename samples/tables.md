@@ -4,8 +4,6 @@ author: Ada Example
 lang: en
 ---
 
-# Tables
-
 A table is written as a pipe table. The delimiter row below the header sets the alignment of each column: a colon on the left aligns left, on the right aligns right, and on both sides centers. A paragraph that starts with a colon and a space, directly after the table, is its caption. Tables are numbered apart from figures.
 
 | Setting | Default | Effect |
@@ -20,7 +18,7 @@ Column widths come from the text of the cells. A table whose cells fit on one li
 
 [^widths]: Each wide column gets the same width, but never less than its longest word needs. A word that cannot fit even then is reported at its cell.
 
-## A long table
+# A long table
 
 The table below continues on the next page. Pages break only between rows, never inside one, and the header row is repeated at the top of every page the table continues on. The caption stays with the start of the table.
 
@@ -64,7 +62,7 @@ The table below continues on the next page. Pages break only between rows, never
 
 Prose continues after the table. A table is spaced like a figure: the caption style's space after it sets the distance to the text above and below.
 
-## Tables in columns
+# Tables in columns
 
 ::: columns
 Inside a column section a table takes the width of its column. The short table below fits in the column at its natural width.

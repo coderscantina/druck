@@ -4,15 +4,13 @@ author: Ada Example
 lang: en
 ---
 
-# Breaking pages
-
 A page break is a decision about the whole document, not about one line. Moving a single line from one page to the next changes where every later page begins, so a good choice for one page can force a poor one three pages later. Kyber therefore weighs all candidate breaks together, much as it weighs the line breaks of a paragraph.[^weigh]
 
 The rules it follows are old ones. A heading should never be the last thing on a page. The first line of a paragraph should not sit alone at the bottom of a page, and its last line should not sit alone at the top of the next. Pages should end at the same height, and when they cannot, the difference should be absorbed by the space between blocks rather than by stretching the lines of a paragraph apart.
 
 [^weigh]: The search keeps, for every place a page may end, the cheapest way of reaching it. It looks at most one page ahead from each such place, so the work grows with the length of the document.
 
-## Orphans and widows
+# Orphans and widows
 
 Typesetters call a first line stranded at the foot of a page an orphan and a last line stranded at the head of a page a widow. Both break the shape of the paragraph and make the reader hunt for the continuation. The traditional remedy is to move a line, to run a page one line short, or to let the spacing between blocks absorb the difference.
 
@@ -24,7 +22,7 @@ Kyber gives each break a cost. A break between two blocks costs nothing by itsel
 
 The final page of a document may be as short as it needs to be. So may a page that ends at an explicit page break, because the author asked for the break there.
 
-## Headings at the foot of a page
+# Headings at the foot of a page
 
 A heading announces what follows, so it belongs with the text it introduces. If a heading would otherwise land at the foot of a page, it moves to the next page together with at least the first two lines of its text. The page it leaves behind runs short, which is the lesser evil.
 
@@ -32,7 +30,7 @@ This paragraph and the ones around it are long enough that, depending on the pag
 
 When a page runs short because a heading moved on, or because a long note took the room,[^long] the spaces between the blocks on that page may stretch a little to bring the last line closer to the bottom. They never stretch by more than half their natural height, so a short page stays visibly short rather than visibly distorted.
 
-## Footnotes
+# Footnotes
 
 Footnotes are numbered in the order of their references.[^order] Each note starts on the page that holds its reference, at the foot of that page, below a short rule. Because the notes take space from the text area, a note can change where a page ends: when a reference falls near the foot of a page and its note does not fit below, the line with the reference moves to the next page together with its note.[^space]
 
@@ -56,7 +54,7 @@ A long note may not fit on the page of its reference at all. Then it begins ther
 
 The text after a long note continues normally. The space the note takes on the following page is simply unavailable to the main text there, and the breaks on that page are chosen with it in mind.
 
-## Keeping blocks together
+# Keeping blocks together
 
 Some passages read badly when divided. A short definition followed by its example, a question and its answer, or a list and the sentence that introduces it can be wrapped in a keep group:
 
@@ -72,7 +70,7 @@ Some passages read badly when divided. A short definition followed by its exampl
 
 A keep group taller than a page cannot be honoured. Kyber does not split it silently; it reports the group's line and the heights involved, and writes no PDF until the document is changed.
 
-## Spacing between blocks
+# Spacing between blocks
 
 Paragraphs that follow one another are separated by an indent, not by space, so a page of plain prose has no room to stretch. Its last line ends wherever the line grid ends, at most one line short of the bottom. Pages with headings, lists, quotations, or code have space between blocks, and that space can grow a little to bring the last line to the bottom.
 
@@ -100,7 +98,7 @@ The same rules apply in quotations and in the notes themselves, with one differe
 
 ::: page-break
 
-## An explicit page break
+# An explicit page break
 
 This section begins on a new page because the source has a page-break directive before its heading. The page before it may end short without penalty, because the author asked for the break.
 

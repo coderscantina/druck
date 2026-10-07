@@ -4,13 +4,11 @@ author: Ada Example
 lang: en
 ---
 
-# On quiet typography
-
 A well-set page asks for nothing. The reader should find the first line of a paragraph without effort, follow the text from line to line without losing the place, and reach the end of a chapter without noticing that a typesetter was ever involved. Typography of this kind is not decoration; it is the careful removal of friction.
 
 This sample exercises the first rendering path of *Kyber*: headings, paragraphs, **strong** and *emphasized* text, ***both at once***, inline `code`, and [a link to the CommonMark specification](https://spec.commonmark.org/). Ligatures such as fi, fl, ff, ffi, and ffl should appear in words like *office*, *affluent*, *difficult*, and *find*.
 
-## Paragraphs and their rhythm
+# Paragraphs and their rhythm
 
 The traditional book paragraph starts without an indent after a heading and with an indent when it follows another paragraph. The indent is the only signal of a new paragraph, so no extra space separates them. Readers have relied on this convention for centuries, and it keeps the text block calm and even.
 
@@ -19,7 +17,7 @@ Line breaks are chosen for the whole paragraph at once. A greedy method fills ea
 A line can also be broken by hand.\
 This line follows a hard break and starts at the left edge.
 
-### Lists
+## Lists
 
 Lists are set with hanging markers:
 
@@ -35,13 +33,13 @@ Ordered lists keep their numbering:
 4. Fourth.
 5. Fifth, with `inline code` inside the item.
 
-### Quotations
+## Quotations
 
 > The whole duty of typography, as of calligraphy, is to communicate to the imagination, without loss by the way, the thought or image intended to be communicated by the Author.
 >
 > A quotation may contain *emphasis*, which turns upright inside italic text.
 
-### Code
+## Code
 
 Code is set in the monospaced face and never wrapped:
 
@@ -52,7 +50,7 @@ fn main() {
 }
 ```
 
-## Pages
+# Pages
 
 A document of a few pages shows how text flows from one page to the next. The margins of odd and even pages mirror each other, so the inner margin sits next to the binding. Page breaks are chosen for the whole document: a heading moves to the next page with its text rather than being left alone at the bottom of a page.
 
