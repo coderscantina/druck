@@ -10,6 +10,7 @@ abstract: |
 lang: en
 title-page: true
 toc: true
+bibliography: references.bib
 ---
 
 ::: page-break
@@ -18,13 +19,15 @@ toc: true
 
 A report is more than a sequence of paragraphs. Its reader expects a title page, a table of contents that agrees with the pages, headings numbered in order, and references that lead to the right place. When any of these is set by hand, the next edit breaks it. Kyber generates all of them from the source and from the theme, so the author writes `@sec:tables` and the text reads @sec:tables.
 
-The sections below follow the order in which a reader meets the parts of a report. @sec:columns sets text in two columns with notes from both. @sec:figures holds the figures, and @sec:tables starts with a short table and ends with a long one that runs over several pages. @sec:references explains how the references in this text are resolved, and why the page numbers in them can be trusted.[^trust]
+The craft behind these expectations is old and well documented. @bringhurst2004 treats them as questions of proportion and rhythm, @forssman2002 collects the details a typesetter has to decide, and @tschichold1928 argued for them at the start of modern typography.
+
+The sections below follow the order in which a reader meets the parts of a report. @sec:columns sets text in two columns with notes from both. @sec:figures holds the figures, and @sec:tables starts with a short table and ends with a long one that runs over several pages. @sec:references explains how the references in this text are resolved, and why the page numbers in them can be trusted. @sec:sources shows how the works behind this text are cited.[^trust]
 
 [^trust]: The page numbers are those of the final layout. @sec:references on [@sec:references, page] describes how they settle.
 
 ## What the reader sees first
 
-The title page carries the title, the subtitle, the authors, the date, and the abstract, each in its own slot of the theme. A slot without a value is left out together with the space above it, so a report without a subtitle needs no different theme. The table of contents follows on its own page, and the body starts on the page after it.
+The title page carries the title, the subtitle, the authors, the date, and the abstract, each in its own slot of the theme. A slot without a value is left out together with the space above it, so a report without a subtitle needs no different theme. How readers meet such a page on paper and on screen is the subject of the essays in @hartmann2015. The table of contents follows on its own page, and the body starts on the page after it.
 
 Every body page has a header with the title of its section and a footer with its page number. Pages are counted from the title page, so the number in the footer is the number a PDF viewer shows for the page.
 
@@ -35,11 +38,11 @@ A report often holds material that a reader scans rather than reads: lists of te
 ::: columns
 ## Reading order
 
-In a two-column section the text runs down the first column, then down the second, then on to the next page. A reader who reaches the foot of the second column turns the page and continues at the top of the first column there. The search for page breaks treats the two columns of a page as one region whose height is the taller column, so a section can begin in the middle of one page and end in the middle of another.[^order]
+In a two-column section the text runs down the first column, then down the second, then on to the next page. A reader who reaches the foot of the second column turns the page and continues at the top of the first column there. The search for page breaks treats the two columns of a page as one region whose height is the taller column, so a section can begin in the middle of one page and end in the middle of another. Balancing the columns against footnotes and tables is a known hard case [@okafor2022; @schaefer2018].[^order]
 
-[^order]: Notes are numbered in reading order, so a note referenced in the first column comes before a note referenced in the second.
+[^order]: Notes are numbered in reading order, so a note referenced in the first column comes before a note referenced in the second. Notes that the author writes at the end of a source file but that print at the foot of a page go back to the literate programs of @knuth1984lit.
 
-Each column is narrower than the text area, so its lines hold fewer words and hyphenation becomes more frequent. The paragraph breaker sets every line of a column paragraph at the column width and chooses the breaks for the whole paragraph at once, exactly as it does for full-width text.
+Each column is narrower than the text area, so its lines hold fewer words and hyphenation becomes more frequent. The paragraph breaker sets every line of a column paragraph at the column width and chooses the breaks for the whole paragraph at once, exactly as it does for full-width text. The method is that of @knuthplass1981, and the hyphenation patterns follow @liang1983. Where a line may break at all is decided by the rules of @unicode16.
 
 ## Notes in columns
 
@@ -60,7 +63,7 @@ The section ends with a paragraph across the full width again. Its first line st
 
 # Figures {#sec:figures}
 
-Figures are numbered in the order they appear, across the whole report. The chart in @sec:columns is @fig:wide. The two figures in this section continue the count, and their labels let the text refer to them before or after they appear.
+Figures are numbered in the order they appear, across the whole report. The chart in @sec:columns is @fig:wide. The two figures in this section continue the count, and their labels let the text refer to them before or after they appear. Both drawings reach the PDF as drawing operators of the format that @adobe2006 describes and that is standardised as [@iso32000].
 
 ![A landscape drawn as a small raster image.](images/landscape.png){#fig:landscape}
 
@@ -120,7 +123,7 @@ Tables are numbered apart from figures. @tbl:settings is short and keeps its nat
 
 [^linotype]: A footnote referenced in a table cell goes on the page of its row, like any other note.
 
-Prose continues after the table. The caption of @tbl:history stays with its first rows, and its header row is set again at the top of each page it continues on.
+Prose continues after the table. The caption of @tbl:history stays with its first rows, and its header row is set again at the top of each page it continues on. Its rows follow the history told in [@tschichold1928; @bringhurst2004], and the row for 1978 refers to the program described in @knuth1984. A small font that holds only the glyphs of a document keeps files short, as measured in @idocs2019.
 
 # Cross-references {#sec:references}
 
@@ -138,6 +141,18 @@ A heading below the numbering depth has no number, and a reference to it shows i
 
 This heading is at the fourth level. It is not listed in the table of contents, which goes down to `toc-depth`.
 
+# Sources {#sec:sources}
+
+Citations work like cross-references. An at sign and a key from the file named by `bibliography` in the front matter cite a work. In brackets, as in `[@key]`, the citation stands in parentheses, and several works are separated by semicolons, as in `[@key1; @key2]`. Without brackets, as in `@key`, the work becomes part of the sentence.
+
+A locator follows the key after a comma inside brackets: `[@key, p. 12]` or `[@key, pp. 3-5]`. A narrative citation takes it in brackets after one space: `@key [p. 12]`. Both forms read well in either citation style. Grouped citations suit the end of a claim that several works support [@knuthplass1981; @liang1983; @okafor2022], and a narrative one suits a claim about a single work. The collection @hartmann2015 [pp. 31-35] shows how a locator reads, and the benchmark in @okafor2022 [p. 4] shows it with one page.
+
+A citation can also stand in a note.[^cite] The sections above cite inside the two columns of @sec:columns, in the prose after the long table of @sec:tables, and in the notes. Works on screen typography are @koenig2021 and, for tables, @schaefer2018.
+
+[^cite]: A note may cite as well, for instance the standard that @unicode16 defines, or the German handbook by @forssman2002, which lists rules for numbers, dashes, and quotation marks.
+
+The list of references at the end of this report is generated. It holds only the works cited in the text, in the order the citation style asks for, and every entry that the text cites appears in it once. Adding a citation adds an entry, and removing the last citation of a work removes it.
+
 # Conclusion
 
-A report set this way stays consistent while it changes. Moving @sec:figures before @sec:columns renumbers both sections, the figures in them, the table of contents, and every reference, and the page references follow the new layout.
+A report set this way stays consistent while it changes. Moving @sec:figures before @sec:columns renumbers both sections, the figures in them, the table of contents, and every reference, and the page references follow the new layout. The same holds for the reference list, which follows the citations.
