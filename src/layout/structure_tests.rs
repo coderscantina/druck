@@ -578,8 +578,13 @@ fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the
     };
     let config = config("{}", theme());
 
-    // The long URL of `pdfspec` does not fit a column, which is reported at the entry in the `.bib` file.
-    let errors = render_cited(&config, &body(&citations), Some(BIB), &[]).unwrap_err();
+    // Without slashes to break after, the long URL of `pdfspec` does not fit a column, which is
+    // reported at the entry in the `.bib` file.
+    let unbreakable = BIB.replace(
+        "com/dc-acrobat-sdk-docs/pdfstandards/",
+        "com.dc-acrobat-sdk-docs.pdfstandards.",
+    );
+    let errors = render_cited(&config, &body(&citations), Some(&unbreakable), &[]).unwrap_err();
     assert_eq!(errors[0].source, Some(Source::Bibliography("/fake/refs.bib".into())));
     assert_eq!(errors[0].location, Some((90, 1)));
     assert!(

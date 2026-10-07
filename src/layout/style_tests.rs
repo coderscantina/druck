@@ -1,4 +1,4 @@
-//! Custom styles in layout: case, letter spacing, keeping with the next block, list bullets, and
+//! Custom styles in layout: case, letter spacing, keeping with the next block, list bullets and markers, and
 //! hanging heading numbers.
 
 use std::collections::{BTreeMap, HashMap};
@@ -20,6 +20,7 @@ fn config() -> Config {
         "custom-styles": {
             "eyebrow": {"based-on": "body", "uppercase": true, "tracking": 0.1, "keep-with-next": true},
             "checks": {"based-on": "list", "bullets": ["✔"]},
+            "small-marks": {"based-on": "list", "marker": "footnote"},
             "step": {"based-on": "heading-3", "number-gap": "1em"},
         },
     });
@@ -122,6 +123,24 @@ fn takes_list_bullets_from_the_list_style() {
 }
 
 #[test]
+fn sets_list_markers_in_the_marker_style_on_the_first_baseline() {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let pages = render(&config, &fonts, "{.small-marks}\n1. One\n2. Two\n").unwrap();
+    let runs = runs(&pages);
+    let find = |text: &str| runs.iter().find(|(.., run)| run.text == text).expect(text);
+    let (list, footnote) = (&config.styles.list, &config.styles.footnote);
+
+    for (number, item) in [("1.", "One"), ("2.", "Two")] {
+        let (_, x, y, marker) = find(number);
+        let (_, text_x, text_y, _) = find(item);
+        assert_eq!(marker.size, footnote.size);
+        assert_eq!(y, text_y);
+        assert!((x + marker.width.0 + 0.5 * list.size.0 - text_x).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn hangs_a_typed_heading_number_with_the_gap_of_its_style() {
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
@@ -163,7 +182,7 @@ fn reports_unknown_styles_and_styles_for_another_kind_of_block_at_the_attribute(
         [
             (
                 Some((1, 6)),
-                "unknown style \"nope\"; the theme's custom styles are checks, eyebrow, step"
+                "unknown style \"nope\"; the theme's custom styles are checks, eyebrow, small-marks, step"
             ),
             (
                 Some((3, 8)),

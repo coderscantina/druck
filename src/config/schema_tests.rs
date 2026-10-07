@@ -210,6 +210,12 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             true,
         ),
         (
+            "list marker styles",
+            json!({"version": 1, "lists": {"marker": "caption"},
+                "custom-styles": {"details": {"based-on": "list", "marker": "footnote"}}}),
+            true,
+        ),
+        (
             "table rules and a row style without a rule",
             json!({"version": 1, "tables": {"top-rule": null, "header-rule": {"thickness": "1pt", "color": "#000000"}},
                 "custom-styles": {"total": {"based-on": "table-cell", "rule-below": "none"}}}),

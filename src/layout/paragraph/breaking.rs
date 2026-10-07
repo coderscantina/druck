@@ -2,14 +2,16 @@
 //!
 //! A paragraph is a list of boxes, glue, and penalties. Every feasible break is scored, and the
 //! breaks with the least total demerits over the whole paragraph win. A first pass only accepts
-//! lines up to [`TOLERANCE`]; if that finds no solution, a second pass accepts any line that is not
+//! lines up to [`TOLERANCE`]; if that finds no solution, a final pass accepts any line that is not
 //! overfull. Ties go to the earlier candidate, so the result is deterministic.
 
 /// Badness limit of the first pass. 200 lets interword spaces stretch to about 1.26 times their
 /// permitted stretch.
 const TOLERANCE: f64 = 200.0;
-/// Badness of a line that cannot stretch enough, such as a single word in a justified line.
-const MAX_BADNESS: f64 = 10_000.0;
+/// Badness of a line that falls short and cannot stretch at all, such as a single word in a
+/// justified line. Other badness is not capped, so very loose lines still compare: a nearly empty
+/// line costs more than a fuller one.
+const NO_STRETCH: f64 = 10_000.0;
 /// Added to every line's badness, so fewer lines are preferred.
 const LINE_PENALTY: f64 = 10.0;
 /// Demerits for two hyphenated lines in a row.
@@ -73,7 +75,7 @@ pub struct Measure {
 pub fn breaks<P: Copy>(items: &[Item<P>], measure: &Measure) -> Option<Vec<P>> {
     debug_assert!(matches!(items.last(), Some(Item::Break { .. })));
     let sums = sums(items);
-    let positions = pass(items, &sums, measure, TOLERANCE).or_else(|| pass(items, &sums, measure, MAX_BADNESS))?;
+    let positions = pass(items, &sums, measure, TOLERANCE).or_else(|| pass(items, &sums, measure, f64::INFINITY))?;
     Some(
         positions
             .into_iter()
@@ -202,7 +204,11 @@ fn pass<P>(items: &[Item<P>], sums: &[Sums], measure: &Measure, tolerance: f64) 
                 end.fills > start.fills,
             );
             if ratio >= -1.0 {
-                let badness = (100.0 * ratio.abs().powi(3)).min(MAX_BADNESS);
+                let badness = if ratio.is_finite() {
+                    100.0 * ratio.abs().powi(3)
+                } else {
+                    NO_STRETCH
+                };
                 if badness <= tolerance {
                     let fitness = Fitness::of(ratio);
                     let mut demerits = (LINE_PENALTY + badness).powi(2);
@@ -345,6 +351,31 @@ mod tests {
         let items = paragraph(&[6.0, 6.0, 6.0, 10.0, 10.0]);
 
         assert_eq!(breaks(&items, &measure(20.0)), Some(vec![2, 4, 5]));
+    }
+
+    #[test]
+    fn prefers_the_fuller_line_when_no_line_fits_within_tolerance() {
+        // Neither "a" nor "a b" fits within tolerance before the wide word. Both used to cap at the
+        // same badness, so the earlier break won and left "a" alone.
+        let items: Vec<_> = paragraph(&[2.0, 2.0, 16.0])
+            .into_iter()
+            .map(|item| match item {
+                Item::Glue { width, at, hang, .. } => Item::Glue {
+                    width,
+                    stretch: 0.0,
+                    shrink: 0.0,
+                    at,
+                    hang,
+                },
+                item => item,
+            })
+            .collect();
+        let ragged = Measure {
+            stretch: 3.0,
+            ..measure(20.0)
+        };
+
+        assert_eq!(breaks(&items, &ragged), Some(vec![2, 3]));
     }
 
     #[test]

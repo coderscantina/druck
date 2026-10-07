@@ -233,6 +233,16 @@ impl<'a> Resolver<'a> {
         }))
     }
 
+    /// Reports a list marker style that is neither a built-in nor a custom style.
+    fn check_marker(&self, name: &str, property: &str) {
+        if self.theme.styles.named(name).is_none() && !self.theme.custom_styles.contains_key(name) {
+            self.error(
+                property,
+                format!("marker style \"{name}\" is neither a built-in nor a custom style"),
+            );
+        }
+    }
+
     /// The style a slot names, or `None` after reporting a custom style the theme does not define, or when
     /// the styles failed to resolve, which has been reported.
     fn slot_style<'s>(&self, style: &SlotStyle, property: &str, styles: SlotStyles<'s>) -> Option<&'s Style> {
@@ -458,6 +468,7 @@ impl<'a> Resolver<'a> {
                 .rev()
                 .fold(base.clone(), |raw, (_, style)| style.apply(&raw));
             let bullets = chain.iter().find_map(|(_, style)| style.bullets.clone());
+            let marker = chain.iter().find_map(|(_, style)| style.marker.clone());
             let number_gap = chain.iter().find_map(|(_, style)| style.number_gap.clone());
             let rule_below = chain.iter().find_map(|(_, style)| style.rule_below);
             let Some(resolved_style) = self.block(&path, &raw, body) else {
@@ -467,6 +478,12 @@ impl<'a> Resolver<'a> {
             let heading = base_name.starts_with("heading-");
             if bullets.is_some() && base_name != "list" {
                 self.error(&format!("{path}.bullets"), "bullets apply only to styles based on list");
+            }
+            if let Some(marker) = &marker {
+                if base_name != "list" {
+                    self.error(&format!("{path}.marker"), "marker applies only to styles based on list");
+                }
+                self.check_marker(marker, &format!("{path}.marker"));
             }
             if number_gap.is_some() && !heading {
                 self.error(
@@ -503,6 +520,7 @@ impl<'a> Resolver<'a> {
                 "list" => CustomStyle::List {
                     style: resolved_style,
                     bullets,
+                    marker,
                 },
                 _ if heading => CustomStyle::Heading {
                     style: resolved_style,
@@ -898,8 +916,12 @@ impl<'a> Resolver<'a> {
                 indent: self.spacing(&theme.lists.indent, "lists.indent", list_em)?,
                 item_spacing: self.spacing(&theme.lists.item_spacing, "lists.item-spacing", list_em)?,
                 bullets: theme.lists.bullets.clone(),
+                marker: theme.lists.marker.clone(),
             })
         })();
+        if let Some(marker) = &theme.lists.marker {
+            self.check_marker(marker, "lists.marker");
+        }
         let tables = (|| {
             Some(resolved::Tables {
                 cell_padding: self.spacing(&theme.tables.cell_padding, "tables.cell-padding", table_em)?,
@@ -1284,5 +1306,22 @@ mod tests {
             "custom-styles": {"x": {"based-on": "list", "number-gap": "1em"}},
         }));
         assert_eq!(property, "custom-styles.x.number-gap");
+    }
+
+    #[test]
+    fn rejects_marker_styles_on_other_styles_and_unknown_marker_styles() {
+        let (property, message) = rejection(json!({
+            "version": 1,
+            "custom-styles": {"x": {"based-on": "body", "marker": "caption"}},
+        }));
+        assert_eq!(property, "custom-styles.x.marker");
+        assert_eq!(message, "marker applies only to styles based on list");
+
+        let (property, message) = rejection(json!({"version": 1, "lists": {"marker": "bold"}}));
+        assert_eq!(property, "lists.marker");
+        assert_eq!(
+            message,
+            "marker style \"bold\" is neither a built-in nor a custom style"
+        );
     }
 }
