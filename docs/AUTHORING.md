@@ -2,7 +2,7 @@
 
 A Kyber document is a Markdown file with optional YAML front matter. Front matter holds metadata and a small set of design settings. Everything else about the design comes from a [theme](THEMES.md).
 
-`kyber render` turns a document into a PDF. Not every construct renders yet; see [Markdown content](#markdown-content). Layout directives are documented here as the decided syntax and are reported as not supported until their milestone.
+`kyber render` turns a document into a PDF. Not every construct renders yet; see [Markdown content](#markdown-content) and [layout directives](#layout-directives).
 
 ## Front matter
 
@@ -139,23 +139,51 @@ The body is CommonMark. These constructs render:
 - Block quotations.
 - Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
+- [Footnotes](#footnotes) and the `keep` and `page-break` [layout directives](#layout-directives).
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
-A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, or code block does not.
+A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, or code block does not. Keep groups do not interrupt that sequence.
 
 Line breaks are chosen for each whole paragraph. Words are hyphenated by the rules of `lang` where the block style allows it, which the default theme does for body text, abstracts, quotations, lists, and footnotes but not for headings. Inline code and link text that spells out its URL are never hyphenated. A word also breaks after a hyphen that joins two words, as in "e-mail".
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported yet: images, tables, footnotes, and layout directives. They arrive in later milestones.
+- Not supported yet: images, tables, and the `columns` and `full-width` directives. They arrive in later milestones.
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
 
+## Pages
+
+Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it. A paragraph's first or last line is not left alone at the bottom or top of a page if a better break exists. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
+
+Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
+
+## Footnotes
+
+Footnotes use the common Markdown extension syntax. A reference is `[^label]` in the text; the definition is `[^label]:` at the start of a line, anywhere in the document. Lines indented by four spaces continue the definition, so a note can hold several paragraphs.
+
+```markdown
+Kyber weighs all breaks together.[^weigh]
+
+[^weigh]: The search looks at most one page ahead.
+
+    A second paragraph of the same note.
+```
+
+Notes are numbered 1, 2, 3 in the order of their references. The number appears raised after the reference and at the start of the note. Notes are set at the foot of the page that holds their reference, below a short rule. A note too long for that page continues at the foot of the next one, under its number and "(continued)" ("(Fortsetzung)" in German). Labels are matched without regard to case.
+
+These are errors:
+
+- A reference without a definition, or a definition that is never referenced.
+- A second reference to the same note. Each note is referenced once.
+- Two definitions with the same label.
+- A reference inside a footnote.
+
 ## Layout directives
 
-This syntax is decided. The parser arrives with the column and page milestones; until then `render` reports a directive as not supported yet.
+`keep` and `page-break` work. `columns` and `full-width` are parsed and checked, and `render` reports them as not supported yet until the column milestone.
 
 Directives are fenced containers that use three or more colons. They express layout intent only. There are no coordinates and no commands beyond the ones below.
 
@@ -186,6 +214,7 @@ Content kept on one page.
 
 Rules:
 
+- A directive line starts at the beginning of a line, outside lists, quotations, and footnotes. It needs no blank line around it.
 - An opening line is colons, a space, and a directive name.
 - A line of only colons closes the innermost open container.
 - `page-break` stands alone. It has no body and no closing line.
@@ -193,7 +222,8 @@ Rules:
 - `full-width` is only allowed directly inside `columns`.
 - `page-break` is not allowed inside `keep`.
 - Directive lines inside fenced code blocks are code, not directives.
-- Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line.
+- Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line. So is a directive line between the items of a list or inside another block.
+- Several page breaks in a row start one new page. A page break before all content or after it has no effect.
 - Outside `columns` the layout is one column.
 
 Embedded HTML is not rendered.

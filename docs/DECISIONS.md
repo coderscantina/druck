@@ -57,7 +57,7 @@ Open for milestone 08: the displayed page-number sequence, which heading supplie
 
 ### Layout directives
 
-Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. The parser arrives with the features that use it. Caption, label, cross-reference, and citation syntax is decided in milestones 06, 08, and 09.
+Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption, label, cross-reference, and citation syntax is decided in milestones 06, 08, and 09.
 
 ### CLI
 
@@ -91,7 +91,7 @@ Every Markdown construct that does not render yet is an error with its location,
 
 ### Temporary layout
 
-Line filling was greedy, word by word, with no hyphenation; [milestone 03](#2026-10-06-milestone-03-paragraph-composition) replaced it. Pages break at the first line that does not fit until milestone 04 replaces pagination.
+Line filling was greedy, word by word, with no hyphenation; [milestone 03](#2026-10-06-milestone-03-paragraph-composition) replaced it. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) replaced first-fit page breaks.
 
 Settled layout rules that later milestones keep:
 
@@ -155,6 +155,66 @@ Only one glyph per edge protrudes; a comma after a closing quote hangs, the quot
 - The breaking constants are not theme settings. A theme can only switch `align` and `hyphenate` per block. Expose them only if review asks for it.
 - German compounds break at any pattern point, not preferably at compound boundaries ("Donaudampfschifffahrtsge-sellschaft"). Weighting compound boundaries needs data the patterns lack.
 - The breaker takes one line width for the first line and one for the rest. Milestone 05 columns and later shapes may need a width per line, which the node structure allows.
+
+## 2026-10-07: Milestone 04 pagination and footnotes
+
+### Directive parsing
+
+[The parser](../src/markdown.rs) finds directive lines before CommonMark sees the text: every line that starts with `:::` in its first column, outside the code blocks of a first parse. It overwrites them with spaces, so byte offsets and locations stay valid and CommonMark sees a blank line, and applies them between the top-level blocks they stand between. Authors need no blank lines around directives, and a closing `:::` right after a paragraph line is not swallowed by the paragraph.
+
+Errors, each at the directive's line: an unknown name, a fence never closed, a closing line with nothing open, `page-break` inside `keep`, nested `columns`, `full-width` not directly inside `columns`, a directive line inside a block's text (for example between the items of a loose list), and a `:::` paragraph inside a list, quotation, or footnote. An unknown name still opens a container so its closing line matches, and it is not reported again as unclosed.
+
+`columns` and `full-width` become `Block::Columns` and `Block::FullWidth`. Layout reports them as not supported yet, so milestone 05 only adds layout. A keep group is transparent for first-line indents. Page breaks in a row give one break, and a page break before all content or after it has no effect, so no empty pages appear.
+
+### Footnotes
+
+Syntax is the GitHub form that pulldown-cmark parses with `ENABLE_FOOTNOTES`: `[^label]` references and `[^label]:` definitions anywhere, continued by four-space indents. Labels match without regard to case. Notes are numbered by reference order, which is their index in `Document::footnotes`.
+
+All of these are errors with the location, because each would otherwise drop content or make placement ambiguous:
+
+- A reference without a definition. pulldown-cmark leaves it as literal text, so the parser looks for `[^label]` text that does not start with an escape.
+- A definition never referenced. It would have no page to go on.
+- A second reference to the same note. A note starts on the page of its reference, and two references would make that ambiguous.
+- Two definitions of one label, and a reference inside a footnote.
+
+The marker is the number in the regular face of the block style at `inline.footnote-marker.size`, raised by `raise`, and part of the preceding word, so no line break separates them. A note starts with the same raised number and a space, in `styles.footnote`. The default theme now gives that style a first-line indent, so the paragraphs of a long note are distinguishable.
+
+The note area spans the text width at the foot of the page: at least `footnotes.gap` below the body text, the separator, then each note after `footnotes.spacing`. Notes keep their order, so only the last note on a page can continue. It breaks between two of its lines. On the next page the rest follows a line with its raised number and the `continued` label in italics, "(continued)" or "(Fortsetzung)".
+
+### Page breaks
+
+[The composer](../src/layout/pages.rs) receives the body as lines, each with the collapsed space above it and a rule for ending a page after it: allowed with a cost, never, or forced. Headings never end a page. Lines inside a keep group never end one, except the group's last line. A page break forces the end.
+
+A page costs the penalty of its break, plus a fill cost when it is not the last page and does not end at a forced break. Space between blocks may stretch by up to half its natural height. The fill cost is `100 × r³` for the share `r` of that stretch used, plus `1000 × s²` where `s` is the remaining shortfall in body lines. Break penalties:
+
+| Break | Cost |
+| --- | --- |
+| Between blocks | 0 |
+| Between two lines of a block | 50 |
+| After a block's first line (orphan) | 5 000 more |
+| Before a block's last line (widow) | 5 000 more |
+| Continuing a footnote on the next page | 2 000 |
+| A page holding only continued footnotes | 10 000 |
+
+These rules apply to paragraphs, headings, list items, quotations, and code blocks alike.
+
+The search is dynamic programming over the places a page may end. A state is a break position together with how many footnote lines have been placed, because carried note text changes what fits next. From each state it extends one page at a time until the body lines alone exceed the text height, so the work is proportional to lines times lines per page, times the few note states per position. On each candidate page it places as many note lines as fit, at least through the first line of every note referenced on the page. Ties go to the earlier state, and nothing depends on hashing or timing, so breaks are deterministic.
+
+Before the search, every run of lines that cannot be broken is checked against the text height together with the first lines of its notes. A run that is too tall is an error at the keep group's directive, or at the heading that starts it. A footnote line too tall for a page of its own is also an error. With those checks the search always finds a solution; if it ever did not, layout reports it rather than writing a partial PDF.
+
+The constants are internal. Visual review of the samples set widow and orphan costs to 5 000; at 3 000, a widow was preferred over running a page two lines short.
+
+### Regions for milestone 05
+
+A planned page is a list of body regions stacked from the top plus one range of footnote lines across the full width. Each page has one full-width region now. Milestone 05 adds column regions to that list. The flow will need column sections as units whose height comes from balancing, and the composer's candidate pages will span them; the footnote stream and its placement stay as they are.
+
+### Consequences
+
+- Pages end shorter to avoid widows, orphans, and stranded headings. The repeated English sample went from 99 to 104 pages.
+- Notes have no widow or orphan rules. A continued note may leave a single line on either page.
+- A line hyphenated at the end of a page costs nothing extra.
+- Lists and code inside notes use their own styles at body size.
+- The scoring constants are not theme settings.
 
 ## Recording a decision
 

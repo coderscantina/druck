@@ -155,6 +155,21 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`.
 
+Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Lines within a block never move apart.
+
+## Footnotes
+
+Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across its full width:
+
+| Key | Effect |
+| --- | --- |
+| `footnotes.gap` | Minimum space between the body text and the separator. |
+| `footnotes.separator-width`, `separator-thickness`, `separator-color` | The rule above the notes, starting at the left edge of the text area. |
+| `footnotes.spacing` | Space between the separator and the first note, and between notes. |
+| `inline.footnote-marker.size`, `raise` | Size and baseline shift of the note number, in the text and at the start of the note, relative to the surrounding text. |
+
+A note that continues on the next page starts there with its number and the `continued` label (see [labels](#labels)).
+
 Other sections have their own fields; the [schema](../schema/theme.v1.schema.json) lists them all.
 
 ## Templates
@@ -210,7 +225,7 @@ The inner margin sits on the left of odd pages and mirrors on even pages.
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 
 ## Resources and distribution
 
