@@ -282,13 +282,13 @@ fn render(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
 #[test]
 fn renders_the_samples() {
     let sandbox = Sandbox::new("samples");
-    for name in ["en", "de", "pagination"] {
+    for name in ["en", "de", "pagination", "columns"] {
         let output = sandbox.root.join(format!("{name}.pdf"));
         let document = format!("{REPO}/samples/{name}.md");
         let pdf = render(&sandbox, &[&document, "-o", output.to_str().unwrap()], &output);
         let pdf = String::from_utf8_lossy(&pdf);
         assert!(pdf.contains("/FontFile3"), "{name}: fonts are embedded");
-        if name != "pagination" {
+        if name == "en" || name == "de" {
             assert!(pdf.contains("/URI"), "{name}: the link is clickable");
         }
     }
