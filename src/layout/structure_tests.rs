@@ -588,7 +588,7 @@ fn the_bibliography_lists_each_cited_entry_once_in_style_order_with_a_hanging_in
             "Adobe Systems",
             "Ito, Mei",
             "Knuth, Donald E.",
-            "Kyber Lab",
+            "Kurrent Lab",
             "Lee, Cy et al.",
             "Müller, Hans, Eva Großmann, and Cy Lee",
             "Smith, Ada",

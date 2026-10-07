@@ -17,7 +17,7 @@ bibliography: references.bib
 
 # Einleitung {#sec:einleitung}
 
-Ein Bericht ist mehr als eine Folge von Absätzen. Der Leser erwartet eine Titelseite, ein Inhaltsverzeichnis, das mit den Seiten übereinstimmt, der Reihe nach nummerierte Überschriften und Verweise, die an die richtige Stelle führen. Wird eines davon von Hand gesetzt, zerbricht es bei der nächsten Änderung. Kyber erzeugt alles aus dem Text und aus dem Thema, sodass der Autor `@sec:tabellen` schreibt und im Satz „@sec:tabellen“ steht.
+Ein Bericht ist mehr als eine Folge von Absätzen. Der Leser erwartet eine Titelseite, ein Inhaltsverzeichnis, das mit den Seiten übereinstimmt, der Reihe nach nummerierte Überschriften und Verweise, die an die richtige Stelle führen. Wird eines davon von Hand gesetzt, zerbricht es bei der nächsten Änderung. Druck erzeugt alles aus dem Text und aus dem Thema, sodass der Autor `@sec:tabellen` schreibt und im Satz „@sec:tabellen“ steht.
 
 Das Handwerk hinter diesen Erwartungen ist alt und gut beschrieben. @tschichold1928 forderte schon 1928 eine klare, sachliche Ordnung der Seite, @bringhurst2004 beschreibt Proportion und Rhythmus als Aufgabe des Setzers, und @forssman2002 sammeln die Einzelheiten, die im Satz täglich zu entscheiden sind.
 
@@ -131,7 +131,7 @@ Eine Marke benennt eine Überschrift, eine Abbildung oder eine Tabelle. Sie begi
 
 ## Seitenzahlen, die sich einpendeln
 
-Ein Seitenverweis ist Text, und seine Breite kann einen Zeilenumbruch verschieben, einen Seitenumbruch und damit die Seite, auf die er verweist. Das Inhaltsverzeichnis hat dasselbe Problem: Seine Länge bestimmt, wo der Haupttext beginnt. Kyber setzt den Bericht, liest die Seiten aller Überschriften, Abbildungen und Tabellen und setzt ihn mit diesen Zahlen erneut, bis sie sich nicht mehr ändern. Die meisten Dokumente brauchen zwei Durchläufe. Ein Dokument, dessen Zahlen immer weiterwandern, wird gemeldet und nicht mit falschen Zahlen geschrieben.
+Ein Seitenverweis ist Text, und seine Breite kann einen Zeilenumbruch verschieben, einen Seitenumbruch und damit die Seite, auf die er verweist. Das Inhaltsverzeichnis hat dasselbe Problem: Seine Länge bestimmt, wo der Haupttext beginnt. Druck setzt den Bericht, liest die Seiten aller Überschriften, Abbildungen und Tabellen und setzt ihn mit diesen Zahlen erneut, bis sie sich nicht mehr ändern. Die meisten Dokumente brauchen zwei Durchläufe. Ein Dokument, dessen Zahlen immer weiterwandern, wird gemeldet und nicht mit falschen Zahlen geschrieben.
 
 ## Überschriften ohne Nummer
 

@@ -1,4 +1,4 @@
-//! End-to-end checks of `kyber check` and `kyber render`.
+//! End-to-end checks of `druck check` and `druck render`.
 //!
 //! Every run starts in a working directory that is neither the fixture nor the document
 //! directory, so relative paths and origins are resolved for real.
@@ -25,7 +25,7 @@ struct Sandbox {
 
 impl Sandbox {
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("kyber-cli-{}-{name}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("druck-cli-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("cwd")).expect("create sandbox");
         let root = root.canonicalize().expect("canonical sandbox path");
@@ -72,11 +72,11 @@ impl Drop for Sandbox {
 }
 
 fn run_in(cwd: &Path, args: &[&str]) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_kyber"))
+    let output = Command::new(env!("CARGO_BIN_EXE_druck"))
         .args(args)
         .current_dir(cwd)
         .output()
-        .expect("run kyber");
+        .expect("run druck");
     Run {
         code: output.status.code().expect("exit code"),
         stdout: String::from_utf8(output.stdout).expect("utf-8 stdout"),

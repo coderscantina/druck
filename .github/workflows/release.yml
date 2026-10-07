@@ -42,11 +42,11 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Render samples with the release binary
         if: matrix.smoke
-        run: scripts/render-samples.sh target/${{ matrix.target }}/release/kyber "$RUNNER_TEMP/pdfs"
+        run: scripts/render-samples.sh target/${{ matrix.target }}/release/druck "$RUNNER_TEMP/pdfs"
       - name: Package
-        run: python3 scripts/package.py ${{ matrix.target }} target/${{ matrix.target }}/release/kyber${{ contains(matrix.target, 'windows') && '.exe' || '' }} dist
+        run: python3 scripts/package.py ${{ matrix.target }} target/${{ matrix.target }}/release/druck${{ contains(matrix.target, 'windows') && '.exe' || '' }} dist
       - uses: actions/upload-artifact@v4
         with:
-          name: kyber-${{ matrix.target }}
+          name: druck-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error

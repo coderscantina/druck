@@ -6,7 +6,7 @@ lang: de
 
 Eine gut gesetzte Seite verlangt nichts. Der Leser soll den Anfang eines Absatzes mühelos finden, dem Text von Zeile zu Zeile folgen, ohne die Stelle zu verlieren, und das Ende eines Kapitels erreichen, ohne zu bemerken, dass je ein Setzer beteiligt war. Typografie dieser Art ist keine Verzierung; sie ist das sorgfältige Entfernen von Reibung.
 
-Dieses Beispiel prüft den ersten Darstellungsweg von *Kyber*: Überschriften, Absätze, **fetten** und *betonten* Text, `Code` im Fließtext und [einen Verweis auf die CommonMark-Spezifikation](https://spec.commonmark.org/). Ligaturen wie in „Effizienz“, „finden“, „Schiff“ und „auffällig“ sollen erhalten bleiben, ebenso Umlaute (ä, ö, ü, Ä, Ö, Ü) und das ß in „Straße“ und „Maß“.
+Dieses Beispiel prüft den ersten Darstellungsweg von *Druck*: Überschriften, Absätze, **fetten** und *betonten* Text, `Code` im Fließtext und [einen Verweis auf die CommonMark-Spezifikation](https://spec.commonmark.org/). Ligaturen wie in „Effizienz“, „finden“, „Schiff“ und „auffällig“ sollen erhalten bleiben, ebenso Umlaute (ä, ö, ü, Ä, Ö, Ü) und das ß in „Straße“ und „Maß“.
 
 # Absätze und ihr Rhythmus
 

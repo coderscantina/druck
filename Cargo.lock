@@ -294,6 +294,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "druck"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fontdb",
+ "hypher",
+ "jsonschema",
+ "krilla",
+ "krilla-svg",
+ "png",
+ "pulldown-cmark",
+ "rustybuzz",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "serde_path_to_error",
+ "unicode-segmentation",
+ "usvg",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -651,28 +673,6 @@ dependencies = [
  "euclid",
  "polycool",
  "smallvec",
-]
-
-[[package]]
-name = "kyber"
-version = "0.1.0"
-dependencies = [
- "clap",
- "fontdb",
- "hypher",
- "jsonschema",
- "krilla",
- "krilla-svg",
- "png",
- "pulldown-cmark",
- "rustybuzz",
- "serde",
- "serde-saphyr",
- "serde_json",
- "serde_path_to_error",
- "unicode-segmentation",
- "usvg",
- "zune-jpeg",
 ]
 
 [[package]]

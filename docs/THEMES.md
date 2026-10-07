@@ -2,7 +2,7 @@
 
 A theme is one JSON file plus any local assets (fonts, images) it references. It controls the design of a document: element styles, page geometry, title blocks, headers, footers, and generated labels. Document authors change a small subset of it from front matter, see [authoring](AUTHORING.md).
 
-`kyber check` loads and validates a theme, and `kyber check --print-config` shows the resolved result. `kyber render` uses it to typeset a document.
+`druck check` loads and validates a theme, and `druck check --print-config` shows the resolved result. `druck render` uses it to typeset a document.
 
 References: the [JSON Schema](../schema/theme.v1.schema.json) and the [bundled default theme](../themes/default.json).
 
@@ -139,7 +139,7 @@ Font sizes must be greater than zero.
 
 A style asks for a face with `weight` and `style`, for example `"weight": 500, "style": "italic"` for `500-italic`. Inline code uses the regular face.
 
-A family name that `fonts` does not define is looked up among the fonts installed on the machine, by its family name, ignoring case. This includes faces in font collections. A family defined in `fonts`, also through front matter `font-files`, wins over an installed one with the same name. Every face a style requests must be installed; a missing family, weight, or style is an error naming what was searched for, and no PDF is written. Installed faces with a condensed or expanded width are used only if the family has no normal width. Kyber scans the installed fonts only when a style names such a family, so documents using the bundled and file fonts never depend on the machine.
+A family name that `fonts` does not define is looked up among the fonts installed on the machine, by its family name, ignoring case. This includes faces in font collections. A family defined in `fonts`, also through front matter `font-files`, wins over an installed one with the same name. Every face a style requests must be installed; a missing family, weight, or style is an error naming what was searched for, and no PDF is written. Installed faces with a condensed or expanded width are used only if the family has no normal width. Druck scans the installed fonts only when a style names such a family, so documents using the bundled and file fonts never depend on the machine.
 
 A font whose license (the OS/2 `fsType` field) restricts embedding or subsetting is still embedded, with a warning that names its file. The license is yours to check.
 
@@ -147,7 +147,7 @@ Inline emphasis and strong text may ask for a face the family lacks. Then the cl
 
 `images` maps a name to a file path. Title slots refer to images by that name. Only the images that the title layout in use shows are read, so an unused image is not decoded. Images in the document body are not part of the theme; they resolve relative to the document.
 
-Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `kyber check` reports missing ones.
+Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `druck check` reports missing ones.
 
 ## Block styles
 
@@ -272,7 +272,7 @@ Other sections have their own fields; the [schema](../schema/theme.v1.schema.jso
 
 ## Templates
 
-Title slots, header/footer slots, and the watermark hold text with placeholders. Kyber fills them from the document's metadata, its text, the date, and the page.
+Title slots, header/footer slots, and the watermark hold text with placeholders. Druck fills them from the document's metadata, its text, the date, and the page.
 
 ### Placeholders
 
@@ -355,7 +355,7 @@ The default theme's left, center, and right band slots are groups as wide as the
 
 ### Missing values
 
-A slot marked `required` whose value is missing is an error. Title slots are checked for the title layout in use as soon as the document's metadata is known, by `kyber check` and `kyber render`. Header and footer slots need the page, so `kyber render` checks them after layout and names the page. Optional slots with no value are omitted along with their spacing.
+A slot marked `required` whose value is missing is an error. Title slots are checked for the title layout in use as soon as the document's metadata is known, by `druck check` and `druck render`. Header and footer slots need the page, so `druck render` checks them after layout and names the page. Optional slots with no value are omitted along with their spacing.
 
 ## Page variants
 

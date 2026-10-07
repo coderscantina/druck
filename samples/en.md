@@ -6,7 +6,7 @@ lang: en
 
 A well-set page asks for nothing. The reader should find the first line of a paragraph without effort, follow the text from line to line without losing the place, and reach the end of a chapter without noticing that a typesetter was ever involved. Typography of this kind is not decoration; it is the careful removal of friction.
 
-This sample exercises the first rendering path of *Kyber*: headings, paragraphs, **strong** and *emphasized* text, ***both at once***, inline `code`, and [a link to the CommonMark specification](https://spec.commonmark.org/). Ligatures such as fi, fl, ff, ffi, and ffl should appear in words like *office*, *affluent*, *difficult*, and *find*.
+This sample exercises the first rendering path of *Druck*: headings, paragraphs, **strong** and *emphasized* text, ***both at once***, inline `code`, and [a link to the CommonMark specification](https://spec.commonmark.org/). Ligatures such as fi, fl, ff, ffi, and ffl should appear in words like *office*, *affluent*, *difficult*, and *find*.
 
 # Paragraphs and their rhythm
 

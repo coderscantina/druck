@@ -49,7 +49,7 @@ The table below continues on the next page. Pages break only between rows, never
 | 1949 | Phototypesetting | The Lumitype projects letters from a disc onto film. | 12 |
 | 1957 | Univers and Helvetica | Two sans serifs in one year; Univers plans a family of 21 weights and widths from the start. | 64 |
 | 1965 | Digital type | The Digiset draws letters on a cathode ray tube from stored outlines. | 8 |
-| 1978 | TeX | Donald Knuth starts TeX to typeset the second volume of *The Art of Computer Programming* after he sees the results of phototypesetting. Paragraphs are broken as a whole, which is the method Kyber uses. | 700 |
+| 1978 | TeX | Donald Knuth starts TeX to typeset the second volume of *The Art of Computer Programming* after he sees the results of phototypesetting. Paragraphs are broken as a whole, which is the method Druck uses. | 700 |
 | 1984 | PostScript | A page description language that treats type as outlines. | 2 |
 | 1985 | Desktop publishing | The LaserWriter and PageMaker put typesetting on a desk. | 1 |
 | 1993 | PDF | Portable Document Format, built on the PostScript imaging model. | 1 |

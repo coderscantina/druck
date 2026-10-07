@@ -17,7 +17,7 @@ bibliography: references.bib
 
 # Introduction {#sec:intro}
 
-A report is more than a sequence of paragraphs. Its reader expects a title page, a table of contents that agrees with the pages, headings numbered in order, and references that lead to the right place. When any of these is set by hand, the next edit breaks it. Kyber generates all of them from the source and from the theme, so the author writes `@sec:tables` and the text reads @sec:tables.
+A report is more than a sequence of paragraphs. Its reader expects a title page, a table of contents that agrees with the pages, headings numbered in order, and references that lead to the right place. When any of these is set by hand, the next edit breaks it. Druck generates all of them from the source and from the theme, so the author writes `@sec:tables` and the text reads @sec:tables.
 
 The craft behind these expectations is old and well documented. @bringhurst2004 treats them as questions of proportion and rhythm, @forssman2002 collects the details a typesetter has to decide, and @tschichold1928 argued for them at the start of modern typography.
 
@@ -131,7 +131,7 @@ A label names a heading, a figure, or a table. It starts with the kind of thing 
 
 ## Page numbers that settle
 
-A page reference is text, and its width can move a line break, a page break, and with it the page it refers to. The table of contents has the same problem: its length decides where the body starts. Kyber lays the report out, reads the pages of every heading, figure, and table, and lays it out again with those numbers until they no longer change. Most documents need two passes. A document whose numbers keep moving is reported rather than written with wrong numbers.
+A page reference is text, and its width can move a line break, a page break, and with it the page it refers to. The table of contents has the same problem: its length decides where the body starts. Druck lays the report out, reads the pages of every heading, figure, and table, and lays it out again with those numbers until they no longer change. Most documents need two passes. A document whose numbers keep moving is reported rather than written with wrong numbers.
 
 ## Unnumbered headings
 

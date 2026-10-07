@@ -146,7 +146,7 @@ mod tests {
     fn finds_a_face_of_a_collection_by_its_index() {
         let regular = bundled::font("fonts/LibertinusSerif-Regular.otf").unwrap();
         let bold = bundled::font("fonts/LibertinusSerif-Bold.otf").unwrap();
-        let dir = std::env::temp_dir().join(format!("kyber-collection-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("druck-collection-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("Serif.ttc");
         std::fs::write(&path, collection(&[regular, bold])).unwrap();

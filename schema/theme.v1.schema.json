@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://kyber.invalid/schema/theme.v1.schema.json",
-  "title": "Kyber theme, version 1",
-  "description": "A kyber theme file. Files may be partial: only version is required, other fields inherit from the bundled default.",
+  "$id": "https://raw.githubusercontent.com/coderscantina/druck/main/schema/theme.v1.schema.json",
+  "title": "Druck theme, version 1",
+  "description": "A druck theme file. Files may be partial: only version is required, other fields inherit from the bundled default.",
   "type": "object",
   "required": [
     "version"
@@ -11,7 +11,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "Schema location for editors. Ignored by kyber."
+      "description": "Schema location for editors. Ignored by druck."
     },
     "version": {
       "const": 1,

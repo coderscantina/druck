@@ -233,7 +233,7 @@ fn bundled_faces_cover_german_and_english_text() {
 fn missing_font_file_names_the_property() {
     let missing = FaceFile {
         resource: Resource {
-            origin: Origin::WorkingDir(PathBuf::from("/nonexistent-kyber-dir")),
+            origin: Origin::WorkingDir(PathBuf::from("/nonexistent-druck-dir")),
             path: "nope.otf".to_owned(),
         },
         index: 0,

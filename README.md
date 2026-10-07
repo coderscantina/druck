@@ -1,10 +1,10 @@
-# Kyber
+# Druck
 
 A native Rust Markdown-to-PDF renderer for carefully typeset articles, reports, and short manuscripts.
 
 The CLI renders complete documents to PDF: paragraph-wide line breaking with English and German hyphenation, scored page breaks, footnotes, one and two columns, images, tables, title pages, contents, cross-references, and citations from BibTeX. Release acceptance (milestone 10) is still open.
 
-Kyber's own license is not chosen yet, so do not distribute builds. Third-party licenses are listed in [the notices](THIRD_PARTY_NOTICES.md).
+Druck's own license is not chosen yet, so do not distribute builds. Third-party licenses are listed in [the notices](THIRD_PARTY_NOTICES.md).
 
 ```sh
 cargo run -- render samples/en.md -o en.pdf

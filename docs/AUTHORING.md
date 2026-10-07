@@ -1,8 +1,8 @@
 # Authoring documents
 
-A Kyber document is a Markdown file with optional YAML front matter. Front matter holds metadata and a small set of design settings. Everything else about the design comes from a [theme](THEMES.md).
+A Druck document is a Markdown file with optional YAML front matter. Front matter holds metadata and a small set of design settings. Everything else about the design comes from a [theme](THEMES.md).
 
-`kyber render` turns a document into a PDF. Not every construct renders yet; see [Markdown content](#markdown-content) and [layout directives](#layout-directives).
+`druck render` turns a document into a PDF. Not every construct renders yet; see [Markdown content](#markdown-content) and [layout directives](#layout-directives).
 
 ## Front matter
 
@@ -108,8 +108,8 @@ Notes:
 ## Command line
 
 ```
-kyber check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
-kyber render <doc.md> [-o PATH]
+druck check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
+druck render <doc.md> [-o PATH]
 ```
 
 `check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, and a layout that does not settle. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
@@ -121,7 +121,7 @@ kyber render <doc.md> [-o PATH]
 `--set KEY=VALUE` overrides a front matter setting. It uses the same keys, with dots for nesting. It can be repeated.
 
 ```
-kyber check paper.md --set toc=true --set margins.top=2cm --set 'author=[A, B]'
+druck check paper.md --set toc=true --set margins.top=2cm --set 'author=[A, B]'
 ```
 
 - The value is parsed as YAML, so `--set date=2024` is a number and is rejected. Write `--set 'date="2024"'`.
@@ -194,7 +194,7 @@ An image stands alone in its paragraph. Its description becomes the caption:
 ```
 
 - PNG, JPEG, and SVG files are supported. GIF, WebP, and other formats are errors, as is a file whose content does not match its extension.
-- The path is relative to the Markdown file, wherever Kyber is run from. Put a path with spaces in angle brackets: `![Caption](<my chart.png>)`.
+- The path is relative to the Markdown file, wherever Druck is run from. Put a path with spaces in angle brackets: `![Caption](<my chart.png>)`.
 - Only local files are read. URLs, including `data:` URLs, are errors. An SVG file may embed images as data URLs but cannot refer to other files.
 - The caption is numbered and labelled in the document language, as in "Figure 1: Pages typeset per year". It may use emphasis, strong text, and inline code. An image with an empty description, `![](file.png)`, has no caption and no number.
 - A caption cannot hold a footnote, because CommonMark does not read `[^note]` inside an image description. Reference the note from the text next to the image.
@@ -270,7 +270,7 @@ A `::: table` directive holds a list table: a list with one item per row, and in
 Footnotes use the common Markdown extension syntax. A reference is `[^label]` in the text; the definition is `[^label]:` at the start of a line, anywhere in the document. Lines indented by four spaces continue the definition, so a note can hold several paragraphs.
 
 ```markdown
-Kyber weighs all breaks together.[^weigh]
+Druck weighs all breaks together.[^weigh]
 
 [^weigh]: The search looks at most one page ahead.
 
@@ -354,7 +354,7 @@ An `@key` without a `sec:`, `fig:`, or `tbl:` prefix is a citation, see [citatio
 
 A document with a `title`, `subtitle`, `author`, `date`, or `abstract` starts with a title block: the theme's title slots filled with the metadata, followed by some space. Without any of them there is no title block. With `title-page: true` the title, authors, date, and abstract fill a first page of their own instead, and the text starts on the next page.
 
-A slot whose value is missing is left out with the space above it. The theme marks some slots as required; the default theme requires `title`, and a missing required value is an error that names the slot, from `kyber check` and `kyber render`. The abstract is set under the heading "Abstract" ("Zusammenfassung" in German).
+A slot whose value is missing is left out with the space above it. The theme marks some slots as required; the default theme requires `title`, and a missing required value is an error that names the slot, from `druck check` and `druck render`. The abstract is set under the heading "Abstract" ("Zusammenfassung" in German).
 
 A theme may place several groups of slots on the title page, such as an address block at the top right and the title halfway down. [`samples/offer.md`](../samples/offer.md) with [its theme](../samples/themes/business.json) shows a cover of that kind.
 
@@ -393,7 +393,7 @@ The name after the prefix uses letters, digits, `-`, and `_`. A reference writes
 
 This reads "Section 2 shows the totals, and Figure 1 the trend. The data is in Table 1, which starts on page 4." The words come from the theme's labels in the document language. A reference to a heading without a number shows the heading's text. `[@label, page]` shows the page the heading, figure, or table starts on. Every reference is a link to its target.
 
-Numbers and page numbers are those of the final layout. Page references and the table of contents can move text to other pages; Kyber lays the document out again until all of them agree, usually in two passes, and reports an error naming the target if they do not settle.
+Numbers and page numbers are those of the final layout. Page references and the table of contents can move text to other pages; Druck lays the document out again until all of them agree, usually in two passes, and reports an error naming the target if they do not settle.
 
 Write `\@` for an at sign that should stay text before a prefix. An `@` right after a letter or digit, as in an e-mail address, is never a reference.
 
@@ -436,7 +436,7 @@ These are errors with their location:
 
 ### What the statistics count
 
-The statistics count the text you wrote in the body and the footnotes: paragraphs, list items, quotations, headings, table cells, and captions. They leave out code blocks, the front matter, the table of contents, the bibliography, and text Kyber generates: heading numbers, citations, cross-references, and footnote markers. Placeholders count as no text, so a count never includes itself and never depends on another count. Each block counts on its own; runs of spaces and line breaks count as one space.
+The statistics count the text you wrote in the body and the footnotes: paragraphs, list items, quotations, headings, table cells, and captions. They leave out code blocks, the front matter, the table of contents, the bibliography, and text Druck generates: heading numbers, citations, cross-references, and footnote markers. Placeholders count as no text, so a count never includes itself and never depends on another count. Each block counts on its own; runs of spaces and line breaks count as one space.
 
 - Characters are the characters a reader sees, so "é" counts once even when written as "e" with a combining accent, and so does an emoji.
 - Words follow the Unicode word rules ([UAX #29](https://www.unicode.org/reports/tr29/)) and must hold a letter or digit. Words joined by a hyphen count once, as in "well-known" or "e-mail". "can't", "3.5", and "12,480" are one word each; "this—that" with a dash is two.
@@ -445,7 +445,7 @@ The statistics count the text you wrote in the body and the footnotes: paragraph
 
 ### Build date
 
-`{build-date}` and `{year}` use the date in UTC when Kyber runs. For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Kyber then uses that day.
+`{build-date}` and `{year}` use the date in UTC when Druck runs. For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Druck then uses that day.
 
 ### Drafts
 

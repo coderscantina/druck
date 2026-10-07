@@ -61,7 +61,7 @@ Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORI
 
 ### CLI
 
-`kyber check <doc>` validates and can `--print-config`; `kyber render <doc>` fails until milestone 02. Exit code 0 is success, 1 means diagnostics were reported, and 2 is a usage error.
+`druck check <doc>` validates and can `--print-config`; `druck render <doc>` fails until milestone 02. Exit code 0 is success, 1 means diagnostics were reported, and 2 is a usage error.
 
 ## 2026-10-06: Milestone 02 rendering path
 
@@ -105,7 +105,7 @@ Settled layout rules that later milestones keep:
 
 ### PDF and CLI
 
-The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. `kyber render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
+The PDF has no creation date, so repeated renders are byte-identical. Title, authors, and language go into the document metadata. `druck render <doc> [-o PATH]` writes next to the document with a `.pdf` extension by default; `-o` is relative to the working directory.
 
 ## 2026-10-06: Milestone 03 paragraph composition
 
@@ -392,7 +392,7 @@ An optional slot is omitted with its `space-before` when any of its placeholders
 
 The title page stacks its slots from the top of the text area and keeps the first slot's space. Content taller than the text area is an error. The title block is one keep group at the top of the flow.
 
-Required title slots are checked as soon as the configuration and metadata are known, by `kyber check` and by `kyber render`. The error names the document and the slot property.
+Required title slots are checked as soon as the configuration and metadata are known, by `druck check` and by `druck render`. The error names the document and the slot property.
 
 ### Page numbers, variants, and running headers
 
@@ -551,7 +551,7 @@ Decided with the owner against a reference offer PDF: a cover with a metadata bl
 
 - **Headings** take one class through pulldown-cmark's heading attributes, alone or with the label. Other attributes and a second class are errors at the attribute. This replaces the milestone 08 rule in [labels and cross-references](#labels-and-cross-references) that heading classes are errors.
 - **Paragraphs:** a `{.name}` at the end of the last text is read from the source, so `\{.name}` stays text. When only spaces or quote markers precede it on its line, it stands on a line of its own and styles the list that must start next; otherwise it styles the paragraph. A line of its own after paragraph text without a blank line therefore styles the list, which is what an author writing a label line before a list means.
-- **Checks:** the parser has no configuration, so [a pass before layout](../src/layout/classes.rs) reports unknown names and styles of another kind at the attribute. `kyber check` does not parse the body, so these errors show up in `render`.
+- **Checks:** the parser has no configuration, so [a pass before layout](../src/layout/classes.rs) reports unknown names and styles of another kind at the attribute. `druck check` does not parse the body, so these errors show up in `render`.
 
 ### Keeping and hanging numbers
 
@@ -691,7 +691,7 @@ Consequences: paragraphs of two or three lines no longer split across pages. The
 
 #### Check runs everything before layout
 
-`kyber check` first called the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images, with no layout and no fonts. The owner replaced this: see [check lays out](#check-lays-out).
+`druck check` first called the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images, with no layout and no fonts. The owner replaced this: see [check lays out](#check-lays-out).
 
 #### Theme images follow the title layout
 
@@ -735,7 +735,7 @@ Decided by the owner after the fixes above.
 
 #### Check lays out
 
-`kyber check` is `render` without writing the PDF: it loads fonts, lays the document out, and reports every error `render` reports, such as a word wider than its line, an oversized row or keep group, or a layout that does not settle. Both commands share one `typeset` function in `src/main.rs`, so nothing is duplicated. The title slot check is part of layout, so `check` no longer calls it apart. Consequences: `check` needs the fonts the theme names and takes as long as `render`. `--print-config` stays a view of the resolved configuration and does not lay out, so it also works for themes whose fonts cannot be loaded; the success message "document is valid" is still true.
+`druck check` is `render` without writing the PDF: it loads fonts, lays the document out, and reports every error `render` reports, such as a word wider than its line, an oversized row or keep group, or a layout that does not settle. Both commands share one `typeset` function in `src/main.rs`, so nothing is duplicated. The title slot check is part of layout, so `check` no longer calls it apart. Consequences: `check` needs the fonts the theme names and takes as long as `render`. `--print-config` stays a view of the resolved configuration and does not lay out, so it also works for themes whose fonts cannot be loaded; the success message "document is valid" is still true.
 
 #### Hyphens in extracted text
 
@@ -747,7 +747,7 @@ The explicit line-end hyphen mapping described under [text and line breaking](#t
 
 #### Citation suffixes
 
-Text after the locator in a bracketed item is its suffix, in Pandoc's manner: `[@a, p. 3, emphasis added]` reads "(Smith 2024, p. 3, emphasis added)". The text after the comma is a locator, then a suffix, when the part up to the next comma is a locator (`p.`, `pp.`, or `S.` with a page or range). Otherwise the whole text is the suffix: `[@a, emphasis added]`. A suffix is kept as written, joined to the locator with ", ", and is part of the work's link. Pandoc's manual, "Citation syntax", shows `[@doe99, pp. 33-35, 38-39 and passim]`, with all text after the key handed to its citation processor. Kyber supports three locator labels and splits at the first comma instead: that example is the locator "pp. 33–35" and the suffix "38-39 and passim", which prints the same. Three deliberate differences: the text must follow a comma, where Pandoc also accepts `[@a and passim]`; a malformed locator such as `p.3` is silently a suffix, where Kyber used to report an unsupported locator; and `[@a see below]` stays an error, now saying that a locator or suffix follows a comma. A narrative citation takes the same in its brackets, `@a [p. 3, passim]`, but brackets that do not start with a locator stay text. Numeric style prints the suffix inside the brackets after the locator, "[1, p. 3, emphasis added]". Numbers are no longer grouped into ranges when an item has a suffix.
+Text after the locator in a bracketed item is its suffix, in Pandoc's manner: `[@a, p. 3, emphasis added]` reads "(Smith 2024, p. 3, emphasis added)". The text after the comma is a locator, then a suffix, when the part up to the next comma is a locator (`p.`, `pp.`, or `S.` with a page or range). Otherwise the whole text is the suffix: `[@a, emphasis added]`. A suffix is kept as written, joined to the locator with ", ", and is part of the work's link. Pandoc's manual, "Citation syntax", shows `[@doe99, pp. 33-35, 38-39 and passim]`, with all text after the key handed to its citation processor. Druck supports three locator labels and splits at the first comma instead: that example is the locator "pp. 33–35" and the suffix "38-39 and passim", which prints the same. Three deliberate differences: the text must follow a comma, where Pandoc also accepts `[@a and passim]`; a malformed locator such as `p.3` is silently a suffix, where Druck used to report an unsupported locator; and `[@a see below]` stays an error, now saying that a locator or suffix follows a comma. A narrative citation takes the same in its brackets, `@a [p. 3, passim]`, but brackets that do not start with a locator stay text. Numeric style prints the suffix inside the brackets after the locator, "[1, p. 3, emphasis added]". Numbers are no longer grouped into ranges when an item has a suffix.
 
 #### Captions over narrow tables
 

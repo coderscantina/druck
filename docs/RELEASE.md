@@ -1,10 +1,10 @@
-# Releasing Kyber
+# Releasing Druck
 
 How to build, check, and package a release by hand. CI runs the same scripts. Nothing here publishes, tags, or pushes. Those steps need a separate decision each time.
 
-## Open item: Kyber's own license
+## Open item: Druck's own license
 
-Kyber has no `LICENSE` file and no `license` field in `Cargo.toml`. The owner has not chosen one. Until then:
+Druck has no `LICENSE` file and no `license` field in `Cargo.toml`. The owner has not chosen one. Until then:
 
 - Do not distribute binaries or archives outside the project. Third-party licenses are covered by the notices file, but the code itself has no grant.
 - `scripts/package.py` ships any `LICENSE*` file it finds at the repository root, so adding the file is enough. Also set `license` in `Cargo.toml`.
@@ -16,7 +16,7 @@ Kyber has no `LICENSE` file and no `license` field in `Cargo.toml`. The owner ha
 - Python 3.11 or newer for the scripts. They use the standard library only.
 - `pdffonts` and `pdftotext` (poppler) for the checks.
 - The crates in `Cargo.lock` in the local cargo registry (`cargo fetch --locked`). The notices script reads license files from there.
-- Minimum Rust version: dependencies declare 1.92 at most (`krilla`). Kyber's own minimum is not tested, so `rust-version` is not set.
+- Minimum Rust version: dependencies declare 1.92 at most (`krilla`). Druck's own minimum is not tested, so `rust-version` is not set.
 
 ## Procedure
 
@@ -25,17 +25,17 @@ Kyber has no `LICENSE` file and no `license` field in `Cargo.toml`. The owner ha
 3. Regenerate the notices if dependencies changed: `python3 scripts/notices.py`. CI fails when the file is stale (`--check`). Commit the result.
 4. Build: `cargo build --release --locked`. The release profile uses fat LTO, one codegen unit, and stripped symbols. Expect about a minute.
 5. Check the binary:
-   - Render all samples from another directory: `scripts/render-samples.sh target/release/kyber /tmp/kyber-pdfs`.
-   - Run it without network. On macOS: put `(version 1)(allow default)(deny network*)` in a file and run `sandbox-exec -f FILE target/release/kyber render samples/de.md -o /tmp/de.pdf`. On Linux: `unshare -rn target/release/kyber render samples/de.md -o /tmp/de.pdf`. The output must equal the online render. Kyber has no network code, so this guards against a future dependency adding one.
-   - Confirm fonts are embedded: `pdffonts /tmp/kyber-pdfs/report.pdf` must show `yes` in the `emb` column for every row (Libertinus Serif and Mono).
+   - Render all samples from another directory: `scripts/render-samples.sh target/release/druck /tmp/druck-pdfs`.
+   - Run it without network. On macOS: put `(version 1)(allow default)(deny network*)` in a file and run `sandbox-exec -f FILE target/release/druck render samples/de.md -o /tmp/de.pdf`. On Linux: `unshare -rn target/release/druck render samples/de.md -o /tmp/de.pdf`. The output must equal the online render. Druck has no network code, so this guards against a future dependency adding one.
+   - Confirm fonts are embedded: `pdffonts /tmp/druck-pdfs/report.pdf` must show `yes` in the `emb` column for every row (Libertinus Serif and Mono).
    - To compare platforms by hand, copy each platform's PDFs into `DIR/<platform>/` and run `scripts/check-pdfs.sh DIR`.
-6. Package: `python3 scripts/package.py <target> target/release/kyber dist`. This writes `dist/kyber-<version>-<target>.tar.gz` (`.zip` for Windows) and a `.sha256` file with it. Verify with `shasum -a 256 -c` (macOS) or `sha256sum -c` (Linux) inside `dist/`.
+6. Package: `python3 scripts/package.py <target> target/release/druck dist`. This writes `dist/druck-<version>-<target>.tar.gz` (`.zip` for Windows) and a `.sha256` file with it. Verify with `shasum -a 256 -c` (macOS) or `sha256sum -c` (Linux) inside `dist/`.
 
 ## Archive layout
 
 ```
-kyber-<version>-<target>/
-  kyber (kyber.exe on Windows)
+druck-<version>-<target>/
+  druck (druck.exe on Windows)
   README.md
   THIRD_PARTY_NOTICES.md
   OFL.txt

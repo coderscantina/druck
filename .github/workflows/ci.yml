@@ -54,7 +54,7 @@ jobs:
       - name: Build
         run: cargo build --release --locked
       - name: Render samples
-        run: scripts/render-samples.sh target/release/kyber "$RUNNER_TEMP/pdfs"
+        run: scripts/render-samples.sh target/release/druck "$RUNNER_TEMP/pdfs"
       - uses: actions/upload-artifact@v4
         with:
           name: pdfs-${{ matrix.os }}

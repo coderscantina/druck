@@ -8,7 +8,7 @@ An image stands alone in its paragraph. Its description becomes the caption, num
 
 ![A landscape drawn as a small raster image.](images/landscape.png)
 
-The image above is a PNG of 240 by 150 pixels. Kyber counts one pixel as one point, so it appears at its natural size of 240 by 150 points, centered in the text area. An image is never enlarged beyond its natural size; a small image stays small rather than turning blurred.[^raster]
+The image above is a PNG of 240 by 150 pixels. Druck counts one pixel as one point, so it appears at its natural size of 240 by 150 points, centered in the text area. An image is never enlarged beyond its natural size; a small image stays small rather than turning blurred.[^raster]
 
 [^raster]: A note shares the page with the images around its reference. Its height counts when the search decides whether an image still fits.
 
@@ -16,7 +16,7 @@ A page break may not fall between an image and its caption. When the image and i
 
 Typesetting has always been a negotiation between the content and the page. A paragraph can bend: its lines can break in many places, its spaces can stretch, and a page can end between any two of its lines. An image cannot bend at all. It is one rigid box, and the page has to make room for it or pass it on.
 
-That rigidity is why traditional systems let figures float to the top or bottom of a page, or to the next page, away from the text that refers to them. Kyber keeps images in document order instead. The reader finds each figure where the author placed it, at the cost of an occasional short page.
+That rigidity is why traditional systems let figures float to the top or bottom of a page, or to the next page, away from the text that refers to them. Druck keeps images in document order instead. The reader finds each figure where the author placed it, at the cost of an occasional short page.
 
 ![An oversized drawing, scaled down to the width of the text area.](images/plan.svg)
 
@@ -45,7 +45,7 @@ A column section balances its last columns as before. An image counts as one tal
 ![A full-width image between two column regions. The columns above are balanced first.](images/landscape.png)
 :::
 
-Below a full-width block the columns resume. The image in the block above spans the text area rather than a column, because the block asks for the full width explicitly. Kyber never promotes an image to the full width on its own.
+Below a full-width block the columns resume. The image in the block above spans the text area rather than a column, because the block asks for the full width explicitly. Druck never promotes an image to the full width on its own.
 
 A very tall image follows. At the column width it would be taller than the page, so it is scaled down further until it and its caption fit the height of a column.
 

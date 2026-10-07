@@ -3,7 +3,7 @@
 
 Usage: python3 scripts/package.py TARGET BINARY OUTDIR
 
-Writes OUTDIR/kyber-VERSION-TARGET.tar.gz (.zip for Windows targets) and a
+Writes OUTDIR/druck-VERSION-TARGET.tar.gz (.zip for Windows targets) and a
 matching .sha256 file. The archive holds one folder with the binary, README.md,
 THIRD_PARTY_NOTICES.md, OFL.txt, and LICENSE if the repository has one.
 Standard library only, so it runs the same on every platform.
@@ -27,9 +27,9 @@ def main() -> int:
     target, binary, outdir = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
     windows = "windows" in target
-    folder = f"kyber-{version}-{target}"
+    folder = f"druck-{version}-{target}"
 
-    members = {binary: f"kyber{'.exe' if windows else ''}"}
+    members = {binary: f"druck{'.exe' if windows else ''}"}
     members |= {ROOT / src: name for name, src in FILES.items()}
     for license in sorted(ROOT.glob("LICENSE*")):
         members[license] = license.name
@@ -60,7 +60,7 @@ def _normalize(info: tarfile.TarInfo, name: str) -> tarfile.TarInfo:
     info.uid = info.gid = 0
     info.uname = info.gname = ""
     info.mtime = 0
-    info.mode = 0o755 if name == "kyber" else 0o644
+    info.mode = 0o755 if name == "druck" else 0o644
     return info
 
 

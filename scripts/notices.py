@@ -153,7 +153,7 @@ def render() -> tuple[str, list[str]]:
     out = [
         "# Third-party notices",
         "",
-        "Kyber's release binaries embed the fonts, hyphenation patterns, and Rust crates listed here.",
+        "Druck's release binaries embed the fonts, hyphenation patterns, and Rust crates listed here.",
         "Their licenses require that the copyright notices and license texts travel with the binary.",
         "This file does that. Ship it next to the executable.",
         "",

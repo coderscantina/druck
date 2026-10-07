@@ -1,4 +1,4 @@
-//! Kyber command-line interface: reads inputs, presents diagnostics, and sets exit codes.
+//! Druck command-line interface: reads inputs, presents diagnostics, and sets exit codes.
 
 mod bibliography;
 mod citations;

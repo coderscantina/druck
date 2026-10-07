@@ -1,7 +1,7 @@
 ---
 title: Typesetting the annual report
 subtitle: Offer 2026-17
-author: Kyber Studio
+author: Druck Studio
 date: 7 October 2026
 theme: themes/typography-styles.json
 lang: en

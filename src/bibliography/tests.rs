@@ -187,7 +187,7 @@ fn sorts_the_author_date_bibliography_by_author_year_and_title() {
         Lang::En,
     );
     let keys: Vec<&str> = rendered.references().iter().map(|r| r.key.as_str()).collect();
-    // Knuth, Kyber Lab, Lee, Müller (as Mueller), Smith Ada, Smith and Jones, Typst documentation, Weber, World.
+    // Knuth, Kurrent Lab, Lee, Müller (as Mueller), Smith Ada, Smith and Jones, Typst documentation, Weber, World.
     assert_eq!(
         keys,
         [
@@ -373,7 +373,7 @@ fn formats_reports_and_web_resources() {
     );
     assert_eq!(
         entries[1],
-        "Kyber Lab (2018). *Font metrics in practice*. Technical report."
+        "Kurrent Lab (2018). *Font metrics in practice*. Technical report."
     );
     assert_eq!(
         entries[2],

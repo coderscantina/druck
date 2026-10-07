@@ -1,5 +1,5 @@
 #!/bin/sh
-# Render every Markdown file in samples/ to OUTDIR with the given kyber binary.
+# Render every Markdown file in samples/ to OUTDIR with the given druck binary.
 # A sample that has a theme of the same name in samples/themes/ is rendered
 # a second time with it, as NAME-theme.pdf.
 #
@@ -7,11 +7,11 @@
 # the working directory. Renders use only the bundled fonts and hyphenation
 # data. Picks up whatever samples exist, so new samples need no change here.
 #
-# Usage: scripts/render-samples.sh KYBER OUTDIR
+# Usage: scripts/render-samples.sh DRUCK OUTDIR
 set -eu
 
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 KYBER OUTDIR" >&2
+  echo "usage: $0 DRUCK OUTDIR" >&2
   exit 2
 fi
 

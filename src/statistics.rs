@@ -339,7 +339,7 @@ mod tests {
                 at: AT,
                 columns: Vec::new(),
                 header: row("Name"),
-                rows: vec![row("Kyber")],
+                rows: vec![row("Druck")],
                 caption: vec![text("A caption.")],
                 label: None,
             },
