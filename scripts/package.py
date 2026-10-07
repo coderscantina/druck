@@ -3,13 +3,15 @@
 
 Usage: python3 scripts/package.py TARGET BINARY OUTDIR
 
-Writes OUTDIR/druck-VERSION-TARGET.tar.gz (.zip for Windows targets) and a
-matching .sha256 file. The archive holds one folder with the binary, README.md,
-THIRD_PARTY_NOTICES.md, OFL.txt, and LICENSE if the repository has one.
+Writes OUTDIR/druck-VERSION-HASH-TARGET.tar.gz (.zip for Windows targets) and a
+matching .sha256 file, where HASH is the short commit hash as in the release
+tag. The archive holds one folder with the binary, README.md,
+THIRD_PARTY_NOTICES.md, OFL.txt, and LICENSE.
 Standard library only, so it runs the same on every platform.
 """
 
 import hashlib
+import subprocess
 import sys
 import tarfile
 import tomllib
@@ -26,6 +28,10 @@ def main() -> int:
         return 2
     target, binary, outdir = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
+    commit = subprocess.run(
+        ["git", "rev-parse", "--short=7", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    version = f"{version}-{commit.stdout.strip()}"
     windows = "windows" in target
     folder = f"druck-{version}-{target}"
 

@@ -33,7 +33,7 @@ use text::Fonts;
 
 /// Typeset Markdown documents as PDF.
 #[derive(Parser)]
-#[command(version)]
+#[command(version = env!("DRUCK_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Command,
