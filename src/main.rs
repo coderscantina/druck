@@ -3,6 +3,7 @@
 mod config;
 mod diagnostic;
 mod document;
+mod image;
 mod layout;
 mod markdown;
 mod page;

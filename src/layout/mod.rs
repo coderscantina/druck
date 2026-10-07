@@ -461,6 +461,7 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
         Item::Text { x, y, run, color } => text_item(x.0 + dx, y.0 + dy, run, color),
         Item::Rect { rect: r, color } => Item::Rect { rect: rect(r), color },
         Item::Link { rect: r, url } => Item::Link { rect: rect(r), url },
+        Item::Image { rect: r, image } => Item::Image { rect: rect(r), image },
     }
 }
 

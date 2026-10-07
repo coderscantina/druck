@@ -6,16 +6,18 @@ use krilla::Document;
 use krilla::action::LinkAction;
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
-use krilla::geom::{PathBuilder, Point, Rect as PdfRect};
+use krilla::geom::{PathBuilder, Point, Rect as PdfRect, Size, Transform};
 use krilla::metadata::Metadata as PdfMetadata;
 use krilla::page::PageSettings;
 use krilla::paint::Fill;
 use krilla::surface::Surface;
 use krilla::text::{GlyphId, KrillaGlyph};
+use krilla_svg::{SurfaceExt, SvgSettings};
 
 use crate::config::front_matter::Metadata;
 use crate::config::theme::Lang;
 use crate::config::values::Color;
+use crate::image::{Image, Pixels};
 use crate::page::{Item, Page, Rect};
 use crate::text::{Fonts, ShapedRun};
 
@@ -37,6 +39,7 @@ pub fn write(pages: &[Page], fonts: &Fonts, metadata: &Metadata, lang: Lang) -> 
                 }
                 Item::Rect { rect, color } => draw_rect(&mut surface, rect, *color)?,
                 Item::Link { rect, url } => links.push((rect, url)),
+                Item::Image { rect, image } => draw_image(&mut surface, rect, image)?,
             }
         }
         surface.finish();
@@ -105,6 +108,23 @@ fn draw_rect(surface: &mut Surface, rect: &Rect, color: Color) -> Result<(), Str
     let path = path.finish().ok_or("empty rectangle")?;
     surface.set_fill(Some(fill(color)));
     surface.draw_path(&path);
+    Ok(())
+}
+
+/// Draws `image` scaled to fill `rect` exactly.
+fn draw_image(surface: &mut Surface, rect: &Rect, image: &Image) -> Result<(), String> {
+    let size = Size::from_wh(rect.width.0 as f32, rect.height.0 as f32)
+        .ok_or_else(|| format!("invalid image size {} x {} pt", rect.width.0, rect.height.0))?;
+    surface.push_transform(&Transform::from_translate(rect.x.0 as f32, rect.y.0 as f32));
+    match image.pixels() {
+        Pixels::Raster(raster) => surface.draw_image(raster.clone(), size),
+        Pixels::Svg(tree) => {
+            surface
+                .draw_svg(tree, size, SvgSettings::default())
+                .ok_or("cannot draw SVG image")?;
+        }
+    }
+    surface.pop();
     Ok(())
 }
 
@@ -180,5 +200,34 @@ mod tests {
         };
         let bytes = write(&[page], &fonts, &metadata, Lang::De).expect("pdf");
         assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn writes_the_same_bytes_for_png_jpeg_and_svg_images() {
+        let image = |name: &str, y: f64| {
+            let path = format!("{}/tests/fixtures/images/{name}", env!("CARGO_MANIFEST_DIR"));
+            let extension = name.rsplit('.').next().unwrap_or_default();
+            let image = Image::decode(std::fs::read(path).expect("fixture"), extension).expect("image");
+            let rect = Rect {
+                x: Pt(10.0),
+                y: Pt(y),
+                width: Pt(80.0),
+                height: Pt(40.0),
+            };
+            Item::Image { rect, image }
+        };
+        let page = Page {
+            width: Pt(100.0),
+            height: Pt(160.0),
+            items: vec![
+                image("pixel.png", 5.0),
+                image("photo.jpg", 55.0),
+                image("drawing.svg", 105.0),
+            ],
+        };
+        let first = write(std::slice::from_ref(&page), &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let second = write(std::slice::from_ref(&page), &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        assert!(first.starts_with(b"%PDF"));
+        assert_eq!(first, second);
     }
 }
