@@ -201,7 +201,7 @@ fn a_wide_table_wider_than_the_prose_starts_where_the_prose_starts() {
 
 #[test]
 fn a_caption_starts_at_the_table_and_is_no_wider_than_it() {
-    let body = "| Column header | Another header |\n|---|---|\n| a | b |\n\n: A caption that is longer than the table is wide.\n";
+    let body = "| A longer column header | Another header |\n|---|---|\n| a | b |\n\n: A caption that is longer than the table is wide.\n";
     let (_, pages) = render(body);
     let page = &pages[0];
     let rule = rects(page)[0];
@@ -216,6 +216,26 @@ fn a_caption_starts_at_the_table_and_is_no_wider_than_it() {
         caption_end <= rule.x.0 + rule.width.0 + 0.01,
         "{caption_end} past {rule:?}"
     );
+}
+
+#[test]
+fn a_caption_over_a_table_under_a_third_of_the_frame_runs_to_the_frames_edge() {
+    let body = "| a | b |\n|---|---|\n| c | d |\n\n: A caption that is longer than this very narrow table is wide.\n";
+    let (config, pages) = render(body);
+    let page = &pages[0];
+    let rule = rects(page)[0];
+    let first = find(page, "Table");
+    let caption_end = runs(page)
+        .into_iter()
+        .filter(|(_, y, _)| *y < first.1 + 1.0)
+        .map(|(x, _, run)| x + run.width.0)
+        .fold(0.0, f64::max);
+    assert!(close(first.0, rule.x.0), "{} against {}", first.0, rule.x.0);
+    assert!(
+        caption_end > rule.x.0 + 2.0 * rule.width.0,
+        "{caption_end} against {rule:?}"
+    );
+    assert!(caption_end <= config.page.margin_inner.0 + config.page.text_width().0 + 0.01);
 }
 
 #[test]

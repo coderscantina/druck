@@ -68,8 +68,14 @@
       "uppercase": true,
       "tracking": 0.1
     },
+    "detail-marker": {
+      "based-on": "body",
+      "size": "0.6em",
+      "color": "$colors.muted"
+    },
     "detail": {
       "based-on": "list",
+      "marker": "detail-marker",
       "size": "$sizes.small",
       "color": "$colors.muted",
       "space-before": "0.2em"

@@ -147,11 +147,18 @@ impl<'a> Flow<'a> {
         };
         let left = frame.left + (place - table_width) / 2.0;
 
+        // A caption starts at the table's left edge and is as wide as the table, but a table under a
+        // third of the frame lets it run on to the frame's right edge.
+        let caption_width = if table_width < width / 3.0 {
+            frame.left + width - left
+        } else {
+            table_width
+        };
         let mut caption = match table.number {
             None => Vec::new(),
             Some(number) => {
                 let label = &config.labels.table;
-                match self.caption_lines(table.at, label, number.number, table.caption, table_width, true) {
+                match self.caption_lines(table.at, label, number.number, table.caption, caption_width, true) {
                     Some(lines) => lines,
                     None => return,
                 }
