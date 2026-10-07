@@ -176,6 +176,20 @@ Captions use `styles.caption`. A caption reads "Figure 1: " and then the image d
 
 Images are centered in their frame. Their size and placement have no theme settings; see [authoring](AUTHORING.md#images-and-captions).
 
+Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the width of its frame, and spaced like figure captions.
+
+## Tables
+
+Header cells use `styles.table-header` and body cells `styles.table-cell`. A column aligned in the Markdown overrides the style's `align` for that column; other columns keep it. `hyphenate` decides whether long words in cells may break, which also lowers the narrowest width a column can take. The styles' spacing and indent fields do not apply inside cells.
+
+| Key | Effect |
+| --- | --- |
+| `tables.cell-padding` | Space on every side between a cell's text and its edges. |
+| `tables.rule-thickness` | The rules above and below the header row and below each body row. `0pt` draws none. |
+| `tables.rule-color` | The color of those rules. |
+
+There are no vertical rules. A table is spaced like a figure: the caption style's `space-after` above and below it, and its `space-before` between the caption and the table. The header row, with its rules, repeats at the top of each page or column a table continues in.
+
 ## Columns
 
 `page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the text width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the full text width.
@@ -235,7 +249,7 @@ The inner margin sits on the left of odd pages and mirrors on even pages.
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `figure` starts image captions. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `figure` starts image captions and `table` table captions. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 
 ## Resources and distribution
 

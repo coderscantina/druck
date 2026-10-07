@@ -57,7 +57,7 @@ Open for milestone 08: the displayed page-number sequence, which heading supplie
 
 ### Layout directives
 
-Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions); label, cross-reference, and citation syntax is decided in milestones 08 and 09.
+Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions) for figures and [milestone 07](#2026-10-07-milestone-07-multipage-tables) for tables; label, cross-reference, and citation syntax is decided in milestones 08 and 09.
 
 ### CLI
 
@@ -71,7 +71,7 @@ Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORI
 
 ### Dependencies
 
-- `pulldown-cmark` with default features off, for CommonMark with byte offsets. Tables, footnotes, strikethrough, and task lists are enabled only so they can be recognized and reported. Math is left off so `$` in prose stays text.
+- `pulldown-cmark` with default features off, for CommonMark with byte offsets. Tables, footnotes, strikethrough, and task lists are enabled only so they can be recognized and reported. Math is left off so `$` in prose stays text. Footnotes render since [milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) and tables since [milestone 07](#2026-10-07-milestone-07-multipage-tables).
 - `krilla` for PDF output. It embeds and subsets fonts, writes ToUnicode maps from the glyph-to-text ranges we pass, and supports link annotations and, later, outlines and images. Its coordinates match ours: points from the top-left, y down.
 - `rustybuzz` 0.20 for shaping, the same version krilla already depends on, so there is one shaping engine and one font parser in the build.
 
@@ -297,6 +297,69 @@ Scoring is unchanged. Without floats, an image that does not fit leaves a short 
 - Tables can enter the flow the same way, with rows as lines that never split. A table caption can reuse the caption path with the `table` label and its own counter.
 - Cross-references need figure labels attached to the image, likely the `{#fig:x}` attribute, and numbers known before layout. The figure counter should move to a pass before layout then.
 - Title slot images can use the same loader with the theme origin.
+
+## 2026-10-07: Milestone 07 multipage tables
+
+### Table model and syntax
+
+Tables are GitHub pipe tables, parsed by pulldown-cmark with `ENABLE_TABLES`. [The parser](../src/markdown.rs) turns one into `Block::Table` in [the document model](../src/document.rs): the column alignments from the delimiter row (`None` keeps the cell style's alignment), a header row, and body rows, each cell with its location and flat inline content like a paragraph. Every row has one cell per column. A short row is padded with empty cells, as GitHub does. A row with more cells than the header is an error, because pulldown-cmark drops the extra cells without an event; the parser counts unescaped pipes in the row's source to find them. Merged cells are out of scope.
+
+Tables may stand wherever blocks may: in lists, quotations, columns, `full-width`, and `keep`. A table in a footnote is an error, since the note area has no room for that layout. Images in cells are errors. Footnote references in body cells work and are numbered in reading order. A reference in a header cell is an error, because the header repeats on every page and the note would have no single page.
+
+### Caption syntax
+
+A paragraph directly after the table that starts with a colon and a space is its caption, as in Pandoc: `: Caption text`. A blank line must separate them, since GitHub tables run until a blank line. The caption keeps emphasis, strong text, and code. These are errors at their location:
+
+- A `: ` paragraph that does not directly follow a table, or a second one.
+- A body row whose only content is a first cell starting with `: `, which is a caption written without the blank line.
+- A footnote in a caption, as for figures.
+- A caption ending in `{#...}`. Milestone 08 can give `: Caption {#tbl:x}` a meaning without breaking documents, as `{#fig:x}` after an image.
+
+A captioned table is numbered in document order with the `table` label and its own counter, apart from figures, and the caption is set above the table across the frame width, in the caption style. A table without a caption takes no number. The counter lives in [layout](../src/layout/mod.rs) next to the figure counter.
+
+### Column widths
+
+[Table layout](../src/layout/table.rs) shapes every cell once. [Paragraph composition](../src/layout/paragraph.rs) now has a prepare step that shapes and builds the breaking items, and a set step that breaks at a given width, so a cell is measured and set from one shaping. Two widths per cell:
+
+- Natural: the widest line when only hard breaks end lines.
+- Minimum: the widest unbreakable piece, after hyphenation if the cell style hyphenates, with the added hyphen.
+
+A column's widths are the largest of its cells. Cell padding is added on both sides of each column. If the natural widths fit the frame, every column keeps its natural width and the table is centered. Otherwise each column gets one common width clamped between its own minimum and natural width, with the common width chosen so the columns fill the frame. A column of short entries stays on one line, and long text columns share the rest equally. The common width is found by bisection, 64 steps, which is deterministic and exact enough. If even the minimum widths do not fit, the error names the cell with the widest word, its width, and the table's minimum width.
+
+The frame is the text width, the column width inside `columns`, the text width inside `full-width`, and the narrower frame of a list or quotation. Cells are set with the paragraph breaker at their column width plus 10⁻⁶ pt, so text measured to fit exactly is not broken by rounding.
+
+### Rows in the flow
+
+A table enters the flow as lines. A row is one line, as tall as its tallest cell plus the padding above and below and a rule below it; the header row also has a rule above. Cells are top aligned. The caption lines and the header row never end a page or column, so the caption stays with the header and the first row. Breaks between body rows follow the paragraph costs: 50 between rows, 5 000 more for leaving the first row alone at the bottom or the last row alone at the top. The table is spaced like a figure: the caption style's `space-after` above and below it and `space-before` between caption and table. No new theme settings were needed.
+
+Because a row is a single line, pages and columns can never break inside it. Pagination, column splits, balancing, keep groups, and footnote placement apply unchanged.
+
+### Header repetition at the composer boundary
+
+The composer receives each table's line range, the range of rows a page or column may start at, and a copy of the header row ([`pages::Table`](../src/layout/pages.rs)). From it the composer builds one entry per body line: the header to set above that line when a page or column starts there. Three places read it:
+
+- A page starting inside a full-width table counts the header in its height.
+- A column, first or second, that starts inside a table counts it in the column height used for balancing.
+- Rendering places the header copy at the top of that page or column.
+
+The lookup is constant time, so pagination stays proportional to lines times lines per page. The binary search for the even column split now sees a header jump in the second column's height; the walk outward from the crossing point covers that.
+
+### Diagnostics
+
+- A row taller than the text area together with the repeated header and the first lines of its notes is reported at the row: "this table row with the repeated header is ... high". A column is as tall as the text area, so the same check covers columns.
+- The caption, header, and first row together too tall are reported at the table.
+- A word too wide for the minimum layout is reported at its cell, see above. Characters without a glyph are reported at their cell.
+- All parser errors above carry their location.
+
+### Composer gap in the images sample
+
+Page 2 of `samples/images.md` ends about a quarter page early. The text after the chart does fit: the page ending after that paragraph and its note is a valid candidate, and cheaper for page 2 alone (fill cost 92 191 against 113 041). The search still prefers the earlier end, because it leaves page 3 fuller: 104 387 against 163 181 for page 3. Both pages end short since the tall image on page 4 cannot move up, and the square fill cost spreads the shortfall over both pages rather than leaving it on one. This is the scoring trade-off recorded for milestone 06, not a feasibility defect. Tables do not trigger it, because rows are short units that the search can move one at a time. The code was left unchanged.
+
+### Consequences for milestone 08
+
+- Table numbers come from a counter in layout, like figure numbers. Cross-references need numbers before layout, so both counters should move to a pass over the document model, which already holds every caption.
+- `: Caption {#tbl:x}` is the reserved label form, currently an error.
+- A table of tables, if wanted, can read the same captions.
 
 ## Recording a decision
 

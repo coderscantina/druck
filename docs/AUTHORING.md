@@ -140,6 +140,7 @@ The body is CommonMark. These constructs render:
 - Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
 - [Images](#images-and-captions) with captions.
+- [Tables](#tables) with captions.
 - [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
@@ -150,7 +151,6 @@ Line breaks are chosen for each whole paragraph. Words are hyphenated by the rul
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported yet: tables. They arrive in a later milestone.
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
@@ -184,6 +184,31 @@ Errors name the image's line and file: a missing or unreadable file, a malformed
 
 SVG text uses the bundled Libertinus fonts, never the fonts installed on the machine, so an SVG renders the same everywhere.
 
+## Tables
+
+Tables are pipe tables as on GitHub. The second line sets each column's alignment: `:--` left, `:-:` centered, `--:` right, and `---` the alignment of the theme's cell style. A paragraph directly after the table that starts with a colon and a space is its caption:
+
+```markdown
+| Year | Event               | Pages |
+|-----:|:--------------------|------:|
+| 1455 | The *42-line Bible* | 1 286 |
+| 1978 | TeX                 |   700 |
+
+: Two events in the history of typesetting.
+```
+
+- Cells hold text with emphasis, strong text, inline code, links, and footnote references. Write `\|` for a pipe inside a cell, also inside code.
+- A row with fewer cells than the header gets empty cells. A row with more cells is an error.
+- Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
+- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table. Tables are numbered apart from figures. A table without a caption has no number.
+- A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes, and a label such as `{#tbl:events}` at its end is reserved for cross-references and reported for now.
+
+Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.
+
+A table can run over several pages and columns. Pages and columns break only between rows, never inside a row. The header row is repeated at the top of each page or column the table continues in, and the caption stays with the start of the table. A row is as tall as its tallest cell, and a row that does not fit on a page together with the repeated header is an error at the row. Notes referenced in a cell go at the foot of that row's page.
+
+A table inside `full-width` spans the text area; the columns above it are balanced and resume below it. These are errors: an image in a cell, a footnote reference in the header row (the header repeats, so the note would have no single page), and a table inside a footnote. Merged cells are not supported.
+
 ## Footnotes
 
 Footnotes use the common Markdown extension syntax. A reference is `[^label]` in the text; the definition is `[^label]:` at the start of a line, anywhere in the document. Lines indented by four spaces continue the definition, so a note can hold several paragraphs.
@@ -211,7 +236,7 @@ Text in a `columns` section is set in two columns of equal width with `column-ga
 
 When a section ends, its last columns are balanced: the column break goes where both columns are most even, and the next block starts below the taller column. A `full-width` block inside a section does the same before it, runs across the text area, and the columns resume below it. Changing between one and two columns never starts a new page by itself. At least `column-gap` separates the columns from the full-width text above and below them.
 
-Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order.
+Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, a table breaks between rows with its header repeated, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order.
 
 `page-break` inside a section ends the page. The columns above it are balanced, and the section continues in two columns on the next page.
 
