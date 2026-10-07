@@ -107,7 +107,7 @@ fn mm(value: f64) -> f64 {
 #[test]
 fn named_themes_load_from_the_os_config_directory_with_their_asset_origin() {
     let sandbox = Sandbox::new("named-themes");
-    let shared = sandbox.root.join("config/druck/themes");
+    let shared = sandbox.root.join("config").join("druck").join("themes");
     fs::create_dir_all(shared.join("fonts")).unwrap();
     fs::write(shared.join("fonts/dummy.otf"), "fixture").unwrap();
     fs::write(

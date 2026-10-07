@@ -32,7 +32,7 @@ fn directory() -> Option<PathBuf> {
         std::env::var_os("HOME").map(PathBuf::from),
         std::env::var_os("APPDATA").map(PathBuf::from),
     )
-    .map(|root| root.join("druck/themes"))
+    .map(|root| root.join("druck").join("themes"))
 }
 
 fn config_root(
