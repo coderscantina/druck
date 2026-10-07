@@ -3,7 +3,7 @@
 //! Each page uses the first variant present in its chain. The title page: `title`, `body`. The first
 //! body page: `first`, then `odd` or `even`, then `body`. Other pages: `odd` or `even`, then `body`.
 //! Parity, `{page}`, and `{pages}` follow the physical pages, counted from 1 and including the title
-//! page.
+//! page and blank pages, which have no bands.
 //!
 //! `{section}` is the first level 1 heading that starts on the page, otherwise the last one on an
 //! earlier page. `{subsection}` is the first level 2 heading that starts on the page after the
@@ -30,9 +30,12 @@ use crate::diagnostic::Diagnostic;
 use crate::page::{Item, Page, Position};
 use crate::text::{Fonts, ShapedRun};
 
-/// Draws the header and footer of every page. `anchors` are the final anchor positions.
+/// Draws the header and footer of every page but the `blanks`. `first` is the index of the first body
+/// page and `anchors` are the final anchor positions.
 pub(super) fn draw(
     pages: &mut [Page],
+    first: usize,
+    blanks: &[usize],
     structure: &Structure,
     anchors: &[Position],
     config: &Config,
@@ -49,7 +52,10 @@ pub(super) fn draw(
     let total = pages.len().to_string();
     let mut errors = Vec::new();
     for (index, page) in pages.iter_mut().enumerate() {
-        let (name, variant) = variant(config, index, title_page);
+        if blanks.contains(&index) {
+            continue;
+        }
+        let (name, variant) = variant(config, index, title_page, first);
         let number = (index + 1).to_string();
         let (section, subsection) = &marks[index];
         let value = |placeholder: &Placeholder| match placeholder {
@@ -90,8 +96,8 @@ pub(super) fn draw(
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The variant of the page at `index`, counted from 0, and its name.
-fn variant(config: &Config, index: usize, title_page: bool) -> (&'static str, &PageVariant) {
+/// The variant of the page at `index`, counted from 0, and its name. The body starts at `first`.
+fn variant(config: &Config, index: usize, title_page: bool, first: usize) -> (&'static str, &PageVariant) {
     let variants = &config.pages;
     let parity = if index.is_multiple_of(2) {
         ("odd", variants.odd.as_ref())
@@ -101,7 +107,7 @@ fn variant(config: &Config, index: usize, title_page: bool) -> (&'static str, &P
     let body = ("body", Some(&variants.body));
     let chain = if title_page && index == 0 {
         vec![("title", variants.title.as_ref()), body]
-    } else if index == usize::from(title_page) {
+    } else if index == first {
         vec![("first", variants.first.as_ref()), parity, body]
     } else {
         vec![parity, body]

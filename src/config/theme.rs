@@ -51,6 +51,8 @@ pub struct DocumentDefaults {
     pub lang: Lang,
     pub title_page: bool,
     pub toc: bool,
+    /// Whether the body starts on an odd page, after blank pages where needed.
+    pub duplex: bool,
     pub numbered_headings: bool,
     pub numbering_depth: HeadingDepth,
     pub toc_depth: HeadingDepth,

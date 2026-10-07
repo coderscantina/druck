@@ -49,7 +49,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | Key | Purpose |
 | --- | --- |
 | `version`, `$schema` | Format version and editor hint. |
-| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`. |
+| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`. |
 | `fonts` | Font families and their files. |
 | `images` | Named images used by title slots. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
@@ -348,7 +348,9 @@ A slot marked `required` whose value is missing is an error. Title slots are che
 | First body page | `first`, then `odd` or `even` by parity, then `body`. |
 | Other body pages | `odd` or `even` by parity, then `body`. |
 
-A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one.
+A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page and blank pages. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one, or the third with `document.duplex`.
+
+With `document.duplex: true` the body starts on an odd page: a blank page follows the title page, and the table of contents ends its page and is followed by a blank page if the text would otherwise start on an even one. Blank pages have no header or footer but count in `{page}` and `{pages}`.
 
 The inner margin sits on the left of odd pages and, unless `page.margins.mirror` is `false`, on the right of even pages.
 

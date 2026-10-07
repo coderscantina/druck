@@ -46,6 +46,8 @@ pub struct FrontMatter {
     #[serde(default, deserialize_with = "non_null")]
     pub toc: Option<bool>,
     #[serde(default, deserialize_with = "non_null")]
+    pub duplex: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
     pub numbered_headings: Option<bool>,
     #[serde(default, deserialize_with = "non_null")]
     pub numbering_depth: Option<HeadingDepth>,
@@ -218,6 +220,7 @@ impl FrontMatter {
             ("lang", self.lang.as_ref().map(json)),
             ("title-page", self.title_page.map(Value::Bool)),
             ("toc", self.toc.map(Value::Bool)),
+            ("duplex", self.duplex.map(Value::Bool)),
             ("numbered-headings", self.numbered_headings.map(Value::Bool)),
             ("numbering-depth", self.numbering_depth.as_ref().map(json)),
             ("toc-depth", self.toc_depth.as_ref().map(json)),

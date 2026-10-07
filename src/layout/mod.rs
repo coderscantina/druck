@@ -74,6 +74,8 @@ pub fn layout(
     } else {
         None
     };
+    // In duplex a blank page follows the title page, so the body starts on an odd page.
+    let blank = (title_page.is_some() && config.document.duplex).then(|| blank_page(config));
     let pass = Pass {
         document,
         cited,
@@ -83,12 +85,16 @@ pub fn layout(
         fonts,
         source,
         structure: &structure,
-        first: usize::from(title_page.is_some()),
+        first: usize::from(title_page.is_some()) + usize::from(blank.is_some()),
     };
     let shown = structure.shown_pages(config);
     let (body, anchors) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
-    let mut pages: Vec<Page> = title_page.into_iter().chain(body).collect();
-    bands::draw(&mut pages, &structure, &anchors, config, fonts)?;
+    let mut blanks = body.blanks;
+    if blank.is_some() {
+        blanks.insert(0, 1);
+    }
+    let mut pages: Vec<Page> = title_page.into_iter().chain(blank).chain(body.pages).collect();
+    bands::draw(&mut pages, pass.first, &blanks, &structure, &anchors, config, fonts)?;
     let outline = structure
         .headings
         .iter()
@@ -160,11 +166,11 @@ struct Pass<'a> {
 impl Pass<'_> {
     /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages and
     /// where each anchor is in the whole document.
-    fn run(&self, assumed: &[usize]) -> Result<(Vec<Page>, Vec<Position>), Vec<Diagnostic>> {
+    fn run(&self, assumed: &[usize]) -> Result<(pages::Composed, Vec<Position>), Vec<Diagnostic>> {
         let content = self.content(assumed)?;
-        let pages = pages::compose(content, self.first, self.config, self.source)?;
+        let body = pages::compose(content, self.first, self.config, self.source)?;
         let mut positions = vec![None; self.structure.anchors.len()];
-        for (index, page) in pages.iter().enumerate() {
+        for (index, page) in body.pages.iter().enumerate() {
             for item in &page.items {
                 if let Item::Anchor { id, x, y } = item {
                     positions[*id] = Some(Position {
@@ -179,7 +185,7 @@ impl Pass<'_> {
             .into_iter()
             .map(|position| position.expect("layout places every anchor"))
             .collect();
-        Ok((pages, positions))
+        Ok((body, positions))
     }
 
     /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
@@ -214,8 +220,13 @@ impl Pass<'_> {
         {
             flow.title(slots, frame);
         }
+        let mut recto = None;
         if config.document.toc {
             flow.contents(frame);
+            if config.document.duplex {
+                flow.lines.last_mut().expect("the contents have a heading").after = Break::Forced;
+                recto = Some(flow.lines.len());
+            }
         }
         flow.blocks(&self.document.blocks, frame);
         let body = std::mem::take(&mut flow.lines);
@@ -234,12 +245,22 @@ impl Pass<'_> {
         }
         Ok(pages::Content {
             body,
+            recto,
             keeps,
             columns,
             tables,
             notes,
             continued,
         })
+    }
+}
+
+/// A page left blank, without header or footer.
+fn blank_page(config: &Config) -> Page {
+    Page {
+        width: config.page.width,
+        height: config.page.height,
+        items: Vec::new(),
     }
 }
 

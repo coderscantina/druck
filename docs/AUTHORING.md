@@ -84,6 +84,7 @@ Each setting writes one property of the resolved theme.
 | `lang` | `en`, `de` | `document.lang` |
 | `title-page` | `true`, `false` | `document.title-page` |
 | `toc` | `true`, `false` | `document.toc` |
+| `duplex` | `true`, `false` | `document.duplex` |
 | `numbered-headings` | `true`, `false` | `document.numbered-headings` |
 | `numbering-depth` | 1 to 6 | `document.numbering-depth` |
 | `toc-depth` | 1 to 6 | `document.toc-depth` |
@@ -361,6 +362,8 @@ Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default 
 ### Table of contents
 
 `toc: true` sets a table of contents after the title block, or at the top of the first page after a title page. It lists headings down to `toc-depth` (2 in the default theme) with their numbers and pages, and each entry is a link to its heading. To start the text on a new page after the contents, begin the body with `::: page-break`.
+
+`duplex: true` prepares a document for printing on both sides: the text starts on an odd page, the right-hand page. A blank page follows the title page, and the contents end their page and are followed by a blank page if needed. Blank pages have no header or footer and count in the page numbers.
 
 ### Page numbers and running headers
 

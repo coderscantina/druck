@@ -1327,3 +1327,51 @@ fn a_page_end_after_a_colon_before_a_list_or_code_costs_a_little() {
     assert_eq!(breaks_of(&lines, 9), [Break::Allowed(pages::INTRODUCTION)]);
     assert_eq!(breaks_of(&lines, 15), [Break::Allowed(0.0)]);
 }
+
+#[test]
+fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
+    let yaml = "title: Report\ntitle-page: true\ntoc: true\nduplex: true\n";
+    let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
+    let config = resolve(Inputs {
+        theme: None,
+        document: SettingsInput {
+            source: source(),
+            settings,
+        },
+        overrides: SettingsInput {
+            source: Source::Cli {
+                working_dir: "/fake".into(),
+            },
+            settings: FrontMatter::default(),
+        },
+    })
+    .expect("configuration resolves");
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    let document = crate::markdown::parse("# One\n\nText.\n", 1, &source()).expect("document parses");
+    let output = layout(
+        &document,
+        &Cited::default(),
+        &[],
+        &HashMap::new(),
+        &config,
+        &fonts,
+        &source(),
+    )
+    .unwrap();
+    let pages = &output.pages;
+    let bands = |page: &Page| -> Vec<String> {
+        (page.items.iter())
+            .filter_map(|item| match item {
+                Item::Text { y, run, .. } if is_band(*y) => Some(run.text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
+    assert_eq!(pages.len(), 5);
+    assert!(pages[1].items.is_empty() && pages[3].items.is_empty());
+    assert!(lines(&pages[2])[1].2.ends_with(" 5"), "{:?}", lines(&pages[2]));
+    assert_eq!(lines(&pages[4])[0].2, "1 One");
+    assert!(bands(&pages[2]).contains(&"3".to_owned()));
+    assert!(bands(&pages[4]).contains(&"5".to_owned()));
+}

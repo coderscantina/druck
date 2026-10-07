@@ -93,6 +93,8 @@ pub(super) struct Table {
 /// Everything that goes on the pages.
 pub(super) struct Content {
     pub body: Vec<FlowLine>,
+    /// The body line that starts an odd page, after a blank page if needed.
+    pub recto: Option<usize>,
     /// Line ranges of keep groups with their directive locations.
     pub keeps: Vec<(Range<usize>, Location)>,
     /// Line ranges set in two columns, in order.
@@ -105,16 +107,25 @@ pub(super) struct Content {
     pub continued: Vec<Vec<FlowLine>>,
 }
 
+/// The body pages.
+pub(super) struct Composed {
+    pub pages: Vec<Page>,
+    /// The physical indices of blank pages among them.
+    pub blanks: Vec<usize>,
+}
+
 /// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
-/// page, which decides parity: odd pages, counted from 1, have the inner margin on the left.
+/// page, which decides parity: odd pages, counted from 1, have the inner margin on the left. Blank pages
+/// are inserted so that the `recto` line starts an odd page.
 pub(super) fn compose(
     content: Content,
     first: usize,
     config: &Config,
     source: &Source,
-) -> Result<Vec<Page>, Vec<Diagnostic>> {
+) -> Result<Composed, Vec<Diagnostic>> {
     let Content {
         mut body,
+        recto,
         keeps,
         columns,
         tables,
@@ -144,7 +155,7 @@ pub(super) fn compose(
             "no page breaks satisfy the layout constraints",
         )]
     })?;
-    Ok(render(&plans, &mut body, &headers, notes, first, config))
+    Ok(render(&plans, &mut body, &headers, notes, (first, recto), config))
 }
 
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
@@ -690,15 +701,20 @@ fn render(
     body: &mut [FlowLine],
     headers: &[Option<&Line>],
     mut notes: Notes,
-    first: usize,
+    (first, recto): (usize, Option<usize>),
     config: &Config,
-) -> Vec<Page> {
+) -> Composed {
     let geometry = &config.page;
     let footnotes = &config.footnotes;
     let height = geometry.text_height().0;
     let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
+    let mut blanks = Vec::new();
     for plan in plans {
+        if recto == Some(plan.lines.start) && !(first + pages.len()).is_multiple_of(2) {
+            blanks.push(first + pages.len());
+            pages.push(super::blank_page(config));
+        }
         let index = first + pages.len();
         let left = geometry.left_margin(index).0;
         let shift = geometry.prose_shift(index);
@@ -781,13 +797,9 @@ fn render(
         });
     }
     if pages.is_empty() {
-        pages.push(Page {
-            width: geometry.width,
-            height: geometry.height,
-            items: Vec::new(),
-        });
+        pages.push(super::blank_page(config));
     }
-    pages
+    Composed { pages, blanks }
 }
 
 /// Places body lines from `y` down, after the repeated header row if the first one has one, dropping

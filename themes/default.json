@@ -5,6 +5,7 @@
     "lang": "en",
     "title-page": false,
     "toc": false,
+    "duplex": false,
     "numbered-headings": true,
     "numbering-depth": 3,
     "toc-depth": 2,
