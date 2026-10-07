@@ -172,3 +172,50 @@ fn reports_unknown_styles_and_styles_for_another_kind_of_block_at_the_attribute(
         ]
     );
 }
+
+#[test]
+fn sets_automatic_heading_numbers_hanging_with_the_gap_of_their_style() {
+    let mut config = config();
+    config.styles.heading_2.number_gap = Some(Pt(30.0));
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let pages = render(&config, &fonts, "# One\n\n## Two\n\nText.\n").unwrap();
+    let runs = runs(&pages);
+    let (_, left, baseline, number) = find(&runs, "1.1");
+    let (_, text, text_baseline, _) = find(&runs, "Two");
+    assert_eq!(text_baseline, baseline);
+    assert!((text - (left + number.width.0 + 30.0)).abs() < 1e-9, "{text}");
+}
+
+#[test]
+fn sets_contents_entries_in_the_style_of_their_level() {
+    let mut config = config();
+    config.document.toc = true;
+    let style = |size| Style {
+        size: Pt(size),
+        ..config.styles.toc_entry.clone()
+    };
+    config.toc.level_styles = vec![style(20.0), style(8.0)];
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let pages = render(&config, &fonts, "# One\n\n## Two\n\n### Three\n\nText.\n").unwrap();
+    let runs = runs(&pages);
+    let size = |text: &str, size: f64| runs.iter().any(|(.., run)| run.text == text && run.size.0 == size);
+    assert!(size("One", 20.0));
+    assert!(size("Two", 8.0));
+}
+
+#[test]
+fn scales_lists_in_footnotes_to_the_footnote_size() {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let body = "Text.[^n]\n\n- Body item\n\n[^n]: Note.\n\n    - Note item\n";
+    let pages = render(&config, &fonts, body).unwrap();
+    let sizes: Vec<f64> = runs(&pages)
+        .into_iter()
+        .filter(|(.., run)| run.text == "•")
+        .map(|(.., run)| run.size.0)
+        .collect();
+    let ratio = config.styles.footnote.size.0 / config.styles.body.size.0;
+    assert_eq!(sizes.len(), 2, "{sizes:?}");
+    assert!((sizes[0] - config.styles.list.size.0).abs() < 1e-9);
+    assert!((sizes[1] - config.styles.list.size.0 * ratio).abs() < 1e-9);
+}

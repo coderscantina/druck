@@ -1077,7 +1077,7 @@ impl<'a> Builder<'a> {
     /// Reads a citation group such as `[@a, p. 3; @b]` at the `[` at `offset`, and whether it was one.
     /// The group ends at the first `]` and may span lines.
     fn bracketed_citation(&mut self, offset: usize) -> bool {
-        if !self.links.is_empty() || !self.body[offset + 1..].trim_start().starts_with('@') {
+        if !self.links.is_empty() {
             return false;
         }
         let Some(close) = self.body[offset..].find(']') else {
@@ -1260,6 +1260,10 @@ impl<'a> Builder<'a> {
                 classes,
                 attrs,
             } => {
+                if self.containers.iter().any(|c| matches!(c, Container::Footnote { .. })) {
+                    self.skip_reported(offset, "headings are not allowed in footnotes");
+                    return;
+                }
                 self.open_leaf(offset, Some(level as u8), false);
                 let brace = self.body[range].rfind('{').map_or(offset, |index| offset + index);
                 if !attrs.is_empty() || classes.len() > 1 {
@@ -2364,6 +2368,11 @@ mod tests {
                 "a[^n]\n\n[^n]: | a |\n    |---|",
                 (3, 7),
                 "tables are not allowed in footnotes",
+            ),
+            (
+                "a[^n]\n\n[^n]: Note\n\n    # Heading",
+                (5, 5),
+                "headings are not allowed in footnotes",
             ),
             (
                 "text\n\n: Caption",

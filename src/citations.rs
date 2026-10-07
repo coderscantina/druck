@@ -3,22 +3,18 @@
 //! Citations are added in reading order: the body in order, with a footnote's content at its reference.
 //! Numeric labels and the order of author-date suffixes follow it.
 
-use std::collections::HashMap;
-
-use crate::bibliography::{Bibliography, Citations, Reference};
+use crate::bibliography::{Bibliography, Citations, Part, Reference};
 use crate::config::resolved::Config;
 use crate::config::source::Source;
-use crate::config::theme::CitationStyle;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Document, Inline, Location};
 
 /// The formatted citations of a document and the works they cite.
 #[derive(Debug, Default)]
 pub struct Cited {
-    /// The text of each of [`Document::citations`].
-    pub texts: Vec<String>,
-    /// The reference each citation links to, the first work it shows, as an index into the section's references.
-    pub targets: Vec<usize>,
+    /// The text of each of [`Document::citations`] in pieces. A piece links to the entry of the work it shows,
+    /// given as an index into the section's references.
+    pub citations: Vec<Vec<Part>>,
     /// `None` for a document without citations.
     pub section: Option<Section>,
 }
@@ -73,30 +69,17 @@ pub fn resolve(
         return Err(errors);
     }
 
-    let style = config.document.citation_style;
-    let rendered = citations.finish(style, config.document.lang);
-    let positions: HashMap<&str, usize> = rendered
-        .references()
-        .iter()
-        .enumerate()
-        .map(|(position, reference)| (reference.key.as_str(), position))
+    let rendered = citations.finish(config.document.citation_style, config.document.lang);
+    let parts = ids
+        .into_iter()
+        .map(|id| {
+            rendered
+                .citation(id.expect("every citation is in the reading order"))
+                .to_vec()
+        })
         .collect();
-    let mut texts = Vec::with_capacity(ids.len());
-    let mut targets = Vec::with_capacity(ids.len());
-    for (citation, id) in document.citations.iter().zip(ids) {
-        let id = id.expect("every citation is in the reading order");
-        texts.push(rendered.citation(id).to_owned());
-        let mut shown = citation.syntax.items.iter().map(|item| positions[item.key.as_str()]);
-        // Numeric citations show their numbers in order; author-date citations show works as written.
-        let target = match style {
-            CitationStyle::Numeric => shown.min(),
-            CitationStyle::AuthorDate => shown.next(),
-        };
-        targets.push(target.expect("a citation has at least one item"));
-    }
     Ok(Cited {
-        texts,
-        targets,
+        citations: parts,
         section: Some(Section {
             source: bibliography.source().clone(),
             references: rendered.into_references(),

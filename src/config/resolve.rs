@@ -310,6 +310,10 @@ impl<'a> Resolver<'a> {
             self.error(&property("size"), "font size must be greater than zero");
         }
         let em = size.unwrap_or(body);
+        let number_gap = raw
+            .number_gap
+            .as_ref()
+            .map(|gap| self.spacing(gap, &property("number-gap"), em));
         let color = self.color(&raw.color, &property("color"));
         let space_before = self.spacing(&raw.space_before, &property("space-before"), em);
         let space_after = self.spacing(&raw.space_after, &property("space-after"), em);
@@ -331,6 +335,10 @@ impl<'a> Resolver<'a> {
             tracking: raw.tracking.get(),
             uppercase: raw.uppercase,
             keep_with_next: raw.keep_with_next,
+            number_gap: match number_gap {
+                Some(gap) => Some(gap?),
+                None => None,
+            },
         })
     }
 
@@ -773,7 +781,15 @@ impl<'a> Resolver<'a> {
         let body = self.body_size()?;
         let page = self.page(body);
         let styles = (theme.styles.clone())
-            .try_map(|name, raw| Ok::<_, ()>(self.block(&format!("styles.{name}"), &raw, body)))
+            .try_map(|name, raw| {
+                if raw.number_gap.is_some() && !name.starts_with("heading-") {
+                    self.error(
+                        &format!("styles.{name}.number-gap"),
+                        "number-gap applies only to heading-1 to heading-6",
+                    );
+                }
+                Ok::<_, ()>(self.block(&format!("styles.{name}"), &raw, body))
+            })
             .and_then(|styles| styles.try_map(|_, style| style.ok_or(())))
             .ok();
         let custom_styles = self.custom_styles(body);
@@ -866,16 +882,29 @@ impl<'a> Resolver<'a> {
                 )?,
             })
         })();
-        let toc = self
-            .spacing(
+        let toc = (|| {
+            let level_indent = self.spacing(
                 &theme.toc.level_indent,
                 "toc.level-indent",
                 em_of(s.map(|s| &s.toc_entry)),
-            )
-            .map(|level_indent| resolved::Toc {
+            )?;
+            let level_styles = theme.toc.level_styles.iter().enumerate().map(|(level, name)| {
+                let (styles, custom) = (s?, custom_styles.as_ref()?);
+                let found = custom.get(name).map(CustomStyle::style).or_else(|| styles.named(name));
+                if found.is_none() {
+                    self.error(
+                        &format!("toc.level-styles.{level}"),
+                        format!("style \"{name}\" is neither a built-in nor a custom style"),
+                    );
+                }
+                found.cloned()
+            });
+            Some(resolved::Toc {
                 level_indent,
                 leader: theme.toc.leader,
-            });
+                level_styles: level_styles.collect::<Option<_>>()?,
+            })
+        })();
 
         let page = page?;
         let slot_styles = SlotStyles {

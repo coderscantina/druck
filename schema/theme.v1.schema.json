@@ -226,27 +226,27 @@
         },
         "heading-1": {
           "description": "Level 1 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "heading-2": {
           "description": "Level 2 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "heading-3": {
           "description": "Level 3 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "heading-4": {
           "description": "Level 4 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "heading-5": {
           "description": "Level 5 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "heading-6": {
           "description": "Level 6 headings.",
-          "$ref": "#/$defs/blockStyle"
+          "$ref": "#/$defs/headingStyle"
         },
         "title": {
           "description": "Document title.",
@@ -519,6 +519,14 @@
         "leader": {
           "type": "boolean",
           "description": "Whether dot leaders connect entries to page numbers."
+        },
+        "level-styles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": "The built-in or custom style of the entries at each heading level, starting with level 1. The last one repeats for deeper levels. Without any, every entry uses toc-entry."
         }
       },
       "description": "Table of contents layout."
@@ -897,6 +905,93 @@
         }
       },
       "description": "Style of one block element."
+    },
+    "headingStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "font": {
+          "description": "Font family.",
+          "$ref": "#/$defs/fontSpec"
+        },
+        "size": {
+          "description": "Font size. em is relative to the body size.",
+          "$ref": "#/$defs/sizeSpec"
+        },
+        "weight": {
+          "$ref": "#/$defs/weight"
+        },
+        "style": {
+          "enum": [
+            "normal",
+            "italic"
+          ],
+          "description": "Font style."
+        },
+        "color": {
+          "description": "Text color.",
+          "$ref": "#/$defs/colorSpec"
+        },
+        "line-height": {
+          "description": "Line height as a multiple of this element's font size.",
+          "$ref": "#/$defs/lineHeight"
+        },
+        "align": {
+          "enum": [
+            "justify",
+            "left",
+            "center",
+            "right"
+          ],
+          "description": "Text alignment."
+        },
+        "hyphenate": {
+          "type": "boolean",
+          "description": "Whether words may be hyphenated."
+        },
+        "space-before": {
+          "description": "Space above the block. em is relative to this element's font size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "space-after": {
+          "description": "Space below the block. em is relative to this element's font size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "indent": {
+          "description": "Left indent of the whole block. em is relative to this element's font size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "first-line-indent": {
+          "description": "Extra indent of each paragraph's first line. em is relative to this element's font size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "tracking": {
+          "type": "number",
+          "minimum": -0.2,
+          "maximum": 1.0,
+          "description": "Letter spacing in em of this element's font size, from -0.2 to 1."
+        },
+        "uppercase": {
+          "type": "boolean",
+          "description": "Whether text is set in capitals. Inline code keeps its case."
+        },
+        "keep-with-next": {
+          "type": "boolean",
+          "description": "Whether the block stays on the page or in the column of the next block."
+        },
+        "number-gap": {
+          "description": "Space between an automatic heading number and the heading text, which hangs. null sets one space after the number.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spacingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Style of a heading level."
     },
     "customStyle": {
       "type": "object",

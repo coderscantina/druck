@@ -3,10 +3,11 @@
 //!
 //! - `[@key]`, `[@a; @b]`: parenthetical citations with one or more keys.
 //! - `[@key, p. 12]`, `[@key, pp. 3-5]`, `[@key, S. 12]`: with a locator after a comma.
+//! - `[see @key]`, `[see @a; also @b]`: text before an item's `@key` is its prefix.
 //! - `@key` and `@key [p. 12]`: narrative citations, only at a word start so that `a@b.de` stays text.
 //!
 //! A locator is `p.`, `pp.`, or `S.`, then a page or a range of two pages, each made of letters and digits ("12",
-//! "xiv", "A3"). The range separator is `-` or an en dash and is normalized to an en dash. Keys with the prefixes of
+//! "xiv", "A3"). A bracket without any `@key` is text. The range separator is `-` or an en dash and is normalized to an en dash. Keys with the prefixes of
 //! cross-references (`sec:`, `fig:`, `tbl:`) are not citations: a bracket group of only such keys is left as text,
 //! and a group that mixes them with citation keys is invalid.
 
@@ -41,6 +42,8 @@ pub struct Item {
     pub key: String,
     /// Where the key is written, including the `@`.
     pub range: Range<usize>,
+    /// The text before the key, such as "see".
+    pub prefix: Option<String>,
     pub locator: Option<Locator>,
 }
 
@@ -154,7 +157,7 @@ fn bracketed(text: &str, open: usize) -> Option<Segment<'_>> {
     let inner_start = open + 1;
     let close = inner_start + text[inner_start..].find(']')?;
     let inner = &text[inner_start..close];
-    if !inner.trim_start().starts_with('@') {
+    if inner.split(';').all(|part| key_mark(part).is_none()) {
         return None;
     }
     let mut items = Vec::new();
@@ -190,13 +193,24 @@ fn bracketed(text: &str, open: usize) -> Option<Segment<'_>> {
     })
 }
 
-/// One `@key` or `@key, locator` between the separators, where `offset` is where `part` starts in `text`.
+/// The position of the first `@` in `part` that starts a key: at a word start and before a key character.
+fn key_mark(part: &str) -> Option<usize> {
+    part.match_indices('@').map(|(index, _)| index).find(|&index| {
+        let word_start = part[..index].chars().next_back().is_none_or(char::is_whitespace);
+        word_start && key_end(part, index + 1) > index + 1
+    })
+}
+
+/// One `[prefix] @key` or `[prefix] @key, locator` between the separators, where `offset` is where `part` starts
+/// in `text`.
 fn item(text: &str, offset: usize, part: &str) -> Result<Item, String> {
-    let leading = part.len() - part.trim_start().len();
-    let start = offset + leading;
-    if !text[start..offset + part.len()].starts_with('@') {
+    let Some(mark) = key_mark(part) else {
         return Err(format!("expected `@key` in the citation, found `{}`", part.trim()));
-    }
+    };
+    let start = offset + mark;
+    let prefix = Some(part[..mark].trim())
+        .filter(|prefix| !prefix.is_empty())
+        .map(str::to_owned);
     let end = key_end(text, start + 1);
     if end == start + 1 {
         return Err("expected a citation key after `@`".to_owned());
@@ -215,6 +229,7 @@ fn item(text: &str, offset: usize, part: &str) -> Result<Item, String> {
     Ok(Item {
         key,
         range: start..end,
+        prefix,
         locator,
     })
 }
@@ -249,6 +264,7 @@ fn narrative(text: &str, at: usize) -> Option<Segment<'_>> {
         items: vec![Item {
             key: key.to_owned(),
             range: at..end,
+            prefix: None,
             locator,
         }],
     }))
@@ -301,6 +317,17 @@ mod tests {
         assert_eq!(locators[1].as_ref().unwrap().text(Lang::En), "p.\u{a0}12");
         assert_eq!(locators[2].as_ref().unwrap().text(Lang::En), "pp.\u{a0}3–5");
         assert_eq!(locators[3].as_ref().unwrap().text(Lang::De), "S.\u{a0}7–9");
+    }
+
+    #[test]
+    fn reads_the_text_before_a_key_as_its_prefix() {
+        let text = "[see @a, p. 3; also @b; @c] and [see below] and [mail me@x.org]";
+        let found = citations(text);
+        assert_eq!(found.len(), 1);
+        let prefixes: Vec<_> = found[0].items.iter().map(|item| item.prefix.as_deref()).collect();
+        assert_eq!(prefixes, [Some("see"), Some("also"), None]);
+        assert!(found[0].items[0].locator.is_some());
+        assert_eq!(&text[found[0].items[1].range.clone()], "@b");
     }
 
     #[test]

@@ -51,19 +51,29 @@ pub struct Reference {
     pub content: Vec<Inline>,
 }
 
+/// A piece of citation text. A linked piece points to the work it shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Part {
+    pub text: String,
+    /// The position of the cited work in [`Rendered::references`].
+    pub target: Option<usize>,
+}
+
 /// The formatted result for a whole document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rendered {
-    texts: Vec<String>,
+    citations: Vec<Vec<Part>>,
     references: Vec<Reference>,
 }
 
 impl Rendered {
-    pub fn citation(&self, id: CitationId) -> &str {
-        &self.texts[id.0]
+    /// The text of a citation in pieces, one linked piece per work it shows.
+    pub fn citation(&self, id: CitationId) -> &[Part] {
+        &self.citations[id.0]
     }
 
     /// The cited works in bibliography order.
+    #[cfg(test)]
     pub fn references(&self) -> &[Reference] {
         &self.references
     }
@@ -73,9 +83,17 @@ impl Rendered {
     }
 }
 
+/// One cited work with the text around it in the citation.
+struct Work {
+    /// The entry's index in the bibliography.
+    index: usize,
+    locator: Option<Locator>,
+    prefix: Option<String>,
+}
+
 struct Use {
     form: Form,
-    items: Vec<(usize, Option<Locator>)>,
+    items: Vec<Work>,
 }
 
 pub struct Citations<'a> {
@@ -100,7 +118,11 @@ impl<'a> Citations<'a> {
         let mut missing = Vec::new();
         for (position, item) in citation.items.iter().enumerate() {
             match self.bibliography.index(&item.key) {
-                Some(index) => items.push((index, item.locator.clone())),
+                Some(index) => items.push(Work {
+                    index,
+                    locator: item.locator.clone(),
+                    prefix: item.prefix.clone(),
+                }),
                 None => missing.push(MissingKey {
                     key: item.key.clone(),
                     item: position,
@@ -110,9 +132,9 @@ impl<'a> Citations<'a> {
         if !missing.is_empty() {
             return Err(missing);
         }
-        for &(index, _) in &items {
-            if !self.first_cited.contains(&index) {
-                self.first_cited.push(index);
+        for work in &items {
+            if !self.first_cited.contains(&work.index) {
+                self.first_cited.push(work.index);
             }
         }
         self.uses.push(Use {
@@ -138,7 +160,7 @@ impl<'a> Citations<'a> {
             suffixes: &suffixes,
             lang,
         };
-        let texts = self
+        let citations = self
             .uses
             .iter()
             .map(|usage| match style {
@@ -155,7 +177,7 @@ impl<'a> Citations<'a> {
                 content: format::reference(&entries[index], lang, &suffixes[index]),
             })
             .collect();
-        Rendered { texts, references }
+        Rendered { citations, references }
     }
 }
 
@@ -223,73 +245,134 @@ impl Context<'_> {
         locator.as_ref().map(|locator| locator.text(self.lang))
     }
 
-    fn author_date(&self, usage: &Use) -> String {
+    fn author_date(&self, usage: &Use) -> Vec<Part> {
         let no_date = words(self.lang).no_date;
-        let item = |&(index, ref locator): &(usize, Option<Locator>)| {
-            let entry = &self.entries[index];
-            let year = format!("{}{}", entry.year.as_deref().unwrap_or(no_date), self.suffixes[index]);
-            let year_and_locator = [Some(year.clone()), self.locator(locator)]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
+        let item = |work: &Work| {
+            let entry = &self.entries[work.index];
+            let year = format!(
+                "{}{}",
+                entry.year.as_deref().unwrap_or(no_date),
+                self.suffixes[work.index]
+            );
             match usage.form {
                 Form::Parenthetical => {
                     let parts = [
                         Some(format!("{} {year}", label(entry, self.lang).0)),
-                        self.locator(locator),
+                        self.locator(&work.locator),
                     ];
                     parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
                 }
-                Form::Narrative => format!("{} ({})", label(entry, self.lang).0, year_and_locator.join(", ")),
+                Form::Narrative => {
+                    let year_and_locator = [Some(year), self.locator(&work.locator)];
+                    let inner = year_and_locator.into_iter().flatten().collect::<Vec<_>>().join(", ");
+                    format!("{} ({inner})", label(entry, self.lang).0)
+                }
             }
         };
-        let items: Vec<String> = usage.items.iter().map(item).collect();
-        match usage.form {
-            Form::Parenthetical => format!("({})", items.join("; ")),
-            Form::Narrative => items.join(", "),
+        let parenthetical = usage.form == Form::Parenthetical;
+        let mut parts = Parts::default();
+        if parenthetical {
+            parts.text("(");
         }
+        for (position, work) in usage.items.iter().enumerate() {
+            if position > 0 {
+                parts.text(if parenthetical { "; " } else { ", " });
+            }
+            parts.prefix(work);
+            parts.link(item(work), self.numbers[work.index] - 1);
+        }
+        if parenthetical {
+            parts.text(")");
+        }
+        parts.0
     }
 
-    fn numeric(&self, usage: &Use) -> String {
-        let mut items: Vec<(usize, &Option<Locator>)> = usage
-            .items
-            .iter()
-            .map(|(index, locator)| (self.numbers[*index], locator))
-            .collect();
-        items.sort_by_key(|&(number, _)| number);
-        let number_and_locator = |&(number, locator): &(usize, &Option<Locator>)| match self.locator(locator) {
-            Some(locator) => format!("{number}, {locator}"),
-            None => number.to_string(),
+    fn numeric(&self, usage: &Use) -> Vec<Part> {
+        let mut items: Vec<&Work> = usage.items.iter().collect();
+        // Prefixes such as "see" and "also" refer to the order the author wrote.
+        if items.iter().all(|work| work.prefix.is_none()) {
+            items.sort_by_key(|work| self.numbers[work.index]);
+        }
+        let number_and_locator = |work: &Work| match self.locator(&work.locator) {
+            Some(locator) => format!("{}, {locator}", self.numbers[work.index]),
+            None => self.numbers[work.index].to_string(),
         };
+        let mut parts = Parts::default();
         match usage.form {
-            Form::Parenthetical if items.iter().all(|(_, locator)| locator.is_none()) => {
-                let numbers: Vec<usize> = items.iter().map(|&(number, _)| number).collect();
-                format!("[{}]", group_numbers(&numbers))
+            Form::Parenthetical if items.iter().all(|work| work.locator.is_none() && work.prefix.is_none()) => {
+                let numbers: Vec<usize> = items.iter().map(|work| self.numbers[work.index]).collect();
+                parts.text("[");
+                for (position, (first, last)) in runs(&numbers).into_iter().enumerate() {
+                    if position > 0 {
+                        parts.text(", ");
+                    }
+                    parts.link(first.to_string(), first - 1);
+                    if last > first {
+                        parts.text("–");
+                        parts.link(last.to_string(), last - 1);
+                    }
+                }
+                parts.text("]");
             }
             Form::Parenthetical => {
-                let items: Vec<String> = items.iter().map(number_and_locator).collect();
-                format!("[{}]", items.join("; "))
+                parts.text("[");
+                for (position, work) in items.iter().enumerate() {
+                    if position > 0 {
+                        parts.text("; ");
+                    }
+                    parts.prefix(work);
+                    parts.link(number_and_locator(work), self.numbers[work.index] - 1);
+                }
+                parts.text("]");
             }
             Form::Narrative => {
-                let items: Vec<String> = usage
-                    .items
-                    .iter()
-                    .map(|(index, locator)| {
-                        let label = label(&self.entries[*index], self.lang).0;
-                        format!("{label} [{}]", number_and_locator(&(self.numbers[*index], locator)))
-                    })
-                    .collect();
-                items.join(", ")
+                for (position, work) in usage.items.iter().enumerate() {
+                    if position > 0 {
+                        parts.text(", ");
+                    }
+                    let label = label(&self.entries[work.index], self.lang).0;
+                    let text = format!("{label} [{}]", number_and_locator(work));
+                    parts.link(text, self.numbers[work.index] - 1);
+                }
             }
         }
+        parts.0
     }
 }
 
-/// Joins sorted numbers, collapsing runs of three or more into a range: 1, 2, 3, 5 becomes "1–3, 5".
-pub(super) fn group_numbers(numbers: &[usize]) -> String {
+/// Pieces of citation text under construction.
+#[derive(Default)]
+struct Parts(Vec<Part>);
+
+impl Parts {
+    fn text(&mut self, text: &str) {
+        self.0.push(Part {
+            text: text.to_owned(),
+            target: None,
+        });
+    }
+
+    /// The text before a work, if the author wrote one, and a space.
+    fn prefix(&mut self, work: &Work) {
+        if let Some(prefix) = &work.prefix {
+            self.text(&format!("{prefix} "));
+        }
+    }
+
+    fn link(&mut self, text: String, target: usize) {
+        self.0.push(Part {
+            text,
+            target: Some(target),
+        });
+    }
+}
+
+/// Groups sorted numbers into `(first, last)` runs, collapsing three or more consecutive numbers into one
+/// run and keeping the others single: 1, 2, 3, 5 becomes `(1, 3), (5, 5)`.
+pub(super) fn runs(numbers: &[usize]) -> Vec<(usize, usize)> {
     let mut unique = numbers.to_vec();
     unique.dedup();
-    let mut parts = Vec::new();
+    let mut runs = Vec::new();
     let mut start = 0;
     while start < unique.len() {
         let mut end = start;
@@ -297,11 +380,11 @@ pub(super) fn group_numbers(numbers: &[usize]) -> String {
             end += 1;
         }
         if end - start >= 2 {
-            parts.push(format!("{}–{}", unique[start], unique[end]));
+            runs.push((unique[start], unique[end]));
         } else {
-            parts.extend(unique[start..=end].iter().map(usize::to_string));
+            runs.extend(unique[start..=end].iter().map(|&number| (number, number)));
         }
         start = end + 1;
     }
-    parts.join(", ")
+    runs
 }

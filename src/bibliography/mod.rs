@@ -30,7 +30,7 @@ use std::path::Path;
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
 
-pub use cite::{Citations, Reference};
+pub use cite::{Citations, Part, Reference};
 pub use entry::Entry;
 
 use bibtex::Problem;

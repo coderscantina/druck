@@ -110,7 +110,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "heading-2": {
       "font": "$fonts.heading",
@@ -127,7 +128,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "heading-3": {
       "font": "$fonts.heading",
@@ -144,7 +146,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "heading-4": {
       "font": "$fonts.heading",
@@ -161,7 +164,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "heading-5": {
       "font": "$fonts.heading",
@@ -178,7 +182,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "heading-6": {
       "font": "$fonts.heading",
@@ -195,7 +200,8 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "number-gap": null
     },
     "title": {
       "font": "$fonts.heading",
@@ -551,7 +557,8 @@
   },
   "toc": {
     "level-indent": "1.5em",
-    "leader": true
+    "leader": true,
+    "level-styles": []
   },
   "title-block": {
     "slots": [

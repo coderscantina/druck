@@ -1,5 +1,5 @@
 //! The table of contents: the `contents` label in the `toc-heading` style, then one entry per heading
-//! up to `document.toc-depth`, in the `toc-entry` style.
+//! up to `document.toc-depth`, in the `toc-entry` style or the style `toc.level-styles` names for its level.
 //!
 //! An entry is indented by `toc.level-indent` per level below the first and shows the heading's
 //! number and text. Lines after its first are indented by one more level. The page number is right
@@ -46,7 +46,9 @@ impl<'a> Flow<'a> {
 
     fn entry(&mut self, heading: &Heading, frame: Frame<'a>) {
         let (config, fonts) = (self.config, self.fonts);
-        let style = &config.styles.toc_entry;
+        let levels = &config.toc.level_styles;
+        let level_style = levels.get(usize::from(heading.level) - 1).or(levels.last());
+        let style = level_style.unwrap_or(&config.styles.toc_entry);
         let lang = config.document.lang;
         let face = fonts.face(&style.font, style.weight, style.style);
         let em = style.size.0;

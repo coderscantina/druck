@@ -546,6 +546,10 @@ pub struct BlockStyle {
     pub uppercase: bool,
     /// The block never ends a page or column without the next block.
     pub keep_with_next: bool,
+    /// Space between an automatic heading number and the heading text, for `heading-1` to `heading-6`.
+    /// Without it, one space follows the number.
+    #[serde(default)]
+    pub number_gap: Option<Spec<Spacing>>,
 }
 
 /// A named style applied with `{.name}`: the style named by `based-on` with the fields given here
@@ -616,6 +620,7 @@ impl CustomStyle {
             tracking: self.tracking.unwrap_or(base.tracking),
             uppercase: self.uppercase.unwrap_or(base.uppercase),
             keep_with_next: self.keep_with_next.unwrap_or(base.keep_with_next),
+            number_gap: base.number_gap,
         }
     }
 }
@@ -740,6 +745,10 @@ pub struct Bibliography {
 pub struct Toc {
     pub level_indent: Spec<Spacing>,
     pub leader: bool,
+    /// The style of the entries at each heading level, a built-in or custom style name. The last one repeats for
+    /// deeper levels. Without any, every entry is in `toc-entry`.
+    #[serde(default)]
+    pub level_styles: Vec<String>,
 }
 
 /// Ordered content slots for the title block at the start of the body, and the space below it. `em`

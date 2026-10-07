@@ -192,6 +192,8 @@ pub struct Style {
     pub tracking: f64,
     pub uppercase: bool,
     pub keep_with_next: bool,
+    /// Space after an automatic heading number; `None` is one space. Only heading styles have it.
+    pub number_gap: Option<Pt>,
 }
 
 /// A custom style by the kind of block it applies to, which its built-in base decides.
@@ -306,6 +308,8 @@ pub struct Bibliography {
 pub struct Toc {
     pub level_indent: Pt,
     pub leader: bool,
+    /// The entry style per heading level, the last repeating for deeper levels; empty for `toc-entry` throughout.
+    pub level_styles: Vec<Style>,
 }
 
 /// The title block's slots and the space below it.

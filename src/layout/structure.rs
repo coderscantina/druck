@@ -15,7 +15,7 @@ use crate::document::{Block, Document, Inline, Location};
 
 /// Numbers, anchors, and labels of a document.
 pub(super) struct Structure {
-    /// Headings of the body in document order. Headings inside footnotes are not part of the structure.
+    /// Headings of the body in document order.
     pub headings: Vec<Heading>,
     /// Each image of the body in document order: its number and anchor, or `None` without a caption.
     pub figures: Vec<Option<Numbered>>,
@@ -137,7 +137,7 @@ impl Walk<'_> {
         }
     }
 
-    /// Notes only hold references; their headings, if any, are set unnumbered.
+    /// Notes only hold references.
     fn references(&mut self, blocks: &[Block]) {
         for block in blocks {
             match block {

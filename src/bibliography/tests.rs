@@ -34,7 +34,11 @@ fn render(texts: &[&str], style: CitationStyle, lang: Lang) -> (Rendered, Vec<Ci
 
 fn cited(texts: &[&str], style: CitationStyle, lang: Lang) -> Vec<String> {
     let (rendered, ids) = render(texts, style, lang);
-    ids.iter().map(|&id| rendered.citation(id).to_owned()).collect()
+    ids.iter().map(|&id| text(&rendered, id)).collect()
+}
+
+fn text(rendered: &Rendered, id: CitationId) -> String {
+    rendered.citation(id).iter().map(|part| part.text.as_str()).collect()
 }
 
 fn plain(content: &[Inline]) -> String {
@@ -170,8 +174,8 @@ fn adds_letters_to_works_with_the_same_label_and_year() {
         })
         .collect();
     let rendered = citations.finish(CitationStyle::AuthorDate, Lang::En);
-    assert_eq!(rendered.citation(ids[0]), "(Smith 2024b)");
-    assert_eq!(rendered.citation(ids[1]), "(Smith 2024a)");
+    assert_eq!(text(&rendered, ids[0]), "(Smith 2024b)");
+    assert_eq!(text(&rendered, ids[1]), "(Smith 2024a)");
     assert_eq!(rendered.references()[0].key, "y");
 }
 
@@ -221,10 +225,61 @@ fn formats_numeric_citations_with_grouping_locators_and_narrative_form() {
 }
 
 #[test]
+fn puts_prefixes_before_the_work_they_belong_to() {
+    let texts = ["[see @weber2020, p. 3; also @lee2022] [see @lee2022; also @weber2020] [@lee2022]"];
+    assert_eq!(
+        cited(&texts, CitationStyle::AuthorDate, Lang::En),
+        [
+            "(see Weber 2020, p.\u{a0}3; also Lee et al. 2022)",
+            "(see Lee et al. 2022; also Weber 2020)",
+            "(Lee et al. 2022)",
+        ]
+    );
+    assert_eq!(
+        cited(&texts, CitationStyle::Numeric, Lang::En),
+        ["[see 1, p.\u{a0}3; also 2]", "[see 2; also 1]", "[2]"]
+    );
+}
+
+/// The linked pieces of a citation as text and the key of the work each points to.
+fn links(rendered: &Rendered, id: CitationId) -> Vec<(String, &str)> {
+    rendered
+        .citation(id)
+        .iter()
+        .filter_map(|part| Some((part.text.clone(), rendered.references()[part.target?].key.as_str())))
+        .collect()
+}
+
+#[test]
+fn links_each_work_of_a_citation_to_its_own_entry() {
+    let (rendered, ids) = render(
+        &["[@lee2022, p. 12; @weber2020] [@weber2020; @ito2021; @lee2022; @knuth1984]"],
+        CitationStyle::AuthorDate,
+        Lang::En,
+    );
+    let works = links(&rendered, ids[0]);
+    assert_eq!(works.len(), 2);
+    assert_eq!(works[0].1, "lee2022");
+    assert_eq!(works[1].1, "weber2020");
+
+    let (rendered, ids) = render(
+        &["[@weber2020; @ito2021; @lee2022; @knuth1984] [@lee2022, p. 3; @weber2020]"],
+        CitationStyle::Numeric,
+        Lang::En,
+    );
+    let numbers: Vec<_> = links(&rendered, ids[0]);
+    assert_eq!(
+        numbers,
+        [("1", "weber2020"), ("4", "knuth1984")].map(|(text, key)| (text.to_owned(), key))
+    );
+    assert_eq!(links(&rendered, ids[1]).len(), 2);
+}
+
+#[test]
 fn groups_numbers_into_ranges_of_three_or_more() {
-    assert_eq!(cite::group_numbers(&[1, 2, 3, 5]), "1–3, 5");
-    assert_eq!(cite::group_numbers(&[1, 2, 4, 5, 6, 9]), "1, 2, 4–6, 9");
-    assert_eq!(cite::group_numbers(&[2, 2]), "2");
+    assert_eq!(cite::runs(&[1, 2, 3, 5]), [(1, 3), (5, 5)]);
+    assert_eq!(cite::runs(&[1, 2, 4, 5, 6, 9]), [(1, 1), (2, 2), (4, 6), (9, 9)]);
+    assert_eq!(cite::runs(&[2, 2]), [(2, 2)]);
 }
 
 #[test]

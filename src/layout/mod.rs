@@ -18,6 +18,7 @@
 mod bands;
 mod bibliography;
 mod classes;
+mod notes;
 mod pages;
 mod paragraph;
 mod structure;
@@ -37,6 +38,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
+use self::notes::NoteStyles;
 use self::structure::Structure;
 use crate::citations::Cited;
 use crate::config::resolved::{Config, CustomStyle, PageGeometry, Style};
@@ -69,6 +71,7 @@ pub fn layout(
     titles::check(config, source)?;
     classes::check(document, config, source)?;
     let structure = Structure::new(document, config, cited.references());
+    let notes = NoteStyles::new(config);
     let title_page = if config.document.title_page {
         Some(titles::page(config, fonts, theme_images, source)?)
     } else {
@@ -83,6 +86,7 @@ pub fn layout(
         fonts,
         source,
         structure: &structure,
+        notes: &notes,
         first: usize::from(title_page.is_some()),
     };
     let shown = structure.shown_pages(config);
@@ -153,6 +157,7 @@ struct Pass<'a> {
     fonts: &'a Fonts,
     source: &'a Source,
     structure: &'a Structure,
+    notes: &'a NoteStyles,
     /// The physical index of the first body page: 1 after a title page.
     first: usize,
 }
@@ -170,6 +175,7 @@ impl Pass<'_> {
             images: self.images,
             theme_images: self.theme_images,
             structure: self.structure,
+            notes: self.notes,
             assumed,
             headings: 0,
             figures: 0,
@@ -314,6 +320,7 @@ struct Flow<'a> {
     images: &'a [Image],
     theme_images: &'a HashMap<Resource, Image>,
     structure: &'a Structure,
+    notes: &'a NoteStyles,
     /// The page number this pass assumes for each anchor.
     assumed: &'a [usize],
     /// The headings, images, and tables set so far, which index their entries in `structure`.
@@ -438,21 +445,31 @@ impl<'a> Flow<'a> {
                     class,
                     ..
                 } => {
-                    let (style, number_gap) = match class.as_ref().map(|class| self.custom(class)) {
+                    let (style, typed_gap) = match class.as_ref().map(|class| self.custom(class)) {
                         None => (heading_style(self.config, *level), None),
                         Some(CustomStyle::Heading { style, number_gap }) => (style, *number_gap),
                         Some(_) => unreachable!("classes are checked before layout"),
                     };
-                    if self.in_notes {
-                        self.heading(*at, content, style, frame, None, number_gap);
-                    } else {
-                        let heading = &self.structure.headings[self.headings];
-                        self.headings += 1;
-                        let content = match &heading.number {
-                            Some(number) => Cow::Owned(numbered(number, content)),
-                            None => Cow::Borrowed(content.as_slice()),
-                        };
-                        self.heading(*at, &content, style, frame, Some(heading.anchor), number_gap);
+                    let typed = |gap: Option<Pt>| {
+                        let (number, rest) = typed_number(content)?;
+                        Some((gap?, number, rest))
+                    };
+                    let heading = &self.structure.headings[self.headings];
+                    self.headings += 1;
+                    let anchor = heading.anchor;
+                    match (&heading.number, style.number_gap) {
+                        (Some(number), Some(gap)) => {
+                            self.heading(*at, content, Some((gap, number)), style, frame, anchor);
+                        }
+                        (Some(number), None) => {
+                            self.heading(*at, &numbered(number, content), None, style, frame, anchor);
+                        }
+                        (None, _) => match typed(typed_gap) {
+                            Some((gap, number, rest)) => {
+                                self.heading(*at, &rest, Some((gap, &number)), style, frame, anchor);
+                            }
+                            None => self.heading(*at, content, None, style, frame, anchor),
+                        },
                     }
                 }
                 Block::List {
@@ -552,30 +569,30 @@ impl<'a> Flow<'a> {
     fn list_style(&self, class: Option<&Class>) -> (&'a Style, &'a [String]) {
         let lists = &self.config.lists;
         match class.map(|class| self.custom(class)) {
+            None if self.in_notes => (&self.notes.list, &lists.bullets),
             None => (&self.config.styles.list, &lists.bullets),
             Some(CustomStyle::List { style, bullets }) => (style, bullets.as_ref().unwrap_or(&lists.bullets)),
             Some(_) => unreachable!("classes are checked before layout"),
         }
     }
 
-    /// Sets a heading. With a number gap, a number such as "2." that the author typed at its start
-    /// hangs before the text, which starts the gap after it on every line.
+    /// Sets a heading. A `hanging` number, with the gap after it, is set before the text, which starts
+    /// the gap after the number on every line.
     fn heading(
         &mut self,
         at: Location,
         content: &[Inline],
+        hanging: Option<(Pt, &str)>,
         style: &Style,
         frame: Frame<'a>,
-        anchor: Option<usize>,
-        number_gap: Option<Pt>,
+        anchor: usize,
     ) {
-        let typed = number_gap.and_then(|gap| Some((gap, typed_number(content)?)));
-        let Some((gap, (number, rest))) = typed else {
-            self.text_block(at, content, style, frame, 0.0, Role::Heading(anchor));
+        let Some((gap, number)) = hanging else {
+            self.text_block(at, content, style, frame, 0.0, Role::Heading(Some(anchor)));
             return;
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
-        let run = (self.fonts).shape_tracked(&number, face, style.size, self.config.document.lang, style.tracking);
+        let run = (self.fonts).shape_tracked(number, face, style.size, self.config.document.lang, style.tracking);
         if let Some(problem) = paragraph::missing_glyph(&run) {
             self.errors.push(self.error(at, problem));
         }
@@ -585,7 +602,7 @@ impl<'a> Flow<'a> {
             ..frame
         };
         let first = self.lines.len();
-        self.text_block(at, &rest, style, text, 0.0, Role::Heading(anchor));
+        self.text_block(at, content, style, text, 0.0, Role::Heading(Some(anchor)));
         if let Some(line) = self.lines.get_mut(first) {
             let y = line.line.baseline;
             line.line.items.push(text_item(x, y, run, style.color));
@@ -653,7 +670,7 @@ impl<'a> Flow<'a> {
     }
 
     /// Replaces cross-references and citations with their text, linked to their anchor. A page reference
-    /// shows the page this pass assumes. A citation links to the bibliography entry of the first work it shows.
+    /// shows the page this pass assumes. Each work in a citation links to its bibliography entry.
     fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
         if !content
             .iter()
@@ -661,9 +678,9 @@ impl<'a> Flow<'a> {
         {
             return Cow::Borrowed(content);
         }
-        let resolved = content
-            .iter()
-            .map(|inline| match inline {
+        let mut resolved = Vec::with_capacity(content.len());
+        for inline in content {
+            match inline {
                 Inline::Ref(reference) => {
                     let (anchor, number) = self.structure.reference(&reference.label);
                     let text = if reference.page {
@@ -675,21 +692,20 @@ impl<'a> Flow<'a> {
                         link: Some(Link::Anchor(anchor)),
                         ..reference.style.clone()
                     };
-                    Inline::Text { text, style }
+                    resolved.push(Inline::Text { text, style });
                 }
                 Inline::Citation { index, style } => {
-                    let anchor = self.structure.entries[self.cited.targets[*index]];
-                    Inline::Text {
-                        text: self.cited.texts[*index].clone(),
+                    resolved.extend(self.cited.citations[*index].iter().map(|part| Inline::Text {
+                        text: part.text.clone(),
                         style: InlineStyle {
-                            link: Some(Link::Anchor(anchor)),
+                            link: part.target.map(|target| Link::Anchor(self.structure.entries[target])),
                             ..style.clone()
                         },
-                    }
+                    }));
                 }
-                inline => inline.clone(),
-            })
-            .collect();
+                inline => resolved.push(inline.clone()),
+            }
+        }
         Cow::Owned(resolved)
     }
 
@@ -703,11 +719,15 @@ impl<'a> Flow<'a> {
         class: Option<&Class>,
         frame: Frame<'a>,
     ) {
-        let lists = &self.config.lists;
+        let (indent, item_spacing) = if self.in_notes {
+            (self.notes.list_indent, self.notes.item_spacing)
+        } else {
+            (self.config.lists.indent, self.config.lists.item_spacing)
+        };
         let (style, bullets) = self.list_style(class);
         let start_line = self.lines.len();
         let inner = Frame {
-            left: frame.left + lists.indent.0,
+            left: frame.left + indent.0,
             style,
             list_depth: frame.list_depth + 1,
             widen: 0.0,
@@ -717,7 +737,7 @@ impl<'a> Flow<'a> {
         self.space(style.space_before.0);
         for (index, item) in items.iter().enumerate() {
             if index > 0 {
-                self.space(lists.item_spacing.0);
+                self.space(item_spacing.0);
             }
             let marker = match start {
                 Some(first) => format!("{}.", first + index as u64),
@@ -900,7 +920,11 @@ impl<'a> Flow<'a> {
 
     /// Code lines are set as they are. A line wider than the available width is an error.
     fn code(&mut self, first_line: u64, lines: &[String], frame: Frame<'a>) {
-        let style = &self.config.styles.code_block;
+        let style = if self.in_notes {
+            &self.notes.code_block
+        } else {
+            &self.config.styles.code_block
+        };
         let face = self.fonts.face(&style.font, style.weight, style.style);
         let width = self.width(frame) - 2.0 * style.indent.0;
         let x = frame.left + style.indent.0;

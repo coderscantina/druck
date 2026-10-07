@@ -441,13 +441,13 @@ fn citations_show_their_style_and_link_to_their_bibliography_entry() {
                 "Weber (2020, pp. 3–5) and Section 1.",
             ],
             "Smith, Ada and Bob Jones (2024).",
-            [2, 3],
+            [2, 1, 3],
         ),
         (
             "numeric",
             ["[1, p. 12; 2]", "Weber [3, pp. 3–5] and Section 1."],
             "[1] Smith, Ada",
-            [1, 3],
+            [1, 2, 3],
         ),
     ];
     for (style, texts, smith, entries) in cases {
@@ -460,7 +460,8 @@ fn citations_show_their_style_and_link_to_their_bibliography_entry() {
         let references = &output.outline[1];
         assert_eq!((references.title.as_str(), references.level), ("References", 1));
         let first = references.anchor;
-        assert_eq!(link_targets(&output), [first + entries[0], first + entries[1], intro]);
+        let expected = entries.map(|entry| first + entry);
+        assert_eq!(link_targets(&output), [expected[0], expected[1], expected[2], intro]);
         let anchor = output.anchors[first + entries[0]];
         let line = lines
             .iter()
@@ -524,15 +525,35 @@ fn the_bibliography_lists_each_cited_entry_once_in_style_order_with_a_hanging_in
     assert_eq!(numbered[0], "[1] Weber, Lena");
     assert_eq!(numbered[10], "[11] Smith, Ada and Bob Jones");
 
-    // A wrapped entry hangs by the theme's indent, and the contents list the section with its page.
+    // A wrapped author-date entry hangs by the theme's indent, and numeric entries set their text after a
+    // label column as wide as "[11]" on every line, so the text after "[9]" and "[10]" starts together.
     let config = config("{}", theme());
-    let lines = all_lines(&numeric);
-    let lee = lines
+    let lines = all_lines(&author_date);
+    let heading = lines.iter().position(|line| line.3 == "References").expect("heading");
+    let wrapped = lines[heading + 1..]
         .iter()
-        .position(|line| line.3.starts_with("[5] Lee"))
-        .expect("Lee's entry");
-    let hang = lines[lee + 1].2 - lines[lee].2;
+        .find(|line| line.2 > lines[heading].2 + 1.0)
+        .expect("an entry that wraps");
+    let hang = wrapped.2 - lines[heading].2;
     assert!((hang - config.bibliography.hanging_indent.0).abs() < 0.01, "{hang}");
+
+    let texts: Vec<_> = numeric
+        .pages
+        .iter()
+        .flat_map(|page| &page.items)
+        .filter_map(|item| match item {
+            Item::Text { x, run, .. } => Some((x.0, run.text.as_str())),
+            _ => None,
+        })
+        .collect();
+    let starts: Vec<f64> = texts
+        .windows(2)
+        .filter(|pair| pair[0].1 == "[9]" || pair[0].1 == "[10]")
+        .map(|pair| pair[1].0)
+        .collect();
+    assert_eq!(starts.len(), 2);
+    assert!((starts[0] - starts[1]).abs() < 0.01, "{starts:?}");
+    let lines = all_lines(&numeric);
     let references = numeric.outline.last().expect("bookmarks");
     let page = page_of(&numeric, references.anchor);
     assert!(
