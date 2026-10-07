@@ -323,6 +323,16 @@
       },
       "description": "Block element styles."
     },
+    "custom-styles": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/customStyle"
+      },
+      "description": "Named styles that documents apply with {.name}, each based on another style."
+    },
     "inline": {
       "type": "object",
       "additionalProperties": false,
@@ -680,49 +690,89 @@
       ],
       "description": "The block style a slot is set in."
     },
+    "weight": {
+      "anyOf": [
+        {
+          "enum": [
+            "regular",
+            "bold"
+          ]
+        },
+        {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 900,
+          "multipleOf": 100
+        }
+      ],
+      "description": "Font weight from 100 to 900 in steps of 100. regular is 400 and bold is 700."
+    },
+    "fontFile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/resourcePath"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "index"
+          ],
+          "properties": {
+            "file": {
+              "description": "A font collection file (.ttc, .otc).",
+              "$ref": "#/$defs/resourcePath"
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The index of the face in the collection, from 0."
+            }
+          }
+        }
+      ],
+      "description": "A font file, or a face of a collection by its index."
+    },
+    "fontFace": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/fontFile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A face file, or null if the family has no such face."
+    },
     "fontFamily": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "regular": {
-          "description": "Regular face file.",
-          "$ref": "#/$defs/resourcePath"
+          "description": "Regular face file, weight 400.",
+          "$ref": "#/$defs/fontFile"
         },
         "italic": {
-          "description": "Italic face file, or null if the family has none.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/resourcePath"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Italic face file, weight 400, or null if the family has none.",
+          "$ref": "#/$defs/fontFace"
         },
         "bold": {
-          "description": "Bold face file, or null if the family has none.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/resourcePath"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Bold face file, weight 700, or null if the family has none.",
+          "$ref": "#/$defs/fontFace"
         },
         "bold-italic": {
-          "description": "Bold italic face file, or null if the family has none.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/resourcePath"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Bold italic face file, weight 700, or null if the family has none.",
+          "$ref": "#/$defs/fontFace"
         }
       },
-      "description": "Font files for one family. Styles may only request faces that are present."
+      "patternProperties": {
+        "^[1235689]00(-italic)?$": {
+          "description": "The face of another weight, upright or italic, such as 500 or 300-italic.",
+          "$ref": "#/$defs/fontFace"
+        }
+      },
+      "description": "Font files for one family by face. Styles may only request faces that are present."
     },
     "blockStyle": {
       "type": "object",
@@ -737,11 +787,7 @@
           "$ref": "#/$defs/sizeSpec"
         },
         "weight": {
-          "enum": [
-            "regular",
-            "bold"
-          ],
-          "description": "Font weight."
+          "$ref": "#/$defs/weight"
         },
         "style": {
           "enum": [
@@ -786,9 +832,96 @@
         "first-line-indent": {
           "description": "Extra indent of each paragraph's first line. em is relative to this element's font size.",
           "$ref": "#/$defs/spacingSpec"
+        },
+        "tracking": {
+          "type": "number",
+          "minimum": -0.2,
+          "maximum": 1.0,
+          "description": "Letter spacing in em of this element's font size, from -0.2 to 1."
+        },
+        "uppercase": {
+          "type": "boolean",
+          "description": "Whether text is set in capitals. Inline code keeps its case."
+        },
+        "keep-with-next": {
+          "type": "boolean",
+          "description": "Whether the block stays on the page or in the column of the next block."
         }
       },
       "description": "Style of one block element."
+    },
+    "customStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "based-on"
+      ],
+      "properties": {
+        "based-on": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A built-in style such as body, heading-2, or list, or another custom style. Fields not given here come from it."
+        },
+        "font": {
+          "$ref": "#/$defs/blockStyle/properties/font"
+        },
+        "size": {
+          "$ref": "#/$defs/blockStyle/properties/size"
+        },
+        "weight": {
+          "$ref": "#/$defs/blockStyle/properties/weight"
+        },
+        "style": {
+          "$ref": "#/$defs/blockStyle/properties/style"
+        },
+        "color": {
+          "$ref": "#/$defs/blockStyle/properties/color"
+        },
+        "line-height": {
+          "$ref": "#/$defs/blockStyle/properties/line-height"
+        },
+        "align": {
+          "$ref": "#/$defs/blockStyle/properties/align"
+        },
+        "hyphenate": {
+          "$ref": "#/$defs/blockStyle/properties/hyphenate"
+        },
+        "space-before": {
+          "$ref": "#/$defs/blockStyle/properties/space-before"
+        },
+        "space-after": {
+          "$ref": "#/$defs/blockStyle/properties/space-after"
+        },
+        "indent": {
+          "$ref": "#/$defs/blockStyle/properties/indent"
+        },
+        "first-line-indent": {
+          "$ref": "#/$defs/blockStyle/properties/first-line-indent"
+        },
+        "tracking": {
+          "$ref": "#/$defs/blockStyle/properties/tracking"
+        },
+        "uppercase": {
+          "$ref": "#/$defs/blockStyle/properties/uppercase"
+        },
+        "keep-with-next": {
+          "$ref": "#/$defs/blockStyle/properties/keep-with-next"
+        },
+        "bullets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": "List markers per nesting level, for styles based on list."
+        },
+        "number-gap": {
+          "description": "Space between a number the author typed at the start of a heading, such as 2., and the heading text, which hangs. For styles based on a heading style.",
+          "$ref": "#/$defs/spacingSpec"
+        }
+      },
+      "description": "A named style: another style with the fields given here replaced."
     },
     "anchor": {
       "enum": [

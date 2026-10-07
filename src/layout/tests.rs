@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
 use super::paragraph::protrusion;
@@ -39,6 +39,7 @@ fn paragraph(line: u64, text: &str) -> Block {
             text: text.to_owned(),
             style: InlineStyle::default(),
         }],
+        class: None,
     }
 }
 
@@ -56,7 +57,7 @@ fn render_with_images(
     images: &[Image],
 ) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let config = config();
-    let fonts = Fonts::load(&config).expect("bundled fonts");
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
     let document = Document {
         blocks,
         footnotes,
@@ -238,10 +239,10 @@ fn hyphenation_across_style_changes_keeps_each_style() {
         content.push(text("graphical ", InlineStyle::default()));
     }
     let lines = set(&content, &config.styles.body, Lang::En, 110.0);
-    let fonts = Fonts::load(&config).unwrap();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
     let bold = fonts.face(
         &config.styles.body.font,
-        crate::config::theme::Weight::Bold,
+        crate::config::theme::Weight::BOLD,
         config.styles.body.style,
     );
 
@@ -265,6 +266,7 @@ fn sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker() {
             plain(" Long."),
             Inline::FootnoteRef(1),
         ],
+        class: None,
     };
     let mut blocks = vec![first];
     blocks.extend((0..30).map(|i| paragraph(i + 3, PROSE)));
@@ -524,6 +526,7 @@ fn notes_from_both_columns_share_one_area_in_reference_order() {
             column: 1,
         },
         content: vec![text_inline(&format!("P{number} {PROSE}")), Inline::FootnoteRef(note)],
+        class: None,
     };
     let section = columns(1, vec![referring(0, 0), referring(1, 1)]);
     let notes = vec![note(10, "First note."), note(12, "Second note.")];
@@ -618,7 +621,7 @@ fn text(text: &str, style: InlineStyle) -> Inline {
 /// Sets a paragraph of `width` and returns each line's text runs with their x positions.
 fn set(content: &[Inline], style: &Style, lang: Lang, width: f64) -> Vec<Vec<(f64, ShapedRun)>> {
     let config = config();
-    let fonts = Fonts::load(&config).expect("bundled fonts");
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
     let lines = paragraph::lines(content, style, &config.inline, &fonts, lang, width, 0.0).unwrap();
     lines
         .into_iter()
@@ -831,6 +834,7 @@ fn a_note_stays_on_the_page_of_its_reference_beside_an_image() {
         blocks.push(Block::Paragraph {
             at: Location { line: 90, column: 1 },
             content: vec![text_inline("Noted text."), Inline::FootnoteRef(0)],
+            class: None,
         });
         blocks.push(figure(100, 0, vec![text_inline("Noted caption.")]));
         let pages = render_with_images(blocks, vec![note(110, "Text note.")], &images).unwrap();
@@ -853,6 +857,7 @@ fn a_tall_image_shrinks_to_fit_below_its_heading() {
         level: 2,
         content: vec![text_inline("Results")],
         label: None,
+        class: None,
     };
     let blocks = vec![numbered(0), heading, figure(3, 0, vec![text_inline("Tall.")])];
     let pages = render_with_images(blocks, Vec::new(), &[svg(300.0, 3000.0)]).unwrap();

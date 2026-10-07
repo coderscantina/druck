@@ -17,11 +17,14 @@
 
 mod bands;
 mod bibliography;
+mod classes;
 mod pages;
 mod paragraph;
 mod structure;
 #[cfg(test)]
 mod structure_tests;
+#[cfg(test)]
+mod style_tests;
 mod table;
 #[cfg(test)]
 mod tests;
@@ -34,12 +37,12 @@ use std::ops::Range;
 
 use self::structure::Structure;
 use crate::citations::Cited;
-use crate::config::resolved::{Config, PageGeometry, Style};
+use crate::config::resolved::{Config, CustomStyle, PageGeometry, Style};
 use crate::config::source::{Resource, Source};
 use crate::config::theme::{FontStyle, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Link, Location};
+use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location};
 use crate::image::Image;
 use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
@@ -62,6 +65,7 @@ pub fn layout(
     source: &Source,
 ) -> Result<Output, Vec<Diagnostic>> {
     titles::check(config, source)?;
+    classes::check(document, config, source)?;
     let structure = Structure::new(document, config, cited.references());
     let title_page = if config.document.title_page {
         Some(titles::page(config, fonts, theme_images, source)?)
@@ -355,6 +359,7 @@ impl<'a> Flow<'a> {
                 Block::Paragraph {
                     at: footnote.at,
                     content: vec![marker],
+                    class: None,
                 },
             ),
         }
@@ -371,7 +376,11 @@ impl<'a> Flow<'a> {
             },
         };
         let content = vec![Inline::FootnoteRef(index), label];
-        self.unmarked(&[Block::Paragraph { at, content }])
+        self.unmarked(&[Block::Paragraph {
+            at,
+            content,
+            class: None,
+        }])
     }
 
     /// Lays out footnote content at the prose width. Its own markers do not count as references.
@@ -406,19 +415,33 @@ impl<'a> Flow<'a> {
                 frame
             };
             match block {
-                Block::Paragraph { at, content } => {
+                Block::Paragraph { at, content, class } => {
+                    let style = match class {
+                        Some(class) => self.custom(class).style(),
+                        None => frame.style,
+                    };
                     // Only a paragraph that continues another one gets a first-line indent.
                     let indent = if self.after_paragraph {
-                        frame.style.first_line_indent.0
+                        style.first_line_indent.0
                     } else {
                         0.0
                     };
-                    self.text_block(*at, content, frame.style, frame, indent, Role::Text);
+                    self.text_block(*at, content, style, frame, indent, Role::Text);
                 }
-                Block::Heading { at, level, content, .. } => {
-                    let style = heading_style(self.config, *level);
+                Block::Heading {
+                    at,
+                    level,
+                    content,
+                    class,
+                    ..
+                } => {
+                    let (style, number_gap) = match class.as_ref().map(|class| self.custom(class)) {
+                        None => (heading_style(self.config, *level), None),
+                        Some(CustomStyle::Heading { style, number_gap }) => (style, *number_gap),
+                        Some(_) => unreachable!("classes are checked before layout"),
+                    };
                     if self.in_notes {
-                        self.text_block(*at, content, style, frame, 0.0, Role::Heading(None));
+                        self.heading(*at, content, style, frame, None, number_gap);
                     } else {
                         let heading = &self.structure.headings[self.headings];
                         self.headings += 1;
@@ -426,10 +449,15 @@ impl<'a> Flow<'a> {
                             Some(number) => Cow::Owned(numbered(number, content)),
                             None => Cow::Borrowed(content.as_slice()),
                         };
-                        self.text_block(*at, &content, style, frame, 0.0, Role::Heading(Some(heading.anchor)));
+                        self.heading(*at, &content, style, frame, Some(heading.anchor), number_gap);
                     }
                 }
-                Block::List { at, start, items } => self.list(*at, *start, items, frame),
+                Block::List {
+                    at,
+                    start,
+                    items,
+                    class,
+                } => self.list(*at, *start, items, class.as_ref(), frame),
                 Block::Quote { blocks, .. } => {
                     let style = &self.config.styles.quote;
                     self.space(style.space_before.0);
@@ -500,7 +528,47 @@ impl<'a> Flow<'a> {
         }
     }
 
-    /// Sets a paragraph or heading. Headings never end a page, so they stay with what follows.
+    /// The custom style of a class, which [`classes::check`] has found in the theme.
+    fn custom(&self, class: &Class) -> &'a CustomStyle {
+        &self.config.custom_styles[&class.name]
+    }
+
+    /// Sets a heading. With a number gap, a number such as "2." that the author typed at its start
+    /// hangs before the text, which starts the gap after it on every line.
+    fn heading(
+        &mut self,
+        at: Location,
+        content: &[Inline],
+        style: &Style,
+        frame: Frame<'a>,
+        anchor: Option<usize>,
+        number_gap: Option<Pt>,
+    ) {
+        let typed = number_gap.and_then(|gap| Some((gap, typed_number(content)?)));
+        let Some((gap, (number, rest))) = typed else {
+            self.text_block(at, content, style, frame, 0.0, Role::Heading(anchor));
+            return;
+        };
+        let face = self.fonts.face(&style.font, style.weight, style.style);
+        let run = (self.fonts).shape_tracked(&number, face, style.size, self.config.document.lang, style.tracking);
+        if let Some(problem) = paragraph::missing_glyph(&run) {
+            self.errors.push(self.error(at, problem));
+        }
+        let x = frame.left + style.indent.0;
+        let text = Frame {
+            left: frame.left + run.width.0 + gap.0,
+            ..frame
+        };
+        let first = self.lines.len();
+        self.text_block(at, &rest, style, text, 0.0, Role::Heading(anchor));
+        if let Some(line) = self.lines.get_mut(first) {
+            let y = line.line.baseline;
+            line.line.items.push(text_item(x, y, run, style.color));
+        }
+    }
+
+    /// Sets a paragraph or heading. Headings never end a page, so they stay with what follows, and
+    /// neither does a block whose style keeps it with the next one.
     fn text_block(
         &mut self,
         at: Location,
@@ -528,10 +596,20 @@ impl<'a> Flow<'a> {
                     };
                     self.push(translate_line(line, dx), at, after);
                 }
+                if style.keep_with_next && count > 0 {
+                    self.keep_last();
+                }
             }
             Err(problem) => self.errors.push(self.error(at, problem)),
         }
         self.space(style.space_after.0);
+    }
+
+    /// Keeps the last line set with the line that follows it.
+    fn keep_last(&mut self) {
+        if let Some(line) = self.lines.last_mut() {
+            line.after = Break::Never;
+        }
     }
 
     /// Breaks inline content into lines of `width` in `style`, with cross-references and citations resolved.
@@ -590,9 +668,23 @@ impl<'a> Flow<'a> {
         Cow::Owned(resolved)
     }
 
-    fn list(&mut self, at: Location, start: Option<u64>, items: &[Vec<Block>], frame: Frame<'a>) {
-        let style = &self.config.styles.list;
+    /// Sets a list in the `list` style or its custom style, with markers before the items. A custom
+    /// style's bullets replace the theme's.
+    fn list(
+        &mut self,
+        at: Location,
+        start: Option<u64>,
+        items: &[Vec<Block>],
+        class: Option<&Class>,
+        frame: Frame<'a>,
+    ) {
         let lists = &self.config.lists;
+        let (style, bullets) = match class.map(|class| self.custom(class)) {
+            None => (&self.config.styles.list, &lists.bullets),
+            Some(CustomStyle::List { style, bullets }) => (style, bullets.as_ref().unwrap_or(&lists.bullets)),
+            Some(_) => unreachable!("classes are checked before layout"),
+        };
+        let start_line = self.lines.len();
         let inner = Frame {
             left: frame.left + lists.indent.0,
             style,
@@ -608,7 +700,7 @@ impl<'a> Flow<'a> {
             }
             let marker = match start {
                 Some(first) => format!("{}.", first + index as u64),
-                None => lists.bullets[frame.list_depth.min(lists.bullets.len() - 1)].clone(),
+                None => bullets[frame.list_depth.min(bullets.len() - 1)].clone(),
             };
             let run = self.fonts.shape(&marker, face, style.size, self.config.document.lang);
             if let Some(problem) = paragraph::missing_glyph(&run) {
@@ -626,6 +718,9 @@ impl<'a> Flow<'a> {
             let line = &mut self.lines[first].line;
             let y = line.baseline;
             line.items.push(text_item(x, y, run, style.color));
+        }
+        if style.keep_with_next && self.lines.len() > start_line {
+            self.keep_last();
         }
         self.space(style.space_after.0);
     }
@@ -852,6 +947,30 @@ impl<'a> Flow<'a> {
     }
 }
 
+/// A number such as "2." typed at the start of a heading and followed by a space, and the content
+/// after it, or `None` without one.
+fn typed_number(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
+    let Some(Inline::Text { text, style }) = content.first() else {
+        return None;
+    };
+    let digits = text.find(|c: char| !c.is_ascii_digit())?;
+    let after = text[digits..].strip_prefix('.')?;
+    let rest = after.trim_start_matches(' ');
+    if style.code || digits == 0 || rest.len() == after.len() {
+        return None;
+    }
+    let mut content = content.to_vec();
+    if rest.is_empty() {
+        content.remove(0);
+    } else {
+        content[0] = Inline::Text {
+            text: rest.to_owned(),
+            style: style.clone(),
+        };
+    }
+    (!content.is_empty()).then(|| (text[..=digits].to_owned(), content))
+}
+
 /// Heading content after its number and a space.
 fn numbered(number: &str, content: &[Inline]) -> Vec<Inline> {
     let number = Inline::Text {
@@ -915,9 +1034,14 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
     }
 }
 
-/// The face for inline text in a block style. Emphasis toggles italic; strong sets bold.
+/// The face for inline text in a block style. Emphasis toggles italic; strong sets bold, or keeps a
+/// heavier weight.
 fn inline_face(style: &Style, emphasis: bool, strong: bool) -> (Weight, FontStyle) {
-    let weight = if strong { Weight::Bold } else { style.weight };
+    let weight = if strong {
+        style.weight.max(Weight::BOLD)
+    } else {
+        style.weight
+    };
     let italic = (style.style == FontStyle::Italic) != emphasis;
     (weight, if italic { FontStyle::Italic } else { FontStyle::Normal })
 }

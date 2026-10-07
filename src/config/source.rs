@@ -50,6 +50,8 @@ pub enum Origin {
     Theme(PathBuf),
     Document(PathBuf),
     WorkingDir(PathBuf),
+    /// An installed font, whose path is absolute.
+    Installed,
 }
 
 /// A resource reference with the origin of the layer that supplied it.
@@ -66,6 +68,7 @@ impl Resource {
         match &self.origin {
             Origin::Bundled => None,
             Origin::Theme(dir) | Origin::Document(dir) | Origin::WorkingDir(dir) => Some(dir.join(&self.path)),
+            Origin::Installed => Some(PathBuf::from(&self.path)),
         }
     }
 }
@@ -82,6 +85,7 @@ impl fmt::Display for Resource {
                 self.path,
                 dir.display()
             ),
+            Origin::Installed => write!(f, "installed font \"{}\"", self.path),
         }
     }
 }

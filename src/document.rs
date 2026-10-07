@@ -48,11 +48,20 @@ pub struct Footnote {
     pub blocks: Vec<Block>,
 }
 
+/// A theme's custom style applied with `{.name}`, where the attribute is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Class {
+    pub name: String,
+    pub at: Location,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Paragraph {
         at: Location,
         content: Vec<Inline>,
+        /// A custom style from `{.name}` at the end of the paragraph.
+        class: Option<Class>,
     },
     /// `level` is 1 to 6.
     Heading {
@@ -61,6 +70,8 @@ pub enum Block {
         content: Vec<Inline>,
         /// A `sec:` label from `{#sec:name}` at the end of the heading.
         label: Option<String>,
+        /// A custom style from `{.name}` at the end of the heading.
+        class: Option<Class>,
     },
     List {
         at: Location,
@@ -68,6 +79,8 @@ pub enum Block {
         start: Option<u64>,
         /// Each item is a sequence of blocks. Tight list items hold paragraphs too.
         items: Vec<Vec<Block>>,
+        /// A custom style from `{.name}` on the line before the list.
+        class: Option<Class>,
     },
     Quote {
         at: Location,

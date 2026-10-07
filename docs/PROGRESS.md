@@ -4,8 +4,9 @@
 
 Milestone 09 is complete. Documents cite works from a local BibTeX file with `[@key]`, grouped keys, page locators, and narrative `@key` citations, in a built-in author-date or numeric style in English or German. A bibliography of the cited works follows at the end, or where `::: bibliography` stands, also in two columns. It is in the table of contents and the outline, and every citation links to its entry. Decisions are in [decisions](DECISIONS.md#2026-10-07-milestone-09-citations-and-bibliography); the syntax, styles, and fields are in [authoring](AUTHORING.md#citations-and-bibliography).
 
-Current milestones: 11 and 12, in parallel. The [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07 added milestones 11 to 13; release acceptance (10) waits until they are complete.
-Next milestone: [13: Rich tables](milestones/13-rich-tables.md), once 11 and 12 are merged.
+Milestones 11 and 12 are complete and merged. The [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07 added milestones 11 to 13; release acceptance (10) waits until they are complete. Themes can now use installed fonts (looked up by the CLI only, collection faces included) with weights 100 to 900, tracking, capitals, keep-with-next, and custom styles applied with `{.name}` ([decisions](DECISIONS.md#2026-10-07-milestone-11-installed-fonts-and-custom-styles)). They can set prose narrower than wide blocks, unmirrored margins, title pages and bands made of anchored slot groups, `meta` values, and `{pages}` ([decisions](DECISIONS.md#2026-10-07-milestone-12-page-geometry-covers-and-bands)).
+
+Current milestone: [13: Rich tables](milestones/13-rich-tables.md).
 
 ## Milestone status
 
@@ -19,17 +20,21 @@ Next milestone: [13: Rich tables](milestones/13-rich-tables.md), once 11 and 12 
 - [x] 08: Document structures and templates.
 - [x] 09: Citations and bibliography.
 - [ ] 10: Release acceptance and distribution.
-- [ ] 11: Installed fonts and custom styles.
-- [ ] 12: Page geometry, covers, and bands.
+- [x] 11: Installed fonts and custom styles.
+- [x] 12: Page geometry, covers, and bands.
 - [ ] 13: Rich tables.
 
 ## Resume note
 
-Milestones 11 and 12 are being implemented in parallel worktrees from the amendment decisions in [decisions](DECISIONS.md#2026-10-07-business-documents-amendment). The notes for milestone 10 below still apply.
+For milestone 13: 11 and 12 were built in parallel and merged. `samples/typography.md` shows the milestone 11 styles and `samples/offer.md` the milestone 12 geometry; 13 should merge them into one offer sample with a cost table. Slot styles are still the fixed `TemplateStyle` list, so bands ignore tracking and capitals until 13 lets slots name custom styles. Fold the centered-wide-table follow-up into 13's column work. The notes for milestone 10 below still apply.
 
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: Kyber's own license (the owner's decision; distribution is blocked until then), the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Milestones 11 and 12, on 2026-10-07 on the same machine: after merging both, `cargo test -q` passed 189 unit and 23 integration tests, and `cargo clippy --all-targets -q` and `cargo fmt --check` were clean. `scripts/render-samples.sh` with a release build of the amendment commit (`a4fe54e`, its own script and samples) and of the merged tree gave byte-identical PDFs for all nine existing renders. Avenir Next and Helvetica Neue embedded from the system `.ttc` files with the right six faces, and a misspelled family or a missing face was an error with no PDF written. `samples/offer.md` (4 pages) and `samples/typography.md` (2 pages) were rendered from the merged tree and inspected: the cover's metadata block and title, the three-column footer with "Page 1/4", narrow prose beside a frame-wide table, eyebrows kept with their headings, ✔ and • lists, and hanging step numbers.
+
+The rest of this section records milestone 09.
 
 On 2026-10-07, macOS 27.0.1 on an Apple M1 Pro with 32 GB:
 
@@ -62,6 +67,10 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
+- A wide table narrower than the frame is centered across the frame, which looks off beside narrow left-set prose (`samples/offer.md`). Planned for milestone 13.
+- Band slots ignore tracking and capitals until slots can name custom styles in milestone 13.
+- Tracking adds space after the last letter of a line, so tracked right-aligned text sits slightly left.
+- `meta` numbers must be quoted, like `date`. `margins.mirror` is theme-only, not a front matter setting.
 - When no first line of a ragged paragraph fits within tolerance, the breaker's second pass caps badness at 10 000, so all very loose first lines tie and the earliest break wins. A bibliography entry whose URL does not fit after the first line can then break after its first word: "Knuth," alone in the custom-theme report, "The Unicode Standard, Version / 16.0" in the German numeric one. Uncapped badness in the second pass, or an emergency stretch, in [the breaker](../src/layout/paragraph/breaking.rs) would fix it; it changes milestone 03 behaviour, so it was left.
 - URLs and DOIs never break, so one wider than a column is an error at its `.bib` entry. Allowing breaks after `/` in link text that spells its URL would make two-column bibliographies safer.
 - In both reports, page 3 ends about 40% short and page 4 starts with the last line of a paragraph, because the longer text before the column section no longer fits on page 3. A pagination scoring trade-off before a column region, not caused by citations; the milestone 08 version of the sample laid out fully.

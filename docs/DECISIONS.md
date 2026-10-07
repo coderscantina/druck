@@ -366,7 +366,7 @@ Page 2 of `samples/images.md` ends about a quarter page early. The text after th
 
 A label names a heading, a figure, or a table and always starts with the prefix of its kind:
 
-- `# Heading {#sec:name}`, read with pulldown-cmark's heading attributes. Classes and other attributes are errors, since only labels have a meaning.
+- `# Heading {#sec:name}`, read with pulldown-cmark's heading attributes. Other attributes are errors. Since [milestone 11](#attribute-syntax) a heading may also take one `{.name}` class.
 - `![Caption](file.png){#fig:name}` directly after the image, spaces allowed. A label on an image without a caption is an error, because it has no number to show.
 - `: Caption {#tbl:name}` at the end of a table caption.
 
@@ -520,7 +520,47 @@ Decided with the owner against a reference offer PDF: a cover with a metadata bl
 
 ## 2026-10-07: Milestone 11 installed fonts and custom styles
 
-Not started.
+### Installed fonts
+
+- **Lookup:** `fontdb` 0.23, already in the tree through `usvg` and `krilla-svg`, is now a direct dependency, so no crate and no notice was added. [The CLI](../src/installed.rs) scans the system font directories, and fontconfig's on Linux, only when a style names a family that `fonts` does not define. Configuration records those families with the faces styles request (`installed_fonts`) instead of rejecting them, so `src/config/` and layout stay free of system access, and the phase 2 crate can supply its own resolver.
+- **Matching:** a family name matches the typographic or legacy family name fontdb reads, ignoring ASCII case. Only the width closest to normal counts, so condensed faces do not stand in. Oblique counts as italic. Where two files hold the same face, italic beats oblique, then the first path and index win, so the choice does not depend on directory order. The whole family is loaded so emphasis and strong text find their faces; only faces used are embedded.
+- **Errors:** a missing family or face is an error at the first style property that requests it, naming the family and face searched for and listing the installed faces. No PDF is written.
+- **Restricted embedding:** a used face whose OS/2 `fsType` restricts embedding, forbids subsetting, or allows bitmaps only is embedded with a `warning:` line naming its file. Unused faces of the family do not warn.
+- **Collections:** every face file carries its index in the resolved configuration, and font loading reads each file once, so the faces of one collection share its bytes.
+
+### Weights and faces
+
+- **Weights:** a number from 100 to 900 in steps of 100, with `regular` and `bold` for 400 and 700. Installed faces keep the weight class they declare, which may lie between steps; a style then matches them only through inline fallback, and the error for an exact request lists what is there.
+- **Family shape:** one map from face names to files. `regular`, `italic`, `bold`, and `bold-italic` keep their meaning, so existing themes and `font-files` stay valid; other weights are `500` or `500-italic`. `400` and `700` are rejected as names, so every face has one key and a later layer replaces it when merged. A face of a collection is `{ "file": ..., "index": n }`.
+- **Fallback:** inline emphasis and strong text take the nearest weight by the CSS rule, then the requested style. This keeps every earlier fallback except one: a family with bold-italic but no bold now sets strong upright text in bold-italic instead of regular. Strong text keeps a style weight above 700.
+- `--print-config` shows weights as numbers and each font file with its `index`.
+
+### Tracking and capitals
+
+- **Tracking** is a unitless number of em from -0.2 to 1 rather than a length, so tightening is possible and the basis is always the style's size. It follows every character, spaces included, also the last one of a line. Tracked text sets no ligatures.
+- **Uppercase** uses Unicode case mapping before shaping, so "ß" becomes "SS" and hyphenation sees the capitals. Inline code keeps its case and spacing.
+- Header and footer bands ignore both, since milestone 12 rebuilds them; see the follow-ups.
+
+### Custom styles
+
+- **Place:** a top-level `custom-styles` map next to `styles`, not extra entries in `styles`, which stays a fixed list so a misspelled built-in name remains an error.
+- **Bases:** `based-on` names a built-in or another custom style. The chain is followed to a built-in style, and a cycle is reported once, at its first member by name. "One level of lookup" in the milestone brief is read as one flat namespace of names, without selectors or context.
+- **Kinds:** the built-in style at the end of the chain makes a style a heading, list, or paragraph style, resolved as an enum. `bullets` is accepted only on list styles and `number-gap` only on heading styles, checked when the theme resolves. Names use the characters of `{.name}` and cannot shadow a built-in style.
+
+### Attribute syntax
+
+- **Headings** take one class through pulldown-cmark's heading attributes, alone or with the label. Other attributes and a second class are errors at the attribute. This replaces the milestone 08 rule in [labels and cross-references](#labels-and-cross-references) that heading classes are errors.
+- **Paragraphs:** a `{.name}` at the end of the last text is read from the source, so `\{.name}` stays text. When only spaces or quote markers precede it on its line, it stands on a line of its own and styles the list that must start next; otherwise it styles the paragraph. A line of its own after paragraph text without a blank line therefore styles the list, which is what an author writing a label line before a list means.
+- **Checks:** the parser has no configuration, so [a pass before layout](../src/layout/classes.rs) reports unknown names and styles of another kind at the attribute. `kyber check` does not parse the body, so these errors show up in `render`.
+
+### Keeping and hanging numbers
+
+- `keep-with-next` marks the last line of the block as a line a page never ends after, as heading lines are. For a list that is its last line.
+- `number-gap` hangs a typed "N." followed by a space: the number is set in the heading's face, and the text is set in a frame narrowed by the number's width and the gap, so wrapped lines align with the text. Such headings are not numbered automatically and do not advance the counters, which would otherwise print "1.2.1 1.".
+
+### Sample
+
+[The typography sample](../samples/typography.md) uses [its theme](../samples/themes/typography-styles.json), named apart from the sample so `render-samples.sh` renders it once. Bundled Libertinus Serif has weights 400 and 700 only, so the theme maps 300 and 500 to those files to show the mapping; real Light and Medium faces were checked with installed Avenir Next and Helvetica Neue. Libertinus Serif has no ✓ (U+2713), so the check list uses ✔ (U+2714).
 
 ## 2026-10-07: Milestone 12 page geometry, covers, and bands
 

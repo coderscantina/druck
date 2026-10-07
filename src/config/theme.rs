@@ -6,12 +6,13 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::non_null;
 use super::template::Template;
-use super::values::{Color, FontName, LineHeight, Size, Spacing, Spec, TokenName};
+use super::values::{Color, FontName, LineHeight, Size, Spacing, Spec, TokenName, Tracking};
 
 pub const THEME_VERSION: u64 = 1;
 
@@ -29,6 +30,7 @@ pub struct Theme {
     pub tokens: Tokens,
     pub page: Page,
     pub styles: Styles<BlockStyle>,
+    pub custom_styles: BTreeMap<String, CustomStyle>,
     pub inline: InlineStyles,
     pub lists: Lists,
     pub tables: Tables,
@@ -91,14 +93,211 @@ impl<'de> Deserialize<'de> for HeadingDepth {
     }
 }
 
-/// Font files for one family. Missing faces are errors only when a style requests them.
+/// Font files for one family by face. `regular` is required; `null` marks a face the family lacks.
+/// Missing faces are errors only when a style requests them.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct FontFamily {
-    pub regular: ResourcePath,
-    pub italic: Option<ResourcePath>,
-    pub bold: Option<ResourcePath>,
-    pub bold_italic: Option<ResourcePath>,
+#[serde(try_from = "BTreeMap<Face, Option<FontFile>>")]
+pub struct FontFamily(pub BTreeMap<Face, Option<FontFile>>);
+
+impl TryFrom<BTreeMap<Face, Option<FontFile>>> for FontFamily {
+    type Error = &'static str;
+
+    fn try_from(faces: BTreeMap<Face, Option<FontFile>>) -> Result<Self, Self::Error> {
+        match faces.get(&Face::REGULAR) {
+            Some(Some(_)) => Ok(Self(faces)),
+            _ => Err("a font family needs a regular face file"),
+        }
+    }
+}
+
+/// A font file, or one face of a collection (`.ttc`, `.otc`) by its index from 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum FontFile {
+    Path(ResourcePath),
+    Collection(CollectionFace),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionFace {
+    pub file: ResourcePath,
+    pub index: u32,
+}
+
+impl FontFile {
+    pub fn path(&self) -> &ResourcePath {
+        match self {
+            Self::Path(path) | Self::Collection(CollectionFace { file: path, .. }) => path,
+        }
+    }
+
+    pub fn index(&self) -> u32 {
+        match self {
+            Self::Path(_) => 0,
+            Self::Collection(face) => face.index,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FontFile {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, value};
+
+        struct FontFileVisitor;
+
+        impl<'de> de::Visitor<'de> for FontFileVisitor {
+            type Value = FontFile;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a font file path, or a map of file and index for a face of a collection")
+            }
+
+            fn visit_str<E: de::Error>(self, path: &str) -> Result<FontFile, E> {
+                ResourcePath::deserialize(value::StrDeserializer::new(path)).map(FontFile::Path)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<FontFile, A::Error> {
+                CollectionFace::deserialize(value::MapAccessDeserializer::new(map)).map(FontFile::Collection)
+            }
+        }
+
+        deserializer.deserialize_any(FontFileVisitor)
+    }
+}
+
+/// A font weight. Styles use 100 to 900 in steps of 100, with `regular` for 400 and `bold` for 700;
+/// installed faces may lie between the steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct Weight(u16);
+
+impl Weight {
+    pub const REGULAR: Self = Self(400);
+    pub const BOLD: Self = Self(700);
+
+    /// The weight class a font file declares.
+    pub fn of_font(class: u16) -> Self {
+        Self(class)
+    }
+
+    pub fn get(self) -> u16 {
+        self.0
+    }
+
+    /// A step from 100 to 900.
+    fn step(value: u64) -> Option<Self> {
+        let value = u16::try_from(value).ok()?;
+        ((100..=900).contains(&value) && value % 100 == 0).then_some(Self(value))
+    }
+}
+
+impl<'de> Deserialize<'de> for Weight {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        struct WeightVisitor;
+
+        impl de::Visitor<'_> for WeightVisitor {
+            type Value = Weight;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("regular, bold, or a weight from 100 to 900 in steps of 100")
+            }
+
+            fn visit_str<E: de::Error>(self, name: &str) -> Result<Weight, E> {
+                match name {
+                    "regular" => Ok(Weight::REGULAR),
+                    "bold" => Ok(Weight::BOLD),
+                    _ => Err(E::invalid_value(de::Unexpected::Str(name), &self)),
+                }
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Weight, E> {
+                Weight::step(value).ok_or_else(|| E::invalid_value(de::Unexpected::Unsigned(value), &self))
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Weight, E> {
+                Err(E::invalid_value(de::Unexpected::Signed(value), &self))
+            }
+
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Weight, E> {
+                Err(E::invalid_value(de::Unexpected::Float(value), &self))
+            }
+        }
+
+        deserializer.deserialize_any(WeightVisitor)
+    }
+}
+
+/// One face of a family: a weight and a style. Written `regular`, `italic`, `bold`, and `bold-italic`
+/// for 400 and 700, otherwise as the weight, such as `500` or `300-italic`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Face {
+    pub weight: Weight,
+    pub style: FontStyle,
+}
+
+impl Face {
+    pub const REGULAR: Self = Self {
+        weight: Weight::REGULAR,
+        style: FontStyle::Normal,
+    };
+}
+
+impl fmt::Display for Face {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.weight, self.style) {
+            (Weight::REGULAR, FontStyle::Normal) => f.write_str("regular"),
+            (Weight::REGULAR, FontStyle::Italic) => f.write_str("italic"),
+            (Weight::BOLD, FontStyle::Normal) => f.write_str("bold"),
+            (Weight::BOLD, FontStyle::Italic) => f.write_str("bold-italic"),
+            (weight, FontStyle::Normal) => write!(f, "{}", weight.0),
+            (weight, FontStyle::Italic) => write!(f, "{}-italic", weight.0),
+        }
+    }
+}
+
+impl FromStr for Face {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, String> {
+        let face = |weight, style| Ok(Self { weight, style });
+        match name {
+            "regular" => return face(Weight::REGULAR, FontStyle::Normal),
+            "italic" => return face(Weight::REGULAR, FontStyle::Italic),
+            "bold" => return face(Weight::BOLD, FontStyle::Normal),
+            "bold-italic" => return face(Weight::BOLD, FontStyle::Italic),
+            _ => {}
+        }
+        let (number, style) = match name.strip_suffix("-italic") {
+            Some(number) => (number, FontStyle::Italic),
+            None => (name, FontStyle::Normal),
+        };
+        match number.parse().ok().and_then(Weight::step) {
+            Some(weight @ (Weight::REGULAR | Weight::BOLD)) => {
+                let named = Self { weight, style };
+                Err(format!("write \"{named}\" for the face \"{name}\""))
+            }
+            Some(weight) => face(weight, style),
+            None => Err(format!(
+                "unknown face \"{name}\"; use regular, italic, bold, bold-italic, or a weight from 100 to 900 \
+                 such as 500 or 500-italic"
+            )),
+        }
+    }
+}
+
+impl Serialize for Face {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Face {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        name.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 /// A local file path relative to the origin of the layer that supplied it.
@@ -293,6 +492,38 @@ impl<B> Styles<B> {
             TemplateStyle::Body => &self.body,
         }
     }
+
+    /// An element's style by its theme name, such as `heading-2`.
+    pub fn named(&self, name: &str) -> Option<&B> {
+        Some(match name {
+            "body" => &self.body,
+            "heading-1" => &self.heading_1,
+            "heading-2" => &self.heading_2,
+            "heading-3" => &self.heading_3,
+            "heading-4" => &self.heading_4,
+            "heading-5" => &self.heading_5,
+            "heading-6" => &self.heading_6,
+            "title" => &self.title,
+            "subtitle" => &self.subtitle,
+            "author" => &self.author,
+            "date" => &self.date,
+            "abstract-heading" => &self.abstract_heading,
+            "abstract" => &self.abstract_,
+            "quote" => &self.quote,
+            "list" => &self.list,
+            "code-block" => &self.code_block,
+            "caption" => &self.caption,
+            "table-cell" => &self.table_cell,
+            "table-header" => &self.table_header,
+            "footnote" => &self.footnote,
+            "bibliography" => &self.bibliography,
+            "toc-heading" => &self.toc_heading,
+            "toc-entry" => &self.toc_entry,
+            "header" => &self.header,
+            "footer" => &self.footer,
+            _ => return None,
+        })
+    }
 }
 
 /// Style of a block element. `size` em refers to the body size; other em lengths to `size`.
@@ -311,16 +542,81 @@ pub struct BlockStyle {
     pub space_after: Spec<Spacing>,
     pub indent: Spec<Spacing>,
     pub first_line_indent: Spec<Spacing>,
+    pub tracking: Tracking,
+    pub uppercase: bool,
+    /// The block never ends a page or column without the next block.
+    pub keep_with_next: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Weight {
-    Regular,
-    Bold,
+/// A named style applied with `{.name}`: the style named by `based-on` with the fields given here
+/// replaced. `bullets` applies to styles based on `list`, `number-gap` to styles based on a heading.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CustomStyle {
+    pub based_on: String,
+    #[serde(default, deserialize_with = "non_null")]
+    pub font: Option<Spec<FontName>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub size: Option<Spec<Size>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub weight: Option<Weight>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub style: Option<FontStyle>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub color: Option<Spec<Color>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub line_height: Option<LineHeight>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub align: Option<Align>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub hyphenate: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub space_before: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub space_after: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub indent: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub first_line_indent: Option<Spec<Spacing>>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub tracking: Option<Tracking>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub uppercase: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub keep_with_next: Option<bool>,
+    /// List markers per nesting level, as in `lists.bullets`.
+    #[serde(default, deserialize_with = "non_null")]
+    pub bullets: Option<Vec<String>>,
+    /// Space between an author-typed leading number, such as "2.", and the heading text.
+    #[serde(default, deserialize_with = "non_null")]
+    pub number_gap: Option<Spec<Spacing>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+impl CustomStyle {
+    /// `base` with the fields this style sets replaced.
+    pub fn apply(&self, base: &BlockStyle) -> BlockStyle {
+        let base = base.clone();
+        BlockStyle {
+            font: self.font.clone().unwrap_or(base.font),
+            size: self.size.clone().unwrap_or(base.size),
+            weight: self.weight.unwrap_or(base.weight),
+            style: self.style.unwrap_or(base.style),
+            color: self.color.clone().unwrap_or(base.color),
+            line_height: self.line_height.unwrap_or(base.line_height),
+            align: self.align.unwrap_or(base.align),
+            hyphenate: self.hyphenate.unwrap_or(base.hyphenate),
+            space_before: self.space_before.clone().unwrap_or(base.space_before),
+            space_after: self.space_after.clone().unwrap_or(base.space_after),
+            indent: self.indent.clone().unwrap_or(base.indent),
+            first_line_indent: self.first_line_indent.clone().unwrap_or(base.first_line_indent),
+            tracking: self.tracking.unwrap_or(base.tracking),
+            uppercase: self.uppercase.unwrap_or(base.uppercase),
+            keep_with_next: self.keep_with_next.unwrap_or(base.keep_with_next),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FontStyle {
     Normal,

@@ -40,6 +40,8 @@ struct Fragment {
     rise: f64,
     /// The footnote this fragment marks.
     note: Option<usize>,
+    /// Letter spacing in em, which reshaping keeps.
+    tracking: f64,
 }
 
 /// Text between two spaces. Style changes inside a word split it into fragments.
@@ -258,8 +260,8 @@ struct Builder<'a> {
     lang: Lang,
     hyphenate: bool,
     justify: bool,
-    /// Width and right hang of a hyphen per face and size; `None` if the face has no hyphen.
-    hyphens: HashMap<(FaceId, u64), Option<(f64, f64)>>,
+    /// Width and right hang of a hyphen per face, size, and tracking; `None` if the face has no hyphen.
+    hyphens: HashMap<(FaceId, u64, u64), Option<(f64, f64)>>,
     words: Vec<Word>,
     /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
     spaces: Vec<f64>,
@@ -345,8 +347,8 @@ impl Builder<'_> {
         let (mut first, mut rest) = (None, 0.0f64);
         for (fragment, offset, hyphen) in self.cuts(word) {
             let (hyphen_width, end) = if hyphen {
-                let run = &word.fragments[fragment].run;
-                self.hyphen(run.face, run.size)
+                let piece = &word.fragments[fragment];
+                self.hyphen(piece.run.face, piece.run.size, piece.tracking)
                     .expect("cuts only hyphenate faces with a hyphen")
             } else {
                 (0.0, protrusion::trailing(&word.fragments[fragment].run, offset))
@@ -411,7 +413,10 @@ impl Builder<'_> {
                 Some(next) if offset == current.run.text.len() => next.prose,
                 _ => current.prose,
             };
-            let has_hyphen = !hyphen || self.hyphen(current.run.face, current.run.size).is_some();
+            let has_hyphen = !hyphen
+                || self
+                    .hyphen(current.run.face, current.run.size, current.tracking)
+                    .is_some();
             if current.prose && next_prose && has_hyphen {
                 cuts.push((fragment, offset, hyphen));
             }
@@ -419,12 +424,13 @@ impl Builder<'_> {
         cuts
     }
 
-    /// Width and right hang of a hyphen in a face and size, or `None` if the face has no hyphen.
-    fn hyphen(&mut self, face: FaceId, size: Pt) -> Option<(f64, f64)> {
+    /// Width and right hang of a hyphen in a face, size, and tracking, or `None` if the face has no hyphen.
+    fn hyphen(&mut self, face: FaceId, size: Pt, tracking: f64) -> Option<(f64, f64)> {
         let (fonts, lang) = (self.fonts, self.lang);
         let justify = self.justify;
-        *self.hyphens.entry((face, size.0.to_bits())).or_insert_with(|| {
-            let run = fonts.shape("-", face, size, lang);
+        let key = (face, size.0.to_bits(), tracking.to_bits());
+        *self.hyphens.entry(key).or_insert_with(|| {
+            let run = fonts.shape_tracked("-", face, size, lang, tracking);
             let hang = if justify { protrusion::trailing(&run, 1) } else { 0.0 };
             missing_glyph(&run).is_none().then_some((run.width.0, hang))
         })
@@ -514,7 +520,7 @@ fn line_runs<'a>(
                 if hyphen {
                     piece.push('-');
                 }
-                fonts.shape(&piece, fragment.run.face, fragment.run.size, lang)
+                fonts.shape_tracked(&piece, fragment.run.face, fragment.run.size, lang, fragment.tracking)
             };
             let space = (first && index > start.word).then_some(index);
             runs.push((run, fragment, space));
@@ -631,7 +637,7 @@ fn tokens(
 ) -> Result<Vec<Token>, String> {
     let mut tokens = Vec::new();
     let mut word = Word::default();
-    let mut space_widths: HashMap<(FaceId, u64), f64> = HashMap::new();
+    let mut space_widths: HashMap<(FaceId, u64, u64), f64> = HashMap::new();
     let finish = |word: &mut Word, tokens: &mut Vec<Token>| {
         if !word.fragments.is_empty() {
             tokens.push(Token::Word(std::mem::take(word)));
@@ -664,16 +670,25 @@ fn tokens(
                     prose: false,
                     rise: inline.footnote_marker_raise.to_pt(style.size).0,
                     note: Some(*index),
+                    tracking: 0.0,
                 });
                 continue;
             }
         };
-        let (face, size) = if text_style.code {
-            let face = fonts.face(&inline.code_font, Weight::Regular, FontStyle::Normal);
-            (face, inline.code_size.to_pt(style.size))
+        // Code keeps its case and spacing.
+        let (face, size, tracking) = if text_style.code {
+            let face = fonts.face(&inline.code_font, Weight::REGULAR, FontStyle::Normal);
+            (face, inline.code_size.to_pt(style.size), 0.0)
         } else {
             let (weight, font_style) = inline_face(style, text_style.emphasis, text_style.strong);
-            (fonts.face(&style.font, weight, font_style), style.size)
+            (fonts.face(&style.font, weight, font_style), style.size, style.tracking)
+        };
+        let upper;
+        let text = if style.uppercase && !text_style.code {
+            upper = text.to_uppercase();
+            &upper
+        } else {
+            text
         };
         let color = match (&text_style.link, text_style.code) {
             (Some(_), _) => inline.link_color,
@@ -685,8 +700,8 @@ fn tokens(
             if index > 0 {
                 finish(&mut word, &mut tokens);
                 let space = *space_widths
-                    .entry((face, size.0.to_bits()))
-                    .or_insert_with(|| fonts.shape(" ", face, size, lang).width.0);
+                    .entry((face, size.0.to_bits(), tracking.to_bits()))
+                    .or_insert_with(|| fonts.shape_tracked(" ", face, size, lang, tracking).width.0);
                 match tokens.last_mut() {
                     Some(Token::Space(width)) => *width = width.max(space),
                     _ => tokens.push(Token::Space(space)),
@@ -695,7 +710,7 @@ fn tokens(
             if part.is_empty() {
                 continue;
             }
-            let run = fonts.shape(part, face, size, lang);
+            let run = fonts.shape_tracked(part, face, size, lang, tracking);
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
             }
@@ -709,6 +724,7 @@ fn tokens(
                 prose: !text_style.code && !spells_url,
                 rise: 0.0,
                 note: None,
+                tracking,
             });
         }
     }
