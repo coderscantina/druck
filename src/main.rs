@@ -10,6 +10,7 @@ mod page;
 mod pdf;
 mod text;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -79,7 +80,8 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
     match cli.command {
         Command::Check { input, print_config } => {
-            let (config, _) = load(&input)?;
+            let (config, document) = load(&input)?;
+            layout::check_title(&config, &document.source)?;
             if print_config {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
                 println!("{json}");
@@ -95,12 +97,12 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 None => document.path.with_extension("pdf"),
             };
             let fonts = Fonts::load(&config)?;
-            let pages = render(&config, &fonts, &document)?;
-            let pdf = pdf::write(&pages, &fonts, &config.metadata, config.document.lang)
+            let laid = render(&config, &fonts, &document)?;
+            let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang)
                 .map_err(|e| vec![Diagnostic::new(None, e)])?;
             std::fs::write(&output, pdf)
                 .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", output.display()))])?;
-            let count = pages.len();
+            let count = laid.pages.len();
             println!(
                 "{}: wrote {count} page{}",
                 output.display(),
@@ -119,15 +121,40 @@ struct DocumentFile {
     text: String,
 }
 
-/// Parses the Markdown body, loads its images, and lays it out.
-fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<Vec<page::Page>, Vec<Diagnostic>> {
+/// Parses the Markdown body, loads its images and the theme's, and lays it out.
+fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<page::Output, Vec<Diagnostic>> {
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
     let content = markdown::parse(body, first_line, &document.source)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let images = load_images(&content.images, dir, &document.source)?;
-    layout::layout(&content, &images, config, fonts, &document.source)
+    let theme_images = load_theme_images(config)?;
+    layout::layout(&content, &images, &theme_images, config, fonts, &document.source)
+}
+
+/// Reads and decodes the images a theme names for its title slots. Errors name the property.
+fn load_theme_images(config: &Config) -> Result<HashMap<Resource, Image>, Vec<Diagnostic>> {
+    let mut images = HashMap::new();
+    let mut errors = Vec::new();
+    for (name, resource) in &config.images {
+        let loaded = match resource.file() {
+            None => Err(format!("{resource} is not bundled")),
+            Some(path) => {
+                let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_owned();
+                std::fs::read(&path)
+                    .map_err(|e| format!("cannot read image {resource}: {e}"))
+                    .and_then(|data| Image::decode(data, &extension).map_err(|e| format!("image {resource}: {e}")))
+            }
+        };
+        match loaded {
+            Ok(image) => {
+                images.insert(resource.clone(), image);
+            }
+            Err(message) => errors.push(Diagnostic::new(None, message).property(Some(format!("images.{name}")))),
+        }
+    }
+    if errors.is_empty() { Ok(images) } else { Err(errors) }
 }
 
 /// Reads and decodes each image file once, relative to the document. Errors name the first reference.

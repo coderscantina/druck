@@ -11,7 +11,8 @@
 //! first row, and the composer sets the header again where a page or column starts at a later row.
 
 use super::paragraph::{self, Prepared};
-use super::{Break, Flow, Frame, Line, pages, translate, translate_line};
+use super::structure::Numbered;
+use super::{Break, Flow, Frame, Line, anchor_item, pages, translate, translate_line};
 use crate::config::resolved::Style;
 use crate::config::theme::Align;
 use crate::config::values::{Color, Pt};
@@ -29,6 +30,8 @@ pub(super) struct TableBlock<'d> {
     pub header: &'d Row,
     pub rows: &'d [Row],
     pub caption: &'d [Inline],
+    /// The table's number and anchor, if it has a caption.
+    pub number: Option<Numbered>,
 }
 
 impl<'a> Flow<'a> {
@@ -65,7 +68,8 @@ impl<'a> Flow<'a> {
         for (row, styles) in &rows {
             let mut cells = Vec::with_capacity(row.cells.len());
             for (cell, style) in row.cells.iter().zip(styles.iter()) {
-                match paragraph::prepare(&cell.content, style, &config.inline, self.fonts, lang) {
+                let content = self.resolve(&cell.content);
+                match paragraph::prepare(&content, style, &config.inline, self.fonts, lang) {
                     Ok(cell) => cells.push(cell),
                     Err(problem) => {
                         self.errors.push(self.error(cell.at, problem));
@@ -96,16 +100,19 @@ impl<'a> Flow<'a> {
         let table_width = widths.iter().sum::<f64>() + padded;
         let left = frame.left + (width - table_width) / 2.0;
 
-        let caption = if table.caption.is_empty() {
-            Vec::new()
-        } else {
-            self.tables += 1;
-            let label = &config.labels.table;
-            match self.caption_lines(table.at, label, self.tables, table.caption, width) {
-                Some(lines) => lines,
-                None => return,
+        let mut caption = match table.number {
+            None => Vec::new(),
+            Some(number) => {
+                let label = &config.labels.table;
+                match self.caption_lines(table.at, label, number.number, table.caption, width) {
+                    Some(lines) => lines,
+                    None => return,
+                }
             }
         };
+        if let (Some(number), Some(line)) = (table.number, caption.first_mut()) {
+            line.items.push(anchor_item(number.anchor, frame.left));
+        }
 
         let mut lines = Vec::with_capacity(rows.len());
         for (index, ((row, _), cells)) in rows.iter().zip(prepared).enumerate() {

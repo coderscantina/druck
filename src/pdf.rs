@@ -1,4 +1,5 @@
-//! PDF output: embeds and subsets fonts, writes text as selectable glyph runs, adds links.
+//! PDF output: embeds and subsets fonts, writes text as selectable glyph runs, adds links to URLs and
+//! anchors, and writes the heading outline as bookmarks.
 //!
 //! krilla uses the same coordinates as [`Page`]: points from the top-left corner, y growing down.
 
@@ -6,8 +7,10 @@ use krilla::Document;
 use krilla::action::LinkAction;
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
+use krilla::destination::XyzDestination;
 use krilla::geom::{PathBuilder, Point, Rect as PdfRect, Size, Transform};
 use krilla::metadata::Metadata as PdfMetadata;
+use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
 use krilla::paint::Fill;
 use krilla::surface::Surface;
@@ -17,16 +20,29 @@ use krilla_svg::{SurfaceExt, SvgSettings};
 use crate::config::front_matter::Metadata;
 use crate::config::theme::Lang;
 use crate::config::values::Color;
+use crate::document::Link;
 use crate::image::{Image, Pixels};
-use crate::page::{Item, Page, Rect};
+use crate::page::{Bookmark, Item, Output, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-/// Writes `pages` as a PDF document. Title, authors, and language go into the document info.
-/// No creation date is written, so the same input gives the same bytes.
-pub fn write(pages: &[Page], fonts: &Fonts, metadata: &Metadata, lang: Lang) -> Result<Vec<u8>, String> {
+/// Writes the pages of `output` as a PDF document, with links, anchors, and bookmarks. Title, authors,
+/// and language go into the document info. No creation date is written, so the same input gives the
+/// same bytes.
+pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) -> Result<Vec<u8>, String> {
+    let destination = |anchor: usize| {
+        let position = output
+            .anchors
+            .get(anchor)
+            .filter(|position| position.page < output.pages.len())
+            .ok_or_else(|| format!("link to anchor {anchor}, which is on no page"))?;
+        Ok::<_, String>(XyzDestination::new(
+            position.page,
+            Point::from_xy(position.x.0 as f32, position.y.0 as f32),
+        ))
+    };
     let mut document = Document::new();
     document.set_metadata(document_info(metadata, lang));
-    for page in pages {
+    for page in &output.pages {
         let settings = PageSettings::from_wh(page.width.0 as f32, page.height.0 as f32)
             .ok_or_else(|| format!("invalid page size {} x {} pt", page.width.0, page.height.0))?;
         let mut pdf_page = document.start_page_with(settings);
@@ -38,19 +54,50 @@ pub fn write(pages: &[Page], fonts: &Fonts, metadata: &Metadata, lang: Lang) -> 
                     draw_run(&mut surface, fonts, run, Point::from_xy(x.0 as f32, y.0 as f32), *color)
                 }
                 Item::Rect { rect, color } => draw_rect(&mut surface, rect, *color)?,
-                Item::Link { rect, url } => links.push((rect, url)),
+                Item::Link { rect, link } => links.push((rect, link)),
                 Item::Image { rect, image } => draw_image(&mut surface, rect, image)?,
+                Item::Anchor { .. } => {}
             }
         }
         surface.finish();
-        for (rect, url) in links {
+        for (rect, link) in links {
             let rect = pdf_rect(rect)?;
-            let target = Target::Action(LinkAction::new(url.clone()).into());
+            let target = match link {
+                Link::Url(url) => Target::Action(LinkAction::new(url.clone()).into()),
+                Link::Anchor(anchor) => Target::Destination(destination(*anchor)?.into()),
+            };
             pdf_page.add_annotation(Annotation::new_link(LinkAnnotation::new(rect, target), None));
         }
         pdf_page.finish();
     }
+    if !output.outline.is_empty() {
+        document.set_outline(outline(&output.outline, destination)?);
+    }
     document.finish().map_err(|e| format!("cannot write PDF: {e}"))
+}
+
+/// Nests bookmarks by level: each belongs to the nearest earlier bookmark of a lower level.
+fn outline(
+    bookmarks: &[Bookmark],
+    destination: impl Fn(usize) -> Result<XyzDestination, String>,
+) -> Result<Outline, String> {
+    let mut outline = Outline::new();
+    let mut open: Vec<(u8, OutlineNode)> = Vec::new();
+    let close = |open: &mut Vec<(u8, OutlineNode)>, outline: &mut Outline, level: u8| {
+        while let Some((_, node)) = open.pop_if(|(open, _)| *open >= level) {
+            match open.last_mut() {
+                Some((_, parent)) => parent.push_child(node),
+                None => outline.push_child(node),
+            }
+        }
+    };
+    for bookmark in bookmarks {
+        close(&mut open, &mut outline, bookmark.level);
+        let node = OutlineNode::new(bookmark.title.clone(), destination(bookmark.anchor)?);
+        open.push((bookmark.level, node));
+    }
+    close(&mut open, &mut outline, 0);
+    Ok(outline)
 }
 
 fn document_info(metadata: &Metadata, lang: Lang) -> PdfMetadata {
@@ -147,6 +194,7 @@ mod tests {
     use crate::config::source::{Origin, Resource};
     use crate::config::theme::{FontStyle, Weight};
     use crate::config::values::Pt;
+    use crate::page::{Page, Position};
 
     fn fonts() -> Fonts {
         let regular = Resource {
@@ -189,7 +237,7 @@ mod tests {
                 },
                 Item::Link {
                     rect,
-                    url: "https://example.com".to_owned(),
+                    link: Link::Url("https://example.com".to_owned()),
                 },
             ],
         };
@@ -198,8 +246,73 @@ mod tests {
             authors: vec!["Mike".to_owned()],
             ..Metadata::default()
         };
-        let bytes = write(&[page], &fonts, &metadata, Lang::De).expect("pdf");
+        let bytes = write(&output(vec![page]), &fonts, &metadata, Lang::De).expect("pdf");
         assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    fn output(pages: Vec<Page>) -> Output {
+        Output {
+            pages,
+            anchors: Vec::new(),
+            outline: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn links_to_anchors_and_nests_bookmarks_by_level() {
+        let page = || Page {
+            width: Pt(200.0),
+            height: Pt(200.0),
+            items: Vec::new(),
+        };
+        let mut first = page();
+        first.items.push(Item::Link {
+            rect: Rect {
+                x: Pt(10.0),
+                y: Pt(10.0),
+                width: Pt(50.0),
+                height: Pt(12.0),
+            },
+            link: Link::Anchor(1),
+        });
+        let at = |page: usize, y: f64| Position {
+            page,
+            x: Pt(20.0),
+            y: Pt(y),
+        };
+        let bookmark = |level: u8, title: &str, anchor: usize| Bookmark {
+            level,
+            title: title.to_owned(),
+            anchor,
+        };
+        let output = Output {
+            pages: vec![first, page()],
+            anchors: vec![at(0, 30.0), at(1, 50.0), at(1, 120.0)],
+            outline: vec![
+                bookmark(1, "Intro", 0),
+                bookmark(2, "Detail", 1),
+                bookmark(1, "Close", 2),
+            ],
+        };
+        let bytes = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let pdf = String::from_utf8_lossy(&bytes);
+
+        // Each dictionary up to its first nested one, found by a key it holds.
+        let dict = |key: &str| pdf.split("<<").find(|dict| dict.contains(key)).expect(key).to_owned();
+
+        assert!(dict("/Type/Outlines").contains("/Count 2"), "two top-level bookmarks");
+        assert!(dict("/Title(Intro)").contains("/First"), "Detail is nested under Intro");
+        assert!(!dict("/Title(Close)").contains("/First"));
+        // The link and the bookmarks go to destinations on pages, not to URLs.
+        assert!(dict("/Subtype/Link").contains("/Dest"));
+        assert!(!pdf.contains("/URI"));
+        assert_eq!(pdf.matches("/XYZ").count(), 3, "one destination per anchor");
+
+        let missing = Output {
+            outline: vec![bookmark(1, "Lost", 7)],
+            ..output
+        };
+        assert!(write(&missing, &fonts(), &Metadata::default(), Lang::En).is_err());
     }
 
     #[test]
@@ -225,8 +338,9 @@ mod tests {
                 image("drawing.svg", 105.0),
             ],
         };
-        let first = write(std::slice::from_ref(&page), &fonts(), &Metadata::default(), Lang::En).expect("pdf");
-        let second = write(std::slice::from_ref(&page), &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let output = output(vec![page]);
+        let first = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let second = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
         assert!(first.starts_with(b"%PDF"));
         assert_eq!(first, second);
     }

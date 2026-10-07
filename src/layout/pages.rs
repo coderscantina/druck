@@ -98,8 +98,14 @@ pub(super) struct Content {
     pub continued: Vec<Vec<FlowLine>>,
 }
 
-/// Chooses page breaks and positions the content on pages. Odd pages have the inner margin on the left.
-pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Result<Vec<Page>, Vec<Diagnostic>> {
+/// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
+/// page, which decides parity: odd pages, counted from 1, have the inner margin on the left.
+pub(super) fn compose(
+    content: Content,
+    first: usize,
+    config: &Config,
+    source: &Source,
+) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let Content {
         mut body,
         keeps,
@@ -131,7 +137,7 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
             "no page breaks satisfy the layout constraints",
         )]
     })?;
-    Ok(render(&plans, &mut body, &headers, notes, config))
+    Ok(render(&plans, &mut body, &headers, notes, first, config))
 }
 
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
@@ -656,6 +662,7 @@ fn render(
     body: &mut [FlowLine],
     headers: &[Option<&Line>],
     mut notes: Notes,
+    first: usize,
     config: &Config,
 ) -> Vec<Page> {
     let geometry = &config.page;
@@ -664,7 +671,7 @@ fn render(
     let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
     for plan in plans {
-        let left = if pages.len() % 2 == 0 {
+        let left = if (first + pages.len()).is_multiple_of(2) {
             geometry.margin_inner.0
         } else {
             geometry.margin_outer.0

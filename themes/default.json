@@ -255,7 +255,7 @@
       "space-before": "$spacing.none",
       "space-after": "$spacing.none",
       "indent": "$spacing.quote-indent",
-      "first-line-indent": "$spacing.none"
+      "first-line-indent": "$spacing.paragraph-indent"
     },
     "quote": {
       "font": "$fonts.body",
@@ -378,7 +378,7 @@
       "line-height": 1.2,
       "align": "left",
       "hyphenate": false,
-      "space-before": "$spacing.none",
+      "space-before": "$spacing.heading-before",
       "space-after": "$spacing.heading-after",
       "indent": "$spacing.none",
       "first-line-indent": "$spacing.none"
@@ -505,7 +505,8 @@
         "required": false,
         "space-before": "1.5em"
       }
-    ]
+    ],
+    "space-after": "2em"
   },
   "title-page": {
     "slots": [
@@ -582,6 +583,8 @@
     "en": {
       "figure": "Figure",
       "table": "Table",
+      "section": "Section",
+      "page": "page",
       "contents": "Contents",
       "abstract": "Abstract",
       "references": "References",
@@ -590,6 +593,8 @@
     "de": {
       "figure": "Abbildung",
       "table": "Tabelle",
+      "section": "Abschnitt",
+      "page": "Seite",
       "contents": "Inhalt",
       "abstract": "Zusammenfassung",
       "references": "Literatur",

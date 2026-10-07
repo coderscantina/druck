@@ -295,6 +295,19 @@ fn renders_the_samples() {
 }
 
 #[test]
+fn check_reports_a_required_title_slot_without_a_value() {
+    let sandbox = Sandbox::new("required-slot");
+    let document = sandbox.write("doc.md", "---\ntitle-page: true\nauthor: Ada\n---\nText.\n");
+    let stderr = sandbox.rejection(&[&document]);
+    assert!(
+        stderr.contains(&format!(
+            "{document}: title-page.slots.0.text: this required slot needs {{title}}; set title in the front matter"
+        )),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn writes_next_to_the_document_by_default() {
     let sandbox = Sandbox::new("default-output");
     let document = sandbox.write("doc.md", "# Doc\n\nText.\n");

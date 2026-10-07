@@ -462,8 +462,8 @@
       "description": "Table of contents layout."
     },
     "title-block": {
-      "description": "Title block at the top of the first page.",
-      "$ref": "#/$defs/titleLayout"
+      "description": "Title block at the start of the body, set when the document has metadata for it.",
+      "$ref": "#/$defs/titleBlock"
     },
     "title-page": {
       "description": "Separate title page.",
@@ -879,6 +879,24 @@
       },
       "description": "One title slot: text or an image."
     },
+    "titleBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/titleSlot"
+          },
+          "description": "Ordered slots. The list is replaced as a whole when a theme sets it."
+        },
+        "space-after": {
+          "description": "Space between the title block and the body. em is relative to the body size.",
+          "$ref": "#/$defs/spacingSpec"
+        }
+      },
+      "description": "Ordered content slots and the space below them."
+    },
     "titleLayout": {
       "type": "object",
       "additionalProperties": false,
@@ -904,6 +922,14 @@
         "table": {
           "type": "string",
           "description": "Label for tables."
+        },
+        "section": {
+          "type": "string",
+          "description": "Label for references to numbered headings, as in \"Section 2.1\"."
+        },
+        "page": {
+          "type": "string",
+          "description": "Label for page references, as in \"page 5\"."
         },
         "contents": {
           "type": "string",

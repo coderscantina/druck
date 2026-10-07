@@ -44,6 +44,8 @@ pub enum Block {
         at: Location,
         level: u8,
         content: Vec<Inline>,
+        /// A `sec:` label from `{#sec:name}` at the end of the heading.
+        label: Option<String>,
     },
     List {
         at: Location,
@@ -68,6 +70,8 @@ pub enum Block {
         at: Location,
         image: usize,
         caption: Vec<Inline>,
+        /// A `fig:` label from `{#fig:name}` after the image. Only captioned images have one.
+        label: Option<String>,
     },
     /// A pipe table. The header row and every body row have one cell per column.
     Table {
@@ -78,6 +82,8 @@ pub enum Block {
         rows: Vec<Row>,
         /// The caption from a `: Caption` paragraph directly after the table, empty for none.
         caption: Vec<Inline>,
+        /// A `tbl:` label from `{#tbl:name}` at the end of the caption.
+        label: Option<String>,
     },
     /// `::: keep`: content that stays on one page.
     Keep {
@@ -129,6 +135,54 @@ pub enum Inline {
     LineBreak,
     /// A footnote reference: an index into [`Document::footnotes`].
     FootnoteRef(usize),
+    /// A cross-reference to a labelled heading, figure, or table.
+    Ref(Reference),
+}
+
+/// A cross-reference such as `@fig:chart`, or `[@fig:chart, page]` for the page it is on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reference {
+    /// The label with its kind prefix, such as `fig:chart`. The parser checks that it is defined.
+    pub label: String,
+    /// Whether the reference shows the target's page instead of its number.
+    pub page: bool,
+    pub style: InlineStyle,
+}
+
+/// What a label names, from its prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelKind {
+    Section,
+    Figure,
+    Table,
+}
+
+impl LabelKind {
+    /// The kind of a prefixed label such as `sec:intro`, or `None` without a known prefix.
+    pub fn of(label: &str) -> Option<Self> {
+        match label.split_once(':')?.0 {
+            "sec" => Some(Self::Section),
+            "fig" => Some(Self::Figure),
+            "tbl" => Some(Self::Table),
+            _ => None,
+        }
+    }
+
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Section => "sec",
+            Self::Figure => "fig",
+            Self::Table => "tbl",
+        }
+    }
+}
+
+/// A link target. The parser produces URLs; layout links cross-references to anchors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Link {
+    Url(String),
+    /// An internal destination, numbered by layout.
+    Anchor(usize),
 }
 
 /// The inline formatting that applies to a text piece. Nesting has been flattened.
@@ -138,5 +192,5 @@ pub struct InlineStyle {
     pub strong: bool,
     pub code: bool,
     /// The target of an enclosing link.
-    pub link: Option<String>,
+    pub link: Option<Link>,
 }

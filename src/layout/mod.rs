@@ -7,74 +7,220 @@
 //!
 //! An image is one line as tall as the image, kept with the lines of its caption. A table row is
 //! one line; see [`table`].
+//!
+//! Before layout, [`structure`] numbers headings, figures, and tables and gives each an anchor. The
+//! body may start with a [title block](titles) and a [table of contents](toc), and a separate title
+//! page may precede it. Page numbers shown in the text, in the table of contents and in page
+//! references, are only known after layout, so layout repeats until they agree with the pages it
+//! produced. Headers and footers are drawn on the final pages; see [`bands`].
 
+mod bands;
 mod pages;
 mod paragraph;
+mod structure;
+#[cfg(test)]
+mod structure_tests;
 mod table;
 #[cfg(test)]
 mod tests;
+mod titles;
+mod toc;
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Range;
 
+use self::structure::Structure;
 use crate::config::resolved::{Config, Style};
-use crate::config::source::Source;
+use crate::config::source::{Resource, Source};
 use crate::config::theme::{FontStyle, Weight};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Location};
+use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Link, Location};
 use crate::image::Image;
-use crate::page::{Item, Page, Rect};
+use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-/// Lays out `document` on pages. `images` are the loaded [`Document::images`]. Errors name the source
-/// location of content that cannot fit.
+pub use self::titles::check as check_title;
+
+/// The most layout passes spent on page numbers that change the layout they come from.
+const PASSES: usize = 5;
+
+/// Lays out `document` on pages with its title, table of contents, headers, and footers. `images` are
+/// the loaded [`Document::images`], and `theme_images` the loaded theme images by resource. Errors name
+/// the source location of content that cannot fit.
 pub fn layout(
     document: &Document,
     images: &[Image],
+    theme_images: &HashMap<Resource, Image>,
     config: &Config,
     fonts: &Fonts,
     source: &Source,
-) -> Result<Vec<Page>, Vec<Diagnostic>> {
-    let mut flow = Flow {
+) -> Result<Output, Vec<Diagnostic>> {
+    titles::check(config, source)?;
+    let structure = Structure::new(document, config);
+    let title_page = if config.document.title_page {
+        Some(titles::page(config, fonts, theme_images, source)?)
+    } else {
+        None
+    };
+    let pass = Pass {
+        document,
+        images,
+        theme_images,
         config,
         fonts,
         source,
-        images,
-        figures: 0,
-        tables: 0,
-        table_lines: Vec::new(),
-        lines: Vec::new(),
-        space: 0.0,
-        after_paragraph: false,
-        keeps: Vec::new(),
-        columns: Vec::new(),
-        errors: Vec::new(),
+        structure: &structure,
+        first: usize::from(title_page.is_some()),
     };
-    let body = flow.run(&document.blocks, Frame::full(&config.styles.body));
-    let keeps = std::mem::take(&mut flow.keeps);
-    let columns = std::mem::take(&mut flow.columns);
-    let tables = std::mem::take(&mut flow.table_lines);
-    let mut notes = Vec::with_capacity(document.footnotes.len());
-    let mut continued = Vec::with_capacity(document.footnotes.len());
-    for (index, footnote) in document.footnotes.iter().enumerate() {
-        notes.push(flow.note(index, footnote));
-        continued.push(flow.continued(index, footnote.at));
+    let shown = structure.shown_pages(config);
+    let (body, anchors) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
+    let mut pages: Vec<Page> = title_page.into_iter().chain(body).collect();
+    bands::draw(&mut pages, &structure, &anchors, config, fonts)?;
+    let outline = structure
+        .headings
+        .iter()
+        .map(|heading| Bookmark {
+            level: heading.level,
+            title: heading.title(),
+            anchor: heading.anchor,
+        })
+        .collect();
+    Ok(Output {
+        pages,
+        anchors,
+        outline,
+    })
+}
+
+/// Repeats `pass` until the page of every anchor in `shown` is the page the pass assumed for it, and
+/// returns the pages and anchor positions of that pass. The first pass assumes page 1 everywhere.
+/// Without shown pages one pass is enough. Page numbers that keep moving are reported at the anchor
+/// that moved, after [`PASSES`] passes.
+fn settle<T>(
+    anchors: &[(Location, String)],
+    shown: &[usize],
+    source: &Source,
+    mut pass: impl FnMut(&[usize]) -> Result<(T, Vec<Position>), Vec<Diagnostic>>,
+) -> Result<(T, Vec<Position>), Vec<Diagnostic>> {
+    let mut assumed = vec![1; anchors.len()];
+    let mut count = 0;
+    loop {
+        let (laid, positions) = pass(&assumed)?;
+        count += 1;
+        let moved = shown
+            .iter()
+            .copied()
+            .find(|&anchor| positions[anchor].page + 1 != assumed[anchor]);
+        let Some(anchor) = moved else {
+            return Ok((laid, positions));
+        };
+        if count == PASSES {
+            let (at, what) = &anchors[anchor];
+            let message = format!(
+                "page numbers did not settle after {PASSES} layout passes: {what} moves between page {} and \
+                 page {}",
+                assumed[anchor],
+                positions[anchor].page + 1
+            );
+            return Err(vec![
+                Diagnostic::new(Some(source.clone()), message).at(at.line, at.column),
+            ]);
+        }
+        assumed = positions.iter().map(|position| position.page + 1).collect();
     }
-    if !flow.errors.is_empty() {
-        return Err(flow.errors);
-    }
-    pages::compose(
-        pages::Content {
+}
+
+/// What every layout pass shares.
+struct Pass<'a> {
+    document: &'a Document,
+    images: &'a [Image],
+    theme_images: &'a HashMap<Resource, Image>,
+    config: &'a Config,
+    fonts: &'a Fonts,
+    source: &'a Source,
+    structure: &'a Structure,
+    /// The physical index of the first body page: 1 after a title page.
+    first: usize,
+}
+
+impl Pass<'_> {
+    /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages and
+    /// where each anchor is in the whole document.
+    fn run(&self, assumed: &[usize]) -> Result<(Vec<Page>, Vec<Position>), Vec<Diagnostic>> {
+        let config = self.config;
+        let mut flow = Flow {
+            config,
+            fonts: self.fonts,
+            source: self.source,
+            images: self.images,
+            theme_images: self.theme_images,
+            structure: self.structure,
+            assumed,
+            headings: 0,
+            figures: 0,
+            tables: 0,
+            in_notes: false,
+            table_lines: Vec::new(),
+            lines: Vec::new(),
+            space: 0.0,
+            after_paragraph: false,
+            keeps: Vec::new(),
+            columns: Vec::new(),
+            errors: Vec::new(),
+        };
+        let frame = Frame::full(&config.styles.body);
+        if !config.document.title_page
+            && let Some(slots) = titles::block(config)
+        {
+            flow.title(slots, frame);
+        }
+        if config.document.toc {
+            flow.contents(frame);
+        }
+        flow.blocks(&self.document.blocks, frame);
+        let body = std::mem::take(&mut flow.lines);
+        let keeps = std::mem::take(&mut flow.keeps);
+        let columns = std::mem::take(&mut flow.columns);
+        let tables = std::mem::take(&mut flow.table_lines);
+        flow.in_notes = true;
+        let mut notes = Vec::with_capacity(self.document.footnotes.len());
+        let mut continued = Vec::with_capacity(self.document.footnotes.len());
+        for (index, footnote) in self.document.footnotes.iter().enumerate() {
+            notes.push(flow.note(index, footnote));
+            continued.push(flow.continued(index, footnote.at));
+        }
+        if !flow.errors.is_empty() {
+            return Err(flow.errors);
+        }
+        let content = pages::Content {
             body,
             keeps,
             columns,
             tables,
             notes,
             continued,
-        },
-        config,
-        source,
-    )
+        };
+        let pages = pages::compose(content, self.first, config, self.source)?;
+        let mut positions = vec![None; self.structure.anchors.len()];
+        for (index, page) in pages.iter().enumerate() {
+            for item in &page.items {
+                if let Item::Anchor { id, x, y } = item {
+                    positions[*id] = Some(Position {
+                        page: self.first + index,
+                        x: *x,
+                        y: *y,
+                    });
+                }
+            }
+        }
+        let positions = positions
+            .into_iter()
+            .map(|position| position.expect("layout places every heading, figure, and table"))
+            .collect();
+        Ok((pages, positions))
+    }
 }
 
 /// A line of content. Item coordinates are relative to the text area's left edge and the line's top.
@@ -106,6 +252,14 @@ struct FlowLine {
     at: Location,
 }
 
+/// How a text block takes part in page breaking.
+#[derive(Debug, Clone, Copy)]
+enum Role {
+    Text,
+    /// A heading, with the anchor its first line marks if it has one.
+    Heading(Option<usize>),
+}
+
 /// The horizontal extent and paragraph style of the blocks being laid out.
 #[derive(Clone, Copy)]
 struct Frame<'a> {
@@ -131,10 +285,16 @@ struct Flow<'a> {
     fonts: &'a Fonts,
     source: &'a Source,
     images: &'a [Image],
-    /// The number of captioned images so far, which numbers the next caption.
+    theme_images: &'a HashMap<Resource, Image>,
+    structure: &'a Structure,
+    /// The page number this pass assumes for each anchor.
+    assumed: &'a [usize],
+    /// The headings, images, and tables set so far, which index their entries in `structure`.
+    headings: usize,
     figures: usize,
-    /// The number of captioned tables so far.
     tables: usize,
+    /// Whether footnotes are being set, whose headings are not part of the structure.
+    in_notes: bool,
     /// The tables set so far, whose headers repeat on continuation pages and columns.
     table_lines: Vec<pages::Table>,
     lines: Vec<FlowLine>,
@@ -213,11 +373,21 @@ impl<'a> Flow<'a> {
                     } else {
                         0.0
                     };
-                    self.text_block(*at, content, frame.style, frame, indent, false);
+                    self.text_block(*at, content, frame.style, frame, indent, Role::Text);
                 }
-                Block::Heading { at, level, content } => {
+                Block::Heading { at, level, content, .. } => {
                     let style = heading_style(self.config, *level);
-                    self.text_block(*at, content, style, frame, 0.0, true);
+                    if self.in_notes {
+                        self.text_block(*at, content, style, frame, 0.0, Role::Heading(None));
+                    } else {
+                        let heading = &self.structure.headings[self.headings];
+                        self.headings += 1;
+                        let content = match &heading.number {
+                            Some(number) => Cow::Owned(numbered(number, content)),
+                            None => Cow::Borrowed(content.as_slice()),
+                        };
+                        self.text_block(*at, &content, style, frame, 0.0, Role::Heading(Some(heading.anchor)));
+                    }
                 }
                 Block::List { at, start, items } => self.list(*at, *start, items, frame),
                 Block::Quote { blocks, .. } => {
@@ -235,9 +405,11 @@ impl<'a> Flow<'a> {
                     self.space(style.space_after.0);
                 }
                 Block::Code { first_line, lines, .. } => self.code(*first_line, lines, frame),
-                Block::Image { at, image, caption } => {
+                Block::Image { at, image, caption, .. } => {
                     let images = self.images;
-                    self.image(*at, &images[*image], caption, frame);
+                    let figure = self.structure.figures[self.figures];
+                    self.figures += 1;
+                    self.image(*at, &images[*image], caption, figure, frame);
                 }
                 Block::Keep { at, blocks } => {
                     let start = self.lines.len();
@@ -264,13 +436,17 @@ impl<'a> Flow<'a> {
                     header,
                     rows,
                     caption,
+                    ..
                 } => {
+                    let number = self.structure.tables[self.tables];
+                    self.tables += 1;
                     let block = table::TableBlock {
                         at: *at,
                         align,
                         header,
                         rows,
                         caption,
+                        number,
                     };
                     self.table(block, frame);
                 }
@@ -289,35 +465,73 @@ impl<'a> Flow<'a> {
         style: &Style,
         frame: Frame<'a>,
         first_indent: f64,
-        heading: bool,
+        role: Role,
     ) {
         let width = self.width(frame) - 2.0 * style.indent.0;
         self.space(style.space_before.0);
+        match self.set(content, style, width, first_indent) {
+            Ok(lines) => {
+                let dx = frame.left + style.indent.0;
+                let count = lines.len();
+                for (index, mut line) in lines.into_iter().enumerate() {
+                    let after = match role {
+                        Role::Heading(anchor) => {
+                            if let Some(id) = anchor.filter(|_| index == 0) {
+                                line.items.push(anchor_item(id, 0.0));
+                            }
+                            Break::Never
+                        }
+                        Role::Text => pages::line_break(index, count),
+                    };
+                    self.push(translate_line(line, dx), at, after);
+                }
+            }
+            Err(problem) => self.errors.push(self.error(at, problem)),
+        }
+        self.space(style.space_after.0);
+    }
+
+    /// Breaks inline content into lines of `width` in `style`, with cross-references resolved.
+    fn set(&self, content: &[Inline], style: &Style, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
+        let content = self.resolve(content);
         let lang = self.config.document.lang;
-        match paragraph::lines(
-            content,
+        paragraph::lines(
+            &content,
             style,
             &self.config.inline,
             self.fonts,
             lang,
             width,
             first_indent,
-        ) {
-            Ok(lines) => {
-                let dx = frame.left + style.indent.0;
-                let count = lines.len();
-                for (index, line) in lines.into_iter().enumerate() {
-                    let after = if heading {
-                        Break::Never
-                    } else {
-                        pages::line_break(index, count)
-                    };
-                    self.push(translate_line(line, dx), at, after);
-                }
-            }
-            Err(problem) => self.errors.push(self.error(at, problem.to_string())),
+        )
+    }
+
+    /// Replaces cross-references with their text, linked to their anchor. A page reference shows the
+    /// page this pass assumes.
+    fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
+        if !content.iter().any(|inline| matches!(inline, Inline::Ref(_))) {
+            return Cow::Borrowed(content);
         }
-        self.space(style.space_after.0);
+        let resolved = content
+            .iter()
+            .map(|inline| match inline {
+                Inline::Ref(reference) => {
+                    let (anchor, number) = self.structure.reference(&reference.label);
+                    let text = if reference.page {
+                        format!("{}\u{a0}{}", self.config.labels.page, self.assumed[anchor])
+                    } else {
+                        number.to_owned()
+                    };
+                    let style = InlineStyle {
+                        link: Some(Link::Anchor(anchor)),
+                        ..reference.style.clone()
+                    };
+                    Inline::Text { text, style }
+                }
+                inline => inline.clone(),
+            })
+            .collect();
+        Cow::Owned(resolved)
     }
 
     fn list(&mut self, at: Location, start: Option<u64>, items: &[Vec<Block>], frame: Frame<'a>) {
@@ -399,17 +613,22 @@ impl<'a> Flow<'a> {
     /// Sets an image centered in the frame, followed by its numbered caption, as lines that stay
     /// together. The image keeps its proportions and shrinks to the frame width and to the height the
     /// text area leaves beside its caption and the heading it is kept with. It never grows.
-    fn image(&mut self, at: Location, image: &Image, caption: &[Inline], frame: Frame<'a>) {
+    fn image(
+        &mut self,
+        at: Location,
+        image: &Image,
+        caption: &[Inline],
+        figure: Option<structure::Numbered>,
+        frame: Frame<'a>,
+    ) {
         let style = &self.config.styles.caption;
         let width = self.width(frame);
-        let caption = if caption.is_empty() {
-            Vec::new()
-        } else {
-            self.figures += 1;
-            match self.caption_lines(at, &self.config.labels.figure, self.figures, caption, width) {
+        let caption = match figure {
+            None => Vec::new(),
+            Some(figure) => match self.caption_lines(at, &self.config.labels.figure, figure.number, caption, width) {
                 Some(lines) => lines,
                 None => return,
-            }
+            },
         };
 
         // A figure is spaced like its caption: the caption's space after it, and its space before
@@ -437,13 +656,17 @@ impl<'a> Flow<'a> {
             width: Pt(size.0),
             height: Pt(size.1),
         };
+        let mut items = vec![Item::Image {
+            rect,
+            image: image.clone(),
+        }];
+        if let Some(figure) = figure {
+            items.push(anchor_item(figure.anchor, frame.left));
+        }
         let line = Line {
             height: size.1,
             baseline: size.1,
-            items: vec![Item::Image {
-                rect,
-                image: image.clone(),
-            }],
+            items,
             notes: Vec::new(),
         };
         let count = caption.len();
@@ -478,9 +701,7 @@ impl<'a> Flow<'a> {
             style: InlineStyle::default(),
         };
         let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
-        let lang = self.config.document.lang;
-        let measure = width - 2.0 * style.indent.0;
-        match paragraph::lines(&content, style, &self.config.inline, self.fonts, lang, measure, 0.0) {
+        match self.set(&content, style, width - 2.0 * style.indent.0, 0.0) {
             Ok(lines) => Some(lines),
             Err(problem) => {
                 self.errors.push(self.error(at, problem));
@@ -571,6 +792,24 @@ impl<'a> Flow<'a> {
     }
 }
 
+/// Heading content after its number and a space.
+fn numbered(number: &str, content: &[Inline]) -> Vec<Inline> {
+    let number = Inline::Text {
+        text: format!("{number} "),
+        style: InlineStyle::default(),
+    };
+    std::iter::once(number).chain(content.iter().cloned()).collect()
+}
+
+/// The destination of anchor `id` at `x` on the top of a line.
+fn anchor_item(id: usize, x: f64) -> Item {
+    Item::Anchor {
+        id,
+        x: Pt(x),
+        y: Pt(0.0),
+    }
+}
+
 fn heading_style(config: &Config, level: u8) -> &Style {
     let styles = &config.styles;
     match level {
@@ -606,8 +845,13 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
     match item {
         Item::Text { x, y, run, color } => text_item(x.0 + dx, y.0 + dy, run, color),
         Item::Rect { rect: r, color } => Item::Rect { rect: rect(r), color },
-        Item::Link { rect: r, url } => Item::Link { rect: rect(r), url },
+        Item::Link { rect: r, link } => Item::Link { rect: rect(r), link },
         Item::Image { rect: r, image } => Item::Image { rect: rect(r), image },
+        Item::Anchor { id, x, y } => Item::Anchor {
+            id,
+            x: Pt(x.0 + dx),
+            y: Pt(y.0 + dy),
+        },
     }
 }
 

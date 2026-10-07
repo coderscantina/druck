@@ -39,7 +39,7 @@ impl fmt::Display for Source {
 }
 
 /// The base a resource path is relative to. Directories are absolute.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "origin", content = "dir")]
 pub enum Origin {
     Bundled,
@@ -49,7 +49,7 @@ pub enum Origin {
 }
 
 /// A resource reference with the origin of the layer that supplied it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Resource {
     #[serde(flatten)]
     pub origin: Origin,

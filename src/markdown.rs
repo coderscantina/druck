@@ -1,9 +1,14 @@
-//! CommonMark parsing into the [document model](crate::document), with footnotes and layout
-//! directives.
+//! CommonMark parsing into the [document model](crate::document), with footnotes, layout
+//! directives, labels, and cross-references.
 //!
 //! Directive lines (`::: name` and `:::`) are found before parsing: every line starting with
 //! `:::` outside a code block. They are blanked, so CommonMark sees a blank line there, and
 //! applied between the top-level blocks they stand between.
+//!
+//! Labels carry a kind prefix: `# Heading {#sec:name}`, `![Caption](file){#fig:name}`, and
+//! `: Caption {#tbl:name}`. References are `@sec:name` or `[@sec:name]` for the number, and
+//! `[@sec:name, page]` for the page. Both are read from the source text, so an escaped `\@` stays
+//! text. An `@key` without one of the three prefixes is left as text for citations.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -12,7 +17,10 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagE
 
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Cell, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, Location, Row};
+use crate::document::{
+    Block, Cell, ColumnAlign, Document, Footnote, ImageFile, Inline, InlineStyle, LabelKind, Link, Location, Reference,
+    Row,
+};
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
@@ -21,8 +29,11 @@ use crate::document::{Block, Cell, ColumnAlign, Document, Footnote, ImageFile, I
 /// either the complete document or every such diagnostic, never a document with content dropped.
 pub fn parse(body: &str, first_line: u64, source: &Source) -> Result<Document, Vec<Diagnostic>> {
     // Strikethrough and task lists are enabled only so they can be recognised and reported.
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_HEADING_ATTRIBUTES;
     let directives = directive_lines(body, options);
     let mut text = String::with_capacity(body.len());
     let mut end = 0;
@@ -103,6 +114,8 @@ struct Leaf {
     content: Vec<Inline>,
     /// The image this paragraph consists of. Its description is the content.
     image: Option<LeafImage>,
+    /// The label of a heading or figure.
+    label: Option<String>,
 }
 
 struct LeafImage {
@@ -163,6 +176,11 @@ struct Builder<'a> {
     /// Image files in order of first use, and their indexes by path.
     images: Vec<ImageFile>,
     image_index: HashMap<String, usize>,
+    /// Defined labels with their locations, and the references to check against them.
+    labels: HashMap<String, Location>,
+    references_to: Vec<(String, Location)>,
+    /// Source text before this offset was read as a label or reference, so text events in it are skipped.
+    consumed: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -191,6 +209,9 @@ impl<'a> Builder<'a> {
             definitions: HashMap::new(),
             images: Vec::new(),
             image_index: HashMap::new(),
+            labels: HashMap::new(),
+            references_to: Vec::new(),
+            consumed: 0,
         }
     }
 
@@ -210,6 +231,15 @@ impl<'a> Builder<'a> {
                 None => self.report_at(at, format!("footnote [^{key}] has no definition")),
             }
         }
+        for (label, at) in std::mem::take(&mut self.references_to) {
+            if !self.labels.contains_key(&label) {
+                self.report_at(
+                    at,
+                    format!("@{label} refers to an undefined label; define it with {{#{label}}}"),
+                );
+            }
+        }
+
         let mut unused: Vec<_> = self
             .definitions
             .drain()
@@ -340,7 +370,7 @@ impl<'a> Builder<'a> {
             emphasis: self.emphasis > 0,
             strong: self.strong > 0,
             code,
-            link: self.links.last().cloned(),
+            link: self.links.last().cloned().map(Link::Url),
         }
     }
 
@@ -362,6 +392,7 @@ impl<'a> Builder<'a> {
             implicit,
             content: Vec::new(),
             image: None,
+            label: None,
         });
     }
 
@@ -371,18 +402,33 @@ impl<'a> Builder<'a> {
             level,
             content,
             image,
+            label,
             ..
         }) = self.leaf.take()
         else {
             return;
         };
         let block = match (level, image) {
-            (Some(level), _) => Block::Heading { at, level, content },
-            (None, Some(image)) => Block::Image {
-                at: image.at,
-                image: image.index,
-                caption: content,
+            (Some(level), _) => Block::Heading {
+                at,
+                level,
+                content,
+                label,
             },
+            (None, Some(image)) => {
+                if label.is_some() && content.is_empty() {
+                    self.report_at(
+                        image.at,
+                        "a figure label needs a caption, as in ![Caption](file.png){#fig:name}",
+                    );
+                }
+                Block::Image {
+                    at: image.at,
+                    image: image.index,
+                    caption: content,
+                    label,
+                }
+            }
             (None, None) => {
                 let mut content = content;
                 if strip_caption_marker(&mut content) {
@@ -415,13 +461,67 @@ impl<'a> Builder<'a> {
         for footnote in footnotes {
             self.report_at(footnote, "a table caption cannot hold footnotes");
         }
-        let label = plain_text(&content);
-        if label.trim_end().ends_with('}') && label.contains("{#") {
-            self.report_at(at, "table labels are not supported yet");
-        }
-        if let Some(Block::Table { caption, .. }) = self.blocks.last_mut().and_then(|blocks| blocks.last_mut()) {
+        let mut content = content;
+        let label = self.caption_label(at, &mut content);
+        if let Some(Block::Table {
+            caption,
+            label: table_label,
+            ..
+        }) = self.blocks.last_mut().and_then(|blocks| blocks.last_mut())
+        {
             *caption = content;
+            *table_label = label;
         }
+    }
+
+    /// Removes a `{#tbl:name}` label from the end of a table caption and registers it.
+    fn caption_label(&mut self, at: Location, content: &mut Vec<Inline>) -> Option<String> {
+        let Some(Inline::Text { text, style }) = content.last_mut() else {
+            return None;
+        };
+        let trimmed = text.trim_end();
+        if style.code || !trimmed.ends_with('}') {
+            return None;
+        }
+        let start = trimmed.rfind("{#")?;
+        let label = trimmed[start + 2..trimmed.len() - 1].to_owned();
+        text.truncate(start);
+        text.truncate(text.trim_end().len());
+        if text.is_empty() {
+            content.pop();
+        }
+        if content.is_empty() {
+            self.report_at(at, "a table caption needs text before its label");
+        }
+        self.define(at, &label, LabelKind::Table)
+    }
+
+    /// Registers a label of `kind` defined at `at`, or reports why it cannot be one.
+    fn define(&mut self, at: Location, label: &str, kind: LabelKind) -> Option<String> {
+        let prefix = kind.prefix();
+        let valid = label
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_prefix(':'))
+            .is_some_and(|name| label_name_length(name) == name.len() && !name.is_empty());
+        if !valid {
+            let what = match kind {
+                LabelKind::Section => "a heading",
+                LabelKind::Figure => "a figure",
+                LabelKind::Table => "a table",
+            };
+            let message = format!(
+                "\"{label}\" is not a label for {what}: write {{#{prefix}:name}} with letters, digits, - and _"
+            );
+            self.report_at(at, message);
+            return None;
+        }
+        if let Some(first) = self.labels.get(label) {
+            let message = format!("label {label} is already defined on line {}", first.line);
+            self.report_at(at, message);
+            return None;
+        }
+        self.labels.insert(label.to_owned(), at);
+        Some(label.to_owned())
     }
 
     fn close_implicit_leaf(&mut self) {
@@ -493,19 +593,11 @@ impl<'a> Builder<'a> {
         }
         match event {
             Event::Start(tag) => self.start(tag, range),
+            Event::End(TagEnd::Image) => self.end_image(range.end),
             Event::End(tag) => self.end(tag),
             Event::Text(text) => match self.code.as_mut() {
                 Some(code) => code.text.push_str(&text),
-                None => {
-                    if &*text == "[" {
-                        self.check_undefined_footnote(offset);
-                    }
-                    // CommonMark keeps an image it cannot parse as text, starting with a separate `![`.
-                    if &*text == "![" && self.body[offset..].starts_with("![") {
-                        self.report(offset, BROKEN_IMAGE);
-                    }
-                    self.push_text(offset, &text, false);
-                }
+                None => self.text(&text, range),
             },
             Event::Code(text) => self.push_text(offset, &text, true),
             Event::SoftBreak => self.push_text(offset, " ", false),
@@ -519,6 +611,123 @@ impl<'a> Builder<'a> {
             Event::TaskListMarker(_) => self.report(offset, "task lists are not supported"),
             // Block HTML is skipped with its tag; math and the rest are not enabled.
             _ => {}
+        }
+    }
+
+    /// Pushes a text event, reading cross-references from its source. Text that a label or reference
+    /// already consumed is skipped.
+    fn text(&mut self, text: &str, range: Range<usize>) {
+        let (mut text, mut offset) = (text, range.start);
+        if offset < self.consumed {
+            let skipped = &self.body[offset..self.consumed.min(range.end)];
+            if range.end <= self.consumed || !text.starts_with(skipped) {
+                return;
+            }
+            text = &text[skipped.len()..];
+            offset = self.consumed;
+        }
+        if text == "[" {
+            self.check_undefined_footnote(offset);
+            if self.bracketed_reference(offset) {
+                return;
+            }
+        }
+        // CommonMark keeps an image it cannot parse as text, starting with a separate `![`.
+        if text == "![" && self.body[offset..].starts_with("![") {
+            self.report(offset, BROKEN_IMAGE);
+        }
+        // Escapes and entities change the text, so only text that matches its source holds references.
+        if self.body.get(offset..offset + text.len()) != Some(text) {
+            self.push_text(offset, text, false);
+            return;
+        }
+        let mut start = 0;
+        for (index, _) in text.match_indices('@') {
+            let before = text[..index]
+                .chars()
+                .next_back()
+                .or_else(|| self.body[..offset].chars().next_back());
+            let escapes = self.body[..offset + index].len() - self.body[..offset + index].trim_end_matches('\\').len();
+            if before.is_some_and(char::is_alphanumeric) || escapes % 2 == 1 || index < start {
+                continue;
+            }
+            let Some(length) = reference_label(&text[index + 1..]) else {
+                continue;
+            };
+            if index > start {
+                self.push_text(offset + start, &text[start..index], false);
+            }
+            let label = text[index + 1..index + 1 + length].to_owned();
+            self.reference(offset + index, label, false);
+            start = index + 1 + length;
+        }
+        if start < text.len() {
+            self.push_text(offset + start, &text[start..], false);
+        }
+    }
+
+    /// Reads `[@label]` or `[@label, page]` at the `[` at `offset`, and whether it was one.
+    fn bracketed_reference(&mut self, offset: usize) -> bool {
+        let Some(inner) = self.body[offset..].strip_prefix("[@") else {
+            return false;
+        };
+        let Some(length) = reference_label(inner) else {
+            return false;
+        };
+        let label = inner[..length].to_owned();
+        let rest = &inner[length..];
+        let (page, close) = if rest.starts_with(']') {
+            (false, "]".len())
+        } else if rest.starts_with(", page]") {
+            (true, ", page]".len())
+        } else {
+            let message = format!("write a cross-reference in brackets as [@{label}] or [@{label}, page]");
+            self.report(offset, message);
+            return false;
+        };
+        self.consumed = offset + "[@".len() + length + close;
+        self.reference(offset, label, page);
+        true
+    }
+
+    fn reference(&mut self, offset: usize, label: String, page: bool) {
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
+            self.report(offset, "a heading cannot hold a cross-reference");
+            return;
+        }
+        if !self.links.is_empty() {
+            self.report(offset, "a cross-reference cannot be inside a link");
+            return;
+        }
+        let at = self.location(offset);
+        self.references_to.push((label.clone(), at));
+        let style = self.style(false);
+        self.push_inline(offset, Inline::Ref(Reference { label, page, style }));
+    }
+
+    /// Reads a `{#fig:name}` label directly after an image that ends at `end`, spaces allowed between.
+    fn end_image(&mut self, end: usize) {
+        let Some(image) = self.leaf.as_mut().and_then(|leaf| leaf.image.as_mut()) else {
+            return;
+        };
+        image.closed = true;
+        let rest = &self.body[end..];
+        let spaces = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+        let Some(attribute) = rest[spaces..].strip_prefix("{#") else {
+            return;
+        };
+        let Some(close) = attribute
+            .find('}')
+            .filter(|&close| !attribute[..close].contains(char::is_whitespace))
+        else {
+            return;
+        };
+        let label = attribute[..close].to_owned();
+        self.consumed = end + spaces + "{#".len() + close + 1;
+        let at = self.location(end + spaces);
+        let label = self.define(at, &label, LabelKind::Figure);
+        if let Some(leaf) = self.leaf.as_mut() {
+            leaf.label = label;
         }
     }
 
@@ -621,7 +830,23 @@ impl<'a> Builder<'a> {
         let offset = range.start;
         match tag {
             Tag::Paragraph => self.open_leaf(offset, None, false),
-            Tag::Heading { level, .. } => self.open_leaf(offset, Some(level as u8), false),
+            Tag::Heading {
+                level,
+                id,
+                classes,
+                attrs,
+            } => {
+                self.open_leaf(offset, Some(level as u8), false);
+                if !classes.is_empty() || !attrs.is_empty() {
+                    self.report(offset, "a heading takes only a label, as in # Heading {#sec:name}");
+                }
+                if let Some(id) = id {
+                    let label = self.define(self.location(offset), &id, LabelKind::Section);
+                    if let Some(leaf) = self.leaf.as_mut() {
+                        leaf.label = label;
+                    }
+                }
+            }
             Tag::BlockQuote(_) => {
                 self.close_implicit_leaf();
                 self.containers.push(Container::Quote(self.location(offset)));
@@ -698,6 +923,7 @@ impl<'a> Builder<'a> {
                     implicit: false,
                     content: Vec::new(),
                     image: None,
+                    label: None,
                 });
             }
             Tag::FootnoteDefinition(label) => {
@@ -814,6 +1040,7 @@ impl<'a> Builder<'a> {
                         header,
                         rows,
                         caption: Vec::new(),
+                        label: None,
                     });
                 }
             }
@@ -821,11 +1048,6 @@ impl<'a> Builder<'a> {
             TagEnd::Strong => self.strong -= 1,
             TagEnd::Link => {
                 self.links.pop();
-            }
-            TagEnd::Image => {
-                if let Some(image) = self.leaf.as_mut().and_then(|leaf| leaf.image.as_mut()) {
-                    image.closed = true;
-                }
             }
             _ => {}
         }
@@ -876,14 +1098,19 @@ fn strip_caption_marker(content: &mut Vec<Inline>) -> bool {
     true
 }
 
-fn plain_text(content: &[Inline]) -> String {
-    content
-        .iter()
-        .filter_map(|inline| match inline {
-            Inline::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
+/// The length of the `prefix:name` cross-reference label that `text` starts with, if any. Names are
+/// ASCII letters, digits, `-`, and `_`.
+fn reference_label(text: &str) -> Option<usize> {
+    LabelKind::of(text)?;
+    let (prefix, rest) = text.split_once(':')?;
+    let name = label_name_length(rest);
+    (name > 0).then_some(prefix.len() + 1 + name)
+}
+
+/// The length of the label name that `text` starts with.
+fn label_name_length(text: &str) -> usize {
+    text.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .unwrap_or(text.len())
 }
 
 fn fence_name(fence: Fence) -> &'static str {
@@ -950,12 +1177,14 @@ mod tests {
                 Block::Heading {
                     at: at(1, 1),
                     level: 1,
-                    content: vec![plain("Title")]
+                    content: vec![plain("Title")],
+                    label: None,
                 },
                 Block::Heading {
                     at: at(3, 1),
                     level: 2,
-                    content: vec![plain("Setext")]
+                    content: vec![plain("Setext")],
+                    label: None,
                 },
                 paragraph(6, 1, "Text"),
                 Block::Quote {
@@ -1014,7 +1243,7 @@ mod tests {
             ..Default::default()
         };
         let link = |style: InlineStyle| InlineStyle {
-            link: Some("https://a.b/".into()),
+            link: Some(Link::Url("https://a.b/".into())),
             ..style
         };
         let code = InlineStyle {
@@ -1121,6 +1350,7 @@ mod tests {
                     at: at(1, 1),
                     image: 0,
                     caption: vec![plain("A "), text("plot", em)],
+                    label: None,
                 },
                 Block::List {
                     at: at(3, 1),
@@ -1129,12 +1359,14 @@ mod tests {
                         at: at(3, 3),
                         image: 1,
                         caption: Vec::new(),
+                        label: None,
                     }]],
                 },
                 Block::Image {
                     at: at(5, 1),
                     image: 0,
                     caption: vec![plain("Again")],
+                    label: None,
                 },
             ]
         );
@@ -1349,7 +1581,7 @@ mod tests {
             ..Default::default()
         };
         let link = InlineStyle {
-            link: Some("https://a.b/".into()),
+            link: Some(Link::Url("https://a.b/".into())),
             ..Default::default()
         };
         let body = "| A | B | C | D |\n|:--|:-:|--:|---|\n| *x* | `y` | [z](https://a.b/) | w |\n| short |\n";
@@ -1393,6 +1625,7 @@ mod tests {
                     },
                 ],
                 caption: Vec::new(),
+                label: None,
             }
         );
     }
@@ -1486,7 +1719,7 @@ mod tests {
             (
                 "| a |\n|---|\n\n: Caption {#tbl-a}",
                 (4, 1),
-                "table labels are not supported yet",
+                "\"tbl-a\" is not a label for a table: write {#tbl:name} with letters, digits, - and _",
             ),
             (
                 "| a |\n|---|\n\n: Caption[^n]\n\n[^n]: n",
@@ -1518,5 +1751,103 @@ mod tests {
         assert_eq!(rows[0].cells[0].content, vec![plain("b"), Inline::FootnoteRef(1)]);
         let notes: Vec<_> = document.footnotes.iter().map(|note| note.at.line).collect();
         assert_eq!(notes, vec![9, 11, 13]);
+    }
+
+    fn reference(label: &str, page: bool, style: InlineStyle) -> Inline {
+        Inline::Ref(Reference {
+            label: label.into(),
+            page,
+            style,
+        })
+    }
+
+    #[test]
+    fn parses_labels_and_references_and_leaves_other_at_signs_as_text() {
+        let body = "# Intro {#sec:intro}\n\n![A chart](c.svg){#fig:chart}\n\n| a |\n|---|\n\n: Data {#tbl:data}\n\n\
+            See @sec:intro, *[@fig:chart, page]* and [@tbl:data]. Not @smith2024, \\@fig:chart, or a@fig:chart.\n";
+        let blocks = blocks(body);
+        let em = InlineStyle {
+            emphasis: true,
+            ..Default::default()
+        };
+
+        assert!(matches!(&blocks[0], Block::Heading { label: Some(l), .. } if l == "sec:intro"));
+        assert!(matches!(&blocks[1], Block::Image { label: Some(l), caption, .. }
+            if l == "fig:chart" && *caption == vec![plain("A chart")]));
+        assert!(matches!(&blocks[2], Block::Table { label: Some(l), caption, .. }
+            if l == "tbl:data" && *caption == vec![plain("Data")]));
+        let Block::Paragraph { content, .. } = &blocks[3] else {
+            panic!("paragraph")
+        };
+        assert_eq!(
+            *content,
+            vec![
+                plain("See "),
+                reference("sec:intro", false, InlineStyle::default()),
+                plain(", "),
+                reference("fig:chart", true, em),
+                plain(" and "),
+                reference("tbl:data", false, InlineStyle::default()),
+                plain(". Not @smith2024, @fig:chart, or a@fig:chart."),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_label_and_reference_errors_at_their_location() {
+        let cases = [
+            (
+                "# A {#fig:a}\n",
+                (1, 1),
+                "\"fig:a\" is not a label for a heading: write {#sec:name} with letters, digits, - and _",
+            ),
+            (
+                "# A {#sec:a .wide}\n",
+                (1, 1),
+                "a heading takes only a label, as in # Heading {#sec:name}",
+            ),
+            (
+                "# A {#sec:a}\n\n# B {#sec:a}\n",
+                (3, 1),
+                "label sec:a is already defined on line 1",
+            ),
+            (
+                "![](c.svg){#fig:c}\n",
+                (1, 1),
+                "a figure label needs a caption, as in ![Caption](file.png){#fig:name}",
+            ),
+            (
+                "![C](c.svg){#tbl:c}\n",
+                (1, 12),
+                "\"tbl:c\" is not a label for a figure: write {#fig:name} with letters, digits, - and _",
+            ),
+            (
+                "See @fig:missing.\n",
+                (1, 5),
+                "@fig:missing refers to an undefined label; define it with {#fig:missing}",
+            ),
+            (
+                "# See @sec:a {#sec:a}\n",
+                (1, 7),
+                "a heading cannot hold a cross-reference",
+            ),
+            (
+                "# A {#sec:a}\n\n[see @sec:a](https://a.b/)\n",
+                (3, 6),
+                "a cross-reference cannot be inside a link",
+            ),
+            (
+                "# A {#sec:a}\n\n[@sec:a; p. 3]\n",
+                (3, 1),
+                "write a cross-reference in brackets as [@sec:a] or [@sec:a, page]",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
     }
 }

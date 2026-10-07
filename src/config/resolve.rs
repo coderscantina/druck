@@ -607,6 +607,7 @@ impl<'a> Resolver<'a> {
 
         let page = page?;
         let title_block = self.title_slots("title-block", &theme.title_block.slots, s, &images, &page, body);
+        let title_block_space = self.spacing(&theme.title_block.space_after, "title-block.space-after", body);
         let title_page = self.title_slots("title-page", &theme.title_page.slots, s, &images, &page, body);
         self.page_variants();
 
@@ -633,7 +634,10 @@ impl<'a> Resolver<'a> {
             caption_separator: theme.captions.separator.clone(),
             bibliography: bibliography?,
             toc: toc?,
-            title_block: title_block?,
+            title_block: resolved::TitleBlock {
+                slots: title_block?,
+                space_after: title_block_space?,
+            },
             title_page: title_page?,
             pages: theme.pages.clone(),
             labels: theme.labels.get(theme.document.lang).clone(),

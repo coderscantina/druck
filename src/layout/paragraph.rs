@@ -16,7 +16,7 @@ use super::{Line, inline_face, text_item};
 use crate::config::resolved::{InlineStyles, Style};
 use crate::config::theme::{Align, FontStyle, Lang, Weight};
 use crate::config::values::{Color, Pt};
-use crate::document::Inline;
+use crate::document::{Inline, Link};
 use crate::page::{Item, Rect};
 use crate::text::{FaceId, Fonts, Metrics, ShapedRun};
 
@@ -32,7 +32,7 @@ const HYPHEN_COST: f64 = 50.0;
 struct Fragment {
     run: ShapedRun,
     color: Color,
-    link: Option<String>,
+    link: Option<Link>,
     metrics: Metrics,
     /// Prose may break at hyphens. Code and link text that spells out its URL may not.
     prose: bool,
@@ -565,10 +565,10 @@ fn position(
             x += spaces[word] * (1.0 + adjust);
         }
         let width = run.width.0;
-        if let Some(url) = &fragment.link {
+        if let Some(link) = &fragment.link {
             let metrics = fragment.metrics;
             let extends = open_link.and_then(|i| match &mut items[i] {
-                Item::Link { rect, url: open } if open == url => Some(rect),
+                Item::Link { rect, link: open } if open == link => Some(rect),
                 _ => None,
             });
             match extends {
@@ -582,7 +582,7 @@ fn position(
                             width: Pt(width),
                             height: Pt(metrics.ascender.0 + metrics.descender.0),
                         },
-                        url: url.clone(),
+                        link: link.clone(),
                     });
                 }
             }
@@ -645,6 +645,7 @@ fn tokens(
                 continue;
             }
             Inline::Text { text, style } => (text, style),
+            Inline::Ref(_) => unreachable!("layout resolves cross-references before setting text"),
             Inline::FootnoteRef(index) => {
                 let (weight, font_style) = inline_face(style, false, false);
                 let face = fonts.face(&style.font, weight, font_style);
@@ -696,10 +697,8 @@ fn tokens(
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
             }
-            let spells_url = text_style
-                .link
-                .as_deref()
-                .is_some_and(|url| url == part || url.strip_prefix("mailto:") == Some(part));
+            let spells_url = matches!(&text_style.link,
+                Some(Link::Url(url)) if url == part || url.strip_prefix("mailto:") == Some(part));
             word.fragments.push(Fragment {
                 run,
                 color,

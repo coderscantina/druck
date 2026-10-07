@@ -103,9 +103,25 @@ impl Template {
         })
     }
 
-    #[allow(dead_code, reason = "slot layout arrives in milestone 08")]
+    #[cfg(test)]
     pub fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    /// The text with every placeholder replaced by its value, or the first placeholder without one.
+    /// Blank values count as missing.
+    pub fn fill(&self, value: impl Fn(Placeholder) -> Option<String>) -> Result<String, Placeholder> {
+        let mut text = String::new();
+        for segment in &self.segments {
+            match segment {
+                Segment::Text(piece) => text.push_str(piece),
+                Segment::Value(placeholder) => match value(*placeholder).filter(|v| !v.trim().is_empty()) {
+                    Some(value) => text.push_str(&value),
+                    None => return Err(*placeholder),
+                },
+            }
+        }
+        Ok(text)
     }
 
     pub fn placeholders(&self) -> impl Iterator<Item = Placeholder> + '_ {
@@ -145,6 +161,19 @@ mod tests {
                 Segment::Value(Placeholder::Page),
             ]
         );
+    }
+
+    #[test]
+    fn fills_values_as_text_and_names_the_first_missing_one() {
+        let template = Template::parse("{title} ({date})").unwrap();
+        let value = |placeholder| match placeholder {
+            Placeholder::Title => Some("*Not* {markup}".to_owned()),
+            Placeholder::Date => Some("  ".to_owned()),
+            _ => None,
+        };
+        assert_eq!(template.fill(value), Err(Placeholder::Date));
+        let filled = Template::parse("{title}!").unwrap().fill(value);
+        assert_eq!(filled.as_deref(), Ok("*Not* {markup}!"));
     }
 
     #[test]

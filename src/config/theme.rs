@@ -36,7 +36,7 @@ pub struct Theme {
     pub captions: Captions,
     pub bibliography: Bibliography,
     pub toc: Toc,
-    pub title_block: TitleLayout,
+    pub title_block: TitleBlock,
     pub title_page: TitleLayout,
     pub pages: PageVariants,
     pub labels: Labels,
@@ -72,6 +72,12 @@ pub enum CitationStyle {
 /// A heading level from 1 to 6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct HeadingDepth(u8);
+
+impl HeadingDepth {
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
 
 impl<'de> Deserialize<'de> for HeadingDepth {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -401,7 +407,16 @@ pub struct Toc {
     pub leader: bool,
 }
 
-/// Ordered content slots for the in-body title block or the separate title page.
+/// Ordered content slots for the title block at the start of the body, and the space below it. `em`
+/// refers to the body size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TitleBlock {
+    pub slots: Vec<TitleSlot>,
+    pub space_after: Spec<Spacing>,
+}
+
+/// Ordered content slots for the separate title page.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TitleLayout {
@@ -510,6 +525,8 @@ impl Labels {
 pub struct LabelSet {
     pub figure: String,
     pub table: String,
+    pub section: String,
+    pub page: String,
     pub contents: String,
     #[serde(rename = "abstract")]
     pub abstract_: String,

@@ -30,7 +30,7 @@ pub struct Config {
     pub caption_separator: String,
     pub bibliography: Bibliography,
     pub toc: Toc,
-    pub title_block: Vec<TitleSlot>,
+    pub title_block: TitleBlock,
     pub title_page: Vec<TitleSlot>,
     pub pages: PageVariants,
     pub labels: LabelSet,
@@ -165,6 +165,14 @@ pub struct Bibliography {
 pub struct Toc {
     pub level_indent: Pt,
     pub leader: bool,
+}
+
+/// The title block's slots and the space below it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TitleBlock {
+    pub slots: Vec<TitleSlot>,
+    pub space_after: Pt,
 }
 
 #[derive(Debug, Clone, Serialize)]

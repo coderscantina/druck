@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use super::paragraph::protrusion;
 use super::*;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, resolve};
+use crate::config::resolved::PageGeometry;
 use crate::config::theme::Lang;
 use crate::document::{Footnote, InlineStyle};
 
@@ -58,7 +62,7 @@ fn render_with_images(
         footnotes,
         images: Vec::new(),
     };
-    layout(&document, images, &config, &fonts, &source())
+    layout(&document, images, &HashMap::new(), &config, &fonts, &source()).map(|output| output.pages)
 }
 
 fn note(line: u64, text: &str) -> Footnote {
@@ -68,11 +72,34 @@ fn note(line: u64, text: &str) -> Footnote {
     }
 }
 
-/// Text lines of a page as (left edge, right edge, text), top to bottom.
+/// Whether a baseline lies in the text area rather than in a header or footer.
+fn in_text_area(y: Pt) -> bool {
+    let page = geometry();
+    y.0 > page.margin_top.0 && y.0 < page.margin_top.0 + page.text_height().0
+}
+
+/// The default page geometry, resolved once.
+fn geometry() -> &'static PageGeometry {
+    static PAGE: LazyLock<PageGeometry> = LazyLock::new(|| config().page);
+    &PAGE
+}
+
+/// Whether a baseline is that of a header or footer.
+fn is_band(y: Pt) -> bool {
+    let page = geometry();
+    let header = page.margin_top.0 - page.header_offset.0;
+    let footer = page.margin_top.0 + page.text_height().0 + page.footer_offset.0;
+    y.0 == header || y.0 == footer
+}
+
+/// Text lines of a page as (left edge, right edge, text), top to bottom. Headers and footers are left out.
 fn lines(page: &Page) -> Vec<(f64, f64, String)> {
     let mut lines: Vec<(f64, f64, f64, String)> = Vec::new();
     for item in &page.items {
         let Item::Text { x, y, run, .. } = item else { continue };
+        if !in_text_area(*y) {
+            continue;
+        }
         match lines.iter_mut().find(|line| line.0 == y.0) {
             Some(line) => {
                 line.2 = x.0 + run.width.0;
@@ -140,7 +167,7 @@ fn text_continues_on_new_pages_inside_the_text_area() {
     for page in &pages {
         for item in &page.items {
             let Item::Text { y, .. } = item else { continue };
-            assert!(y.0 < bottom && y.0 > config.page.margin_top.0);
+            assert!(y.0 < bottom && y.0 > config.page.margin_top.0 || is_band(*y));
         }
     }
 }
@@ -246,7 +273,7 @@ fn sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker() {
         page.items
             .iter()
             .filter_map(|item| match item {
-                Item::Text { y, run, .. } => Some((y.0, run.size.0, run.text.clone())),
+                Item::Text { y, run, .. } if !is_band(*y) => Some((y.0, run.size.0, run.text.clone())),
                 _ => None,
             })
             .collect()
@@ -341,11 +368,15 @@ impl Placed {
     }
 }
 
-/// The text lines of a page in placement order. Raised markers join the line they are in.
+/// The text lines of a page in placement order. Raised markers join the line they are in. Headers and
+/// footers are left out.
 fn placed(page: &Page) -> Vec<Placed> {
     let mut lines: Vec<Placed> = Vec::new();
     for item in &page.items {
         let Item::Text { x, y, run, .. } = item else { continue };
+        if !in_text_area(*y) {
+            continue;
+        }
         let right = x.0 + run.width.0;
         match lines.last_mut() {
             Some(line) if (line.y - y.0).abs() < 6.0 => {
@@ -635,6 +666,7 @@ fn figure(line: u64, image: usize, caption: Vec<Inline>) -> Block {
         at: Location { line, column: 1 },
         image,
         caption,
+        label: None,
     }
 }
 
@@ -818,6 +850,7 @@ fn a_tall_image_shrinks_to_fit_below_its_heading() {
         at: Location { line: 1, column: 1 },
         level: 2,
         content: vec![text_inline("Results")],
+        label: None,
     };
     let blocks = vec![numbered(0), heading, figure(3, 0, vec![text_inline("Tall.")])];
     let pages = render_with_images(blocks, Vec::new(), &[svg(300.0, 3000.0)]).unwrap();
@@ -868,6 +901,7 @@ fn table(line: u64, header: &[&str], rows: &[Vec<String>], caption: &str) -> Blo
         } else {
             vec![text_inline(caption)]
         },
+        label: None,
     }
 }
 
@@ -1125,6 +1159,7 @@ fn a_note_referenced_in_a_cell_goes_on_the_page_of_its_row() {
             header,
             rows,
             caption: Vec::new(),
+            label: None,
         };
         let pages = render_with_notes(vec![block], vec![note(90, "Cell note.")]).unwrap();
         let reference = pages_with(&pages, &format!("R{noted} "));
