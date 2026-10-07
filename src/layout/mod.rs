@@ -4,6 +4,8 @@
 //! it. Lines of a column section are set at the column width and grouped into runs. [`paragraph`]
 //! chooses line breaks for each whole paragraph; [`pages`] chooses page and column breaks for the
 //! whole flow and places footnotes.
+//!
+//! An image is one line as tall as the image, kept with the lines of its caption.
 
 mod pages;
 mod paragraph;
@@ -18,12 +20,15 @@ use crate::config::theme::{FontStyle, Weight};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Location};
+use crate::image::Image;
 use crate::page::{Item, Page, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-/// Lays out `document` on pages. Errors name the source location of content that cannot fit.
+/// Lays out `document` on pages. `images` are the loaded [`Document::images`]. Errors name the source
+/// location of content that cannot fit.
 pub fn layout(
     document: &Document,
+    images: &[Image],
     config: &Config,
     fonts: &Fonts,
     source: &Source,
@@ -32,6 +37,8 @@ pub fn layout(
         config,
         fonts,
         source,
+        images,
+        figures: 0,
         lines: Vec::new(),
         space: 0.0,
         after_paragraph: false,
@@ -117,6 +124,9 @@ struct Flow<'a> {
     config: &'a Config,
     fonts: &'a Fonts,
     source: &'a Source,
+    images: &'a [Image],
+    /// The number of captioned images so far, which numbers the next caption.
+    figures: usize,
     lines: Vec<FlowLine>,
     /// Space requested before the next line. Adjacent spaces collapse to the larger one.
     space: f64,
@@ -215,6 +225,10 @@ impl<'a> Flow<'a> {
                     self.space(style.space_after.0);
                 }
                 Block::Code { first_line, lines, .. } => self.code(*first_line, lines, frame),
+                Block::Image { at, image, caption } => {
+                    let images = self.images;
+                    self.image(*at, &images[*image], caption, frame);
+                }
                 Block::Keep { at, blocks } => {
                     let start = self.lines.len();
                     self.blocks(blocks, frame);
@@ -354,6 +368,100 @@ impl<'a> Flow<'a> {
             self.columns.push(start..self.lines.len());
         }
         self.change_layout();
+    }
+
+    /// Sets an image centered in the frame, followed by its numbered caption, as lines that stay
+    /// together. The image keeps its proportions and shrinks to the frame width and to the height the
+    /// text area leaves beside its caption and the heading it is kept with. It never grows.
+    fn image(&mut self, at: Location, image: &Image, caption: &[Inline], frame: Frame<'a>) {
+        let style = &self.config.styles.caption;
+        let width = self.width(frame);
+        let caption = if caption.is_empty() {
+            Vec::new()
+        } else {
+            self.figures += 1;
+            let label = format!(
+                "{} {}{}",
+                self.config.labels.figure, self.figures, self.config.caption_separator
+            );
+            let label = Inline::Text {
+                text: label,
+                style: InlineStyle::default(),
+            };
+            let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
+            let lang = self.config.document.lang;
+            let inline = &self.config.inline;
+            let measure = width - 2.0 * style.indent.0;
+            match paragraph::lines(&content, style, inline, self.fonts, lang, measure, 0.0) {
+                Ok(lines) => lines,
+                Err(problem) => {
+                    self.errors.push(self.error(at, problem.to_string()));
+                    return;
+                }
+            }
+        };
+
+        // A figure is spaced like its caption: the caption's space after it, and its space before
+        // between image and caption.
+        self.space(style.space_after.0);
+        let mut below = caption.iter().map(|line| line.height).sum::<f64>();
+        if !caption.is_empty() {
+            below += style.space_before.0;
+        }
+        let height = self.config.page.text_height().0 - self.kept_above() - below;
+        if height <= 0.0 {
+            let message = format!(
+                "this image has no room: its caption and the heading kept with it fill the {:.1}pt text area",
+                self.config.page.text_height().0
+            );
+            self.errors.push(self.error(at, message));
+            return;
+        }
+        let (natural_width, natural_height) = image.size();
+        let scale = 1f64.min(width / natural_width.0).min(height / natural_height.0);
+        let size = (natural_width.0 * scale, natural_height.0 * scale);
+        let rect = Rect {
+            x: Pt(frame.left + (width - size.0) / 2.0),
+            y: Pt(0.0),
+            width: Pt(size.0),
+            height: Pt(size.1),
+        };
+        let line = Line {
+            height: size.1,
+            baseline: size.1,
+            items: vec![Item::Image {
+                rect,
+                image: image.clone(),
+            }],
+            notes: Vec::new(),
+        };
+        let count = caption.len();
+        let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
+        self.push(line, at, after);
+        self.space(style.space_before.0);
+        let dx = frame.left + style.indent.0;
+        for (index, line) in caption.into_iter().enumerate() {
+            let after = if index + 1 == count {
+                Break::Allowed(0.0)
+            } else {
+                Break::Never
+            };
+            self.push(translate_line(line, dx), at, after);
+        }
+        self.space(style.space_after.0);
+    }
+
+    /// The height of the lines at the end of the flow that the next line must stay with, such as a
+    /// heading, with the space requested before the next line.
+    fn kept_above(&self) -> f64 {
+        let kept = self.lines.iter().rev().take_while(|line| line.after == Break::Never);
+        let mut height = 0.0;
+        let mut space = self.space;
+        for line in kept {
+            height += space + line.line.height;
+            space = line.space_before;
+        }
+        height
     }
 
     /// Code lines are set as they are. A line wider than the available width is an error.

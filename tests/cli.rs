@@ -329,23 +329,92 @@ fn uses_font_files_relative_to_the_document() {
 #[test]
 fn reports_unsupported_content_with_its_location_and_writes_nothing() {
     let sandbox = Sandbox::new("unsupported");
-    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n![x](x.png)\n\n---\n");
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n| a |\n| - |\n| b |\n\n---\n");
     let run = sandbox.run(&["render", &document]);
 
     assert_eq!(run.code, 1);
     assert!(
         run.stderr
-            .contains(&format!("{document}:7:1: images are not supported yet")),
+            .contains(&format!("{document}:7:1: tables are not supported yet")),
         "{}",
         run.stderr
     );
     assert!(
         run.stderr
-            .contains(&format!("{document}:9:1: thematic breaks are not supported")),
+            .contains(&format!("{document}:11:1: thematic breaks are not supported")),
         "{}",
         run.stderr
     );
     assert!(!sandbox.root.join("doc.pdf").exists());
+}
+
+/// A sandbox whose `images` directory holds the image fixtures.
+fn image_sandbox(name: &str) -> Sandbox {
+    let sandbox = Sandbox::new(name);
+    fs::create_dir(sandbox.root.join("images")).unwrap();
+    for entry in fs::read_dir(format!("{FIXTURES}/images")).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, sandbox.root.join("images").join(path.file_name().unwrap())).unwrap();
+    }
+    sandbox
+}
+
+#[test]
+fn renders_images_relative_to_the_document_the_same_every_time() {
+    let sandbox = image_sandbox("images");
+    let body = "![A *pixel*](images/pixel.png)\n\n![](images/photo.jpg)\n\n![A drawing](images/drawing.svg)\n";
+    let document = sandbox.write("doc.md", body);
+    let output = sandbox.root.join("doc.pdf");
+    let first = render(&sandbox, &[&document], &output);
+    let second = render(&sandbox, &[&document], &output);
+
+    assert_eq!(
+        String::from_utf8_lossy(&first).matches("/Subtype/Image").count(),
+        2,
+        "PNG and JPEG"
+    );
+    assert!(first == second, "renders are identical");
+}
+
+#[test]
+fn reports_image_problems_at_their_reference_with_the_resource() {
+    let sandbox = image_sandbox("image-errors");
+    let body = "Text.\n\n![a](images/missing.png)\n\n![b](images/truncated.png)\n\n![c](images/still.gif)\n\n\
+        ![d](images/jpeg-data.png)\n\n![e](https://example.com/e.png)\n";
+    let document = sandbox.write("doc.md", body);
+    let run = sandbox.run(&["render", &document]);
+    let dir = sandbox.root.display();
+    let expected = [
+        format!("{document}:3:1: image not found: \"images/missing.png\" relative to the document in {dir}"),
+        format!(
+            "{document}:5:1: image \"images/truncated.png\" relative to the document in {dir}: malformed PNG image"
+        ),
+        format!(
+            "{document}:7:1: image \"images/still.gif\" relative to the document in {dir}: GIF images are not supported"
+        ),
+        format!(
+            "{document}:9:1: image \"images/jpeg-data.png\" relative to the document in {dir}: \
+            the file contains JPEG data but its name ends in .png"
+        ),
+    ];
+
+    assert_eq!(run.code, 1);
+    // Remote references are reported by the parser, before any file is read.
+    assert!(
+        run.stderr.contains(&format!(
+            "{document}:11:1: remote images are not fetched; use a local file"
+        )),
+        "{}",
+        run.stderr
+    );
+    assert!(!sandbox.root.join("doc.pdf").exists());
+
+    let local = sandbox.write("local.md", &body.replace("![e](https://example.com/e.png)\n", ""));
+    let run = sandbox.run(&["render", &local]);
+    let expected = expected.map(|line| line.replace(&document, &local));
+    for line in &expected {
+        assert!(run.stderr.contains(line.as_str()), "{line}\n{}", run.stderr);
+    }
 }
 
 #[test]

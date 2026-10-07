@@ -15,6 +15,15 @@ pub struct Document {
     pub blocks: Vec<Block>,
     /// Footnotes in the order of their references, which is also their numbering.
     pub footnotes: Vec<Footnote>,
+    /// The distinct image files referenced, in order of first use.
+    pub images: Vec<ImageFile>,
+}
+
+/// An image file as written in the Markdown, relative to the document, with its first reference.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageFile {
+    pub at: Location,
+    pub path: String,
 }
 
 /// A footnote definition. Its number is its index in [`Document::footnotes`] plus one.
@@ -52,6 +61,13 @@ pub enum Block {
         at: Location,
         first_line: u64,
         lines: Vec<String>,
+    },
+    /// An image alone in its paragraph: an index into [`Document::images`] and the caption from its
+    /// description, empty for none.
+    Image {
+        at: Location,
+        image: usize,
+        caption: Vec<Inline>,
     },
     /// `::: keep`: content that stays on one page.
     Keep {

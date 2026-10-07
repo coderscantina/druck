@@ -43,9 +43,22 @@ fn render(blocks: Vec<Block>) -> Result<Vec<Page>, Vec<Diagnostic>> {
 }
 
 fn render_with_notes(blocks: Vec<Block>, footnotes: Vec<Footnote>) -> Result<Vec<Page>, Vec<Diagnostic>> {
+    render_with_images(blocks, footnotes, &[])
+}
+
+fn render_with_images(
+    blocks: Vec<Block>,
+    footnotes: Vec<Footnote>,
+    images: &[Image],
+) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let config = config();
     let fonts = Fonts::load(&config).expect("bundled fonts");
-    layout(&Document { blocks, footnotes }, &config, &fonts, &source())
+    let document = Document {
+        blocks,
+        footnotes,
+        images: Vec::new(),
+    };
+    layout(&document, images, &config, &fonts, &source())
 }
 
 fn note(line: u64, text: &str) -> Footnote {
@@ -606,4 +619,224 @@ fn joined(lines: &[Vec<(f64, ShapedRun)>]) -> String {
         }
     }
     text.trim_end().to_owned()
+}
+
+/// A plain SVG image of the given natural size in points.
+fn svg(width: f64, height: f64) -> Image {
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}pt" height="{height}pt"><rect width="100%" height="100%"/></svg>"#
+    );
+    Image::decode(svg.into_bytes(), "svg").expect("valid SVG")
+}
+
+/// Image `image` at source line `line` with the caption `caption`, or none if empty.
+fn figure(line: u64, image: usize, caption: Vec<Inline>) -> Block {
+    Block::Image {
+        at: Location { line, column: 1 },
+        image,
+        caption,
+    }
+}
+
+/// The page index and rectangle of every image, in placement order.
+fn image_rects(pages: &[Page]) -> Vec<(usize, Rect)> {
+    let mut rects = Vec::new();
+    for (index, page) in pages.iter().enumerate() {
+        for item in &page.items {
+            if let Item::Image { rect, .. } = item {
+                rects.push((index, *rect));
+            }
+        }
+    }
+    rects
+}
+
+/// The page index and placed line whose text contains `text`.
+fn find_line(pages: &[Page], text: &str) -> (usize, Placed) {
+    pages
+        .iter()
+        .enumerate()
+        .find_map(|(index, page)| {
+            let line = placed(page).into_iter().find(|line| line.text.contains(text))?;
+            Some((index, line))
+        })
+        .expect("line is placed")
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.01
+}
+
+#[test]
+fn images_shrink_proportionally_to_the_frame_and_never_grow() {
+    let config = config();
+    let images = [svg(1000.0, 500.0), svg(100.0, 50.0), svg(200.0, 2000.0)];
+    let blocks = vec![
+        figure(1, 0, Vec::new()),
+        figure(3, 1, Vec::new()),
+        figure(5, 2, vec![text_inline("Tall.")]),
+    ];
+    let pages = render_with_images(blocks, Vec::new(), &images).unwrap();
+    let rects = image_rects(&pages);
+    let width = config.page.text_width().0;
+
+    assert_eq!(rects.len(), 3);
+    let wide = rects[0].1;
+    assert!(
+        close(wide.width.0, width) && close(wide.height.0, width / 2.0),
+        "{wide:?}"
+    );
+    let small = rects[1].1;
+    assert!(close(small.width.0, 100.0) && close(small.height.0, 50.0), "{small:?}");
+    assert!(
+        close(small.x.0 - config.page.margin_inner.0, (width - 100.0) / 2.0),
+        "centered"
+    );
+    let (page, tall) = rects[2];
+    let (caption_page, caption) = find_line(&pages, "Tall.");
+    let bottom = config.page.height.0 - config.page.margin_bottom.0;
+    assert!(close(tall.width.0 * 10.0, tall.height.0), "{tall:?}");
+    assert!(
+        tall.height.0 > config.page.text_height().0 - 3.0 * body_line(),
+        "{tall:?}"
+    );
+    assert_eq!(caption_page, page);
+    assert!(caption.y > tall.y.0 + tall.height.0 && caption.y < bottom);
+}
+
+#[test]
+fn captions_are_numbered_with_the_theme_label() {
+    let images = [svg(50.0, 20.0)];
+    let blocks = vec![
+        figure(1, 0, vec![text_inline("First.")]),
+        figure(3, 0, Vec::new()),
+        figure(5, 0, vec![text_inline("Second.")]),
+    ];
+    let pages = render_with_images(blocks, Vec::new(), &images).unwrap();
+    let captions: Vec<String> = placed(&pages[0]).into_iter().map(|line| line.text).collect();
+
+    assert_eq!(captions, ["Figure 1: First.", "Figure 2: Second."]);
+}
+
+#[test]
+fn an_image_and_its_caption_move_together_to_the_next_page() {
+    let images = [svg(300.0, 300.0)];
+    let mut moved = false;
+    for count in 0..12 {
+        let mut blocks: Vec<Block> = (0..count).map(numbered).collect();
+        blocks.push(figure(100, 0, vec![text_inline("Kept caption.")]));
+        blocks.push(numbered(50));
+        let pages = render_with_images(blocks, Vec::new(), &images).unwrap();
+        let (page, rect) = image_rects(&pages)[0];
+        let (caption_page, caption) = find_line(&pages, "Kept caption.");
+
+        assert_eq!(page, caption_page, "{count} paragraphs before");
+        assert!(caption.y > rect.y.0 + rect.height.0);
+        assert_eq!(reading_order(&pages), (0..count).chain([50]).collect::<Vec<_>>());
+        moved |= page > 0 && reading_order(&pages[..page]).len() == count as usize;
+    }
+    assert!(moved, "some image moved to the next page");
+}
+
+#[test]
+fn an_image_in_columns_has_the_column_width_and_moves_with_its_caption_to_the_next_column() {
+    let width = super::pages::column_width(&config().page);
+    let images = [svg(1000.0, 800.0)];
+    let mut second = false;
+    for count in 0..6 {
+        let mut section: Vec<Block> = (0..count).map(numbered).collect();
+        section.push(figure(100, 0, vec![text_inline("Column caption.")]));
+        section.extend((10..14).map(numbered));
+        let pages = render_with_images(vec![columns(1, section)], Vec::new(), &images).unwrap();
+        let (page, rect) = image_rects(&pages)[0];
+        let (caption_page, caption) = find_line(&pages, "Column caption.");
+        let in_second = rect.x.0 > pages[page].width.0 / 2.0;
+
+        assert!(close(rect.width.0, width), "{rect:?}");
+        assert_eq!(page, caption_page);
+        assert_eq!(caption.in_second_column(&pages[page]), in_second);
+        assert!(caption.y > rect.y.0 + rect.height.0);
+        second |= in_second;
+    }
+    assert!(second, "some image moved to the second column");
+}
+
+#[test]
+fn a_full_width_image_sits_between_balanced_column_regions() {
+    let config = config();
+    let images = [svg(1000.0, 300.0)];
+    let full = Block::FullWidth {
+        at: Location { line: 50, column: 1 },
+        blocks: vec![figure(51, 0, vec![text_inline("Wide caption.")])],
+    };
+    let section = columns(1, vec![numbered(0), numbered(1), full, numbered(2), numbered(3)]);
+    let pages = render_with_images(vec![section], Vec::new(), &images).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let (_, rect) = image_rects(&pages)[0];
+    let caption = lines
+        .iter()
+        .position(|line| line.text.contains("Wide caption."))
+        .unwrap();
+    let (first, second) = column_bottoms(page, &lines[..caption]);
+
+    assert_eq!(pages.len(), 1);
+    assert!(close(rect.width.0, config.page.text_width().0), "{rect:?}");
+    assert!(rect.y.0 > first.max(second));
+    assert!(lines[caption].y > rect.y.0 + rect.height.0);
+    let after = &lines[caption + 1..];
+    assert!(after.iter().any(|line| line.in_second_column(page)));
+    assert!(after.iter().all(|line| line.y > lines[caption].y));
+}
+
+#[test]
+fn a_note_stays_on_the_page_of_its_reference_beside_an_image() {
+    let images = [svg(300.0, 250.0)];
+    for count in 0..10 {
+        let mut blocks: Vec<Block> = (0..count).map(numbered).collect();
+        blocks.push(Block::Paragraph {
+            at: Location { line: 90, column: 1 },
+            content: vec![text_inline("Noted text."), Inline::FootnoteRef(0)],
+        });
+        blocks.push(figure(100, 0, vec![text_inline("Noted caption.")]));
+        let pages = render_with_images(blocks, vec![note(110, "Text note.")], &images).unwrap();
+        let (page, rect) = image_rects(&pages)[0];
+        let (reference, _) = find_line(&pages, "Noted text.");
+        let (note_page, note) = find_line(&pages, "Text note.");
+
+        assert_eq!(note_page, reference, "{count} paragraphs before");
+        assert_eq!(find_line(&pages, "Noted caption.").0, page);
+        if page == note_page {
+            assert!(note.y > rect.y.0 + rect.height.0, "the note area is below the image");
+        }
+    }
+}
+
+#[test]
+fn a_tall_image_shrinks_to_fit_below_its_heading() {
+    let heading = Block::Heading {
+        at: Location { line: 1, column: 1 },
+        level: 2,
+        content: vec![text_inline("Results")],
+    };
+    let blocks = vec![numbered(0), heading, figure(3, 0, vec![text_inline("Tall.")])];
+    let pages = render_with_images(blocks, Vec::new(), &[svg(300.0, 3000.0)]).unwrap();
+
+    let (heading_page, _) = find_line(&pages, "Results");
+    assert_eq!(image_rects(&pages)[0].0, heading_page);
+    assert_eq!(find_line(&pages, "Tall.").0, heading_page);
+}
+
+#[test]
+fn reports_an_image_whose_caption_leaves_no_room() {
+    let caption = vec![text_inline(&PROSE.repeat(30))];
+    let errors = render_with_images(vec![figure(7, 0, caption)], Vec::new(), &[svg(10.0, 10.0)]).unwrap_err();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].location, Some((7, 1)));
+    assert!(
+        errors[0].message.starts_with("this image has no room"),
+        "{}",
+        errors[0].message
+    );
 }

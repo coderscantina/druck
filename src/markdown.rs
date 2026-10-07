@@ -12,7 +12,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::config::source::Source;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Location};
+use crate::document::{Block, Document, Footnote, ImageFile, Inline, InlineStyle, Location};
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
@@ -100,6 +100,16 @@ struct Leaf {
     /// Tight list items hold text without a Paragraph event.
     implicit: bool,
     content: Vec<Inline>,
+    /// The image this paragraph consists of. Its description is the content.
+    image: Option<LeafImage>,
+}
+
+struct LeafImage {
+    at: Location,
+    /// An index into [`Document::images`].
+    index: usize,
+    /// Whether the image's description has ended, so further content is an error.
+    closed: bool,
 }
 
 struct CodeBlock {
@@ -135,6 +145,9 @@ struct Builder<'a> {
     referenced: HashMap<String, usize>,
     /// Footnote definitions by case-folded label: written label, location, and content.
     definitions: HashMap<String, (String, Location, Vec<Block>)>,
+    /// Image files in order of first use, and their indexes by path.
+    images: Vec<ImageFile>,
+    image_index: HashMap<String, usize>,
 }
 
 impl<'a> Builder<'a> {
@@ -160,6 +173,8 @@ impl<'a> Builder<'a> {
             references: Vec::new(),
             referenced: HashMap::new(),
             definitions: HashMap::new(),
+            images: Vec::new(),
+            image_index: HashMap::new(),
         }
     }
 
@@ -195,7 +210,11 @@ impl<'a> Builder<'a> {
             return Err(self.diagnostics);
         }
         let blocks = self.blocks.pop().unwrap_or_default();
-        Ok(Document { blocks, footnotes })
+        Ok(Document {
+            blocks,
+            footnotes,
+            images: self.images,
+        })
     }
 
     /// Applies the directive lines before `range` and reports those inside it. Directive lines
@@ -326,16 +345,29 @@ impl<'a> Builder<'a> {
             level,
             implicit,
             content: Vec::new(),
+            image: None,
         });
     }
 
     fn close_leaf(&mut self) {
-        let Some(Leaf { at, level, content, .. }) = self.leaf.take() else {
+        let Some(Leaf {
+            at,
+            level,
+            content,
+            image,
+            ..
+        }) = self.leaf.take()
+        else {
             return;
         };
-        self.push_block(match level {
-            Some(level) => Block::Heading { at, level, content },
-            None => Block::Paragraph { at, content },
+        self.push_block(match (level, image) {
+            (Some(level), _) => Block::Heading { at, level, content },
+            (None, Some(image)) => Block::Image {
+                at: image.at,
+                image: image.index,
+                caption: content,
+            },
+            (None, None) => Block::Paragraph { at, content },
         });
     }
 
@@ -348,6 +380,17 @@ impl<'a> Builder<'a> {
     fn push_inline(&mut self, offset: usize, inline: Inline) {
         if self.leaf.is_none() {
             self.open_leaf(offset, None, true);
+        }
+        if self
+            .leaf
+            .as_ref()
+            .is_some_and(|leaf| leaf.image.as_ref().is_some_and(|image| image.closed))
+        {
+            self.report(offset, ALONE);
+            // Reported once; the rest of the paragraph is ordinary text.
+            if let Some(leaf) = self.leaf.as_mut() {
+                leaf.image = None;
+            }
         }
         let Some(leaf) = self.leaf.as_mut() else {
             return;
@@ -404,6 +447,10 @@ impl<'a> Builder<'a> {
                     if &*text == "[" {
                         self.check_undefined_footnote(offset);
                     }
+                    // CommonMark keeps an image it cannot parse as text, starting with a separate `![`.
+                    if &*text == "![" && self.body[offset..].starts_with("![") {
+                        self.report(offset, BROKEN_IMAGE);
+                    }
                     self.push_text(offset, &text, false);
                 }
             },
@@ -455,6 +502,54 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Starts an image, whose description becomes the caption. An image must be the only content of
+    /// its paragraph and name a local file.
+    fn image(&mut self, offset: usize, path: &str, title: &str) {
+        let in_footnote = self.containers.iter().any(|c| matches!(c, Container::Footnote { .. }));
+        let leaf = self.leaf.as_ref();
+        let problem = if in_footnote {
+            Some("images are not allowed in footnotes")
+        } else if leaf.is_some_and(|leaf| leaf.level.is_some()) {
+            Some("images are not allowed in headings")
+        } else if !self.links.is_empty() {
+            Some("an image cannot be a link")
+        } else if leaf.is_some_and(|leaf| !leaf.content.is_empty() || leaf.image.is_some()) {
+            Some(ALONE)
+        } else if path.is_empty() {
+            Some("an image needs a file path")
+        } else if path.contains("://") || path.starts_with("data:") {
+            Some("remote images are not fetched; use a local file")
+        } else if !title.is_empty() {
+            Some("image titles are not used; write the caption as the image description, as in ![Caption](file.png)")
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            // The description is skipped with the image; the paragraph stays open.
+            self.report(offset, problem);
+            self.skip = 1;
+            return;
+        }
+        if self.leaf.is_none() {
+            self.open_leaf(offset, None, true);
+        }
+        let at = self.location(offset);
+        let index = *self.image_index.entry(path.to_owned()).or_insert_with(|| {
+            self.images.push(ImageFile {
+                at,
+                path: path.to_owned(),
+            });
+            self.images.len() - 1
+        });
+        if let Some(leaf) = self.leaf.as_mut() {
+            leaf.image = Some(LeafImage {
+                at,
+                index,
+                closed: false,
+            });
+        }
+    }
+
     /// Reports a construct and ignores everything up to its matching end.
     fn skip_reported(&mut self, offset: usize, message: &str) {
         self.close_implicit_leaf();
@@ -501,7 +596,7 @@ impl<'a> Builder<'a> {
             Tag::Strong => self.strong += 1,
             Tag::Link { dest_url, .. } => self.links.push(dest_url.into_string()),
             Tag::Strikethrough => self.report(offset, "strikethrough is not supported"),
-            Tag::Image { .. } => self.skip_reported(offset, "images are not supported yet"),
+            Tag::Image { dest_url, title, .. } => self.image(offset, &dest_url, &title),
             Tag::HtmlBlock => self.skip_reported(offset, "raw HTML is not rendered"),
             Tag::Table(_) => self.skip_reported(offset, "tables are not supported yet"),
             Tag::FootnoteDefinition(label) => {
@@ -567,10 +662,19 @@ impl<'a> Builder<'a> {
             TagEnd::Link => {
                 self.links.pop();
             }
+            TagEnd::Image => {
+                if let Some(image) = self.leaf.as_mut().and_then(|leaf| leaf.image.as_mut()) {
+                    image.closed = true;
+                }
+            }
             _ => {}
         }
     }
 }
+
+const ALONE: &str = "an image must stand alone in its paragraph";
+const BROKEN_IMAGE: &str = "this image is not valid Markdown: write ![Caption](file.png), with <> around a path \
+    that has spaces; a caption cannot hold footnotes";
 
 fn fence_name(fence: Fence) -> &'static str {
     match fence {
@@ -756,14 +860,13 @@ mod tests {
         ));
         assert_eq!(
             diagnostics("ünï ![alt](a.png)", 5),
-            vec![(Some((5, 5)), "images are not supported yet".to_string())]
+            vec![(Some((5, 5)), ALONE.to_string())]
         );
     }
 
     #[test]
     fn reports_each_unsupported_construct() {
         let cases = [
-            ("![alt](a.png)", "images are not supported yet"),
             ("<div>\nhi\n</div>", "raw HTML is not rendered"),
             ("a <b>x</b>", "raw HTML is not rendered"),
             ("---", "thematic breaks are not supported"),
@@ -780,14 +883,96 @@ mod tests {
     #[test]
     fn collects_every_diagnostic_with_its_location() {
         assert_eq!(
-            diagnostics("![a](b.png)\n\n---\n\ntext <i>x</i>\n", 3),
+            diagnostics("a ![b](c.png)\n\n---\n\ntext <i>x</i>\n", 3),
             vec![
-                (Some((3, 1)), "images are not supported yet".to_string()),
+                (Some((3, 3)), ALONE.to_string()),
                 (Some((5, 1)), "thematic breaks are not supported".to_string()),
                 (Some((7, 6)), "raw HTML is not rendered".to_string()),
                 (Some((7, 10)), "raw HTML is not rendered".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn parses_images_alone_in_a_paragraph_with_the_description_as_caption() {
+        let document = parse(
+            "![A *plot*](img/a.png)\n\n- ![](b.svg)\n\n![Again](img/a.png)\n",
+            1,
+            &source(),
+        )
+        .unwrap();
+        let em = InlineStyle {
+            emphasis: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            document.blocks,
+            vec![
+                Block::Image {
+                    at: at(1, 1),
+                    image: 0,
+                    caption: vec![plain("A "), text("plot", em)],
+                },
+                Block::List {
+                    at: at(3, 1),
+                    start: None,
+                    items: vec![vec![Block::Image {
+                        at: at(3, 3),
+                        image: 1,
+                        caption: Vec::new(),
+                    }]],
+                },
+                Block::Image {
+                    at: at(5, 1),
+                    image: 0,
+                    caption: vec![plain("Again")],
+                },
+            ]
+        );
+        let paths: Vec<_> = document
+            .images
+            .iter()
+            .map(|file| (file.at, file.path.as_str()))
+            .collect();
+        assert_eq!(paths, vec![(at(1, 1), "img/a.png"), (at(3, 3), "b.svg")]);
+    }
+
+    #[test]
+    fn reports_images_that_are_not_alone_local_and_untitled() {
+        let cases = [
+            ("See ![a](a.png)", (1, 5), ALONE),
+            ("![a](a.png) and text", (1, 12), ALONE),
+            ("![a](a.png)\ncaption", (1, 12), ALONE),
+            ("# ![a](a.png)", (1, 3), "images are not allowed in headings"),
+            ("[![a](a.png)](https://x.y)", (1, 2), "an image cannot be a link"),
+            (
+                "a[^n]\n\n[^n]: ![a](a.png)",
+                (3, 7),
+                "images are not allowed in footnotes",
+            ),
+            (
+                "![a](https://x.y/a.png)",
+                (1, 1),
+                "remote images are not fetched; use a local file",
+            ),
+            (
+                "![a](data:image/png;base64,AAAA)",
+                (1, 1),
+                "remote images are not fetched; use a local file",
+            ),
+            ("![a](<>)", (1, 1), "an image needs a file path"),
+            ("![a](my file.png)", (1, 1), BROKEN_IMAGE),
+            ("![Note[^n]](a.png)\n\n[^n]: n", (1, 1), BROKEN_IMAGE),
+            (
+                "![a](a.png \"Title\")",
+                (1, 1),
+                "image titles are not used; write the caption as the image description, as in ![Caption](file.png)",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert_eq!(errors, vec![(Some(location), message.to_string())], "{body:?}");
+        }
     }
 
     #[test]

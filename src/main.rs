@@ -19,8 +19,9 @@ use serde_json::{Map, Value};
 use config::front_matter::{self, FrontMatter};
 use config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use config::resolved::Config;
-use config::source::Source;
+use config::source::{Origin, Resource, Source};
 use diagnostic::Diagnostic;
+use image::Image;
 use text::Fonts;
 
 /// Typeset Markdown documents as PDF.
@@ -118,13 +119,41 @@ struct DocumentFile {
     text: String,
 }
 
-/// Parses the Markdown body and lays it out.
+/// Parses the Markdown body, loads its images, and lays it out.
 fn render(config: &Config, fonts: &Fonts, document: &DocumentFile) -> Result<Vec<page::Page>, Vec<Diagnostic>> {
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
     let content = markdown::parse(body, first_line, &document.source)?;
-    layout::layout(&content, config, fonts, &document.source)
+    let dir = document.path.parent().expect("an absolute file path has a parent");
+    let images = load_images(&content.images, dir, &document.source)?;
+    layout::layout(&content, &images, config, fonts, &document.source)
+}
+
+/// Reads and decodes each image file once, relative to the document. Errors name the first reference.
+fn load_images(files: &[document::ImageFile], dir: &Path, source: &Source) -> Result<Vec<Image>, Vec<Diagnostic>> {
+    let mut images = Vec::with_capacity(files.len());
+    let mut errors = Vec::new();
+    for file in files {
+        let path = dir.join(&file.path);
+        let resource = Resource {
+            origin: Origin::Document(dir.to_owned()),
+            path: file.path.clone(),
+        };
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_owned();
+        let loaded = match std::fs::read(&path) {
+            Ok(data) => Image::decode(data, &extension).map_err(|e| format!("image {resource}: {e}")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!("image not found: {resource}")),
+            Err(e) => Err(format!("cannot read image {resource}: {e}")),
+        };
+        match loaded {
+            Ok(image) => images.push(image),
+            Err(message) => {
+                errors.push(Diagnostic::new(Some(source.clone()), message).at(file.at.line, file.at.column))
+            }
+        }
+    }
+    if errors.is_empty() { Ok(images) } else { Err(errors) }
 }
 
 /// Reads the document, theme, and overrides, then resolves and checks the configuration.
