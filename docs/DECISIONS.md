@@ -668,6 +668,10 @@ Only images in the slots of the title layout in use are decoded: the title page 
 
 Resolution records the font tokens that styles use, following token-to-token references, and warns for a `fonts.*` setting from front matter or `--set` whose token nothing uses. Warnings are diagnostics with a `warning` flag, kept in `Config` and printed after loading. The latest layer that sets a token gets the warning.
 
+#### Raster density
+
+The stored density sets a raster image's natural size, each axis on its own, so non-square pixels keep their shape. PNG uses `pHYs` when its unit is the meter. JPEG uses JFIF when its units are inches or centimeters, else the EXIF resolution tags (inches or centimeters, inches by default), found by a small marker scan in `src/image/density.rs`. Files without a usable density keep one point per pixel, so existing images do not change size. This replaces the earlier decision that density is ignored (milestone 06).
+
 #### Paths in messages
 
 Document, theme, bibliography, and resource paths are normalized lexically, with no canonicalization, so symlinks stay as written. Messages print paths inside the working directory relative to it, and others in full. The base is process-wide state set once by the CLI (`show_relative_to`), so `Source` and `Resource` display code needs no extra argument.

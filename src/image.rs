@@ -1,5 +1,8 @@
 //! Image decoding and validation for PNG, JPEG, and SVG.
 //!
+//! Raster images take their natural size from the density stored in the file, or one point per pixel
+//! without one.
+//!
 //! Images are fully decoded here, so a malformed file is reported with the layout error and never
 //! surfaces while the PDF is written. SVG text uses only the bundled fonts, and an SVG cannot read files.
 
@@ -14,9 +17,14 @@ use usvg::fontdb::{Database, Source};
 use usvg::{ImageHrefResolver, Options, Tree};
 use zune_jpeg::JpegDecoder;
 
+mod density;
+
+use self::density::Density;
 use crate::config::values::Pt;
 use crate::text::bundled;
 
+/// PDF points per inch.
+const PT_PER_INCH: f64 = 72.0;
 /// CSS pixels are 96 per inch and PDF points 72 per inch.
 const PT_PER_SVG_PX: f64 = 0.75;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -132,8 +140,8 @@ impl Image {
         }
     }
 
-    /// The natural size in points. Raster images count one pixel as one point (72 dpi); SVG uses CSS units,
-    /// 96 px per inch, so 0.75 pt per px.
+    /// The natural size in points. Raster images use their stored density, else count one pixel as one point
+    /// (72 dpi); SVG uses CSS units, 96 px per inch, so 0.75 pt per px.
     pub fn size(&self) -> (Pt, Pt) {
         (Pt(self.width), Pt(self.height))
     }
@@ -160,8 +168,9 @@ fn decode_png(data: Vec<u8>) -> Result<Image, String> {
     let mut reader = decoder.read_info().map_err(|e| malformed(Format::Png, e))?;
     let mut buffer = vec![0; reader.output_buffer_size().ok_or("image is too large")?];
     reader.next_frame(&mut buffer).map_err(|e| malformed(Format::Png, e))?;
+    let density = density::png(reader.info());
     let image = RasterImage::from_png(data.into(), false).map_err(|e| malformed(Format::Png, e))?;
-    raster(image)
+    raster(image, density)
 }
 
 fn decode_jpeg(data: Vec<u8>) -> Result<Image, String> {
@@ -169,18 +178,20 @@ fn decode_jpeg(data: Vec<u8>) -> Result<Image, String> {
     JpegDecoder::new(Cursor::new(&data))
         .decode()
         .map_err(|e| malformed(Format::Jpeg, e))?;
+    let density = density::jpeg(&data);
     let image = RasterImage::from_jpeg(data.into(), false).map_err(|e| malformed(Format::Jpeg, e))?;
-    raster(image)
+    raster(image, density)
 }
 
-fn raster(image: RasterImage) -> Result<Image, String> {
+fn raster(image: RasterImage, density: Option<Density>) -> Result<Image, String> {
     let (width, height) = image.size();
     if width == 0 || height == 0 {
         return Err("image has no pixels".to_owned());
     }
+    let (per_pixel_x, per_pixel_y) = density.map_or((1.0, 1.0), |d| (PT_PER_INCH / d.x, PT_PER_INCH / d.y));
     Ok(Image {
-        width: f64::from(width),
-        height: f64::from(height),
+        width: f64::from(width) * per_pixel_x,
+        height: f64::from(height) * per_pixel_y,
         pixels: Pixels::Raster(image),
     })
 }
@@ -254,6 +265,29 @@ mod tests {
         assert_eq!(decode("pixel.png").expect("png").size(), (Pt(40.0), Pt(20.0)));
         assert_eq!(decode("photo.jpg").expect("jpeg").size(), (Pt(30.0), Pt(20.0)));
         assert_eq!(decode("drawing.svg").expect("svg").size(), (Pt(60.0), Pt(30.0)));
+    }
+
+    #[test]
+    fn sizes_raster_images_by_their_stored_density() {
+        let (mut png, _) = fixture("pixel.png");
+        let mut chunk = b"pHYs".to_vec();
+        for value in [11811u32, 5906] {
+            chunk.extend(value.to_be_bytes());
+        }
+        chunk.push(1);
+        let crc = chunk.iter().fold(u32::MAX, |crc, byte| {
+            (0..8).fold(crc ^ u32::from(*byte), |crc, _| (crc >> 1) ^ (0xedb8_8320 * (crc & 1)))
+        });
+        let mut bytes = 9u32.to_be_bytes().to_vec();
+        bytes.extend(chunk);
+        bytes.extend((!crc).to_be_bytes());
+        png.splice(33..33, bytes);
+        let (width, height) = Image::decode(png, "png").expect("png with density").size();
+        assert!((width.0 - 40.0 * 72.0 / 300.0).abs() < 0.01 && (height.0 - 20.0 * 72.0 / 150.0).abs() < 0.01);
+
+        let (mut jpeg, _) = fixture("photo.jpg");
+        jpeg[13..18].copy_from_slice(&[1, 0, 144, 0, 144]);
+        assert_eq!(Image::decode(jpeg, "jpg").expect("jpeg").size(), (Pt(15.0), Pt(10.0)));
     }
 
     #[test]
