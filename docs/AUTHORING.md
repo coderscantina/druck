@@ -27,7 +27,7 @@ Front matter cannot redefine templates (title slots, headers, footers). That bel
 
 ### Metadata
 
-Metadata is plain text. It is inserted into templates as text only.
+Metadata is plain text. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
 
 | Key | Type | Effect |
 | --- | --- | --- |
@@ -36,6 +36,8 @@ Metadata is plain text. It is inserted into templates as text only.
 | `author` | string or list of strings | Value of `{author}`. |
 | `date` | string | Value of `{date}`. |
 | `abstract` | string | Value of `{abstract}`. |
+
+Metadata fills the title block at the start of the first page, or the separate title page with `title-page: true`. See [document structure](#document-structure).
 
 ### Files
 
@@ -93,7 +95,7 @@ kyber check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
 kyber render <doc.md> [-o PATH]
 ```
 
-`check` loads the document, theme, and overrides, resolves the configuration, and reports problems. `--print-config` prints the resolved configuration as JSON.
+`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, and reports problems. `--print-config` prints the resolved configuration as JSON.
 
 `render` validates the same way, then parses the Markdown, lays it out, and writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
@@ -142,6 +144,7 @@ The body is CommonMark. These constructs render:
 - [Images](#images-and-captions) with captions.
 - [Tables](#tables) with captions.
 - [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
+- [Labels and cross-references](#labels-and-cross-references) to headings, figures, and tables.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
@@ -175,6 +178,7 @@ An image stands alone in its paragraph. Its description becomes the caption:
 - The caption is numbered and labelled in the document language, as in "Figure 1: Pages typeset per year". It may use emphasis, strong text, and inline code. An image with an empty description, `![](file.png)`, has no caption and no number.
 - A caption cannot hold a footnote, because CommonMark does not read `[^note]` inside an image description. Reference the note from the text next to the image.
 - Image titles, `![Caption](file.png "Title")`, are errors. Write the caption as the description.
+- A label right after the image, `![Caption](file.png){#fig:chart}`, lets the text refer to the figure, see [labels](#labels-and-cross-references). Only a figure with a caption can have one.
 
 An image keeps its place in the text. There are no floats and text never wraps around an image. The image is centered and its caption follows below it. The two stay together: when they do not fit in the rest of a page or column, both move to the next column or page, and the page or column they leave ends short.
 
@@ -201,7 +205,7 @@ Tables are pipe tables as on GitHub. The second line sets each column's alignmen
 - A row with fewer cells than the header gets empty cells. A row with more cells is an error.
 - Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
 - The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table. Tables are numbered apart from figures. A table without a caption has no number.
-- A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes, and a label such as `{#tbl:events}` at its end is reserved for cross-references and reported for now.
+- A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references).
 
 Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.
 
@@ -286,4 +290,57 @@ Rules:
 
 Embedded HTML is not rendered.
 
-Syntax for labels, cross-references, and citations (`[@key]`) is documented with the milestones that implement them.
+Citations (`[@key]`) are documented with the milestone that implements them. Until then an `@key` without a `sec:`, `fig:`, or `tbl:` prefix stays text.
+
+## Document structure
+
+### Title block and title page
+
+A document with a `title`, `subtitle`, `author`, `date`, or `abstract` starts with a title block: the theme's title slots filled with the metadata, followed by some space. Without any of them there is no title block. With `title-page: true` the title, authors, date, and abstract fill a first page of their own instead, and the text starts on the next page.
+
+A slot whose value is missing is left out with the space above it. The theme marks some slots as required; the default theme requires `title`, and a missing required value is an error that names the slot, from `kyber check` and `kyber render`. The abstract is set under the heading "Abstract" ("Zusammenfassung" in German).
+
+### Numbered headings
+
+Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. `numbered-headings: false` turns numbering off.
+
+### Table of contents
+
+`toc: true` sets a table of contents after the title block, or at the top of the first page after a title page. It lists headings down to `toc-depth` (2 in the default theme) with their numbers and pages, and each entry is a link to its heading. To start the text on a new page after the contents, begin the body with `::: page-break`.
+
+### Page numbers and running headers
+
+Pages are numbered from 1, counting the title page, so the number on a page is the one a PDF viewer shows. The default theme puts the page number at the foot of every page except the title page, and the current section in the header of every page after the first. The section shown is the first numbered top-level heading that starts on the page, or the last one before it. Themes change all of this, see [themes](THEMES.md#header-and-footer-bands).
+
+Headings appear as bookmarks in the PDF, nested by level.
+
+## Labels and cross-references
+
+A label names a heading, a figure, or a table so the text can refer to it. It always starts with the kind of thing it names:
+
+| Kind | Label |
+| --- | --- |
+| Heading | `# Results {#sec:results}` |
+| Figure | `![Pages per year.](chart.svg){#fig:chart}` |
+| Table | `: Events in typesetting. {#tbl:events}` after the table |
+
+The name after the prefix uses letters, digits, `-`, and `_`. A reference writes the label after an at sign:
+
+```markdown
+@sec:results shows the totals, and @fig:chart the trend. The data is in
+[@tbl:events], which starts on [@tbl:events, page].
+```
+
+This reads "Section 2 shows the totals, and Figure 1 the trend. The data is in Table 1, which starts on page 4." The words come from the theme's labels in the document language. A reference to a heading without a number shows the heading's text. `[@label, page]` shows the page the heading, figure, or table starts on. Every reference is a link to its target.
+
+Numbers and page numbers are those of the final layout. Page references and the table of contents can move text to other pages; Kyber lays the document out again until all of them agree, usually in two passes, and reports an error naming the target if they do not settle.
+
+Write `\@` for an at sign that should stay text before a prefix. An `@` right after a letter or digit, as in an e-mail address, is never a reference.
+
+These are errors with their location:
+
+- A reference to a label that is not defined, and a label defined twice.
+- A label with the wrong prefix for what it names, or a name with other characters.
+- A label on an image without a caption, or on a heading together with classes or other attributes.
+- A reference in a heading or inside a link.
+- Brackets that hold more than the reference or `, page`, as in `[@sec:a; @sec:b]`.

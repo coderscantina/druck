@@ -60,7 +60,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `captions` | Separator between label and caption text. |
 | `bibliography` | Hanging indent and entry spacing. |
 | `toc` | Level indent and dot leaders. |
-| `title-block` | Title slots shown at the top of the first page. |
+| `title-block` | Title slots at the start of the body, and the space below them. |
 | `title-page` | Title slots for a separate title page. |
 | `pages` | Header and footer bands per page variant. |
 | `labels` | Generated text per language. |
@@ -105,6 +105,7 @@ Lengths are strings with a unit: `pt`, `mm`, `cm`, `in`, or `em`. Examples: `"10
 | `footnotes.*` | The `styles.footnote` size. |
 | `bibliography.*` | The `styles.bibliography` size. |
 | `toc.*` | The `styles.toc-entry` size. |
+| `title-block.space-after` | The body font size. |
 | Title slot `width` and `space-before` | The size of the slot's style. |
 | `inline.*` | The surrounding text size. This is resolved during layout. |
 
@@ -198,7 +199,7 @@ Other sections have their own fields; the [schema](../schema/theme.v1.schema.jso
 
 ## Templates
 
-Title slots and header/footer slots hold text with placeholders.
+Title slots and header/footer slots hold text with placeholders. Kyber fills them from the document's metadata and the page.
 
 ### Placeholders
 
@@ -209,6 +210,8 @@ Title slots and header/footer slots hold text with placeholders.
 - Values are inserted as text. They are never read as layout commands or expressions.
 - Title slots may not use `{section}`, `{subsection}`, or `{page}`.
 - Headers and footers may not use `{abstract}`.
+- A slot's value is missing when any placeholder in it has no value or only spaces.
+- `{author}` joins several authors with commas. `{page}` is the page number, counted from 1 including the title page. `{section}` and `{subsection}` are explained under [header and footer bands](#header-and-footer-bands).
 
 ### Title slots
 
@@ -225,13 +228,21 @@ Title slots and header/footer slots hold text with placeholders.
 
 Because arrays replace whole, a theme that changes one slot restates the whole list.
 
+`title-page` slots fill the first page when a document sets `title-page: true`, stacked from the top of the text area. Otherwise the `title-block` slots start the body, provided the document has a value for at least one of their placeholders; a document without metadata has no title block. `title-block.space-after` is the space between the block and the body.
+
+Slots are set in order, each `space-before` below the previous one. The style of a slot sets its font, alignment, and indent; its own `space-before` and `space-after` are not used. An optional slot whose value is missing is left out with its `space-before`. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style, followed by that style's `space-after`. In slot values, blank lines start a new paragraph, which gets the style's `first-line-indent`. An image slot is aligned like text in its style.
+
 ### Header and footer bands
 
 Each page variant has a `header` and a `footer`. A band has fixed `left`, `center`, and `right` slots, each `{ "text": "...", "required": false }` or `null`.
 
+The header's baseline is `page.header-offset` above the text area and the footer's `page.footer-offset` below it, in the `header` and `footer` styles. The left slot starts at the left edge of the text area, the center slot is centered on it, and the right slot ends at its right edge; they do not swap on even pages, so use the `odd` and `even` variants for mirrored bands. A slot is one line. Slots that overlap or run past the text width are an error naming the band and the page. A slot without a value stays empty.
+
+`{section}` is the first level 1 heading that starts on the page, otherwise the last level 1 heading on an earlier page. `{subsection}` is the first level 2 heading on the page after that section, otherwise the last level 2 heading before the page, unless a level 1 heading followed it. Both include the heading number. On pages before the first heading they have no value.
+
 ### Missing values
 
-A slot marked `required` whose placeholder value is missing is an error. This check needs the document and the page, so it runs when layout arrives in a later milestone. `kyber check` does not report it yet. Optional slots with no value are omitted along with their spacing.
+A slot marked `required` whose value is missing is an error. Title slots are checked for the title layout in use as soon as the document's metadata is known, by `kyber check` and `kyber render`. Header and footer slots need the page, so `kyber render` checks them after layout and names the page. Optional slots with no value are omitted along with their spacing.
 
 ## Page variants
 
@@ -243,13 +254,36 @@ A slot marked `required` whose placeholder value is missing is an error. This ch
 | First body page | `first`, then `odd` or `even` by parity, then `body`. |
 | Other body pages | `odd` or `even` by parity, then `body`. |
 
-A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page. It does not follow the displayed page number. Odd pages are the right-hand pages in duplex printing.
+A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one.
 
 The inner margin sits on the left of odd pages and mirrors on even pages.
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `figure` starts image captions and `table` table captions. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used.
+
+| Key | Used for |
+| --- | --- |
+| `figure`, `table` | Captions, as in "Figure 1: ", and references to figures and tables, as in "Figure 1". |
+| `section` | References to numbered headings, as in "Section 2.1". |
+| `page` | Page references, as in "page 7". |
+| `contents` | The table of contents heading. |
+| `abstract` | The heading above an `abstract` title slot. |
+| `references` | The bibliography heading. |
+| `continued` | The continuation of a footnote on the next page. |
+
+A reference joins the label and the number with a no-break space. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
+
+## Table of contents
+
+With `document.toc` the body starts, after the title block, with the `contents` label in the `toc-heading` style and one entry per heading down to `document.toc-depth`, in the `toc-entry` style.
+
+| Key | Effect |
+| --- | --- |
+| `toc.level-indent` | Indent per heading level below the first. Lines after an entry's first are indented by one level more. |
+| `toc.leader` | Whether a row of dots leads from the entry text to its page number. |
+
+The page number is right aligned at the edge of the text area, in a column at least three digits wide. Leader dots sit on a grid shared by all entries, so they line up. Each entry links to its heading.
 
 ## Resources and distribution
 

@@ -53,11 +53,11 @@ Slot text uses `{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{se
 
 Each page uses the first variant present in its chain. Title page: `title`, `body`. First body page: `first`, `odd` or `even`, `body`. Other pages: `odd` or `even`, `body`. Parity follows the physical page index in the PDF, counting from 1 and including the title page, so odd pages are right-hand pages in duplex print. Odd pages put the inner margin on the left.
 
-Open for milestone 08: the displayed page-number sequence, which heading supplies `{section}` on a page, and when required slots are checked.
+[Milestone 08](#2026-10-07-milestone-08-document-structures-and-templates) decided the displayed page-number sequence, which heading supplies `{section}` on a page, and when required slots are checked.
 
 ### Layout directives
 
-Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions) for figures and [milestone 07](#2026-10-07-milestone-07-multipage-tables) for tables; label, cross-reference, and citation syntax is decided in milestones 08 and 09.
+Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions) for figures and [milestone 07](#2026-10-07-milestone-07-multipage-tables) for tables; label and cross-reference syntax in [milestone 08](#labels-and-cross-references); citation syntax is decided in milestone 09.
 
 ### CLI
 
@@ -272,15 +272,15 @@ The format comes from the content: magic bytes for PNG, JPEG, GIF, and WebP, and
 
 SVG is parsed once with only the bundled Libertinus fonts in its font database, serif and default family Libertinus Serif, monospace Libertinus Mono. An SVG that refers to another file is an error rather than drawn without that part. Embedded data URLs work.
 
-URLs, including `data:` URLs, in Markdown are rejected by the parser, as in configuration. Theme `images` keep their theme origin through resolution as before; title slots that draw them are milestone 08.
+URLs, including `data:` URLs, in Markdown are rejected by the parser, as in configuration. Theme `images` keep their theme origin through resolution as before; title slots draw them since milestone 08, decoded by the CLI like document images.
 
 ### Caption syntax
 
-An image alone in its paragraph is a figure, and its description is the caption, as in Pandoc's implicit figures. The description keeps emphasis, strong text, and code. This needs no new syntax and leaves room for milestone 08: an attribute such as `![Caption](file.png){#fig:x}` currently makes the paragraph hold text after the image, which is an error, so 08 can give it a meaning without breaking documents.
+An image alone in its paragraph is a figure, and its description is the caption, as in Pandoc's implicit figures. The description keeps emphasis, strong text, and code. This needs no new syntax and leaves room for milestone 08: an attribute such as `![Caption](file.png){#fig:x}` currently makes the paragraph hold text after the image, which is an error, so 08 can give it a meaning without breaking documents. [Milestone 08](#labels-and-cross-references) made it the figure label.
 
 Errors: text before or after the image in its paragraph, an image in a heading, link, or footnote, an empty path, and an image title. A title would otherwise be dropped. CommonMark leaves an image it cannot parse as text, starting with a separate `![` event; that is reported too, so a path with spaces or a footnote in a description never prints as literal Markdown. As a consequence, captions cannot hold footnote references.
 
-A captioned image is numbered in document order and its caption starts with the `figure` label, the number, and `captions.separator`, all in the caption style. An image with an empty description has no caption and takes no number. Milestone 08 may number per section or add cross-references; the counter lives in [layout](../src/layout/mod.rs).
+A captioned image is numbered in document order and its caption starts with the `figure` label, the number, and `captions.separator`, all in the caption style. An image with an empty description has no caption and takes no number. Since [milestone 08](#numbering) the number comes from a pass over the document model before layout.
 
 ### Size and placement
 
@@ -295,7 +295,7 @@ Scoring is unchanged. Without floats, an image that does not fit leaves a short 
 ### Consequences for milestones 07 and 08
 
 - Tables can enter the flow the same way, with rows as lines that never split. A table caption can reuse the caption path with the `table` label and its own counter.
-- Cross-references need figure labels attached to the image, likely the `{#fig:x}` attribute, and numbers known before layout. The figure counter should move to a pass before layout then.
+- Cross-references need figure labels and numbers before layout. [Milestone 08](#labels-and-cross-references) added `{#fig:x}` and moved numbering to a pass before layout.
 - Title slot images can use the same loader with the theme origin.
 
 ## 2026-10-07: Milestone 07 multipage tables
@@ -313,9 +313,9 @@ A paragraph directly after the table that starts with a colon and a space is its
 - A `: ` paragraph that does not directly follow a table, or a second one.
 - A body row whose only content is a first cell starting with `: `, which is a caption written without the blank line.
 - A footnote in a caption, as for figures.
-- A caption ending in `{#...}`. Milestone 08 can give `: Caption {#tbl:x}` a meaning without breaking documents, as `{#fig:x}` after an image.
+- A caption ending in `{#...}`, reserved until [milestone 08](#labels-and-cross-references) made `{#tbl:x}` the table label.
 
-A captioned table is numbered in document order with the `table` label and its own counter, apart from figures, and the caption is set above the table across the frame width, in the caption style. A table without a caption takes no number. The counter lives in [layout](../src/layout/mod.rs) next to the figure counter.
+A captioned table is numbered in document order with the `table` label and its own counter, apart from figures, and the caption is set above the table across the frame width, in the caption style. A table without a caption takes no number. Since [milestone 08](#numbering) the number comes from a pass before layout, like figure numbers.
 
 ### Column widths
 
@@ -357,9 +357,72 @@ Page 2 of `samples/images.md` ends about a quarter page early. The text after th
 
 ### Consequences for milestone 08
 
-- Table numbers come from a counter in layout, like figure numbers. Cross-references need numbers before layout, so both counters should move to a pass over the document model, which already holds every caption.
-- `: Caption {#tbl:x}` is the reserved label form, currently an error.
+- Table numbers and the `: Caption {#tbl:x}` label: done in [milestone 08](#labels-and-cross-references), with numbering in a pass before layout.
 - A table of tables, if wanted, can read the same captions.
+
+## 2026-10-07: Milestone 08 document structures and templates
+
+### Labels and cross-references
+
+A label names a heading, a figure, or a table and always starts with the prefix of its kind:
+
+- `# Heading {#sec:name}`, read with pulldown-cmark's heading attributes. Classes and other attributes are errors, since only labels have a meaning.
+- `![Caption](file.png){#fig:name}` directly after the image, spaces allowed. A label on an image without a caption is an error, because it has no number to show.
+- `: Caption {#tbl:name}` at the end of a table caption.
+
+Names are ASCII letters, digits, `-`, and `_`. A label with the wrong prefix or another name is an error at the label, and so is a second definition, naming the line of the first.
+
+A reference is `@sec:name` or `[@sec:name]`. It shows the theme label of its kind, a no-break space, and the number: "Section 2.1", "Figure 3", "Table 2". A reference to an unnumbered heading shows the heading's text. `[@sec:name, page]` shows the `page` label and the target's page: "page 7". Every reference links to its target. The theme gained the labels `section` and `page`.
+
+References are read from the source text of each text event, not from the parsed text, so `\@fig:x` stays text, and an `@` after a letter or digit, as in an e-mail address, is no reference. They are errors in headings, whose text goes into the table of contents, bookmarks, and running headers, which must not depend on pages, and inside link text. A reference to an undefined label is an error at the reference.
+
+The prefix is the boundary with citations. An `@key` or `[@key]` whose key has none of the three prefixes is left as text for milestone 09. A bracket that starts with a prefixed label but holds anything other than `]` or `, page]` after it is an error, so milestone 09 is free to define groups and locators for citations without old documents meaning something else.
+
+### Numbering
+
+[A pass over the document model](../src/layout/structure.rs) before layout numbers headings, figures, and tables, gives each an anchor, and records the text every label is referenced by. Layout visits the same blocks in the same order and takes their entries in turn. Numbers do not depend on pages, so they are final before the first layout pass.
+
+Headings are numbered when `numbered-headings` is on and their level is at most `numbering-depth`: "1", "1.1", "1.1.1". A heading resets the counters below its level. A level 2 heading before any level 1 heading is "0.1", as in LaTeX. The number and a space precede the heading text in the heading, the table of contents, bookmarks, and running headers. Headings inside footnotes are set unnumbered and are not part of the structure. Figures and tables keep their numbering from milestones 06 and 07, now from this pass.
+
+### Title block and title page
+
+With `document.title-page` the `title-page` slots fill the first page of their own. Otherwise the `title-block` slots start the body, but only if the document has a value for at least one of their placeholders, so a document without metadata gets no title block and no error.
+
+An optional slot is omitted with its `space-before` when any of its placeholders lacks a value; blank values count as missing. Slots are spaced only by their `space-before`, so the result does not depend on which slots happen to be present. The title block ends with the new `title-block.space-after` (2em of the body size in the default theme), a schema addition. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style. Authors are joined with commas. Values are text: blank lines separate paragraphs, Markdown is not interpreted.
+
+The title page stacks its slots from the top of the text area and keeps the first slot's space. Content taller than the text area is an error. The title block is one keep group at the top of the flow.
+
+Required title slots are checked as soon as the configuration and metadata are known, by `kyber check` and by `kyber render`. The error names the document and the slot property.
+
+### Page numbers, variants, and running headers
+
+The displayed page number is the physical page number, counted from 1 and including the title page. It is the number a PDF viewer shows, and odd displayed numbers are odd physical pages, which milestone 01 chose for parity. There is no separate front matter numbering. As a consequence the length of the title page and the table of contents moves the numbers of body pages, which the settling below takes care of.
+
+Variant selection follows milestone 01. With a title page the first body page is physical page 2, an even page, so the composer now takes the parity of its first page and puts the inner margin on the right there.
+
+`{section}` is the first level 1 heading that starts on the page, otherwise the last one on an earlier page. `{subsection}` is the first level 2 heading that starts on the page after the section shown, otherwise the last level 2 heading before the page, unless a level 1 heading came after it. This follows LaTeX's right mark: the header describes what starts on the page. Both values include the number.
+
+Header baselines sit `header-offset` above the text area, footer baselines `footer-offset` below it. Slots are aligned to the left edge, center, and right edge of the text area and set on one line. Slots that overlap or run past the text width are an error naming the band and page, since nothing is clipped. An optional slot without a value stays empty; a required one is an error naming the slot property and the page. Bands are drawn after the final layout pass, because they sit in the margins and never change the layout.
+
+### Table of contents
+
+With `toc` the `contents` label in the `toc-heading` style follows the title block, then one entry per heading up to `toc-depth`. Entries use `toc-entry`, are indented by `toc.level-indent` per level, and hang their later lines by one more level. The page number is right aligned in a column as wide as three digits, or the number if wider, so page numbers up to 999 do not change line breaks. With `toc.leader` dots at half-em steps on a grid shared by all entries lead to it, half an em from the text and the number. Each entry is a link to its heading. A `::: page-break` at the start of the body puts the body on a new page.
+
+### Navigation
+
+Layout places an anchor item at the top left of each heading's first line, each figure's image, and each numbered table's first caption line, which never repeats like the header row. [The output](../src/page.rs) carries the anchor positions and the heading outline. [PDF output](../src/pdf.rs) writes XYZ destinations for internal links and bookmarks with krilla 0.8, nesting bookmarks by level. URLs stay URI actions.
+
+### Settling page numbers
+
+The pages of the anchors the document shows (table of contents headings and targets of page references) are only known after layout. The first pass assumes page 1 for every anchor. After each pass the shown anchors' pages are compared with the assumed ones; if any differs, layout runs again with the pages it found. After 5 passes without agreement layout fails with the anchor that moved and its two pages, at the anchor's location. Nothing depends on timing or hashing, so the result is deterministic. A document without shown page numbers needs one pass; running headers and footers do not count.
+
+Every pass lays out the whole document again, shaping included. Measured on 2026-10-07: the report sample and a 101-page report with 176 contents entries and 384 references both settle in 2 passes, the long one in 0.39 s. No damping was added. If documents that oscillate show up, reserving the widest page number seen so far for each reference would make widths grow monotonically and end the oscillation.
+
+### Consequences for milestone 09
+
+- Citations take the `@key` and `[@key]` forms that labels leave free. The branch in [the parser](../src/markdown.rs) where `reference_label` finds no prefix is where they go.
+- A bibliography is generated content in the flow. Numeric citation labels do not depend on pages, but the bibliography's length moves later pages, so it must be laid out in every pass, like the table of contents.
+- The milestone 08 integration scenario (`samples/report.md` in both themes) must be re-run with bibliography content.
 
 ## Recording a decision
 
