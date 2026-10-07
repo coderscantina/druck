@@ -92,79 +92,164 @@ pub fn lines(
     width: f64,
     first_indent: f64,
 ) -> Result<Vec<Line>, String> {
+    prepare(content, style, inline, fonts, lang)?.lines(width, first_indent)
+}
+
+/// Shapes inline content once, so it can be measured and then broken at a chosen width. Fails for a
+/// character the font cannot show.
+pub fn prepare<'a>(
+    content: &[Inline],
+    style: &'a Style,
+    inline: &'a InlineStyles,
+    fonts: &'a Fonts,
+    lang: Lang,
+) -> Result<Prepared<'a>, String> {
     let tokens = tokens(content, style, inline, fonts, lang)?;
-    let justify = style.align == Align::Justify;
     let mut builder = Builder {
         fonts,
         lang,
         hyphenate: style.hyphenate,
-        justify,
+        justify: style.align == Align::Justify,
         hyphens: HashMap::new(),
         words: Vec::new(),
         spaces: Vec::new(),
-        excess: Vec::new(),
+        pieces: Vec::new(),
         items: Vec::new(),
     };
-    builder.build(tokens, width, first_indent);
+    builder.build(tokens);
     let Builder {
         words,
         spaces,
-        excess,
+        pieces,
         items,
         ..
     } = builder;
+    Ok(Prepared {
+        style,
+        inline,
+        fonts,
+        lang,
+        words,
+        spaces,
+        pieces,
+        items,
+    })
+}
 
-    let measure = Measure {
-        first: width - first_indent,
-        rest: width,
-        stretch: if justify { 0.0 } else { RAGGED * style.size.0 },
-        hang: match words.first() {
-            Some(word) if justify => protrusion::leading(&word.fragments[0].run, 0),
-            _ => 0.0,
-        },
-    };
-    let Some(marks) = breaking::breaks(&items, &measure) else {
-        let (index, excess) = excess
+/// Shaped inline content with its breaking items, ready to be set at any width.
+pub struct Prepared<'a> {
+    style: &'a Style,
+    inline: &'a InlineStyles,
+    fonts: &'a Fonts,
+    lang: Lang,
+    words: Vec<Word>,
+    /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
+    spaces: Vec<f64>,
+    /// The width of each word's first unbreakable piece and of its widest later piece, with the
+    /// hyphen added at a hyphenation point.
+    pieces: Vec<(f64, f64)>,
+    items: Vec<Element<Mark>>,
+}
+
+impl Prepared<'_> {
+    /// The width of the widest line when only hard line breaks end lines.
+    pub fn natural(&self) -> f64 {
+        let (mut widest, mut line) = (0.0f64, 0.0);
+        for item in &self.items {
+            match item {
+                Element::Box(width) | Element::Glue { width, .. } => line += width,
+                Element::Break { .. } => widest = widest.max(std::mem::replace(&mut line, 0.0)),
+                Element::Penalty { .. } | Element::Fill => {}
+            }
+        }
+        widest
+    }
+
+    /// The least width that holds every unbreakable piece, with the index of the word that needs it.
+    pub fn minimum(&self) -> (f64, Option<usize>) {
+        let widest = self
+            .pieces
+            .iter()
+            .map(|&(first, rest)| first.max(rest))
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        match widest {
+            Some((index, width)) => (width, Some(index)),
+            None => (0.0, None),
+        }
+    }
+
+    /// The text of word `index`.
+    pub fn word(&self, index: usize) -> String {
+        self.words[index]
+            .fragments
+            .iter()
+            .map(|f| f.run.text.as_str())
+            .collect()
+    }
+
+    /// Breaks the content into positioned lines of `width`, the first indented by `first_indent`.
+    /// Fails for a word wider than its line even after hyphenation.
+    pub fn lines(&self, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
+        let (style, fonts, lang) = (self.style, self.fonts, self.lang);
+        let justify = style.align == Align::Justify;
+        let measure = Measure {
+            first: width - first_indent,
+            rest: width,
+            stretch: if justify { 0.0 } else { RAGGED * style.size.0 },
+            hang: match self.words.first() {
+                Some(word) if justify => protrusion::leading(&word.fragments[0].run, 0),
+                _ => 0.0,
+            },
+        };
+        let Some(marks) = breaking::breaks(&self.items, &measure) else {
+            let (index, excess) = self
+                .pieces
+                .iter()
+                .enumerate()
+                .map(|(index, &(first, rest))| {
+                    let available = if index == 0 { width - first_indent } else { width };
+                    (index, (first - available).max(rest - width))
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .expect("only words can make a paragraph unbreakable");
+            return Err(format!(
+                "\"{}\" is {excess:.1}pt wider than the line and cannot be broken",
+                self.word(index)
+            ));
+        };
+
+        let block_face = fonts.face(&style.font, style.weight, style.style);
+        let height = style.size.0 * style.line_height;
+        let baseline = baseline(height, &fonts.metrics(block_face, style.size));
+        let mut start = Cursor::word(0);
+        Ok(marks
             .into_iter()
             .enumerate()
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-            .expect("only words can make a paragraph unbreakable");
-        let text: String = words[index].fragments.iter().map(|f| f.run.text.as_str()).collect();
-        return Err(format!(
-            "\"{text}\" is {excess:.1}pt wider than the line and cannot be broken"
-        ));
-    };
-
-    let block_face = fonts.face(&style.font, style.weight, style.style);
-    let height = style.size.0 * style.line_height;
-    let baseline = baseline(height, &fonts.metrics(block_face, style.size));
-    let mut start = Cursor::word(0);
-    Ok(marks
-        .into_iter()
-        .enumerate()
-        .map(|(index, mark)| {
-            let runs = line_runs(&words, start, mark, fonts, lang);
-            let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
-            start = mark.at;
-            let indent = if index == 0 { first_indent } else { 0.0 };
-            let items = position(
-                runs,
-                &spaces,
-                style.align,
-                width - indent,
-                indent,
-                mark.forced,
-                baseline,
-                inline.link_underline,
-            );
-            Line {
-                height,
-                baseline,
-                items,
-                notes,
-            }
-        })
-        .collect())
+            .map(|(index, mark)| {
+                let runs = line_runs(&self.words, start, mark, fonts, lang);
+                let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
+                start = mark.at;
+                let indent = if index == 0 { first_indent } else { 0.0 };
+                let items = position(
+                    runs,
+                    &self.spaces,
+                    style.align,
+                    width - indent,
+                    indent,
+                    mark.forced,
+                    baseline,
+                    self.inline.link_underline,
+                );
+                Line {
+                    height,
+                    baseline,
+                    items,
+                    notes,
+                }
+            })
+            .collect())
+    }
 }
 
 /// Turns words and spaces into breaking items, with hyphenation points and margin hangs.
@@ -178,13 +263,13 @@ struct Builder<'a> {
     words: Vec<Word>,
     /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
     spaces: Vec<f64>,
-    /// How far each word's widest unbreakable piece exceeds its line.
-    excess: Vec<f64>,
+    /// Each word's first and widest later unbreakable piece, see [`Prepared`].
+    pieces: Vec<(f64, f64)>,
     items: Vec<Element<Mark>>,
 }
 
 impl Builder<'_> {
-    fn build(&mut self, tokens: Vec<Token>, width: f64, first_indent: f64) {
+    fn build(&mut self, tokens: Vec<Token>) {
         let mut tokens = tokens.into_iter().peekable();
         let mut space = None;
         let mut line_has_word = false;
@@ -237,8 +322,7 @@ impl Builder<'_> {
                         }
                         None => self.spaces.push(0.0),
                     }
-                    let available = if index == 0 { width - first_indent } else { width };
-                    self.word(index, &word, available, width);
+                    self.word(index, &word);
                     self.words.push(word);
                     line_has_word = true;
                 }
@@ -255,11 +339,10 @@ impl Builder<'_> {
         });
     }
 
-    /// Adds the boxes and inner breaks of word `index`. Its first piece has `first` width
-    /// available, later pieces `rest`.
-    fn word(&mut self, index: usize, word: &Word, first: f64, rest: f64) {
+    /// Adds the boxes and inner breaks of word `index` and records its piece widths.
+    fn word(&mut self, index: usize, word: &Word) {
         let mut piece_start = (0, 0);
-        let mut excess = f64::NEG_INFINITY;
+        let (mut first, mut rest) = (None, 0.0f64);
         for (fragment, offset, hyphen) in self.cuts(word) {
             let (hyphen_width, end) = if hyphen {
                 let run = &word.fragments[fragment].run;
@@ -269,8 +352,10 @@ impl Builder<'_> {
                 (0.0, protrusion::trailing(&word.fragments[fragment].run, offset))
             };
             let piece = span_width(word, piece_start, (fragment, offset));
-            let available = if piece_start == (0, 0) { first } else { rest };
-            excess = excess.max(piece + hyphen_width - available);
+            match first {
+                None => first = Some(piece + hyphen_width),
+                Some(_) => rest = rest.max(piece + hyphen_width),
+            }
             self.items.push(Element::Box(piece));
             self.items.push(Element::Penalty {
                 width: hyphen_width,
@@ -291,8 +376,10 @@ impl Builder<'_> {
         }
         let last = word.fragments.len() - 1;
         let piece = span_width(word, piece_start, (last, word.fragments[last].run.text.len()));
-        let available = if piece_start == (0, 0) { first } else { rest };
-        self.excess.push(excess.max(piece - available));
+        self.pieces.push(match first {
+            None => (piece, 0.0),
+            Some(first) => (first, rest.max(piece)),
+        });
         self.items.push(Element::Box(piece));
     }
 
