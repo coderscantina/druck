@@ -642,7 +642,7 @@ An offer theme with installed Avenir Next (Gotham, the reference font, is not in
 
 Fixes for follow-ups from milestones 03 to 13 that needed no product decision.
 
-The owner decided the remaining ones the same day. Built: a `marker` style for list markers, captions at the table's width, Pandoc-style citation prefixes, `document.duplex`, `toc.level-styles`, an error for headings in footnotes, stored raster density, block spacing around lists in the default theme, line-end hyphens that survive text extraction, and `page.column-change-spacing`. Kept as they are, by choice:
+The owner decided the remaining ones the same day. Built: a `marker` style for list markers, captions at the table's width, Pandoc-style citation prefixes, `document.duplex`, `toc.level-styles`, an error for headings in footnotes, stored raster density, block spacing around lists in the default theme, line-end hyphens that survive text extraction (reverted again, see [owner follow-ups](#owner-follow-ups)), and `page.column-change-spacing`. Kept as they are, by choice:
 
 - List table cells hold paragraphs and lists only.
 - A `.bib` `type` field prints as written; an absent one uses the localized label.
@@ -660,7 +660,7 @@ The owner decided the remaining ones the same day. Built: a `marker` style for l
 - **Cross-references.** Their text (label and number, or "page 7") never breaks inside, which the resolved text marks with `InlineStyle::unbreakable`. A line may still end before it. Citations still hyphenate, since author names may.
 - **Protrusion runs.** A run of protruding characters at a line edge hangs by the sum of their shares in the [protrusion table](#optical-margin-alignment), so the closing quote before a comma hangs too. Three periods at a line end now hang by more than a single period; "…" is one character and does not protrude.
 - **URL breaks.** Link text that spells out its URL, in prose, autolinks, and bibliography entries, may break after a `/` that has a character other than `/` on both sides, without adding a hyphen. So "https://" stays whole and a trailing slash stays with its URL. Breaks before `.` or after `-` were left out: slashes were enough for every URL in the samples, and DOIs always have one. A URL break costs the same as a hyphen but is not counted as one for consecutive hyphens. A URL with no such slash that is wider than its column is still an error at its entry. Bibliography entries now fill their lines and break URLs where they reach the edge, as biblatex does, instead of starting a URL on a new line.
-- **Hyphens in extracted text.** Readers such as `pdftotext` take a `-`, a soft hyphen, or U+2010 at a line end for an added hyphen and drop it when they join the lines; all three were tried with poppler 26.10. Added hyphens therefore keep `-`, so "typographi-" and "cal" extract as "typographical", in pdftotext and in viewers without `ActualText` support. A hyphen of the text that ends a line, as in "state-of-the-" or "pre-", maps to U+2011 (non-breaking hyphen) instead, which readers keep: "state-of-the‑" then "art". Only the text mapping changes; the drawn glyph is the same. krilla 0.8.2 writes the mapping through `ActualText` when the glyph already maps to `-`, and has no other marked-content API for it. Its font `ToUnicode` map takes the first text it sees per glyph, so in a document whose first hyphen glyph ends a line, viewers without `ActualText` read every `-` of that face as U+2011. ActualText across the two halves of a hyphenated word is not possible, since they are separate text runs.
+- **Hyphens in extracted text.** Readers such as `pdftotext` take a `-`, a soft hyphen, or U+2010 at a line end for an added hyphen and drop it when they join the lines; all three were tried with poppler 26.10. Added hyphens therefore keep `-`, so "typographi-" and "cal" extract as "typographical", in pdftotext and in viewers without `ActualText` support. A hyphen of the text that ends a line, as in "state-of-the-" or "pre-", was first mapped to U+2011 so that readers kept it, but krilla 0.8.2 takes the first text it sees per glyph for the font `ToUnicode` map, so a document whose first hyphen glyph ended a line extracted every `-` of that face as U+2011. The owner reverted that part: a hyphen of the text at a line end is written as `-` again, and "state-of-the-" then "art" extracts as "state-of-theart" in readers that join lines. The full fix waits for `ActualText` across the line break, which belongs with the deferred accessibility work, since the two halves of a line are separate text runs.
 - **List marker style.** `lists.marker` and a list style's `marker` name a built-in or custom style whose font, size, weight, and color set bullets and numbers, as the owner decided. Tracking, capitals, and the style's spacing do not apply to markers. A marker style is kept by name and looked up at layout, like a slot's custom style, so it may name a custom style defined after the list style. Markers keep the item's first baseline and end half an em of the list style before the text, so the hanging indent does not depend on the marker style. The default theme sets `lists.marker` to `null` and is unchanged.
 
 ### Pagination
@@ -691,7 +691,7 @@ Consequences: paragraphs of two or three lines no longer split across pages. The
 
 #### Check runs everything before layout
 
-`kyber check` calls the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images. Layout and font loading stay out, so `check` stays quick and needs no fonts. Consequence: fixtures used with `check` need a valid `.bib` file.
+`kyber check` first called the same `prepare` step as `render`: body parsing, bibliography, citations, document images, and theme images, with no layout and no fonts. The owner replaced this: see [check lays out](#check-lays-out).
 
 #### Theme images follow the title layout
 
@@ -703,7 +703,7 @@ Resolution records the font tokens that styles use, following token-to-token ref
 
 #### Table captions at table width
 
-Every table's caption is set at the table's width from its left edge, pipe and list tables alike, wide or not. Before, a caption spanned the frame or, for wide tables, the placement width, so a narrow centered table had a caption wider than itself. A long caption now wraps more over a narrow table. The caption's anchor for references moved to the table's left edge too. This replaces the milestone 13 rule for wide tables.
+Every table's caption is set at the table's width from its left edge, pipe and list tables alike, wide or not (but see [captions over narrow tables](#owner-follow-ups)). Before, a caption spanned the frame or, for wide tables, the placement width, so a narrow centered table had a caption wider than itself. A long caption now wraps more over a narrow table. The caption's anchor for references moved to the table's left edge too. This replaces the milestone 13 rule for wide tables.
 
 #### List spacing
 
@@ -724,10 +724,38 @@ Follow-up fixes to milestones 04, 08, 09, and 11.
 - **Citation links per work.** The formatter returns each citation as pieces of text, and a piece that shows a work carries the position of that work in the bibliography. Layout links each piece to its entry. In author-date style a work's piece is its name, year, and locator, without separators or brackets. In numeric style a range such as "1–3" links its first and last number, since the middle ones are not shown. A prefix stays outside the link. This replaced one target per citation.
 - **Numeric label column.** A numeric bibliography sets its labels in a column as wide as the widest label plus half an em, the gap list markers use, and the entry text after it on every line, like LaTeX's `thebibliography`. Labels are left aligned. `bibliography.hanging-indent` applies to author-date entries only. The label is shaped separately from the text, so the entry text is not preceded by a space.
 - **Heading number gap.** `number-gap` is allowed on `heading-1` to `heading-6` as a style field, so the theme can set it per level. Layout sets the automatic number hanging and the text after the gap, the same way it sets a typed number in a custom style. Without it one space follows the number, so the default theme is unchanged. The number text in contents entries, bookmarks, and running headers does not change, because `Heading::title` still joins number and text with a space. A custom style based on a heading style inherits the gap for its automatic numbers, and its own `number-gap` still means that the author types the number.
-- **Footnote lists and code.** Inside a note, `list`, `lists.indent`, `lists.item-spacing`, and `code-block` are scaled by footnote size over body size: font size, spacing, and indents. A ratio keeps the theme's proportions; sizes in em of the footnote style would have needed new theme fields. Custom list styles and quotations inside notes stay at their own size.
-- **Citation prefixes.** In a bracket, text before the first `@key` of an item is its prefix, as in Pandoc: `[see @a, p. 3; also @b]`. A key counts at a word start, so `[mail me@x.org]` is text, and a bracket without any `@key` is text. Prefixes are per item. In author-date style the output is "(see Smith 2024, p. 3; also Lee 2022)". In numeric style the prefix goes inside the brackets, before the number: "[see 1, p. 3; also 2]". Numbers are sorted and grouped into ranges only when no item has a locator or a prefix, so the order the author wrote is kept. Suffixes after the locator are not supported.
+- **Footnote lists and code.** Inside a note, `list`, `lists.indent`, `lists.item-spacing`, `code-block`, and, since the owner follow-ups, `quote` and custom list styles are scaled by footnote size over body size: font size, spacing, and indents. A ratio keeps the theme's proportions; sizes in em of the footnote style would have needed new theme fields.
+- **Citation prefixes.** In a bracket, text before the first `@key` of an item is its prefix, as in Pandoc: `[see @a, p. 3; also @b]`. A key counts at a word start, so `[mail me@x.org]` is text, and a bracket without any `@key` is text. Prefixes are per item. In author-date style the output is "(see Smith 2024, p. 3; also Lee 2022)". In numeric style the prefix goes inside the brackets, before the number: "[see 1, p. 3; also 2]". Numbers are sorted and grouped into ranges only when no item has a locator or a prefix, so the order the author wrote is kept. Suffixes are described under [owner follow-ups](#owner-follow-ups).
 - **Contents level styles.** `toc.level-styles` lists style names, built-in or custom, for the entries of level 1, 2, and so on, and the last repeats for deeper levels. Absent or empty means `toc-entry` for all, so the default theme is unchanged. The indent per level and the leader still come from `toc.level-indent` and `toc.leader`, measured in the `toc-entry` size. An unknown name is an error at its list position.
 - **Headings in footnotes.** The parser rejects them at the heading, like tables and images in footnotes. Layout no longer has a path for them.
+
+### Owner follow-ups
+
+Decided by the owner after the fixes above.
+
+#### Check lays out
+
+`kyber check` is `render` without writing the PDF: it loads fonts, lays the document out, and reports every error `render` reports, such as a word wider than its line, an oversized row or keep group, or a layout that does not settle. Both commands share one `typeset` function in `src/main.rs`, so nothing is duplicated. The title slot check is part of layout, so `check` no longer calls it apart. Consequences: `check` needs the fonts the theme names and takes as long as `render`. `--print-config` stays a view of the resolved configuration and does not lay out, so it also works for themes whose fonts cannot be loaded; the success message "document is valid" is still true.
+
+#### Hyphens in extracted text
+
+The explicit line-end hyphen mapping described under [text and line breaking](#text-and-line-breaking) is removed. Automatic hyphens are unchanged.
+
+#### Footnote scaling
+
+`NoteStyles` also holds the scaled `quote` style and a scaled copy of every custom style based on `list`, by name. Layout picks them inside notes like the scaled `list` and `code-block`. A list marker style, named by `marker`, is still not scaled in notes, neither for the built-in nor for custom list styles, and custom paragraph styles in a note keep their own size. Both are follow-ups if a document needs them.
+
+#### Citation suffixes
+
+Text after the locator in a bracketed item is its suffix, in Pandoc's manner: `[@a, p. 3, emphasis added]` reads "(Smith 2024, p. 3, emphasis added)". The text after the comma is a locator, then a suffix, when the part up to the next comma is a locator (`p.`, `pp.`, or `S.` with a page or range). Otherwise the whole text is the suffix: `[@a, emphasis added]`. A suffix is kept as written, joined to the locator with ", ", and is part of the work's link. Pandoc's manual, "Citation syntax", shows `[@doe99, pp. 33-35, 38-39 and passim]`, with all text after the key handed to its citation processor. Kyber supports three locator labels and splits at the first comma instead: that example is the locator "pp. 33–35" and the suffix "38-39 and passim", which prints the same. Three deliberate differences: the text must follow a comma, where Pandoc also accepts `[@a and passim]`; a malformed locator such as `p.3` is silently a suffix, where Kyber used to report an unsupported locator; and `[@a see below]` stays an error, now saying that a locator or suffix follows a comma. A narrative citation takes the same in its brackets, `@a [p. 3, passim]`, but brackets that do not start with a locator stay text. Numeric style prints the suffix inside the brackets after the locator, "[1, p. 3, emphasis added]". Numbers are no longer grouped into ranges when an item has a suffix.
+
+#### Captions over narrow tables
+
+A caption is as wide as its table, unless the table is narrower than a third of its frame's width, where the caption runs from the table's left edge to the frame's right edge. The owner's wording was "set at the frame width, left edge still the table's, clamped to the frame". Both cannot hold, since a frame-wide caption can only start at the frame's left edge, so the table's left edge is kept and the width is what remains of the frame. The frame is the one the table is set in: the text area for wide tables, the column in columns. The caption's minimum width is still its longest word.
+
+#### Business theme
+
+`samples/themes/business.json` has a `detail-marker` custom style, 0.6em of the body size in the muted color, which the `detail` list style names as its `marker`. The cost table's detail bullets are smaller than their text. The offer stays at 5 pages.
 
 ## Recording a decision
 

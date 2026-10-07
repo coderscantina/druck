@@ -217,7 +217,7 @@ There are no selectors and no cascade: a style applies only where the document n
 
 ## Footnotes
 
-Footnote text uses `styles.footnote`. Lists and code in a note use `styles.list`, `lists.*`, and `styles.code-block` scaled by the footnote size over the body size, so a 9 pt note under 11 pt text sets them at 9/11 of their sizes, spacing, and indents. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across the prose width:
+Footnote text uses `styles.footnote`. Lists, quotations, and code in a note use `styles.list`, custom list styles, `lists.*`, `styles.quote`, and `styles.code-block` scaled by the footnote size over the body size, so a 9 pt note under 11 pt text sets them at 9/11 of their sizes, spacing, and indents. Its `first-line-indent` applies to the second and later paragraphs of a note. The note area sits at the foot of the text area, across the prose width:
 
 | Key | Effect |
 | --- | --- |
@@ -234,7 +234,7 @@ Captions use `styles.caption`. A caption reads "Figure 1: " and then the image d
 
 Images are centered in their frame. Their size and placement have no theme settings; see [authoring](AUTHORING.md#images-and-captions).
 
-Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the table's own width from its left edge, and spaced like figure captions.
+Table captions read "Table 1: " and then the caption text, with the `table` label. They are set above the table, across the table's own width from its left edge, and spaced like figure captions. Over a table narrower than a third of its frame the caption runs on to the frame's right edge instead.
 
 ## Tables
 

@@ -111,9 +111,9 @@ kyber check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
 kyber render <doc.md> [-o PATH]
 ```
 
-`check` loads the document, theme, and overrides, resolves the configuration, checks that required title slots have values, parses the Markdown body, reads the images and the `.bib` file, resolves citations, and reports the same problems as `render` up to layout. Problems that only layout finds, such as a word wider than its line, show up in `render`. `--print-config` prints the resolved configuration as JSON.
+`check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, and a layout that does not settle. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
 
-`render` validates the same way, then parses the Markdown, lays it out, and writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
+`render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
 `--theme PATH` selects a theme and overrides the `theme` key in front matter. The path is relative to the working directory.
 
@@ -173,7 +173,7 @@ The following are reported as errors with their line and column, and no PDF is w
 
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
-A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` does not lay out the document, so it does not find these.
+A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation.
 
 ## Pages
 
@@ -223,7 +223,7 @@ Tables are pipe tables as on GitHub, or [list tables](#list-tables) for cells wi
 - Cells hold text with emphasis, strong text, inline code, links, and footnote references. Write `\|` for a pipe inside a cell, also inside code.
 - A row with fewer cells than the header gets empty cells. A row with more cells is an error.
 - Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
-- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table, as wide as the table and starting at its left edge. Tables are numbered apart from figures. A table without a caption has no number.
+- The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table, as wide as the table and starting at its left edge. Over a table narrower than a third of the text width the caption runs on to the right edge of the text instead. Tables are numbered apart from figures. A table without a caption has no number.
 - A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references).
 
 Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.
@@ -459,7 +459,8 @@ calls the result rhythm.
 - A citation in brackets holds at least one `@key` and ends at the first `]`. Several keys are separated by `;`. The brackets may span lines. A bracket without any `@key` is text.
 - Text before a key is its prefix: `[see @smith2024, p. 3; also @lee2022]` reads "(see Smith 2024, p. 3; also Lee et al. 2022)". Each work in a group takes its own prefix. In the numeric style the prefix stays inside the brackets: "[see 1, p. 3; also 2]". A prefix is plain text, and it is not part of the link. A narrative citation takes no prefix.
 - A locator follows a key after a comma: `p.`, `pp.`, or `S.`, then a page or a range of two pages made of letters and digits, as in `p. 12`, `pp. 3-5`, `S. xiv`. The range gets an en dash. A no-break space keeps the label with the page. `pp.` is used for a range and `p.` for one page, whichever was written.
-- A narrative citation is `@key` where a word starts: at the start of a line, after a space, or after an opening bracket or quotation mark. A locator follows it in brackets after one space on the same line: `@key [p. 12]`.
+- Text after the locator is a suffix, as in Pandoc: `[@smith2024, p. 3, emphasis added]` reads "(Smith 2024, p. 3, emphasis added)". Text after the comma that does not start with a locator is all suffix: `[@smith2024, emphasis added]`. A suffix is printed as written, after the locator and a comma, and is part of the link. Whatever follows the key must start with a comma. The numeric style puts it inside the brackets: "[1, p. 3, emphasis added]".
+- A narrative citation is `@key` where a word starts: at the start of a line, after a space, or after an opening bracket or quotation mark. A locator follows it in brackets after one space on the same line: `@key [p. 12]`, optionally with a suffix: `@key [p. 12, passim]`. Brackets that do not start with a locator stay text.
 - An `@` after a letter or digit, as in an e-mail address, is no citation. Write `\@` for an at sign that starts a word and should stay text. In link text and inline code, `@` is always text.
 
 ### Author-date style
@@ -472,7 +473,7 @@ calls the result rhythm.
 ### Numeric style
 
 - Works are numbered in the order they are first cited, reading the text from the start. A citation in a footnote counts where the footnote is referenced.
-- Numbers in a citation are sorted, and runs of three or more become a range: [1–3, 5]. With a locator or a prefix each work is listed apart, in the order written: [1, p. 12; 3].
+- Numbers in a citation are sorted, and runs of three or more become a range: [1–3, 5]. With a locator, a prefix, or a suffix each work is listed apart, in the order written: [1, p. 12; 3].
 - The bibliography lists the works in number order, each with its label, as in "[1]". The labels stand in a column as wide as the widest one, and the text of every entry starts after it, also on later lines. `bibliography.hanging-indent` does not apply.
 
 ### The bibliography
@@ -519,7 +520,7 @@ These are errors, reported with their location:
 
 - A citation without a `bibliography` setting, at the first citation.
 - A key that is not in the bibliography, at the key.
-- Brackets that start like a citation but cannot be read, such as an unknown locator in `[@key, see below]`, and brackets that mix a citation with a cross-reference, as in `[@key; @sec:intro]`. Write them apart.
+- Brackets that start like a citation but cannot be read, such as text after a key without a comma in `[@key see below]`, and brackets that mix a citation with a cross-reference, as in `[@key; @sec:intro]`. Write them apart.
 - A citation in a heading.
 - A second `::: bibliography`, or one inside `keep`.
 - A bibliography file that does not exist, by the `bibliography` setting.
