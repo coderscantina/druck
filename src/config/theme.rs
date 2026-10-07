@@ -340,6 +340,9 @@ pub struct Page {
     /// Block kinds set across the whole frame when prose is narrower.
     pub wide: Vec<WideBlock>,
     pub column_gap: Spec<Spacing>,
+    /// Least space between a column section and the full-width blocks around it. `null` uses the
+    /// column gap.
+    pub column_change_spacing: Option<Spec<Spacing>>,
     /// Distance from the top of the text area to the header baseline.
     pub header_offset: Spec<Spacing>,
     /// Distance from the bottom of the text area to the footer baseline.

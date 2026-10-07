@@ -205,6 +205,17 @@
           "description": "Gap between columns. em is relative to the body size.",
           "$ref": "#/$defs/spacingSpec"
         },
+        "column-change-spacing": {
+          "description": "Least space between a column section and the full-width blocks above and below it, or null for the column gap. em is relative to the body size.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spacingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "header-offset": {
           "description": "Distance from the top of the text area to the header baseline. em is relative to the body size.",
           "$ref": "#/$defs/spacingSpec"

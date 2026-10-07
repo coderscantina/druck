@@ -88,6 +88,8 @@ pub struct PageGeometry {
     /// Block kinds set across the frame instead of the prose width.
     pub wide: Vec<WideBlock>,
     pub column_gap: Pt,
+    /// Least space between a column section and the full-width blocks around it.
+    pub column_change_spacing: Pt,
     pub header_offset: Pt,
     pub footer_offset: Pt,
 }

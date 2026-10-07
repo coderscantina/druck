@@ -787,8 +787,8 @@ impl<'a> Flow<'a> {
 
     /// Sets a column section at the column width, which divides the prose width. Full-width blocks inside
     /// it are set across `frame`, where wide blocks widen as outside columns, and split the section into
-    /// runs. Each layout change starts a new paragraph sequence and leaves at least the column gap above
-    /// and below the columns.
+    /// runs. Each layout change starts a new paragraph sequence and leaves at least the column change
+    /// spacing above and below the columns.
     fn columns(&mut self, blocks: &[Block], frame: Frame<'a>) {
         let page = &self.config.page;
         let column = Frame {
@@ -812,7 +812,7 @@ impl<'a> Flow<'a> {
 
     /// Requests the space at a change between one and two columns and returns the next line's index.
     fn change_layout(&mut self) -> usize {
-        self.space(self.config.page.column_gap.0);
+        self.space(self.config.page.column_change_spacing.0);
         self.after_paragraph = false;
         self.lines.len()
     }

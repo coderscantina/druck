@@ -38,6 +38,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `pages.title`, `pages.first`, `pages.odd`, `pages.even` | Remove the variant, so the fallback order applies. |
 | `pages.<variant>.header`, `pages.<variant>.footer` | No header or footer on that variant. |
 | `page.text-width` | Prose uses the whole margin frame. |
+| `page.column-change-spacing` | The column gap. |
 | `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
@@ -101,7 +102,7 @@ Lengths are strings with a unit: `pt`, `mm`, `cm`, `in`, or `em`. Examples: `"10
 | --- | --- |
 | `styles.<name>.size` | The body font size. The body size itself must be absolute and greater than zero. |
 | Other lengths in `styles.<name>` (spacing, indents) | That element's own font size. |
-| `page.*` (size, margins, column gap, offsets) | The body font size. |
+| `page.*` (size, margins, column gap and change spacing, offsets) | The body font size. |
 | `lists.*` | The `styles.list` size. |
 | `tables.*` | The `styles.table-cell` size. |
 | `footnotes.*` | The `styles.footnote` size. |
@@ -258,7 +259,7 @@ The text width must be greater than zero and at most the frame width.
 
 ## Columns
 
-`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the prose width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the prose width.
+`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the prose width. `page.column-change-spacing` is the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Its default, `null`, uses the column gap. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the prose width.
 
 Other sections have their own fields; the [schema](../schema/theme.v1.schema.json) lists them all.
 
