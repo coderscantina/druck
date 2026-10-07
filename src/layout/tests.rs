@@ -297,6 +297,267 @@ fn repeated_layout_is_identical() {
     assert_eq!(first, format!("{:?}", render(blocks()).unwrap()));
 }
 
+fn columns(line: u64, blocks: Vec<Block>) -> Block {
+    Block::Columns {
+        at: Location { line, column: 1 },
+        blocks,
+    }
+}
+
+/// A paragraph that starts with the word `P{number}`, so reading order can be checked.
+fn numbered(number: u64) -> Block {
+    paragraph(number * 2 + 1, &format!("P{number} {PROSE}"))
+}
+
+/// A placed line: its left and right edges, baseline, and text.
+#[derive(Debug)]
+struct Placed {
+    left: f64,
+    right: f64,
+    y: f64,
+    text: String,
+}
+
+impl Placed {
+    fn in_second_column(&self, page: &Page) -> bool {
+        self.left > page.width.0 / 2.0
+    }
+
+    fn is_full_width(&self, page: &Page) -> bool {
+        self.left < page.width.0 / 2.0 && self.right > page.width.0 / 2.0
+    }
+}
+
+/// The text lines of a page in placement order. Raised markers join the line they are in.
+fn placed(page: &Page) -> Vec<Placed> {
+    let mut lines: Vec<Placed> = Vec::new();
+    for item in &page.items {
+        let Item::Text { x, y, run, .. } = item else { continue };
+        let right = x.0 + run.width.0;
+        match lines.last_mut() {
+            Some(line) if (line.y - y.0).abs() < 6.0 => {
+                line.y = line.y.max(y.0);
+                line.right = line.right.max(right);
+                line.text = format!("{} {}", line.text, run.text);
+            }
+            _ => lines.push(Placed {
+                left: x.0,
+                right,
+                y: y.0,
+                text: run.text.clone(),
+            }),
+        }
+    }
+    lines
+}
+
+/// The numbers of the `P{number}` words over all pages, in placement order.
+fn reading_order(pages: &[Page]) -> Vec<u64> {
+    pages
+        .iter()
+        .flat_map(placed)
+        .flat_map(|line| {
+            let words: Vec<u64> = line
+                .text
+                .split_whitespace()
+                .filter_map(|word| word.strip_prefix('P')?.parse().ok())
+                .collect();
+            words
+        })
+        .collect()
+}
+
+/// The lowest baseline in each column among `lines`.
+fn column_bottoms(page: &Page, lines: &[Placed]) -> (f64, f64) {
+    let bottom = |second: bool| {
+        lines
+            .iter()
+            .filter(|line| line.in_second_column(page) == second)
+            .map(|line| line.y)
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    (bottom(false), bottom(true))
+}
+
+fn body_line() -> f64 {
+    let config = config();
+    config.styles.body.size.0 * config.styles.body.line_height
+}
+
+#[test]
+fn text_flows_down_the_first_column_then_the_second() {
+    let pages = render(vec![columns(1, (0..3).map(numbered).collect())]).unwrap();
+    let lines = placed(&pages[0]);
+    let second = lines.iter().position(|line| line.in_second_column(&pages[0])).unwrap();
+
+    assert_eq!(reading_order(&pages), [0, 1, 2]);
+    assert!(lines[..second].iter().all(|line| !line.in_second_column(&pages[0])));
+    assert!(lines[second..].iter().all(|line| line.in_second_column(&pages[0])));
+    assert_eq!(lines[0].y, lines[second].y, "both columns start at the top");
+    let width = super::pages::column_width(&config().page);
+    assert!(lines.iter().all(|line| line.right - line.left < width + 3.0));
+}
+
+#[test]
+fn the_final_columns_of_a_section_are_balanced() {
+    for count in [2, 3, 5] {
+        let pages = render(vec![columns(1, (0..count).map(numbered).collect())]).unwrap();
+        let (first, second) = column_bottoms(&pages[0], &placed(&pages[0]));
+        assert!(
+            (first - second).abs() <= body_line() + 1e-6,
+            "{count}: {first} and {second}"
+        );
+    }
+}
+
+#[test]
+fn a_column_section_continues_across_pages_with_full_columns() {
+    let config = config();
+    let pages = render(vec![columns(1, (0..40).map(numbered).collect())]).unwrap();
+    let bottom = config.page.height.0 - config.page.margin_bottom.0;
+
+    assert!(pages.len() > 2);
+    assert_eq!(reading_order(&pages), (0..40).collect::<Vec<_>>());
+    for page in &pages[..pages.len() - 1] {
+        let (first, second) = column_bottoms(page, &placed(page));
+        assert!(first > bottom - 2.0 * body_line() && second > bottom - 2.0 * body_line());
+    }
+}
+
+#[test]
+fn a_full_width_block_balances_the_columns_before_it_and_columns_resume_below() {
+    let full = Block::FullWidth {
+        at: Location { line: 50, column: 1 },
+        blocks: vec![numbered(2)],
+    };
+    let section = columns(1, vec![numbered(0), numbered(1), full, numbered(3), numbered(4)]);
+    let pages = render(vec![section]).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let start = lines.iter().position(|line| line.text.starts_with("P2")).unwrap();
+    let end = start
+        + lines[start..]
+            .iter()
+            .take_while(|line| line.is_full_width(page))
+            .count();
+    let (before, block, after) = (&lines[..start], &lines[start..end], &lines[end..]);
+
+    assert_eq!(pages.len(), 1);
+    assert_eq!(reading_order(&pages), [0, 1, 2, 3, 4]);
+    assert!(block.len() > 1);
+    let (first, second) = column_bottoms(page, before);
+    assert!((first - second).abs() <= body_line() + 1e-6);
+    assert!(block[0].y > first.max(second));
+    assert!(after.iter().any(|line| line.in_second_column(page)));
+    assert!(after.iter().all(|line| line.y > block[block.len() - 1].y));
+}
+
+#[test]
+fn changing_from_one_to_two_columns_and_back_does_not_start_a_new_page() {
+    let blocks = vec![numbered(0), columns(3, vec![numbered(1), numbered(2)]), numbered(3)];
+    let pages = render(blocks).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let last = lines.iter().position(|line| line.text.starts_with("P3")).unwrap();
+    let (first, second) = column_bottoms(page, &lines[..last]);
+
+    assert_eq!(pages.len(), 1);
+    assert_eq!(reading_order(&pages), [0, 1, 2, 3]);
+    assert!(lines[0].is_full_width(page) && lines[last].is_full_width(page));
+    assert!(
+        lines[last].y > first.max(second),
+        "the next layout starts below the taller column"
+    );
+}
+
+#[test]
+fn notes_from_both_columns_share_one_area_in_reference_order() {
+    let referring = |number: u64, note: usize| Block::Paragraph {
+        at: Location {
+            line: number,
+            column: 1,
+        },
+        content: vec![text_inline(&format!("P{number} {PROSE}")), Inline::FootnoteRef(note)],
+    };
+    let section = columns(1, vec![referring(0, 0), referring(1, 1)]);
+    let notes = vec![note(10, "First note."), note(12, "Second note.")];
+    let pages = render_with_notes(vec![section], notes).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let find = |text: &str| lines.iter().position(|line| line.text.contains(text)).unwrap();
+    let (first, second) = (find("First note."), find("Second note."));
+
+    assert_eq!(pages.len(), 1);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.in_second_column(page) && line.text.split_whitespace().any(|word| word == "2"))
+    );
+    assert!(first < second);
+    assert_eq!(lines[first].left, lines[0].left);
+    let (left, right) = column_bottoms(page, &lines[..first]);
+    assert!(lines[first].y > left.max(right));
+}
+
+#[test]
+fn a_keep_group_inside_columns_stays_in_one_column() {
+    let keep = Block::Keep {
+        at: Location { line: 20, column: 1 },
+        blocks: vec![numbered(3), numbered(4)],
+    };
+    let mut blocks: Vec<Block> = (0..3).map(numbered).collect();
+    blocks.push(keep);
+    blocks.extend((5..7).map(numbered));
+    let pages = render(vec![columns(1, blocks)]).unwrap();
+    let page = &pages[0];
+    let lines = placed(page);
+    let start = lines.iter().position(|line| line.text.starts_with("P3")).unwrap();
+    let end = lines.iter().position(|line| line.text.starts_with("P5")).unwrap();
+
+    assert_eq!(pages.len(), 1);
+    assert_eq!(reading_order(&pages), (0..7).collect::<Vec<_>>());
+    let column = lines[start].in_second_column(page);
+    assert!(
+        lines[start..end]
+            .iter()
+            .all(|line| line.in_second_column(page) == column)
+    );
+}
+
+#[test]
+fn reports_a_keep_group_taller_than_a_column_at_its_directive() {
+    let keep = || Block::Keep {
+        at: Location { line: 3, column: 1 },
+        blocks: (0..11).map(numbered).collect(),
+    };
+    assert!(render(vec![keep()]).is_ok(), "the group fits at full width");
+
+    let errors = render(vec![columns(1, vec![keep()])]).unwrap_err();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].location, Some((3, 1)));
+    assert!(
+        errors[0].message.starts_with("this keep group is"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn repeated_column_layout_is_identical() {
+    let blocks = || {
+        let full = Block::FullWidth {
+            at: Location { line: 40, column: 1 },
+            blocks: vec![numbered(12)],
+        };
+        let mut section: Vec<Block> = (0..12).map(numbered).collect();
+        section.push(full);
+        section.extend((13..20).map(numbered));
+        vec![numbered(30), columns(1, section), numbered(31)]
+    };
+    let first = format!("{:?}", render(blocks()).unwrap());
+    assert_eq!(first, format!("{:?}", render(blocks()).unwrap()));
+}
+
 fn text_inline(value: &str) -> Inline {
     text(value, InlineStyle::default())
 }

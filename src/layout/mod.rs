@@ -1,8 +1,9 @@
 //! Layout: places the document's blocks on pages using resolved styles and shaped text.
 //!
 //! Blocks become a flow of lines, each with the space above it and a rule for ending a page after
-//! it. [`paragraph`] chooses line breaks for each whole paragraph; [`pages`] chooses page breaks
-//! for the whole flow and places footnotes.
+//! it. Lines of a column section are set at the column width and grouped into runs. [`paragraph`]
+//! chooses line breaks for each whole paragraph; [`pages`] chooses page and column breaks for the
+//! whole flow and places footnotes.
 
 mod pages;
 mod paragraph;
@@ -35,10 +36,12 @@ pub fn layout(
         space: 0.0,
         after_paragraph: false,
         keeps: Vec::new(),
+        columns: Vec::new(),
         errors: Vec::new(),
     };
     let body = flow.run(&document.blocks, Frame::full(&config.styles.body));
     let keeps = std::mem::take(&mut flow.keeps);
+    let columns = std::mem::take(&mut flow.columns);
     let mut notes = Vec::with_capacity(document.footnotes.len());
     let mut continued = Vec::with_capacity(document.footnotes.len());
     for (index, footnote) in document.footnotes.iter().enumerate() {
@@ -52,6 +55,7 @@ pub fn layout(
         pages::Content {
             body,
             keeps,
+            columns,
             notes,
             continued,
         },
@@ -120,6 +124,8 @@ struct Flow<'a> {
     after_paragraph: bool,
     /// Line ranges of keep groups with their directive locations.
     keeps: Vec<(Range<usize>, Location)>,
+    /// Line ranges set in two columns. A full-width block ends one run and starts the next.
+    columns: Vec<Range<usize>>,
     errors: Vec<Diagnostic>,
 }
 
@@ -228,10 +234,8 @@ impl<'a> Flow<'a> {
                     }
                     continue;
                 }
-                Block::Columns { at, .. } | Block::FullWidth { at, .. } => {
-                    let message = "two-column layout is not supported yet".to_owned();
-                    self.errors.push(self.error(*at, message));
-                }
+                Block::Columns { blocks, .. } => self.columns(blocks, frame),
+                Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
             }
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
         }
@@ -313,6 +317,43 @@ impl<'a> Flow<'a> {
             line.items.push(text_item(x, y, run, style.color));
         }
         self.space(style.space_after.0);
+    }
+
+    /// Sets a column section at the column width. Full-width blocks inside it are set across `frame`
+    /// and split the section into runs. Each layout change starts a new paragraph sequence and leaves
+    /// at least the column gap above and below the columns.
+    fn columns(&mut self, blocks: &[Block], frame: Frame<'a>) {
+        let page = &self.config.page;
+        let column = Frame {
+            right: frame.right + page.text_width().0 - pages::column_width(page),
+            ..frame
+        };
+        let mut start = self.change_layout();
+        for block in blocks {
+            match block {
+                Block::FullWidth { blocks, .. } => {
+                    self.end_run(start);
+                    self.blocks(blocks, frame);
+                    start = self.change_layout();
+                }
+                block => self.blocks(std::slice::from_ref(block), column),
+            }
+        }
+        self.end_run(start);
+    }
+
+    /// Requests the space at a change between one and two columns and returns the next line's index.
+    fn change_layout(&mut self) -> usize {
+        self.space(self.config.page.column_gap.0);
+        self.after_paragraph = false;
+        self.lines.len()
+    }
+
+    fn end_run(&mut self, start: usize) {
+        if self.lines.len() > start {
+            self.columns.push(start..self.lines.len());
+        }
+        self.change_layout();
     }
 
     /// Code lines are set as they are. A line wider than the available width is an error.

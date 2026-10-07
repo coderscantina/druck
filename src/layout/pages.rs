@@ -10,14 +10,17 @@
 //! the page of its reference. Only the last note on a page may continue on the next one, where a
 //! marker with its number and the `continued` label precedes the rest.
 //!
-//! A page holds stacked body regions and one footnote area across the text width. Each page has a
-//! single full-width region for now; milestone 05 adds column regions.
+//! A page holds stacked body regions and one footnote area across the text width. A region is
+//! either full width or the part of a column run on that page. Text in a column region flows down
+//! the first column and then the second, split where both columns are most even. The next region
+//! starts below the taller column. Column regions take part in the search like any other lines:
+//! their balanced height counts toward the page, and the cost of their column break toward its cost.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
 
 use super::{Break, FlowLine, translate};
-use crate::config::resolved::Config;
+use crate::config::resolved::{Config, PageGeometry};
 use crate::config::source::Source;
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
@@ -41,6 +44,14 @@ const WIDOW: f64 = 5000.0;
 const SPLIT_NOTE: f64 = 2000.0;
 /// Cost of a page that holds only the continuation of footnotes.
 const NOTE_PAGE: f64 = 10_000.0;
+/// Cost of a column region one body line taller than its most even split. Grows with the square,
+/// so a region gets one line uneven rather than strand a line, but not two.
+const UNEVEN: f64 = 3000.0;
+
+/// The width of each of two columns.
+pub(super) fn column_width(page: &PageGeometry) -> f64 {
+    (page.text_width().0 - page.column_gap.0) / 2.0
+}
 
 /// The rule after line `index` of a block of `count` lines.
 pub(super) fn line_break(index: usize, count: usize) -> Break {
@@ -62,6 +73,8 @@ pub(super) struct Content {
     pub body: Vec<FlowLine>,
     /// Line ranges of keep groups with their directive locations.
     pub keeps: Vec<(Range<usize>, Location)>,
+    /// Line ranges set in two columns, in order.
+    pub columns: Vec<Range<usize>>,
     /// The lines of each footnote, in reference order.
     pub notes: Vec<Vec<FlowLine>>,
     /// The continuation marker of each footnote.
@@ -73,6 +86,7 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
     let Content {
         mut body,
         keeps,
+        columns,
         notes,
         continued,
     } = content;
@@ -80,7 +94,7 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
     let overhead = footnotes.gap.0 + footnotes.separator_thickness.0;
     let notes = Notes::new(notes, continued, overhead, footnotes.spacing.0);
     let body_line = config.styles.body.size.0 * config.styles.body.line_height;
-    let composer = Composer::new(&body, &notes, config.page.text_height().0, body_line);
+    let composer = Composer::new(&body, &columns, &notes, config.page.text_height().0, body_line);
     composer.check(&keeps, source)?;
     let plans = composer.search().ok_or_else(|| {
         vec![Diagnostic::new(
@@ -94,16 +108,36 @@ pub(super) fn compose(content: Content, config: &Config, source: &Source) -> Res
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
 #[derive(Debug)]
 struct Plan {
+    /// The body lines on the page.
+    lines: Range<usize>,
     regions: Vec<Region>,
+    /// The share of their bound by which spaces and column regions stretch.
+    stretch: f64,
     /// The footnote lines on the page, as a range of the footnote stream.
     notes: Range<usize>,
 }
 
-/// A full-width run of body lines whose spaces stretch by `stretch` of their bound.
 #[derive(Debug)]
-struct Region {
+enum Region {
+    Full(Range<usize>),
+    Columns(Columns),
+}
+
+/// Lines set in two columns: `lines.start..split` in the first and the rest in the second.
+#[derive(Debug, Clone)]
+struct Columns {
     lines: Range<usize>,
-    stretch: f64,
+    split: usize,
+    /// The natural height of the taller column.
+    height: f64,
+    /// How far the region can grow with both columns stretching their spaces within bounds.
+    grow: f64,
+    /// How far the shorter column stays above the region's bottom even when fully stretched.
+    deficit: f64,
+    /// The cost of the column break and of uneven columns.
+    cost: f64,
+    /// The natural height and the stretch bound of each column.
+    columns: [(f64, f64); 2],
 }
 
 /// All footnote lines as one stream in reference order.
@@ -202,6 +236,12 @@ struct Composer<'a> {
     body: &'a [FlowLine],
     /// The number of footnotes referenced before each body line, and in the whole body.
     through: Vec<usize>,
+    /// The height of the body before each line and at its end, each line with the space above it.
+    top: Vec<f64>,
+    /// The space above the lines before each line and at the end.
+    space: Vec<f64>,
+    /// The column run of each line, or `None` for a full-width line.
+    runs: Vec<Option<Range<usize>>>,
     notes: &'a Notes,
     height: f64,
     /// A body line's height, the unit for measuring short pages.
@@ -209,16 +249,29 @@ struct Composer<'a> {
 }
 
 impl<'a> Composer<'a> {
-    fn new(body: &'a [FlowLine], notes: &'a Notes, height: f64, line: f64) -> Self {
+    fn new(body: &'a [FlowLine], columns: &[Range<usize>], notes: &'a Notes, height: f64, line: f64) -> Self {
         let mut through = Vec::with_capacity(body.len() + 1);
+        let mut top = Vec::with_capacity(body.len() + 1);
+        let mut space = Vec::with_capacity(body.len() + 1);
         through.push(0);
+        top.push(0.0);
+        space.push(0.0);
         for flow_line in body {
             let referenced = flow_line.line.notes.iter().map(|note| note + 1).max().unwrap_or(0);
             through.push(referenced.max(through[through.len() - 1]));
+            top.push(top[top.len() - 1] + flow_line.space_before + flow_line.line.height);
+            space.push(space[space.len() - 1] + flow_line.space_before);
+        }
+        let mut runs = vec![None; body.len()];
+        for run in columns {
+            runs[run.clone()].fill(Some(run.clone()));
         }
         Self {
             body,
             through,
+            top,
+            space,
+            runs,
             notes,
             height,
             line,
@@ -328,10 +381,9 @@ impl<'a> Composer<'a> {
         while let Some(previous) = states[index].previous {
             let (from, to) = (&states[previous], &states[index]);
             plans.push(Plan {
-                regions: vec![Region {
-                    lines: from.at..to.at,
-                    stretch: to.stretch,
-                }],
+                lines: from.at..to.at,
+                regions: self.regions(from.at, to.at),
+                stretch: to.stretch,
                 notes: from.placed..to.placed,
             });
             index = previous;
@@ -353,45 +405,81 @@ impl<'a> Composer<'a> {
             pages.push((start, placed, state.cost + NOTE_PAGE + split, 0.0));
         }
 
-        let (mut natural, mut stretch) = (0.0, 0.0);
+        // Natural height, stretch bound, and column break cost of the regions finished so far.
+        let (mut natural, mut stretch, mut cost) = (0.0, 0.0, 0.0);
         for (index, line) in self.body.iter().enumerate().skip(start) {
-            if index > start {
-                natural += line.space_before;
-                stretch += line.space_before * STRETCH;
-            }
-            natural += line.line.height;
-            if natural > self.height {
-                break;
-            }
             let end = index + 1;
             let last = end == self.body.len();
-            let penalty = match line.after {
-                _ if last => 0.0,
-                Break::Never => continue,
-                Break::Forced => 0.0,
-                Break::Allowed(cost) => cost,
-            };
             let referenced = self.through[end];
             let min = if referenced > self.through[start] {
                 self.notes.start[referenced - 1] + 1
             } else {
                 from
             };
+            // The body can use what the first lines of the page's notes leave.
+            let room = self.height - self.notes.area(from, min);
+            // A page ending in columns falls short by its shorter column's deficit too.
+            let (page, page_stretch, page_cost, deficit) = match &self.runs[index] {
+                None => {
+                    if index > start {
+                        natural += line.space_before;
+                        stretch += line.space_before * STRETCH;
+                    }
+                    natural += line.line.height;
+                    if natural > room {
+                        break;
+                    }
+                    (natural, stretch, cost, 0.0)
+                }
+                Some(run) => {
+                    if line.after == Break::Never && !last && end < run.end {
+                        continue;
+                    }
+                    let first = run.start.max(start);
+                    let gap = if first > start {
+                        self.body[first].space_before
+                    } else {
+                        0.0
+                    };
+                    let (columns, least) = self.balance(first, end);
+                    if natural + gap + least > room {
+                        break;
+                    }
+                    let region = (
+                        natural + gap + columns.height,
+                        stretch + gap * STRETCH + columns.grow,
+                        cost + columns.cost,
+                    );
+                    if end == run.end {
+                        (natural, stretch, cost) = region;
+                    }
+                    if region.0 > room {
+                        continue;
+                    }
+                    (region.0, region.1, region.2, columns.deficit)
+                }
+            };
+            let penalty = match line.after {
+                _ if last => 0.0,
+                Break::Never => continue,
+                Break::Forced => 0.0,
+                Break::Allowed(cost) => cost,
+            };
             let max = self.notes.start[referenced];
-            let Some(placed) = self.notes.fit(from, min, max, self.height - natural) else {
+            let Some(placed) = self.notes.fit(from, min, max, self.height - page) else {
                 break;
             };
-            let short = (self.height - natural - self.notes.area(from, placed)).max(0.0);
+            let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
             let (fill, ratio) = if last || line.after == Break::Forced {
                 (0.0, 0.0)
             } else {
-                let used = short.min(stretch);
-                let ratio = if stretch > 0.0 { used / stretch } else { 0.0 };
-                let lines = (short - used) / self.line;
+                let used = short.min(page_stretch);
+                let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
+                let lines = (short - used + deficit) / self.line;
                 (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
             };
             let split = if placed < max { SPLIT_NOTE } else { 0.0 };
-            pages.push((end, placed, state.cost + fill + penalty + split, ratio));
+            pages.push((end, placed, state.cost + fill + penalty + split + page_cost, ratio));
             if line.after == Break::Forced {
                 break;
             }
@@ -400,11 +488,114 @@ impl<'a> Composer<'a> {
     }
 }
 
+impl Composer<'_> {
+    /// The regions of a page holding body lines `start..end`.
+    fn regions(&self, start: usize, end: usize) -> Vec<Region> {
+        let mut regions = Vec::new();
+        let mut index = start;
+        while index < end {
+            let stop = match &self.runs[index] {
+                Some(run) => {
+                    let stop = run.end.min(end);
+                    regions.push(Region::Columns(self.balance(index, stop).0));
+                    stop
+                }
+                None => {
+                    let stop = (index..end).find(|&i| self.runs[i].is_some()).unwrap_or(end);
+                    regions.push(Region::Full(index..stop));
+                    stop
+                }
+            };
+            index = stop;
+        }
+        regions
+    }
+
+    /// The best way to set lines `a..b` in two columns, and the least height any allowed split
+    /// reaches. A split may follow any line a page may end after; the second column may be empty.
+    ///
+    /// The taller column is lowest where the columns cross, so the search starts there and moves
+    /// outward in both directions only while being less even could still pay off.
+    fn balance(&self, a: usize, b: usize) -> (Columns, f64) {
+        let column = |from: usize, to: usize| {
+            if to == from {
+                return (0.0, 0.0);
+            }
+            let height = self.top[to] - self.top[from] - self.body[from].space_before;
+            (height, STRETCH * (self.space[to] - self.space[from + 1]))
+        };
+        let split = |at: usize| {
+            let columns = [column(a, at), column(at, b)];
+            let height = columns[0].0.max(columns[1].0);
+            let reach = |(height, stretch): (f64, f64)| height + stretch;
+            let shorter = reach(columns[0]).min(reach(columns[1]));
+            let grow = if at == b {
+                columns[0].1
+            } else {
+                (shorter - height).max(0.0)
+            };
+            let cost = match self.body[at - 1].after {
+                _ if at == b => 0.0,
+                Break::Allowed(cost) => cost,
+                Break::Never | Break::Forced => unreachable!("splits follow lines a column may end after"),
+            };
+            Columns {
+                lines: a..b,
+                split: at,
+                height,
+                grow,
+                deficit: (height - shorter).max(0.0),
+                cost,
+                columns,
+            }
+        };
+        let (mut low, mut high) = (a + 1, b);
+        while low < high {
+            let middle = (low + high) / 2;
+            if column(a, middle).0 < column(middle, b).0 {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        let allowed = |&at: &usize| at == b || matches!(self.body[at - 1].after, Break::Allowed(_));
+        let mut down = (a + 1..low).rev().filter(allowed);
+        let mut up = (low..=b).filter(allowed);
+        let least = [down.clone().next(), up.clone().next()]
+            .into_iter()
+            .flatten()
+            .map(|at| split(at).height)
+            .fold(f64::INFINITY, f64::min);
+        // Ties go to the taller first column, so the second column is the shorter one.
+        let mut best: Option<(f64, Columns)> = None;
+        let mut scan = |candidates: &mut dyn Iterator<Item = usize>| {
+            for at in candidates {
+                let columns = split(at);
+                let lines = (columns.height - least) / self.line;
+                let uneven = UNEVEN * lines * lines;
+                if best.as_ref().is_some_and(|(score, _)| uneven >= *score) {
+                    break;
+                }
+                let score = uneven + columns.cost;
+                if best.as_ref().is_none_or(|(best, _)| score < *best) {
+                    best = Some((score, columns));
+                }
+            }
+        };
+        scan(&mut up);
+        scan(&mut down);
+        let (score, mut columns) = best.expect("a column region can always end at its last line");
+        columns.cost = score;
+        (columns, least)
+    }
+}
+
 /// Positions the planned pages. Body lines are moved out of `body`.
 fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Config) -> Vec<Page> {
     let geometry = &config.page;
     let footnotes = &config.footnotes;
     let height = geometry.text_height().0;
+    let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
     for plan in plans {
         let left = if pages.len() % 2 == 0 {
@@ -418,15 +609,33 @@ fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Conf
             items.extend(line.into_iter().map(|item| translate(item, left, top + y)));
         };
 
-        let mut y = 0.0;
+        let mut y = top;
         for region in &plan.regions {
-            for index in region.lines.clone() {
-                let line = &mut body[index];
-                if index > region.lines.start {
-                    y += line.space_before * (1.0 + STRETCH * region.stretch);
+            let first = match region {
+                Region::Full(lines) => lines.start,
+                Region::Columns(columns) => columns.lines.start,
+            };
+            if first > plan.lines.start {
+                y += body[first].space_before * (1.0 + STRETCH * plan.stretch);
+            }
+            match region {
+                Region::Full(lines) => y = stack(&mut items, body, lines.clone(), left, y, plan.stretch),
+                Region::Columns(columns) => {
+                    // Each column stretches to the region's height if its spaces allow, else stays natural.
+                    let height = columns.height + plan.stretch * columns.grow;
+                    let parts = [columns.lines.start..columns.split, columns.split..columns.lines.end];
+                    for (index, (lines, (natural, bound))) in parts.into_iter().zip(columns.columns).enumerate() {
+                        let need = (height - natural).max(0.0);
+                        let ratio = if bound > 0.0 && need <= bound + 1e-9 {
+                            need / bound
+                        } else {
+                            0.0
+                        };
+                        let x = left + index as f64 * second_column;
+                        stack(&mut items, body, lines, x, y, ratio);
+                    }
+                    y += height;
                 }
-                place(&mut items, std::mem::take(&mut line.line.items), y);
-                y += line.line.height;
             }
         }
 
@@ -479,6 +688,21 @@ fn render(plans: &[Plan], body: &mut [FlowLine], mut notes: Notes, config: &Conf
     pages
 }
 
+/// Places body lines from `y` down, dropping the space above the first one and stretching the others
+/// by `ratio` of their bound. Returns the bottom of the last line.
+fn stack(items: &mut Vec<Item>, body: &mut [FlowLine], lines: Range<usize>, x: f64, mut y: f64, ratio: f64) -> f64 {
+    for index in lines.clone() {
+        let line = &mut body[index];
+        if index > lines.start {
+            y += line.space_before * (1.0 + STRETCH * ratio);
+        }
+        let placed = std::mem::take(&mut line.line.items);
+        items.extend(placed.into_iter().map(|item| translate(item, x, y)));
+        y += line.line.height;
+    }
+    y
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::Line;
@@ -523,11 +747,10 @@ mod tests {
         let notes = notes.iter().map(|&count| loose(count, &[])).collect();
         let continued = (0..body.len()).map(|_| loose(1, &[])).collect();
         let notes = Notes::new(notes, continued, 5.0, 0.0);
-        let plans = Composer::new(body, &notes, PAGE, 10.0).search().expect("breaks exist");
-        plans
-            .into_iter()
-            .map(|plan| (plan.regions[0].lines.clone(), plan.notes))
-            .collect()
+        let plans = Composer::new(body, &[], &notes, PAGE, 10.0)
+            .search()
+            .expect("breaks exist");
+        plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect()
     }
 
     fn body_pages(body: &[FlowLine]) -> Vec<Range<usize>> {

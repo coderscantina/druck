@@ -255,6 +255,11 @@ impl<'a> Builder<'a> {
             "columns" => {
                 if open.contains(&Some(Fence::Columns)) {
                     self.report(offset, "columns cannot be nested");
+                } else if open.contains(&Some(Fence::Keep)) {
+                    self.report(
+                        offset,
+                        "columns is not allowed inside keep; put keep groups inside columns instead",
+                    );
                 }
                 Some(Fence::Columns)
             }
@@ -831,6 +836,11 @@ mod tests {
                 "page-break is not allowed inside keep",
             ),
             ("::: columns\n::: columns\n:::\n:::", (2, 1), "columns cannot be nested"),
+            (
+                "::: keep\n::: columns\n:::\n:::",
+                (2, 1),
+                "columns is not allowed inside keep; put keep groups inside columns instead",
+            ),
             (
                 "::: full-width\n:::",
                 (1, 1),
