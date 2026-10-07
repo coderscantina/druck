@@ -1228,6 +1228,25 @@ fn tables_are_numbered_apart_from_figures() {
 }
 
 #[test]
+fn a_table_leaves_no_single_row_at_a_page_end_or_top() {
+    let mut split = 0;
+    for count in 4..24 {
+        let rows: Vec<Vec<String>> = (0..count)
+            .map(|index| vec![format!("R{index}"), PROSE.to_owned()])
+            .collect();
+        let blocks = vec![numbered(0), table(10, &["Head", "Text"], &rows, "")];
+        let pages = render(blocks).unwrap();
+        let rows: Vec<usize> = (pages.iter())
+            .map(|page| placed(page).iter().filter(|line| line.text.starts_with('R')).count())
+            .filter(|&rows| rows > 0)
+            .collect();
+        split += usize::from(rows.len() > 1);
+        assert!(rows.iter().all(|&rows| rows > 1), "{count} rows: {rows:?}");
+    }
+    assert!(split > 5, "{split} tables split");
+}
+
+#[test]
 fn repeated_table_layout_is_identical() {
     let blocks = || {
         vec![
@@ -1237,4 +1256,122 @@ fn repeated_table_layout_is_identical() {
     };
     let first = format!("{:?}", render(blocks()).unwrap());
     assert_eq!(first, format!("{:?}", render(blocks()).unwrap()));
+}
+
+/// The body lines of a Markdown document with their break rules, as layout hands them to the composer.
+fn flow(markdown: &str) -> Vec<FlowLine> {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    let document = crate::markdown::parse(markdown, 1, &source()).expect("document parses");
+    let cited = Cited::default();
+    let structure = Structure::new(&document, &config, cited.references());
+    let pass = Pass {
+        document: &document,
+        cited: &cited,
+        images: &[],
+        theme_images: &HashMap::new(),
+        config: &config,
+        fonts: &fonts,
+        source: &source(),
+        structure: &structure,
+        first: 0,
+    };
+    let assumed = vec![1; structure.anchors.len()];
+    pass.content(&assumed).expect("content is set").body
+}
+
+/// The rules after the lines of the block that starts on source line `line`.
+fn breaks_of(lines: &[FlowLine], line: u64) -> Vec<Break> {
+    lines.iter().filter(|l| l.at.line == line).map(|l| l.after).collect()
+}
+
+#[test]
+fn a_heading_keeps_two_lines_of_its_paragraph_and_pages_strand_no_line() {
+    let lines = flow(&format!("# Title\n\n{PROSE} {PROSE}\n\n{PROSE} {PROSE}\n"));
+    let (kept, plain) = (breaks_of(&lines, 3), breaks_of(&lines, 5));
+
+    assert!(kept.len() > 3 && kept.len() == plain.len(), "{kept:?}");
+    assert_eq!(kept[0], Break::Never);
+    assert!(matches!(plain[0], Break::Avoid(_)), "{plain:?}");
+    assert!(matches!(plain[plain.len() - 2], Break::Avoid(_)), "{plain:?}");
+    assert_eq!(kept[1..], plain[1..]);
+}
+
+#[test]
+fn a_page_end_after_a_hyphenated_line_costs_more() {
+    let lines = flow(&"incomprehensibilities ".repeat(60));
+    let cost = |after: Break| match after {
+        Break::Allowed(cost) | Break::Avoid(cost) => cost,
+        Break::Never | Break::Forced => unreachable!("a plain paragraph"),
+    };
+    let ends_in_hyphen = |line: &FlowLine| {
+        line.line.items.iter().rev().find_map(|item| match item {
+            Item::Text { run, .. } => Some(run.text.ends_with('-')),
+            _ => None,
+        })
+    };
+
+    assert!(lines.iter().any(|line| line.line.hyphenated));
+    for line in &lines[..lines.len() - 1] {
+        assert_eq!(ends_in_hyphen(line), Some(line.line.hyphenated));
+        assert_eq!(cost(line.after) >= pages::HYPHENATED, line.line.hyphenated);
+    }
+}
+
+#[test]
+fn a_page_end_after_a_colon_before_a_list_or_code_costs_a_little() {
+    let lines = flow("Steps:\n\n- one\n\nSteps.\n\n- two\n\nCode:\n\n```\nx\n```\n\nText:\n\nMore.\n");
+
+    assert_eq!(breaks_of(&lines, 1), [Break::Allowed(pages::INTRODUCTION)]);
+    assert_eq!(breaks_of(&lines, 5), [Break::Allowed(0.0)]);
+    assert_eq!(breaks_of(&lines, 9), [Break::Allowed(pages::INTRODUCTION)]);
+    assert_eq!(breaks_of(&lines, 15), [Break::Allowed(0.0)]);
+}
+
+#[test]
+fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
+    let yaml = "title: Report\ntitle-page: true\ntoc: true\nduplex: true\n";
+    let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
+    let config = resolve(Inputs {
+        theme: None,
+        document: SettingsInput {
+            source: source(),
+            settings,
+        },
+        overrides: SettingsInput {
+            source: Source::Cli {
+                working_dir: "/fake".into(),
+            },
+            settings: FrontMatter::default(),
+        },
+    })
+    .expect("configuration resolves");
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    let document = crate::markdown::parse("# One\n\nText.\n", 1, &source()).expect("document parses");
+    let output = layout(
+        &document,
+        &Cited::default(),
+        &[],
+        &HashMap::new(),
+        &config,
+        &fonts,
+        &source(),
+    )
+    .unwrap();
+    let pages = &output.pages;
+    let bands = |page: &Page| -> Vec<String> {
+        (page.items.iter())
+            .filter_map(|item| match item {
+                Item::Text { y, run, .. } if is_band(*y) => Some(run.text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
+    assert_eq!(pages.len(), 5);
+    assert!(pages[1].items.is_empty() && pages[3].items.is_empty());
+    assert!(lines(&pages[2])[1].2.ends_with(" 5"), "{:?}", lines(&pages[2]));
+    assert_eq!(lines(&pages[4])[0].2, "1 One");
+    assert!(bands(&pages[2]).contains(&"3".to_owned()));
+    assert!(bands(&pages[4]).contains(&"5".to_owned()));
 }

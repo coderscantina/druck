@@ -84,6 +84,7 @@ Each setting writes one property of the resolved theme.
 | `lang` | `en`, `de` | `document.lang` |
 | `title-page` | `true`, `false` | `document.title-page` |
 | `toc` | `true`, `false` | `document.toc` |
+| `duplex` | `true`, `false` | `document.duplex` |
 | `numbered-headings` | `true`, `false` | `document.numbered-headings` |
 | `numbering-depth` | 1 to 6 | `document.numbering-depth` |
 | `toc-depth` | 1 to 6 | `document.toc-depth` |
@@ -176,7 +177,7 @@ A character the selected font has no glyph for is an error, as is a word wider t
 
 ## Pages
 
-Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it. A paragraph's first or last line is not left alone at the bottom or top of a page if a better break exists. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
+Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it, with at least two lines of a paragraph after it. A paragraph's first or last line is never left alone at the bottom or top of a page, and neither is a table's first or last row unless two rows are too tall to share a page. A page avoids ending after a hyphenated line or after a sentence ending in a colon that introduces a list or code block. A continued footnote avoids leaving a single line on either page. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
 
 Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
 
@@ -362,6 +363,8 @@ Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default 
 ### Table of contents
 
 `toc: true` sets a table of contents after the title block, or at the top of the first page after a title page. It lists headings down to `toc-depth` (2 in the default theme) with their numbers and pages, and each entry is a link to its heading. To start the text on a new page after the contents, begin the body with `::: page-break`.
+
+`duplex: true` prepares a document for printing on both sides: the text starts on an odd page, the right-hand page. A blank page follows the title page, and the contents end their page and are followed by a blank page if needed. Blank pages have no header or footer and count in the page numbers.
 
 ### Page numbers and running headers
 

@@ -51,6 +51,8 @@ pub struct DocumentDefaults {
     pub lang: Lang,
     pub title_page: bool,
     pub toc: bool,
+    /// Whether the body starts on an odd page, after blank pages where needed.
+    pub duplex: bool,
     pub numbered_headings: bool,
     pub numbering_depth: HeadingDepth,
     pub toc_depth: HeadingDepth,
@@ -340,6 +342,9 @@ pub struct Page {
     /// Block kinds set across the whole frame when prose is narrower.
     pub wide: Vec<WideBlock>,
     pub column_gap: Spec<Spacing>,
+    /// Least space between a column section and the full-width blocks around it. `null` uses the
+    /// column gap.
+    pub column_change_spacing: Option<Spec<Spacing>>,
     /// Distance from the top of the text area to the header baseline.
     pub header_offset: Spec<Spacing>,
     /// Distance from the bottom of the text area to the footer baseline.

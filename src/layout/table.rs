@@ -222,10 +222,13 @@ impl<'a> Flow<'a> {
         let start = self.lines.len();
         self.space(style.space_after.0);
         let dx = left + style.indent.0;
+        let mut above = 0.0;
         for line in caption {
+            above += line.height;
             self.push(translate_line(line, dx), table.at, Break::Never);
         }
         if start < self.lines.len() {
+            above += style.space_before.0;
             self.space(style.space_before.0);
         }
         let count = lines.len() - 1;
@@ -235,13 +238,24 @@ impl<'a> Flow<'a> {
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
         self.push(header, table.header.at, after);
         let first_row = self.lines.len();
-        for (index, (line, row)) in lines.zip(table.rows).enumerate() {
-            let kept = self.row_style(row).is_some_and(|(style, _)| style.keep_with_next);
-            let after = if kept {
-                Break::Never
-            } else {
-                pages::line_break(index, count)
-            };
+        let rows: Vec<Line> = lines.collect();
+        let room = config.page.text_height().0 - repeated.height;
+        let afters: Vec<Break> = (table.rows.iter().enumerate())
+            .map(|(index, row)| match pages::line_break(index, count) {
+                _ if self.row_style(row).is_some_and(|(style, _)| style.keep_with_next) => Break::Never,
+                // Rows too tall to stay together may strand one, at the cost a column pays.
+                Break::Avoid(cost) => {
+                    let caption = if index == 0 { above } else { 0.0 };
+                    if rows[index].height + rows[index + 1].height + caption > room {
+                        Break::Allowed(cost)
+                    } else {
+                        Break::Avoid(cost)
+                    }
+                }
+                after => after,
+            })
+            .collect();
+        for ((line, row), after) in rows.into_iter().zip(table.rows).zip(afters) {
             self.push(line, row.at, after);
         }
         self.space(style.space_after.0);
@@ -506,5 +520,6 @@ fn row_line(
         baseline,
         items,
         notes,
+        hyphenated: false,
     }
 }

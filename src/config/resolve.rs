@@ -534,6 +534,11 @@ impl<'a> Resolver<'a> {
             Some(spec) => self.spacing(spec, "page.text-width", body)?,
             None => text_width,
         };
+        let column_gap = self.spacing(&page.column_gap, "page.column-gap", body)?;
+        let column_change_spacing = match &page.column_change_spacing {
+            Some(spec) => self.spacing(spec, "page.column-change-spacing", body)?,
+            None => column_gap,
+        };
         let geometry = PageGeometry {
             width,
             height,
@@ -544,7 +549,8 @@ impl<'a> Resolver<'a> {
             mirror: page.margins.mirror,
             prose_width,
             wide: page.wide.clone(),
-            column_gap: self.spacing(&page.column_gap, "page.column-gap", body)?,
+            column_gap,
+            column_change_spacing,
             header_offset: self.spacing(&page.header_offset, "page.header-offset", body)?,
             footer_offset: self.spacing(&page.footer_offset, "page.footer-offset", body)?,
         };
@@ -1091,6 +1097,18 @@ mod tests {
         let config = resolve(inputs(theme)).expect("theme resolves");
         assert_eq!(config.styles.quote.size, Pt(20.0));
         assert_eq!(config.styles.quote.space_before, Pt(10.0));
+    }
+
+    #[test]
+    fn column_change_spacing_follows_the_column_gap_unless_set() {
+        let page = |page: Value| {
+            resolve(inputs(json!({"version": 1, "page": page})))
+                .expect("theme resolves")
+                .page
+        };
+        assert_eq!(page(json!({"column-gap": "20pt"})).column_change_spacing, Pt(20.0));
+        let set = page(json!({"column-gap": "20pt", "column-change-spacing": "30pt"}));
+        assert_eq!((set.column_gap, set.column_change_spacing), (Pt(20.0), Pt(30.0)));
     }
 
     #[test]

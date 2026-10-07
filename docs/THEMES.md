@@ -38,6 +38,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `pages.title`, `pages.first`, `pages.odd`, `pages.even` | Remove the variant, so the fallback order applies. |
 | `pages.<variant>.header`, `pages.<variant>.footer` | No header or footer on that variant. |
 | `page.text-width` | Prose uses the whole margin frame. |
+| `page.column-change-spacing` | The column gap. |
 | `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
@@ -48,7 +49,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | Key | Purpose |
 | --- | --- |
 | `version`, `$schema` | Format version and editor hint. |
-| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`. |
+| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`. |
 | `fonts` | Font families and their files. |
 | `images` | Named images used by title slots. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
@@ -101,7 +102,7 @@ Lengths are strings with a unit: `pt`, `mm`, `cm`, `in`, or `em`. Examples: `"10
 | --- | --- |
 | `styles.<name>.size` | The body font size. The body size itself must be absolute and greater than zero. |
 | Other lengths in `styles.<name>` (spacing, indents) | That element's own font size. |
-| `page.*` (size, margins, column gap, offsets) | The body font size. |
+| `page.*` (size, margins, column gap and change spacing, offsets) | The body font size. |
 | `lists.*` | The `styles.list` size. |
 | `tables.*` | The `styles.table-cell` size. |
 | `footnotes.*` | The `styles.footnote` size. |
@@ -263,7 +264,7 @@ The text width must be greater than zero and at most the frame width.
 
 ## Columns
 
-`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the prose width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the prose width.
+`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the prose width. `page.column-change-spacing` is the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Its default, `null`, uses the column gap. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the prose width.
 
 Other sections have their own fields; the [schema](../schema/theme.v1.schema.json) lists them all.
 
@@ -352,7 +353,9 @@ A slot marked `required` whose value is missing is an error. Title slots are che
 | First body page | `first`, then `odd` or `even` by parity, then `body`. |
 | Other body pages | `odd` or `even` by parity, then `body`. |
 
-A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one.
+A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page and blank pages. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one, or the third with `document.duplex`.
+
+With `document.duplex: true` the body starts on an odd page: a blank page follows the title page, and the table of contents ends its page and is followed by a blank page if the text would otherwise start on an even one. Blank pages have no header or footer but count in `{page}` and `{pages}`.
 
 The inner margin sits on the left of odd pages and, unless `page.margins.mirror` is `false`, on the right of even pages.
 
