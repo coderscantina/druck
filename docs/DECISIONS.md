@@ -638,6 +638,26 @@ Title and band slot `style` is a built-in slot style name or a custom style name
 
 An offer theme with installed Avenir Next (Gotham, the reference font, is not installed) set the reference's cost table pages from Markdown outside the repository. Page breaks fell after the same rows as in the reference, on three pages, with the same header, group rows, muted detail lists, note row, and totals. Differences: Avenir Next runs wider than Gotham; detail lines hyphenated where the reference does not (a theme choice, `hyphenate: false`); the list markers of Avenir Next are larger than the reference's small bullets; group rows in the reference have more space above. No layout feature was missing.
 
+## 2026-10-07: Follow-up fixes
+
+Fixes for follow-ups from milestones 03 to 13 that needed no product decision.
+
+### Text and line breaking
+
+Not started.
+
+### Pagination
+
+Not started.
+
+### Configuration and CLI
+
+Not started.
+
+### References and structure
+
+Not started.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.
