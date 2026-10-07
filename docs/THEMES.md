@@ -155,7 +155,7 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`.
 
-Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Lines within a block never move apart.
+Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
 
 ## Footnotes
 
@@ -169,6 +169,10 @@ Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the sec
 | `inline.footnote-marker.size`, `raise` | Size and baseline shift of the note number, in the text and at the start of the note, relative to the surrounding text. |
 
 A note that continues on the next page starts there with its number and the `continued` label (see [labels](#labels)).
+
+## Columns
+
+`page.column-gap` is the space between the two columns of a `columns` section. Each column is half of what remains of the text width. The gap is also the least space between a column section and the full-width blocks above and below it; a larger block spacing wins. Block styles, indents, and list markers apply inside a column as they do at full width, measured within the column. Footnotes stay across the full text width.
 
 Other sections have their own fields; the [schema](../schema/theme.v1.schema.json) lists them all.
 

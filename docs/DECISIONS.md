@@ -154,7 +154,7 @@ Only one glyph per edge protrudes; a comma after a closing quote hangs, the quot
 
 - The breaking constants are not theme settings. A theme can only switch `align` and `hyphenate` per block. Expose them only if review asks for it.
 - German compounds break at any pattern point, not preferably at compound boundaries ("Donaudampfschifffahrtsge-sellschaft"). Weighting compound boundaries needs data the patterns lack.
-- The breaker takes one line width for the first line and one for the rest. Milestone 05 columns and later shapes may need a width per line, which the node structure allows.
+- The breaker takes one line width for the first line and one for the rest. That was enough for [milestone 05](#2026-10-07-milestone-05-column-layouts): a paragraph never changes column width midway, because it stays in one column section. Later shapes may need a width per line, which the node structure allows.
 
 ## 2026-10-07: Milestone 04 pagination and footnotes
 
@@ -204,9 +204,9 @@ Before the search, every run of lines that cannot be broken is checked against t
 
 The constants are internal. Visual review of the samples set widow and orphan costs to 5 000; at 3 000, a widow was preferred over running a page two lines short.
 
-### Regions for milestone 05
+### Regions
 
-A planned page is a list of body regions stacked from the top plus one range of footnote lines across the full width. Each page has one full-width region now. Milestone 05 adds column regions to that list. The flow will need column sections as units whose height comes from balancing, and the composer's candidate pages will span them; the footnote stream and its placement stay as they are.
+A planned page is a list of body regions stacked from the top plus one range of footnote lines across the full width. [Milestone 05](#2026-10-07-milestone-05-column-layouts) added column regions.
 
 ### Consequences
 
@@ -215,6 +215,44 @@ A planned page is a list of body regions stacked from the top plus one range of 
 - A line hyphenated at the end of a page costs nothing extra.
 - Lists and code inside notes use their own styles at body size.
 - The scoring constants are not theme settings.
+
+## 2026-10-07: Milestone 05 column layouts
+
+### Region model
+
+[The flow](../src/layout/mod.rs) stays one sequence of lines. Lines of a `columns` section are set at the column width, `(text width - page.column-gap) / 2`, and their line ranges are recorded as column runs. A `full-width` block ends one run, is set across the text area, and starts the next, so it behaves like closing and reopening the section. Each layout change requests at least `page.column-gap` of space, collapsing with block spaces like any other, and starts a new paragraph sequence without a first-line indent.
+
+[The composer](../src/layout/pages.rs) splits a candidate page's lines into regions: full-width runs and the part of a column run on that page. A column region holds its lines in reading order, the first column above the split and the second below. The next region starts below the taller column. Page breaks, footnotes, and break costs work on the same line sequence as before, so a layout change never forces a page by itself and the existing samples render byte for byte as in milestone 04.
+
+### Balancing
+
+Every column region is balanced, whether the section ends on the page or continues. A split may follow any line a page may end after, at that line's break cost; the second column may also stay empty. The taller column is lowest where the two column heights cross, found by binary search over prefix sums. The search then walks outward in both directions while being less even could still pay off. A split costs its break cost plus 3 000 × (excess)², where the excess is how many body lines the region is taller than its most even allowed split. So a region accepts one uneven line to avoid an orphan or widow (5 000), but not two. Ties go to the taller first column.
+
+A region continuing to the next page is balanced too, and the search picks the page end where its balanced height reaches the bottom, so both columns run full. When keep groups or headings force an uneven split there, the shorter column's shortfall counts as a short page in the fill cost, so the search prefers a page end that fills both columns.
+
+Each column's spaces may stretch within the usual bound (half their natural height) toward the region's height, so column bottoms line up when the spaces allow. A column that cannot reach it stays at natural spacing; columns never stretch beyond the bound to balance. A region can grow with the page's stretch by as much as both columns can follow.
+
+Work per candidate page end is a binary search and a few steps, so pagination stays proportional to lines times lines per page. A 91-page column input renders in 0.46 s against 0.39 s for 104 single-column pages; most of the difference is setting more, shorter lines.
+
+### Footnotes and keeps
+
+Footnotes keep one full-width area at the foot of each page. They are numbered in reading order, which runs down the first column and then the second, and the page's note area reduces the room every region on it can use. All other note rules are unchanged.
+
+Headings and keep groups mark their lines as never ending a page, and the same marks forbid a column split. A keep group inside columns therefore stays in one column. A run of lines that cannot break, checked against the text height as before, is also checked against a column, since a column is as tall as the text area.
+
+### Page breaks and nesting
+
+`page-break` inside a column section ends the page. The columns above it are balanced like any region, and the section continues on the next page. A column break directive is not part of the briefing and was not added.
+
+`columns` inside `keep` is now a parser error. Keeping a whole section on one page would need a third break rule, no page break but a column break allowed, for a case authors can express by keeping the parts inside the columns instead.
+
+### Diagnostics
+
+A keep group, or a heading with the start of its text, taller than a column is reported at its directive or heading, as on pages. A word or code line wider than a column is reported at its line with the column width. Nothing is clipped, dropped, or spaced out to fit.
+
+### Consequences for milestones 06 and 07
+
+Images and tables inside a column section get the column frame, so they scale to the column width; inside `full-width` they get the text width. If they enter the flow as lines, with an image and its caption marked as unbreakable, balancing and pagination apply unchanged: a unit that does not fit in the rest of a column moves to the next column or page through the same split and break costs. Table rows that never split work the same way. Downscaling to the column height is the 06 and 07 counterpart of the keep diagnostic.
 
 ## Recording a decision
 

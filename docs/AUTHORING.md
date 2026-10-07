@@ -139,17 +139,17 @@ The body is CommonMark. These constructs render:
 - Block quotations.
 - Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
-- [Footnotes](#footnotes) and the `keep` and `page-break` [layout directives](#layout-directives).
+- [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
-A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, or code block does not. Keep groups do not interrupt that sequence.
+A paragraph that follows another paragraph starts with the body style's `first-line-indent`. The first paragraph after a heading, list, quotation, code block, or a change between one and two columns does not. Keep groups do not interrupt that sequence.
 
 Line breaks are chosen for each whole paragraph. Words are hyphenated by the rules of `lang` where the block style allows it, which the default theme does for body text, abstracts, quotations, lists, and footnotes but not for headings. Inline code and link text that spells out its URL are never hyphenated. A word also breaks after a hyphen that joins two words, as in "e-mail".
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported yet: images, tables, and the `columns` and `full-width` directives. They arrive in later milestones.
+- Not supported yet: images and tables. They arrive in later milestones.
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
@@ -181,9 +181,17 @@ These are errors:
 - Two definitions with the same label.
 - A reference inside a footnote.
 
-## Layout directives
+## Columns
 
-`keep` and `page-break` work. `columns` and `full-width` are parsed and checked, and `render` reports them as not supported yet until the column milestone.
+Text in a `columns` section is set in two columns of equal width with `column-gap` between them. It runs down the first column, then down the second, then on to the next page if the section is longer than the room left on the page. Outside a section the text runs across the whole text area.
+
+When a section ends, its last columns are balanced: the column break goes where both columns are most even, and the next block starts below the taller column. A `full-width` block inside a section does the same before it, runs across the text area, and the columns resume below it. Changing between one and two columns never starts a new page by itself. At least `column-gap` separates the columns from the full-width text above and below them.
+
+Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order.
+
+`page-break` inside a section ends the page. The columns above it are balanced, and the section continues in two columns on the next page.
+
+## Layout directives
 
 Directives are fenced containers that use three or more colons. They express layout intent only. There are no coordinates and no commands beyond the ones below.
 
@@ -220,7 +228,8 @@ Rules:
 - `page-break` stands alone. It has no body and no closing line.
 - `columns` cannot nest.
 - `full-width` is only allowed directly inside `columns`.
-- `page-break` is not allowed inside `keep`.
+- `page-break` is not allowed inside `keep`. Inside `columns` it ends the page, see [columns](#columns).
+- `columns` is not allowed inside `keep`. Put keep groups inside the columns instead.
 - Directive lines inside fenced code blocks are code, not directives.
 - Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line. So is a directive line between the items of a list or inside another block.
 - Several page breaks in a row start one new page. A page break before all content or after it has no effect.
