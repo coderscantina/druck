@@ -1,0 +1,53 @@
+{
+  "$schema": "../../schema/theme.v1.schema.json",
+  "version": 1,
+  "document": {
+    "numbered-headings": false
+  },
+  "fonts": {
+    "Libertinus Serif": {
+      "300": "../../fonts/LibertinusSerif-Regular.otf",
+      "500": "../../fonts/LibertinusSerif-Bold.otf"
+    }
+  },
+  "styles": {
+    "heading-1": { "space-before": "0.2em" }
+  },
+  "custom-styles": {
+    "eyebrow": {
+      "based-on": "body",
+      "size": "$sizes.small",
+      "weight": 500,
+      "color": "$colors.accent",
+      "align": "left",
+      "hyphenate": false,
+      "uppercase": true,
+      "tracking": 0.12,
+      "keep-with-next": true,
+      "space-before": "2.4em",
+      "first-line-indent": "0pt"
+    },
+    "label": {
+      "based-on": "eyebrow",
+      "color": "$colors.muted",
+      "space-before": "0pt",
+      "space-after": "0.3em"
+    },
+    "checks": {
+      "based-on": "list",
+      "bullets": ["✔"]
+    },
+    "step": {
+      "based-on": "heading-3",
+      "number-gap": "0.6em"
+    },
+    "light": {
+      "based-on": "body",
+      "weight": 300
+    },
+    "medium": {
+      "based-on": "body",
+      "weight": 500
+    }
+  }
+}
