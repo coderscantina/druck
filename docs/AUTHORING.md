@@ -139,6 +139,7 @@ The body is CommonMark. These constructs render:
 - Block quotations.
 - Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
+- [Images](#images-and-captions) with captions.
 - [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
@@ -149,7 +150,7 @@ Line breaks are chosen for each whole paragraph. Words are hyphenated by the rul
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported yet: images and tables. They arrive in later milestones.
+- Not supported yet: tables. They arrive in a later milestone.
 - Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation. `kyber check` validates configuration only and does not read the Markdown body.
@@ -159,6 +160,29 @@ A character the selected font has no glyph for is an error, as is a word wider t
 Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it. A paragraph's first or last line is not left alone at the bottom or top of a page if a better break exists. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
 
 Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
+
+## Images and captions
+
+An image stands alone in its paragraph. Its description becomes the caption:
+
+```markdown
+![Pages typeset per year, 2021 to 2025.](figures/chart.svg)
+```
+
+- PNG, JPEG, and SVG files are supported. GIF, WebP, and other formats are errors, as is a file whose content does not match its extension.
+- The path is relative to the Markdown file, wherever Kyber is run from. Put a path with spaces in angle brackets: `![Caption](<my chart.png>)`.
+- Only local files are read. URLs, including `data:` URLs, are errors. An SVG file may embed images as data URLs but cannot refer to other files.
+- The caption is numbered and labelled in the document language, as in "Figure 1: Pages typeset per year". It may use emphasis, strong text, and inline code. An image with an empty description, `![](file.png)`, has no caption and no number.
+- A caption cannot hold a footnote, because CommonMark does not read `[^note]` inside an image description. Reference the note from the text next to the image.
+- Image titles, `![Caption](file.png "Title")`, are errors. Write the caption as the description.
+
+An image keeps its place in the text. There are no floats and text never wraps around an image. The image is centered and its caption follows below it. The two stay together: when they do not fit in the rest of a page or column, both move to the next column or page, and the page or column they leave ends short.
+
+Raster images count one pixel as one point (72 per inch), SVG images use 96 pixels per inch. An image appears at that natural size unless it is too large. Then it shrinks, keeping its proportions, to the width of the text area or, inside `columns`, of the column. It also shrinks until it fits the height of a page together with its caption and a heading directly above it. Images never grow beyond their natural size. Put an image in a `full-width` block to give it the whole text width inside a column section.
+
+Errors name the image's line and file: a missing or unreadable file, a malformed or unsupported image, and an image whose caption fills the whole page. An image inside a heading, a link, or a footnote is an error, and so is text in the same paragraph as an image. A paragraph that starts like an image but is not valid image syntax is an error too, rather than being printed as text.
+
+SVG text uses the bundled Libertinus fonts, never the fonts installed on the machine, so an SVG renders the same everywhere.
 
 ## Footnotes
 
@@ -237,4 +261,4 @@ Rules:
 
 Embedded HTML is not rendered.
 
-Syntax for captions, labels, cross-references, and citations (`[@key]`) is documented with the milestones that implement them.
+Syntax for labels, cross-references, and citations (`[@key]`) is documented with the milestones that implement them.

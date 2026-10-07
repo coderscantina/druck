@@ -129,7 +129,7 @@ Only `regular` is required. A style that requests a face its family lacks is an 
 
 Inline emphasis and strong text may ask for a face the family lacks. Then the closest face is used: bold-italic falls back to bold, then italic, then regular; italic and bold fall back to regular. The default fonts are Libertinus Serif and Libertinus Mono, compiled into the binary, so rendering never depends on system fonts.
 
-`images` maps a name to a file path. Title slots refer to images by that name.
+`images` maps a name to a file path. Title slots refer to images by that name. Images in the document body are not part of the theme; they resolve relative to the document.
 
 Paths must be local. Remote URLs (anything containing `://`) are rejected, and empty paths are errors. Referenced files must exist; `kyber check` reports missing ones.
 
@@ -169,6 +169,12 @@ Footnote text uses `styles.footnote`. Its `first-line-indent` applies to the sec
 | `inline.footnote-marker.size`, `raise` | Size and baseline shift of the note number, in the text and at the start of the note, relative to the surrounding text. |
 
 A note that continues on the next page starts there with its number and the `continued` label (see [labels](#labels)).
+
+## Captions
+
+Captions use `styles.caption`. A caption reads "Figure 1: " and then the image description: the `figure` label of the document language, the number, and `captions.separator`. The caption is set across the width of the image's frame, the text area or a column, with the style's alignment. The caption style's `space-before` separates the image from its caption, and its `space-after` is the space above and below the whole figure. The default theme sets captions small, left aligned, and in the muted color.
+
+Images are centered in their frame. Their size and placement have no theme settings; see [authoring](AUTHORING.md#images-and-captions).
 
 ## Columns
 
@@ -229,7 +235,7 @@ The inner margin sits on the left of odd pages and mirrors on even pages.
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `contents`, `abstract`, `references`, `continued`. The set for `document.lang` is used. `figure` starts image captions. `continued` marks the continuation of a footnote on the next page. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 
 ## Resources and distribution
 

@@ -57,7 +57,7 @@ Open for milestone 08: the displayed page-number sequence, which heading supplie
 
 ### Layout directives
 
-Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption, label, cross-reference, and citation syntax is decided in milestones 06, 08, and 09.
+Fenced containers in the style of Pandoc divs, documented in [authoring](AUTHORING.md): `::: columns`, `::: full-width` (only directly inside `columns`), and `::: keep`, each closed by a line of colons. `::: page-break` stands alone. Directive lines inside code blocks are code. [Milestone 04](#2026-10-07-milestone-04-pagination-and-footnotes) added the parser. Caption syntax was decided in [milestone 06](#2026-10-07-milestone-06-images-and-captions); label, cross-reference, and citation syntax is decided in milestones 08 and 09.
 
 ### CLI
 
@@ -253,6 +253,50 @@ A keep group, or a heading with the start of its text, taller than a column is r
 ### Consequences for milestones 06 and 07
 
 Images and tables inside a column section get the column frame, so they scale to the column width; inside `full-width` they get the text width. If they enter the flow as lines, with an image and its caption marked as unbreakable, balancing and pagination apply unchanged: a unit that does not fit in the rest of a column moves to the next column or page through the same split and break costs. Table rows that never split work the same way. Downscaling to the column height is the 06 and 07 counterpart of the keep diagnostic.
+
+## 2026-10-07: Milestone 06 images and captions
+
+### Dependencies
+
+- `krilla-svg` 0.8.1, the SVG companion of krilla 0.8, draws a `usvg` tree into the PDF as vectors and text. It brings `usvg` and `resvg` 0.47, `fontdb`, `tiny-skia`, and their parsers.
+- `usvg` 0.47 directly, with default features off and only `text`, so there is no system font discovery or memory mapping.
+- `png` 0.18 and `zune-jpeg` 0.5, the versions krilla already uses for its `raster-images` feature, to validate raster images.
+
+Licenses checked on 2026-10-07 with `cargo metadata`: all 19 new crates are MIT, Apache-2.0, BSD-2/3-Clause, or Zlib, or offer one of these.
+
+### Loading and validation
+
+[The parser](../src/markdown.rs) collects the distinct image paths in order of first use. The CLI reads each file once, relative to the document's directory, and [decodes](../src/image.rs) it. Layout receives the decoded images and never reads files, as before. The bytes are shared between all references, and krilla writes each image into the PDF once.
+
+The format comes from the content: magic bytes for PNG, JPEG, GIF, and WebP, and a successful parse for SVG. The extension must agree, so a JPEG named `.png` is an error. GIF and WebP are named as unsupported; krilla could embed them, but the briefing lists PNG, JPEG, and SVG. krilla reads only the headers of raster images and embeds JPEG data as is, so a truncated file would otherwise produce a broken PDF. Raster images are therefore decoded fully when loaded. krilla decodes PNG again while writing; that double decode is cheap at document image sizes, and avoiding it would mean giving krilla raw pixels and losing its PNG handling.
+
+SVG is parsed once with only the bundled Libertinus fonts in its font database, serif and default family Libertinus Serif, monospace Libertinus Mono. An SVG that refers to another file is an error rather than drawn without that part. Embedded data URLs work.
+
+URLs, including `data:` URLs, in Markdown are rejected by the parser, as in configuration. Theme `images` keep their theme origin through resolution as before; title slots that draw them are milestone 08.
+
+### Caption syntax
+
+An image alone in its paragraph is a figure, and its description is the caption, as in Pandoc's implicit figures. The description keeps emphasis, strong text, and code. This needs no new syntax and leaves room for milestone 08: an attribute such as `![Caption](file.png){#fig:x}` currently makes the paragraph hold text after the image, which is an error, so 08 can give it a meaning without breaking documents.
+
+Errors: text before or after the image in its paragraph, an image in a heading, link, or footnote, an empty path, and an image title. A title would otherwise be dropped. CommonMark leaves an image it cannot parse as text, starting with a separate `![` event; that is reported too, so a path with spaces or a footnote in a description never prints as literal Markdown. As a consequence, captions cannot hold footnote references.
+
+A captioned image is numbered in document order and its caption starts with the `figure` label, the number, and `captions.separator`, all in the caption style. An image with an empty description has no caption and takes no number. Milestone 08 may number per section or add cross-references; the counter lives in [layout](../src/layout/mod.rs).
+
+### Size and placement
+
+Raster images count one pixel as one point. PNG density chunks and JPEG density fields are ignored, so a 144 dpi screenshot appears at twice its intended size unless it is scaled down to fit, which most screenshots are. SVG uses CSS units, 0.75 pt per pixel.
+
+An image keeps its proportions and shrinks to the smaller of two bounds: the width of its frame (text area, column, or the narrower frame of a list or quotation) and the text height minus its caption, the space between them, and the lines it must stay with above it, such as a heading. It never grows, because enlarging raster images blurs them and there is no setting that asks for it. It is centered in its frame. A caption that leaves no height at all is an error at the image.
+
+An image enters the flow as one line as tall as the image. If it has a caption, that line and every caption line but the last never end a page or column, so the composer treats image and caption as a keep group: pagination, column splits, balancing, and footnote placement apply unchanged, and an image that does not fit moves to the next column or page with its caption. The figure is spaced by the caption style: its `space-after` above and below the figure, its `space-before` between image and caption. No new theme settings were needed.
+
+Scoring is unchanged. Without floats, an image that does not fit leaves a short page, and the square fill cost can then prefer a widow over an even shorter page, as on page 1 of `samples/images.md`. Capping the fill cost was tried and rejected: when every short page costs the same, the search ends pages early around images.
+
+### Consequences for milestones 07 and 08
+
+- Tables can enter the flow the same way, with rows as lines that never split. A table caption can reuse the caption path with the `table` label and its own counter.
+- Cross-references need figure labels attached to the image, likely the `{#fig:x}` attribute, and numbers known before layout. The figure counter should move to a pass before layout then.
+- Title slot images can use the same loader with the theme origin.
 
 ## Recording a decision
 
