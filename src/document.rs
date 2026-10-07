@@ -13,6 +13,15 @@ pub struct Location {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Document {
     pub blocks: Vec<Block>,
+    /// Footnotes in the order of their references, which is also their numbering.
+    pub footnotes: Vec<Footnote>,
+}
+
+/// A footnote definition. Its number is its index in [`Document::footnotes`] plus one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Footnote {
+    pub at: Location,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +53,25 @@ pub enum Block {
         first_line: u64,
         lines: Vec<String>,
     },
+    /// `::: keep`: content that stays on one page.
+    Keep {
+        at: Location,
+        blocks: Vec<Block>,
+    },
+    /// `::: columns`: content in two columns.
+    Columns {
+        at: Location,
+        blocks: Vec<Block>,
+    },
+    /// `::: full-width`: a block across the text area, directly inside [`Block::Columns`].
+    FullWidth {
+        at: Location,
+        blocks: Vec<Block>,
+    },
+    /// `::: page-break`.
+    PageBreak {
+        at: Location,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +80,8 @@ pub enum Inline {
     Text { text: String, style: InlineStyle },
     /// A hard line break.
     LineBreak,
+    /// A footnote reference: an index into [`Document::footnotes`].
+    FootnoteRef(usize),
 }
 
 /// The inline formatting that applies to a text piece. Nesting has been flattened.

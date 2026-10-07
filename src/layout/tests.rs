@@ -3,7 +3,7 @@ use super::*;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, resolve};
 use crate::config::theme::Lang;
-use crate::document::InlineStyle;
+use crate::document::{Footnote, InlineStyle};
 
 const PROSE: &str = "The design of a page begins with its proportions. A text block that is too wide tires the \
     eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the \
@@ -39,9 +39,20 @@ fn paragraph(line: u64, text: &str) -> Block {
 }
 
 fn render(blocks: Vec<Block>) -> Result<Vec<Page>, Vec<Diagnostic>> {
+    render_with_notes(blocks, Vec::new())
+}
+
+fn render_with_notes(blocks: Vec<Block>, footnotes: Vec<Footnote>) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let config = config();
     let fonts = Fonts::load(&config).expect("bundled fonts");
-    layout(&Document { blocks }, &config, &fonts, &source())
+    layout(&Document { blocks, footnotes }, &config, &fonts, &source())
+}
+
+fn note(line: u64, text: &str) -> Footnote {
+    Footnote {
+        at: Location { line, column: 1 },
+        blocks: vec![paragraph(line, text)],
+    }
 }
 
 /// Text lines of a page as (left edge, right edge, text), top to bottom.
@@ -201,10 +212,93 @@ fn hyphenation_across_style_changes_keeps_each_style() {
 }
 
 #[test]
+fn sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker() {
+    let config = config();
+    let plain = |text: &str| text_inline(text);
+    let first = Block::Paragraph {
+        at: Location { line: 1, column: 1 },
+        content: vec![
+            plain("Short."),
+            Inline::FootnoteRef(0),
+            plain(" Long."),
+            Inline::FootnoteRef(1),
+        ],
+    };
+    let mut blocks = vec![first];
+    blocks.extend((0..30).map(|i| paragraph(i + 3, PROSE)));
+    let long = format!("Lengthy. {}", vec![PROSE; 30].join(" "));
+    let pages = render_with_notes(blocks, vec![note(70, "First note."), note(72, &long)]).unwrap();
+
+    let texts = |page: &Page| -> Vec<(f64, f64, String)> {
+        page.items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Text { y, run, .. } => Some((y.0, run.size.0, run.text.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    let first_page = texts(&pages[0]);
+    let find = |texts: &[(f64, f64, String)], text: &str| texts.iter().find(|t| t.2 == text).cloned().unwrap();
+    let (body_y, _, _) = find(&first_page, "Short.");
+    let raise = config.inline.footnote_marker_raise.to_pt(config.styles.body.size).0;
+    for marker in ["1", "2"] {
+        assert!((find(&first_page, marker).0 - (body_y - raise)).abs() < 1e-9);
+    }
+    let (note_y, _, _) = find(&first_page, "First");
+    let (long_y, _, _) = find(&first_page, "Lengthy.");
+    assert!(body_y < note_y && note_y < long_y);
+    assert!(texts(&pages[1]).iter().any(|t| t.2 == "(continued)"));
+
+    let bottom = config.page.height.0 - config.page.margin_bottom.0;
+    let body_sizes = [
+        config.styles.body.size.0,
+        config.inline.footnote_marker_size.to_pt(config.styles.body.size).0,
+    ];
+    for page in &pages {
+        let rule = page.items.iter().find_map(|item| match item {
+            Item::Rect { rect, .. } => Some(rect.y.0),
+            _ => None,
+        });
+        for (y, size, _) in texts(page) {
+            assert!(y < bottom);
+            if let Some(rule) = rule {
+                assert_eq!(
+                    body_sizes.contains(&size),
+                    y < rule,
+                    "text at {y} of size {size}, rule at {rule}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn reports_a_keep_group_taller_than_the_page_at_its_directive() {
+    let keep = Block::Keep {
+        at: Location { line: 5, column: 1 },
+        blocks: (0..40).map(|i| paragraph(i * 2 + 6, PROSE)).collect(),
+    };
+    let errors = render(vec![paragraph(1, "Intro."), keep]).unwrap_err();
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].location, Some((5, 1)));
+    assert!(
+        errors[0].message.starts_with("this keep group is"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
 fn repeated_layout_is_identical() {
     let blocks = || (0..5).map(|i| paragraph(i * 2 + 1, PROSE)).collect();
     let first = format!("{:?}", render(blocks()).unwrap());
     assert_eq!(first, format!("{:?}", render(blocks()).unwrap()));
+}
+
+fn text_inline(value: &str) -> Inline {
+    text(value, InlineStyle::default())
 }
 
 fn text(text: &str, style: InlineStyle) -> Inline {

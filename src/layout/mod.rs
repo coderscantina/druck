@@ -1,19 +1,22 @@
 //! Layout: places the document's blocks on pages using resolved styles and shaped text.
 //!
-//! Blocks become a vertical flow of lines and spaces, which is then cut into pages.
-//! [`paragraph`] chooses line breaks for each whole paragraph. [`paginate`] still breaks pages at
-//! the first line that does not fit; milestone 04 replaces it with scored page breaks.
+//! Blocks become a flow of lines, each with the space above it and a rule for ending a page after
+//! it. [`paragraph`] chooses line breaks for each whole paragraph; [`pages`] chooses page breaks
+//! for the whole flow and places footnotes.
 
+mod pages;
 mod paragraph;
 #[cfg(test)]
 mod tests;
+
+use std::ops::Range;
 
 use crate::config::resolved::{Config, Style};
 use crate::config::source::Source;
 use crate::config::theme::{FontStyle, Weight};
 use crate::config::values::{Color, Pt};
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Inline, Location};
+use crate::document::{Block, Document, Footnote, Inline, InlineStyle, Location};
 use crate::page::{Item, Page, Rect};
 use crate::text::{Fonts, ShapedRun};
 
@@ -28,20 +31,33 @@ pub fn layout(
         config,
         fonts,
         source,
-        items: Vec::new(),
+        lines: Vec::new(),
+        space: 0.0,
+        after_paragraph: false,
+        keeps: Vec::new(),
         errors: Vec::new(),
     };
-    let frame = Frame {
-        left: 0.0,
-        right: 0.0,
-        style: &config.styles.body,
-        list_depth: 0,
-    };
-    flow.blocks(&document.blocks, frame);
+    let body = flow.run(&document.blocks, Frame::full(&config.styles.body));
+    let keeps = std::mem::take(&mut flow.keeps);
+    let mut notes = Vec::with_capacity(document.footnotes.len());
+    let mut continued = Vec::with_capacity(document.footnotes.len());
+    for (index, footnote) in document.footnotes.iter().enumerate() {
+        notes.push(flow.note(index, footnote));
+        continued.push(flow.continued(index, footnote.at));
+    }
     if !flow.errors.is_empty() {
         return Err(flow.errors);
     }
-    paginate(flow.items, config)
+    pages::compose(
+        pages::Content {
+            body,
+            keeps,
+            notes,
+            continued,
+        },
+        config,
+        source,
+    )
 }
 
 /// A line of content. Item coordinates are relative to the text area's left edge and the line's top.
@@ -50,13 +66,27 @@ struct Line {
     height: f64,
     baseline: f64,
     items: Vec<Item>,
+    /// The footnotes referenced on this line.
+    notes: Vec<usize>,
 }
 
+/// Whether a page may end after a line, and at what cost.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Break {
+    Allowed(f64),
+    Never,
+    Forced,
+}
+
+/// A line in the flow with the space above it and the rule for a page break below it.
 #[derive(Debug)]
-enum FlowItem {
-    Line(Line),
-    /// Vertical space, dropped at the top of a page.
-    Space(f64),
+struct FlowLine {
+    line: Line,
+    /// Space between this line and the one before. Dropped at the top of a page.
+    space_before: f64,
+    after: Break,
+    /// The source of the line's block, for diagnostics.
+    at: Location,
 }
 
 /// The horizontal extent and paragraph style of the blocks being laid out.
@@ -68,30 +98,100 @@ struct Frame<'a> {
     list_depth: usize,
 }
 
+impl<'a> Frame<'a> {
+    fn full(style: &'a Style) -> Self {
+        Self {
+            left: 0.0,
+            right: 0.0,
+            style,
+            list_depth: 0,
+        }
+    }
+}
+
 struct Flow<'a> {
     config: &'a Config,
     fonts: &'a Fonts,
     source: &'a Source,
-    items: Vec<FlowItem>,
+    lines: Vec<FlowLine>,
+    /// Space requested before the next line. Adjacent spaces collapse to the larger one.
+    space: f64,
+    /// Whether the previous block was a paragraph, which gives the next one a first-line indent.
+    after_paragraph: bool,
+    /// Line ranges of keep groups with their directive locations.
+    keeps: Vec<(Range<usize>, Location)>,
     errors: Vec<Diagnostic>,
 }
 
 impl<'a> Flow<'a> {
+    /// Lays out `blocks` from a fresh start and returns their lines.
+    fn run(&mut self, blocks: &[Block], frame: Frame<'a>) -> Vec<FlowLine> {
+        self.space = 0.0;
+        self.after_paragraph = false;
+        self.blocks(blocks, frame);
+        std::mem::take(&mut self.lines)
+    }
+
+    /// The lines of footnote `index`, starting with its raised number.
+    fn note(&mut self, index: usize, footnote: &Footnote) -> Vec<FlowLine> {
+        let mut blocks = footnote.blocks.clone();
+        let marker = Inline::FootnoteRef(index);
+        match blocks.first_mut() {
+            Some(Block::Paragraph { content, .. }) => {
+                let space = Inline::Text {
+                    text: " ".to_owned(),
+                    style: InlineStyle::default(),
+                };
+                content.splice(0..0, [marker, space]);
+            }
+            _ => blocks.insert(
+                0,
+                Block::Paragraph {
+                    at: footnote.at,
+                    content: vec![marker],
+                },
+            ),
+        }
+        self.unmarked(&blocks)
+    }
+
+    /// The marker above the continued part of footnote `index`: its number and the `continued` label.
+    fn continued(&mut self, index: usize, at: Location) -> Vec<FlowLine> {
+        let label = Inline::Text {
+            text: format!(" {}", self.config.labels.continued),
+            style: InlineStyle {
+                emphasis: true,
+                ..InlineStyle::default()
+            },
+        };
+        let content = vec![Inline::FootnoteRef(index), label];
+        self.unmarked(&[Block::Paragraph { at, content }])
+    }
+
+    /// Lays out footnote content. Its own markers do not count as references.
+    fn unmarked(&mut self, blocks: &[Block]) -> Vec<FlowLine> {
+        let mut lines = self.run(blocks, Frame::full(&self.config.styles.footnote));
+        for line in &mut lines {
+            line.line.notes.clear();
+        }
+        lines
+    }
+
     fn blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
-        let mut after_paragraph = false;
         for block in blocks {
             match block {
                 Block::Paragraph { at, content } => {
                     // Only a paragraph that continues another one gets a first-line indent.
-                    let indent = if after_paragraph {
+                    let indent = if self.after_paragraph {
                         frame.style.first_line_indent.0
                     } else {
                         0.0
                     };
-                    self.text_block(*at, content, frame.style, frame, indent);
+                    self.text_block(*at, content, frame.style, frame, indent, false);
                 }
                 Block::Heading { at, level, content } => {
-                    self.text_block(*at, content, heading_style(self.config, *level), frame, 0.0);
+                    let style = heading_style(self.config, *level);
+                    self.text_block(*at, content, style, frame, 0.0, true);
                 }
                 Block::List { at, start, items } => self.list(*at, *start, items, frame),
                 Block::Quote { blocks, .. } => {
@@ -104,16 +204,49 @@ impl<'a> Flow<'a> {
                         style,
                         ..frame
                     };
+                    self.after_paragraph = false;
                     self.blocks(blocks, inner);
                     self.space(style.space_after.0);
                 }
                 Block::Code { first_line, lines, .. } => self.code(*first_line, lines, frame),
+                Block::Keep { at, blocks } => {
+                    let start = self.lines.len();
+                    self.blocks(blocks, frame);
+                    let end = self.lines.len();
+                    if end > start {
+                        for line in &mut self.lines[start..end - 1] {
+                            line.after = Break::Never;
+                        }
+                        self.keeps.push((start..end, *at));
+                    }
+                    // A keep group does not interrupt the paragraph sequence around it.
+                    continue;
+                }
+                Block::PageBreak { .. } => {
+                    if let Some(line) = self.lines.last_mut() {
+                        line.after = Break::Forced;
+                    }
+                    continue;
+                }
+                Block::Columns { at, .. } | Block::FullWidth { at, .. } => {
+                    let message = "two-column layout is not supported yet".to_owned();
+                    self.errors.push(self.error(*at, message));
+                }
             }
-            after_paragraph = matches!(block, Block::Paragraph { .. });
+            self.after_paragraph = matches!(block, Block::Paragraph { .. });
         }
     }
 
-    fn text_block(&mut self, at: Location, content: &[Inline], style: &Style, frame: Frame<'a>, first_indent: f64) {
+    /// Sets a paragraph or heading. Headings never end a page, so they stay with what follows.
+    fn text_block(
+        &mut self,
+        at: Location,
+        content: &[Inline],
+        style: &Style,
+        frame: Frame<'a>,
+        first_indent: f64,
+        heading: bool,
+    ) {
         let width = self.width(frame) - 2.0 * style.indent.0;
         self.space(style.space_before.0);
         let lang = self.config.document.lang;
@@ -128,8 +261,15 @@ impl<'a> Flow<'a> {
         ) {
             Ok(lines) => {
                 let dx = frame.left + style.indent.0;
-                self.items
-                    .extend(lines.into_iter().map(|line| FlowItem::Line(translate_line(line, dx))));
+                let count = lines.len();
+                for (index, line) in lines.into_iter().enumerate() {
+                    let after = if heading {
+                        Break::Never
+                    } else {
+                        pages::line_break(index, count)
+                    };
+                    self.push(translate_line(line, dx), at, after);
+                }
             }
             Err(problem) => self.errors.push(self.error(at, problem.to_string())),
         }
@@ -161,21 +301,14 @@ impl<'a> Flow<'a> {
             }
             // The marker ends half an em before the item text.
             let x = inner.left - 0.5 * style.size.0 - run.width.0;
-            let first = self.items.len();
+            let first = self.lines.len();
+            self.after_paragraph = false;
             self.blocks(item, inner);
-            let line = match self.items[first..].iter_mut().find_map(|item| match item {
-                FlowItem::Line(line) => Some(line),
-                FlowItem::Space(_) => None,
-            }) {
-                Some(line) => line,
-                None => {
-                    self.items.push(FlowItem::Line(self.empty_line(style)));
-                    let Some(FlowItem::Line(line)) = self.items.last_mut() else {
-                        unreachable!()
-                    };
-                    line
-                }
-            };
+            if first == self.lines.len() {
+                let line = self.empty_line(style);
+                self.push(line, at, Break::Allowed(0.0));
+            }
+            let line = &mut self.lines[first].line;
             let y = line.baseline;
             line.items.push(text_item(x, y, run, style.color));
         }
@@ -190,7 +323,7 @@ impl<'a> Flow<'a> {
         let x = frame.left + style.indent.0;
         self.space(style.space_before.0);
         for (index, text) in lines.iter().enumerate() {
-            let at = Location {
+            let line_at = Location {
                 line: first_line + index as u64,
                 column: 1,
             };
@@ -199,7 +332,7 @@ impl<'a> Flow<'a> {
             if !text.trim().is_empty() {
                 let run = self.fonts.shape(&text, face, style.size, self.config.document.lang);
                 if let Some(problem) = paragraph::missing_glyph(&run) {
-                    self.errors.push(self.error(at, problem.to_string()));
+                    self.errors.push(self.error(line_at, problem.to_string()));
                 }
                 if run.width.0 > width {
                     let message = format!(
@@ -207,11 +340,11 @@ impl<'a> Flow<'a> {
                         run.width.0 - width,
                         width
                     );
-                    self.errors.push(self.error(at, message));
+                    self.errors.push(self.error(line_at, message));
                 }
                 line.items.push(text_item(x, line.baseline, run, style.color));
             }
-            self.items.push(FlowItem::Line(line));
+            self.push(line, line_at, pages::line_break(index, lines.len()));
         }
         self.space(style.space_after.0);
     }
@@ -224,15 +357,22 @@ impl<'a> Flow<'a> {
             height,
             baseline: paragraph::baseline(height, &metrics),
             items: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
-    /// Adds vertical space. Adjacent spaces collapse to the larger one.
+    fn push(&mut self, line: Line, at: Location, after: Break) {
+        self.lines.push(FlowLine {
+            line,
+            space_before: std::mem::take(&mut self.space),
+            after,
+            at,
+        });
+    }
+
+    /// Requests vertical space before the next line. Adjacent spaces collapse to the larger one.
     fn space(&mut self, amount: f64) {
-        match self.items.last_mut() {
-            Some(FlowItem::Space(space)) => *space = space.max(amount),
-            _ => self.items.push(FlowItem::Space(amount)),
-        }
+        self.space = self.space.max(amount);
     }
 
     fn width(&self, frame: Frame) -> f64 {
@@ -254,51 +394,6 @@ fn heading_style(config: &Config, level: u8) -> &Style {
         5 => &styles.heading_5,
         _ => &styles.heading_6,
     }
-}
-
-/// Cuts the flow into pages, starting a page when the next line does not fit.
-/// Odd pages have the inner margin on the left.
-fn paginate(flow: Vec<FlowItem>, config: &Config) -> Result<Vec<Page>, Vec<Diagnostic>> {
-    let geometry = &config.page;
-    let text_height = geometry.text_height().0;
-    let new_page = || Page {
-        width: geometry.width,
-        height: geometry.height,
-        items: Vec::new(),
-    };
-    let mut pages = Vec::new();
-    let mut page = new_page();
-    let mut y = 0.0;
-    for item in flow {
-        match item {
-            FlowItem::Space(space) if !page.items.is_empty() => y += space,
-            FlowItem::Space(_) => {}
-            FlowItem::Line(line) => {
-                if line.height > text_height {
-                    let message = format!(
-                        "a line is {:.1}pt high, taller than the {:.1}pt text area",
-                        line.height, text_height
-                    );
-                    return Err(vec![Diagnostic::new(None, message)]);
-                }
-                if y + line.height > text_height && !page.items.is_empty() {
-                    pages.push(std::mem::replace(&mut page, new_page()));
-                    y = 0.0;
-                }
-                let left = if pages.len() % 2 == 0 {
-                    geometry.margin_inner.0
-                } else {
-                    geometry.margin_outer.0
-                };
-                let top = geometry.margin_top.0 + y;
-                page.items
-                    .extend(line.items.into_iter().map(|item| translate(item, left, top)));
-                y += line.height;
-            }
-        }
-    }
-    pages.push(page);
-    Ok(pages)
 }
 
 fn text_item(x: f64, y: f64, run: ShapedRun, color: Color) -> Item {

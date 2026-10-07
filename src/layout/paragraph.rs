@@ -36,6 +36,10 @@ struct Fragment {
     metrics: Metrics,
     /// Prose may break at hyphens. Code and link text that spells out its URL may not.
     prose: bool,
+    /// How far the baseline is raised, for footnote markers.
+    rise: f64,
+    /// The footnote this fragment marks.
+    note: Option<usize>,
 }
 
 /// Text between two spaces. Style changes inside a word split it into fragments.
@@ -140,6 +144,7 @@ pub fn lines(
         .enumerate()
         .map(|(index, mark)| {
             let runs = line_runs(&words, start, mark, fonts, lang);
+            let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
             start = mark.at;
             let indent = if index == 0 { first_indent } else { 0.0 };
             let items = position(
@@ -156,6 +161,7 @@ pub fn lines(
                 height,
                 baseline,
                 items,
+                notes,
             }
         })
         .collect())
@@ -508,7 +514,7 @@ fn position(
         } else {
             open_link = None;
         }
-        items.push(text_item(x, baseline, run, fragment.color));
+        items.push(text_item(x, baseline - fragment.rise, run, fragment.color));
         x += width;
     }
     items
@@ -552,6 +558,25 @@ fn tokens(
                 continue;
             }
             Inline::Text { text, style } => (text, style),
+            Inline::FootnoteRef(index) => {
+                let (weight, font_style) = inline_face(style, false, false);
+                let face = fonts.face(&style.font, weight, font_style);
+                let size = inline.footnote_marker_size.to_pt(style.size);
+                let run = fonts.shape(&(index + 1).to_string(), face, size, lang);
+                if let Some(problem) = missing_glyph(&run) {
+                    return Err(problem);
+                }
+                word.fragments.push(Fragment {
+                    run,
+                    color: style.color,
+                    link: None,
+                    metrics: fonts.metrics(face, size),
+                    prose: false,
+                    rise: inline.footnote_marker_raise.to_pt(style.size).0,
+                    note: Some(*index),
+                });
+                continue;
+            }
         };
         let (face, size) = if text_style.code {
             let face = fonts.face(&inline.code_font, Weight::Regular, FontStyle::Normal);
@@ -594,6 +619,8 @@ fn tokens(
                 link: text_style.link.clone(),
                 metrics,
                 prose: !text_style.code && !spells_url,
+                rise: 0.0,
+                note: None,
             });
         }
     }
