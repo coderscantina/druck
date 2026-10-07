@@ -14,6 +14,7 @@ mod page;
 mod pdf;
 mod statistics;
 mod text;
+mod theme_path;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -63,7 +64,7 @@ enum Command {
 struct InputArgs {
     /// Markdown document.
     input: PathBuf,
-    /// Theme JSON file, overriding the document's `theme` setting.
+    /// Theme name or JSON file, overriding the document's `theme` setting.
     #[arg(long)]
     theme: Option<PathBuf>,
     /// Override a document setting, as in `--set toc=true` or `--set margins.top=2cm`.
@@ -268,8 +269,10 @@ fn load(args: &InputArgs) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let overrides = parse_overrides(&args.overrides, &cli_source)?;
 
     let theme_path = match (&args.theme, &document.theme) {
-        (Some(path), _) => Some(normalize(&working_dir.join(path))),
-        (None, Some(path)) => document_path.parent().map(|dir| normalize(&dir.join(path))),
+        (Some(path), _) => Some(theme_path::resolve(path, &working_dir)),
+        (None, Some(path)) => document_path
+            .parent()
+            .map(|dir| theme_path::resolve(Path::new(path), dir)),
         (None, None) => None,
     };
     let theme = theme_path.map(|path| load_theme(&path)).transpose()?;

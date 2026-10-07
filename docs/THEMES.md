@@ -2,6 +2,17 @@
 
 A theme is one JSON file plus any local assets (fonts, images) it references. It controls the design of a document: element styles, page geometry, title blocks, headers, footers, and generated labels. Document authors change a small subset of it from front matter, see [authoring](AUTHORING.md).
 
+## Named themes
+
+Use `druck render article.md --theme latex-1`, or `theme: latex-1` in front matter, to select `latex-1.json` from your theme directory:
+
+- macOS and other Unix systems: `$XDG_CONFIG_HOME/druck/themes` when `XDG_CONFIG_HOME` is an absolute path, otherwise `~/.config/druck/themes`.
+- Windows: `%APPDATA%\druck\themes`.
+
+Names contain ASCII letters, digits, hyphens, or underscores. An existing file with that exact name takes precedence: relative to the working directory for `--theme`, or the document directory for front matter. A value with an extension or path separator is always a file path, so `--theme ./latex-1` explicitly selects a local file. A missing named theme reports the searched JSON path. Assets resolve relative to the selected JSON file, including when it came from the shared directory. No network access is involved.
+
+The reference themes prepared on 2026-10-07 are installed in `~/.config/druck/themes`: `coderscantina`, `latex-1`, `latex-2`, and `latex-3`. Their metadata and column instructions are in that directory's `README.md`. The three LaTeX references differ in body size, margins, title treatment, and columns, so they remain separate. They use bundled Libertinus. `coderscantina` uses static faces generated from the owner's installed Bad variable fonts; the JSON and its `fonts/bad` directory travel together. These personal themes are not bundled into the binary.
+
 `druck check` loads and validates a theme, and `druck check --print-config` shows the resolved result. `druck render` uses it to typeset a document.
 
 References: the [JSON Schema](../schema/theme.v1.schema.json) and the [bundled default theme](../themes/default.json).

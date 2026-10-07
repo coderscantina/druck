@@ -59,7 +59,7 @@ Paths are relative to the document.
 
 | Key | Type | Effect |
 | --- | --- | --- |
-| `theme` | path | The theme file to use. `--theme` overrides it. |
+| `theme` | name or path | The theme to use. `--theme` overrides it. See [named themes](THEMES.md#named-themes). |
 | `bibliography` | path | BibTeX file for citations, see [citations](#citations-and-bibliography). |
 | `font-files` | map | Adds font families, see below. |
 
@@ -116,7 +116,7 @@ druck render <doc.md> [-o PATH]
 
 `render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
 
-`--theme PATH` selects a theme and overrides the `theme` key in front matter. The path is relative to the working directory.
+`--theme NAME_OR_PATH` selects a theme and overrides the `theme` key in front matter. A path is relative to the working directory; a bare name also searches the [shared theme directory](THEMES.md#named-themes).
 
 `--set KEY=VALUE` overrides a front matter setting. It uses the same keys, with dots for nesting. It can be repeated.
 

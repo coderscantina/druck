@@ -797,6 +797,14 @@ At the owner's request, ahead of publishing on GitHub as [coderscantina/druck](h
 - **Releases:** [scripts/release.sh](../scripts/release.sh) follows the owner's release script for ravn: it releases from an up-to-date `main`, bumps the version, commits, tags, and pushes. It also writes `CHANGELOG.md` from commit subjects grouped by gitmoji, in plain shell, so releasing needs no extra tool. The tag push lets [release.yml](../.github/workflows/release.yml) create the GitHub release with the archives and the newest changelog section.
 - **Schema `$id`:** the raw GitHub URL of `schema/theme.v1.schema.json` on `main`, which resolves once the repository is public.
 
+## 2026-10-07: Named user themes and PDF reference themes
+
+The CLI accepts a bare theme name in front matter or `--theme` and loads `<name>.json` from the user's config directory. Unix, including macOS, uses absolute `XDG_CONFIG_HOME` or `~/.config`, matching the owner's requested macOS location. Windows uses `APPDATA`. The theme directory below either root is `druck/themes`. No dependency is needed for these environment-based paths. Explicit paths retain their original bases; an existing local file with the exact bare name wins. Only ASCII letters, digits, hyphens, and underscores count as a name, so path traversal and filenames with extensions remain explicit paths. Assets keep the selected JSON file's origin. See [lookup](../src/theme_path.rs), [CLI tests](../tests/cli.rs), and [the guide](THEMES.md#named-themes).
+
+Personal themes were installed in `~/.config/druck/themes`, with metadata instructions in its `README.md`. `coderscantina` follows the supplied offer with Bad faces instantiated from the installed variable fonts, because installed lookup currently sees only their default faces. The original fonts are unchanged. `latex-1`, `latex-2`, and `latex-3` remain separate: their body sizes are respectively 12, 11, and 10 TeX points, their side margins differ, and the third has a full-width institutional title above two-column prose. They use bundled Libertinus at the owner's request. Columns belong to the document directive. These themes and the personal Bad assets are not binary resources or tracked repository files.
+
+The current layout cannot reproduce two reference details through themes alone: cover and body margins share one frame, and leading space on the first title-block slot is dropped at a page top. The theme notes record those limits. Fixing them is a follow-up, outside named lookup.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

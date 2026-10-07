@@ -94,6 +94,59 @@ fn mm(value: f64) -> f64 {
 }
 
 #[test]
+fn named_themes_load_from_the_os_config_directory_with_their_asset_origin() {
+    let sandbox = Sandbox::new("named-themes");
+    let shared = sandbox.root.join("config/druck/themes");
+    fs::create_dir_all(shared.join("fonts")).unwrap();
+    fs::write(shared.join("fonts/dummy.otf"), "fixture").unwrap();
+    fs::write(
+        shared.join("named.json"),
+        json!({"version": 1, "fonts": {"Named Serif": {"regular": "fonts/dummy.otf"}},
+            "styles": {"body": {"size": "12pt"}}})
+        .to_string(),
+    )
+    .unwrap();
+    let document = sandbox.write("named.md", "---\ntheme: named\n---\nText.\n");
+    let plain = sandbox.write("plain.md", "Text.\n");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_druck"))
+            .args(["check"])
+            .args(args)
+            .arg("--print-config")
+            .env("XDG_CONFIG_HOME", sandbox.root.join("config"))
+            .env("APPDATA", sandbox.root.join("config"))
+            .current_dir(&sandbox.cwd)
+            .output()
+            .unwrap()
+    };
+    for args in [&[document.as_str()][..], &[plain.as_str(), "--theme", "named"][..]] {
+        let output = run(args);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let config: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_pt(&config, "/styles/body/size", 12.0);
+        assert_eq!(
+            config["fonts"]["Named Serif"]["regular"]["dir"],
+            shared.to_str().unwrap()
+        );
+    }
+    fs::write(
+        sandbox.cwd.join("named"),
+        "{\"version\":1,\"styles\":{\"body\":{\"size\":\"13pt\"}}}",
+    )
+    .unwrap();
+    let output = run(&[&plain, "--theme", "named"]);
+    assert!(output.status.success());
+    assert_pt(
+        &serde_json::from_slice(&output.stdout).unwrap(),
+        "/styles/body/size",
+        13.0,
+    );
+    let missing = run(&[&plain, "--theme", "missing"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains(shared.join("missing.json").to_str().unwrap()));
+}
+
+#[test]
 fn loads_a_document_with_a_partial_theme_and_tracks_resource_origins() {
     let sandbox = Sandbox::new("valid");
     let document = format!("{FIXTURES}/doc.md");
