@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
+  <rect width="360" height="220" fill="#f4f1ea"/>
+  <g fill="#4a6b8a">
+    <rect x="40" y="120" width="40" height="70"/>
+    <rect x="100" y="80" width="40" height="110"/>
+    <rect x="160" y="50" width="40" height="140"/>
+    <rect x="220" y="95" width="40" height="95"/>
+    <rect x="280" y="30" width="40" height="160"/>
+  </g>
+  <line x1="30" y1="190" x2="335" y2="190" stroke="#333" stroke-width="1.5"/>
+  <g font-family="serif" font-size="14" fill="#333" text-anchor="middle">
+    <text x="60" y="208">2021</text><text x="120" y="208">2022</text><text x="180" y="208">2023</text>
+    <text x="240" y="208">2024</text><text x="300" y="208">2025</text>
+  </g>
+  <text x="180" y="22" font-family="serif" font-size="15" font-style="italic" text-anchor="middle" fill="#333">Pages typeset per year</text>
+</svg>

@@ -282,7 +282,7 @@ fn render(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
 #[test]
 fn renders_the_samples() {
     let sandbox = Sandbox::new("samples");
-    for name in ["en", "de", "pagination", "columns"] {
+    for name in ["en", "de", "pagination", "columns", "images"] {
         let output = sandbox.root.join(format!("{name}.pdf"));
         let document = format!("{REPO}/samples/{name}.md");
         let pdf = render(&sandbox, &[&document, "-o", output.to_str().unwrap()], &output);
