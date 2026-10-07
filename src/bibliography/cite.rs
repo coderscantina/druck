@@ -89,6 +89,7 @@ struct Work {
     index: usize,
     locator: Option<Locator>,
     prefix: Option<String>,
+    suffix: Option<String>,
 }
 
 struct Use {
@@ -122,6 +123,7 @@ impl<'a> Citations<'a> {
                     index,
                     locator: item.locator.clone(),
                     prefix: item.prefix.clone(),
+                    suffix: item.suffix.clone(),
                 }),
                 None => missing.push(MissingKey {
                     key: item.key.clone(),
@@ -241,8 +243,11 @@ struct Context<'a> {
 }
 
 impl Context<'_> {
-    fn locator(&self, locator: &Option<Locator>) -> Option<String> {
-        locator.as_ref().map(|locator| locator.text(self.lang))
+    /// What follows a work in its citation: the locator and the suffix, joined by a comma.
+    fn after(&self, work: &Work) -> Option<String> {
+        let locator = work.locator.as_ref().map(|locator| locator.text(self.lang));
+        let parts: Vec<_> = locator.into_iter().chain(work.suffix.clone()).collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
     }
 
     fn author_date(&self, usage: &Use) -> Vec<Part> {
@@ -256,15 +261,15 @@ impl Context<'_> {
             );
             match usage.form {
                 Form::Parenthetical => {
-                    let parts = [
-                        Some(format!("{} {year}", label(entry, self.lang).0)),
-                        self.locator(&work.locator),
-                    ];
+                    let parts = [Some(format!("{} {year}", label(entry, self.lang).0)), self.after(work)];
                     parts.into_iter().flatten().collect::<Vec<_>>().join(", ")
                 }
                 Form::Narrative => {
-                    let year_and_locator = [Some(year), self.locator(&work.locator)];
-                    let inner = year_and_locator.into_iter().flatten().collect::<Vec<_>>().join(", ");
+                    let inner = [Some(year), self.after(work)]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     format!("{} ({inner})", label(entry, self.lang).0)
                 }
             }
@@ -293,13 +298,17 @@ impl Context<'_> {
         if items.iter().all(|work| work.prefix.is_none()) {
             items.sort_by_key(|work| self.numbers[work.index]);
         }
-        let number_and_locator = |work: &Work| match self.locator(&work.locator) {
-            Some(locator) => format!("{}, {locator}", self.numbers[work.index]),
+        let number_and_after = |work: &Work| match self.after(work) {
+            Some(after) => format!("{}, {after}", self.numbers[work.index]),
             None => self.numbers[work.index].to_string(),
         };
         let mut parts = Parts::default();
         match usage.form {
-            Form::Parenthetical if items.iter().all(|work| work.locator.is_none() && work.prefix.is_none()) => {
+            Form::Parenthetical
+                if items
+                    .iter()
+                    .all(|work| work.locator.is_none() && work.prefix.is_none() && work.suffix.is_none()) =>
+            {
                 let numbers: Vec<usize> = items.iter().map(|work| self.numbers[work.index]).collect();
                 parts.text("[");
                 for (position, (first, last)) in runs(&numbers).into_iter().enumerate() {
@@ -321,7 +330,7 @@ impl Context<'_> {
                         parts.text("; ");
                     }
                     parts.prefix(work);
-                    parts.link(number_and_locator(work), self.numbers[work.index] - 1);
+                    parts.link(number_and_after(work), self.numbers[work.index] - 1);
                 }
                 parts.text("]");
             }
@@ -331,7 +340,7 @@ impl Context<'_> {
                         parts.text(", ");
                     }
                     let label = label(&self.entries[work.index], self.lang).0;
-                    let text = format!("{label} [{}]", number_and_locator(work));
+                    let text = format!("{label} [{}]", number_and_after(work));
                     parts.link(text, self.numbers[work.index] - 1);
                 }
             }

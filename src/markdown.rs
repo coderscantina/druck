@@ -2750,9 +2750,9 @@ mod tests {
     fn reports_citation_and_bibliography_errors_at_their_location() {
         let cases = [
             (
-                "x [@a, see below] y\n",
+                "x [@a see below] y\n",
                 (1, 3),
-                "unsupported locator `see below`; use `p. 12`, `pp. 3-5`, or `S. 12`",
+                "unexpected `see below` after the key `a`; a locator or suffix follows a comma",
             ),
             (
                 "See [@a; @sec:b].\n",

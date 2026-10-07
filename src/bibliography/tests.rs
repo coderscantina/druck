@@ -241,6 +241,25 @@ fn puts_prefixes_before_the_work_they_belong_to() {
     );
 }
 
+#[test]
+fn puts_suffixes_after_the_locator() {
+    let texts = ["[@weber2020, p. 3, emphasis added; @lee2022, see also p. 4] @weber2020 [p. 3, passim]"];
+    assert_eq!(
+        cited(&texts, CitationStyle::AuthorDate, Lang::En),
+        [
+            "(Weber 2020, p.\u{a0}3, emphasis added; Lee et al. 2022, see also p. 4)",
+            "Weber (2020, p.\u{a0}3, passim)",
+        ]
+    );
+    assert_eq!(
+        cited(&texts, CitationStyle::Numeric, Lang::En),
+        [
+            "[1, p.\u{a0}3, emphasis added; 2, see also p. 4]",
+            "Weber [1, p.\u{a0}3, passim]",
+        ]
+    );
+}
+
 /// The linked pieces of a citation as text and the key of the work each points to.
 fn links(rendered: &Rendered, id: CitationId) -> Vec<(String, &str)> {
     rendered

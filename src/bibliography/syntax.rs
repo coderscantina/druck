@@ -3,8 +3,10 @@
 //!
 //! - `[@key]`, `[@a; @b]`: parenthetical citations with one or more keys.
 //! - `[@key, p. 12]`, `[@key, pp. 3-5]`, `[@key, S. 12]`: with a locator after a comma.
+//! - `[@key, p. 12, emphasis added]`, `[@key, emphasis added]`: text after the locator, or after the comma when
+//!   no locator starts it, is the suffix.
 //! - `[see @key]`, `[see @a; also @b]`: text before an item's `@key` is its prefix.
-//! - `@key` and `@key [p. 12]`: narrative citations, only at a word start so that `a@b.de` stays text.
+//! - `@key` and `@key [p. 12]` or `@key [p. 12, emphasis added]`: narrative citations, only at a word start so that `a@b.de` stays text.
 //!
 //! A locator is `p.`, `pp.`, or `S.`, then a page or a range of two pages, each made of letters and digits ("12",
 //! "xiv", "A3"). A bracket without any `@key` is text. The range separator is `-` or an en dash and is normalized to an en dash. Keys with the prefixes of
@@ -45,6 +47,8 @@ pub struct Item {
     /// The text before the key, such as "see".
     pub prefix: Option<String>,
     pub locator: Option<Locator>,
+    /// The text after the locator, or after the comma when no locator starts it.
+    pub suffix: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,12 +221,12 @@ fn item(text: &str, offset: usize, part: &str) -> Result<Item, String> {
     }
     let key = text[start + 1..end].to_owned();
     let rest = text[end..offset + part.len()].trim();
-    let locator = match rest.strip_prefix(',') {
-        _ if rest.is_empty() => None,
-        Some(locator) => Some(parse_locator(locator).ok_or_else(|| unknown_locator(locator.trim()))?),
+    let (locator, suffix) = match rest.strip_prefix(',') {
+        _ if rest.is_empty() => (None, None),
+        Some(after) => locator_and_suffix(after),
         None => {
             return Err(format!(
-                "unexpected `{rest}` after the key `{key}`; a locator follows a comma"
+                "unexpected `{rest}` after the key `{key}`; a locator or suffix follows a comma"
             ));
         }
     };
@@ -231,11 +235,19 @@ fn item(text: &str, offset: usize, part: &str) -> Result<Item, String> {
         range: start..end,
         prefix,
         locator,
+        suffix,
     })
 }
 
-fn unknown_locator(locator: &str) -> String {
-    format!("unsupported locator `{locator}`; use `p. 12`, `pp. 3-5`, or `S. 12`")
+/// Reads the text after a comma as in Pandoc: it starts with a locator when the part up to the next comma is
+/// one, and the rest is the suffix. Text that does not start with a locator is all suffix.
+fn locator_and_suffix(text: &str) -> (Option<Locator>, Option<String>) {
+    let suffix = |text: &str| Some(text.trim()).filter(|text| !text.is_empty()).map(str::to_owned);
+    let (head, tail) = text.split_once(',').unwrap_or((text, ""));
+    match parse_locator(head) {
+        Some(locator) => (Some(locator), suffix(tail)),
+        None => (None, suffix(text)),
+    }
 }
 
 /// Parses `@key` or `@key [p. 12]` at `at`. `None` means the text is not a citation.
@@ -249,14 +261,17 @@ fn narrative(text: &str, at: usize) -> Option<Segment<'_>> {
     if !at_word_start || key.is_empty() || is_reserved(key) {
         return None;
     }
-    let locator_end = text[end..]
+    let bracket = text[end..]
         .strip_prefix(' ')
         .filter(|rest| rest.starts_with('['))
-        .and_then(|rest| Some((rest.find(']')?, rest)))
-        .and_then(|(close, rest)| Some((parse_locator(&rest[1..close])?, end + 1 + close + 1)));
-    let (locator, range_end) = match locator_end {
-        Some((locator, range_end)) => (Some(locator), range_end),
-        None => (None, end),
+        .and_then(|rest| {
+            let close = rest.find(']')?;
+            let (locator, suffix) = locator_and_suffix(&rest[1..close]);
+            Some((locator?, suffix, end + 1 + close + 1))
+        });
+    let (locator, suffix, range_end) = match bracket {
+        Some((locator, suffix, range_end)) => (Some(locator), suffix, range_end),
+        None => (None, None, end),
     };
     Some(Segment::Citation(Citation {
         range: at..range_end,
@@ -266,6 +281,7 @@ fn narrative(text: &str, at: usize) -> Option<Segment<'_>> {
             range: at..end,
             prefix: None,
             locator,
+            suffix,
         }],
     }))
 }
@@ -331,6 +347,26 @@ mod tests {
     }
 
     #[test]
+    fn reads_text_after_a_locator_or_a_comma_as_a_suffix() {
+        let text = "[@a, p. 3, emphasis added; @b, see also p. 4] and @c [pp. 3-5, passim]";
+        let found = citations(text);
+        let items: Vec<_> = found
+            .iter()
+            .flat_map(|citation| &citation.items)
+            .map(|item| (item.locator.is_some(), item.suffix.as_deref()))
+            .collect();
+        assert_eq!(
+            items,
+            [
+                (true, Some("emphasis added")),
+                (false, Some("see also p. 4")),
+                (true, Some("passim"))
+            ]
+        );
+        assert_eq!(&text[found[1].range.clone()], "@c [pp. 3-5, passim]");
+    }
+
+    #[test]
     fn finds_narrative_citations_with_an_optional_locator() {
         let text = "Per @smith2024 [p. 12] and @jones.2020, but @k [see].";
         let found = citations(text);
@@ -361,12 +397,12 @@ mod tests {
 
     #[test]
     fn reports_unreadable_groups() {
-        let segments = find("x [@a, see below] y");
+        let segments = find("x [@a see below] y");
         let Segment::Invalid { range, message } = &segments[1] else {
             panic!("expected invalid")
         };
-        assert_eq!(*range, 2..17);
-        assert!(message.contains("unsupported locator `see below`"));
+        assert_eq!(*range, 2..16);
+        assert!(message.contains("unexpected `see below` after the key `a`"));
         assert!(matches!(&find("[@a; b]")[0], Segment::Invalid { .. }));
         assert!(
             find("[a link](http://x.org) and [^1]")
