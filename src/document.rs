@@ -270,4 +270,6 @@ pub struct InlineStyle {
     pub code: bool,
     /// The target of an enclosing link.
     pub link: Option<Link>,
+    /// Text that never breaks across lines. Layout sets it on cross-reference text.
+    pub unbreakable: bool,
 }

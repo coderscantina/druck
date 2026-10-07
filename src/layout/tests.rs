@@ -255,6 +255,100 @@ fn hyphenation_across_style_changes_keeps_each_style() {
 }
 
 #[test]
+fn a_hyphen_of_the_text_at_a_line_end_extracts_as_a_non_breaking_hyphen() {
+    let config = config();
+    let words = "state-of-the-art e-mail typographical ".repeat(12);
+    let lines = set(
+        &[text(&words, InlineStyle::default())],
+        &config.styles.body,
+        Lang::En,
+        200.0,
+    );
+    let ends: Vec<&str> = lines.iter().map(|line| line[line.len() - 1].1.text.as_str()).collect();
+
+    assert!(ends.iter().any(|end| end.ends_with('\u{2011}')), "{ends:?}");
+    assert!(
+        ends.iter().any(|end| end.starts_with("typo") && end.ends_with('-')),
+        "{ends:?}"
+    );
+}
+
+#[test]
+fn tracked_ragged_lines_end_at_their_last_glyph() {
+    let config = config();
+    let style = Style {
+        align: Align::Right,
+        tracking: 0.2,
+        ..config.styles.body.clone()
+    };
+    let width = 200.0;
+    let lines = set(&[text(PROSE, InlineStyle::default())], &style, Lang::En, width);
+    for line in &lines {
+        let (x, run) = &line[line.len() - 1];
+        let edge = x + run.width.0 - run.spacing.0;
+        assert!(run.spacing.0 > 0.0 && (edge - width).abs() < 0.01, "ends at {edge}");
+    }
+}
+
+#[test]
+fn cross_reference_text_does_not_break() {
+    let config = config();
+    let reference = InlineStyle {
+        unbreakable: true,
+        ..InlineStyle::default()
+    };
+    let mut content = Vec::new();
+    for _ in 0..12 {
+        content.push(text("as shown in ", InlineStyle::default()));
+        content.push(text("Figure\u{a0}12", reference.clone()));
+        content.push(text(", ", InlineStyle::default()));
+    }
+    let lines = set(&content, &config.styles.body, Lang::En, 90.0);
+
+    for (_, run) in lines.iter().flatten() {
+        assert!(
+            !run.text.starts_with("Fig") || run.text == "Figure\u{a0}12",
+            "{}",
+            run.text
+        );
+    }
+}
+
+#[test]
+fn a_run_of_punctuation_hangs_by_the_sum_of_its_shares() {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
+    let style = &config.styles.body;
+    let face = fonts.face(&style.font, style.weight, style.style);
+    let run = fonts.shape("word”,", face, style.size, Lang::En);
+    let [.., quote, comma] = run.glyphs.as_slice() else {
+        panic!("too few glyphs")
+    };
+
+    let expected = 0.5 * quote.x_advance.0 + 0.7 * comma.x_advance.0;
+    assert!((protrusion::trailing(&run, run.text.len()) - expected).abs() < 1e-9);
+}
+
+#[test]
+fn link_text_that_spells_its_url_breaks_after_slashes_without_a_hyphen() {
+    let config = config();
+    let url = "https://doi.org/10.1093/comjnl/27.2.97";
+    let link = InlineStyle {
+        link: Some(Link::Url(url.to_owned())),
+        ..InlineStyle::default()
+    };
+    let lines = set(&[text(url, link)], &config.styles.body, Lang::En, 80.0);
+
+    assert!(lines.len() > 1);
+    let texts: Vec<&str> = lines.iter().flatten().map(|(_, run)| run.text.as_str()).collect();
+    assert_eq!(texts.concat(), url);
+    assert!(
+        texts[..texts.len() - 1].iter().all(|text| text.ends_with('/')),
+        "{texts:?}"
+    );
+}
+
+#[test]
 fn sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker() {
     let config = config();
     let plain = |text: &str| text_inline(text);

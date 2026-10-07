@@ -1,5 +1,6 @@
 //! Optical margin alignment: punctuation at the edges of justified lines hangs partly into the
-//! margins, so the text edge looks straight. Letters do not protrude.
+//! margins, so the text edge looks straight. A run of punctuation, such as a comma after a closing
+//! quote, hangs by the sum of its shares. Letters do not protrude.
 
 use crate::text::ShapedRun;
 
@@ -16,24 +17,30 @@ fn factor(c: char) -> f64 {
     }
 }
 
-/// How far the first glyph at or after byte `from` of `run` hangs into the left margin.
+/// How far the glyphs at or after byte `from` of `run` hang into the left margin: the sum over the
+/// protruding characters that start there, such as „‚.
 pub fn leading(run: &ShapedRun, from: usize) -> f64 {
     run.glyphs
         .iter()
-        .find(|glyph| glyph.text.start >= from && !glyph.text.is_empty())
-        .and_then(|glyph| Some(factor(run.text[glyph.text.start..].chars().next()?) * glyph.x_advance.0))
-        .unwrap_or(0.0)
+        .filter(|glyph| glyph.text.start >= from && !glyph.text.is_empty())
+        .map_while(|glyph| {
+            let hang = factor(run.text[glyph.text.start..].chars().next()?) * glyph.x_advance.0;
+            (hang > 0.0).then_some(hang)
+        })
+        .sum()
 }
 
-/// How far the last glyph before byte `to` of `run` hangs into the right margin.
+/// How far the glyphs before byte `to` of `run` hang into the right margin: the sum over the
+/// protruding characters that end there, such as ”, after a word.
 pub fn trailing(run: &ShapedRun, to: usize) -> f64 {
     run.glyphs
         .iter()
         .rev()
-        .find(|glyph| glyph.text.start < to && !glyph.text.is_empty())
-        .and_then(|glyph| {
+        .filter(|glyph| glyph.text.start < to && !glyph.text.is_empty())
+        .map_while(|glyph| {
             let text = &run.text[glyph.text.start..glyph.text.end.min(to)];
-            Some(factor(text.chars().next_back()?) * glyph.x_advance.0)
+            let hang = factor(text.chars().next_back()?) * glyph.x_advance.0;
+            (hang > 0.0).then_some(hang)
         })
-        .unwrap_or(0.0)
+        .sum()
 }

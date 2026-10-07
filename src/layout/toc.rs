@@ -133,6 +133,7 @@ fn leader(dot: &ShapedRun, step: f64, from: f64, to: f64) -> Option<(f64, Shaped
         size: dot.size,
         glyphs,
         width: Pt(step * (count - 1) as f64 + glyph.x_advance.0),
+        spacing: Pt(0.0),
     };
     Some((first * step, run))
 }

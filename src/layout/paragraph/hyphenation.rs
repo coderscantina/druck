@@ -1,4 +1,5 @@
-//! Where words may break: hyphenation points from the bundled TeX patterns, and explicit hyphens.
+//! Where words may break: hyphenation points from the bundled TeX patterns, explicit hyphens, and
+//! slashes in URLs.
 //!
 //! The patterns come compiled into `hypher`: American English (`hyph-en-us`) and German in the
 //! reformed orthography (`hyph-de-1996`). Fragment limits are the pattern authors' own: two letters
@@ -53,6 +54,16 @@ pub fn explicit(word: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Byte offsets just after slashes in a URL, as in "doi.org/|10.1093/|comjnl", where a line may end
+/// without a hyphen. The slashes of "://" and a slash at the end stay with their neighbours.
+pub fn url(text: &str) -> Vec<usize> {
+    let bytes = text.as_bytes();
+    (1..bytes.len().saturating_sub(1))
+        .filter(|&index| bytes[index] == b'/' && bytes[index - 1] != b'/' && bytes[index + 1] != b'/')
+        .map(|index| index + 1)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +98,12 @@ mod tests {
         assert!(points("CommonMark", Lang::En).is_empty());
         assert!(points("https://spec.commonmark.org/", Lang::En).is_empty());
         assert!(points("ada@example.com", Lang::En).is_empty());
+    }
+
+    #[test]
+    fn breaks_urls_after_single_slashes() {
+        let link = "https://doi.org/10.1093/comjnl/";
+        assert_eq!(split(link, &url(link)), "https://doi.org/|10.1093/|comjnl/");
     }
 
     #[test]

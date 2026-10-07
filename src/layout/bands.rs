@@ -199,7 +199,7 @@ impl BandLines<'_> {
             for line in lines {
                 let x = left + line.x;
                 let y = self.baseline + dy;
-                let placed = (x, x + line.run.width.0, y + line.top, y + line.bottom);
+                let placed = (x, x + line.run.set_width().0, y + line.top, y + line.bottom);
                 if boxes
                     .iter()
                     .any(|b| b.0 < placed.1 && placed.0 < b.1 && b.2 < placed.3 && placed.2 < b.3)
@@ -256,17 +256,18 @@ impl BandLines<'_> {
                 if let Some(problem) = paragraph::missing_glyph(&run) {
                     return Err(error(property, format!("{problem}, on page {}", self.page)));
                 }
-                if run.width.0 > width {
+                let set = run.set_width().0;
+                if set > width {
                     let message = format!(
-                        "\"{text}\" is {:.1}pt wide, more than the {width:.1}pt of its group, on page {}; shorten the text",
-                        run.width.0, self.page
+                        "\"{text}\" is {set:.1}pt wide, more than the {width:.1}pt of its group, on page {}; shorten the text",
+                        self.page
                     );
                     return Err(error(property, message));
                 }
                 let x = match group.align.unwrap_or(style.align) {
                     Align::Left | Align::Justify => 0.0,
-                    Align::Center => (width - run.width.0) / 2.0,
-                    Align::Right => width - run.width.0,
+                    Align::Center => (width - set) / 2.0,
+                    Align::Right => width - set,
                 };
                 let top = match lines.last() {
                     Some(previous) => previous.bottom + space,

@@ -673,6 +673,7 @@ impl<'a> Flow<'a> {
                     };
                     let style = InlineStyle {
                         link: Some(Link::Anchor(anchor)),
+                        unbreakable: true,
                         ..reference.style.clone()
                     };
                     Inline::Text { text, style }

@@ -182,6 +182,7 @@ impl Fonts {
             size,
             glyphs,
             width: Pt(width),
+            spacing: Pt(spacing),
         }
     }
 
@@ -267,6 +268,20 @@ pub struct ShapedRun {
     pub glyphs: Vec<Glyph>,
     /// The sum of the glyph advances.
     pub width: Pt,
+    /// Tracking after each character, included in the advances.
+    pub spacing: Pt,
+}
+
+impl ShapedRun {
+    /// The width up to the last glyph, without the tracking after it. Alignment measures this, so
+    /// tracked text ends at its edge.
+    pub fn set_width(&self) -> Pt {
+        if self.text.is_empty() {
+            self.width
+        } else {
+            Pt(self.width.0 - self.spacing.0)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

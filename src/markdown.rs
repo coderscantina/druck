@@ -454,6 +454,7 @@ impl<'a> Builder<'a> {
             strong: self.strong > 0,
             code,
             link: self.links.last().cloned().map(Link::Url),
+            unbreakable: false,
         }
     }
 
