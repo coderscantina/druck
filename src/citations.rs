@@ -113,6 +113,7 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             Block::List { items, .. } => items.iter().for_each(|item| reading_order(item, document, order)),
             Block::Quote { blocks, .. }
             | Block::Keep { blocks, .. }
+            | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }
             | Block::FullWidth { blocks, .. } => reading_order(blocks, document, order),
             Block::Code { .. }

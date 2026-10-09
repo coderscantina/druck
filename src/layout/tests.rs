@@ -420,6 +420,31 @@ fn reports_a_keep_group_taller_than_the_page_at_its_directive() {
 }
 
 #[test]
+fn a_bottom_group_ends_at_the_bottom_of_its_page_and_what_follows_starts_a_new_one() {
+    let bottom = Block::Bottom {
+        at: Location { line: 3, column: 1 },
+        blocks: vec![paragraph(4, "Notice one."), paragraph(6, "Notice two.")],
+    };
+    let pages = render(vec![paragraph(1, "Above."), bottom, paragraph(8, "After.")]).unwrap();
+    let geometry = &config().page;
+    let text_bottom = geometry.margin_top.0 + geometry.text_height().0;
+    let lines = placed(&pages[0]);
+
+    assert_eq!(pages.len(), 2);
+    assert_eq!(
+        lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+        ["Above.", "Notice one.", "Notice two."]
+    );
+    let last = lines[2].y;
+    assert!(
+        last <= text_bottom && last > text_bottom - 14.0,
+        "{last} vs {text_bottom}"
+    );
+    assert!(lines[1].y - lines[0].y > geometry.text_height().0 / 2.0);
+    assert_eq!(placed(&pages[1])[0].text, "After.");
+}
+
+#[test]
 fn repeated_layout_is_identical() {
     let blocks = || (0..5).map(|i| paragraph(i * 2 + 1, PROSE)).collect();
     let first = format!("{:?}", render(blocks()).unwrap());

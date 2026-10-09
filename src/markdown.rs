@@ -96,6 +96,7 @@ enum Fence {
     Columns,
     FullWidth,
     Keep,
+    Bottom,
     Table,
 }
 
@@ -373,6 +374,13 @@ impl<'a> Builder<'a> {
                 _ => None,
             })
             .collect();
+        // The innermost group that stays on one page, by name, for messages.
+        let kept = open
+            .iter()
+            .rev()
+            .flatten()
+            .find(|fence| matches!(fence, Fence::Keep | Fence::Bottom))
+            .map(|fence| fence_name(*fence));
         let fence = match name {
             "" => {
                 // Only directive containers are open between top-level blocks.
@@ -383,6 +391,7 @@ impl<'a> Builder<'a> {
                 let blocks = self.blocks.pop().unwrap_or_default();
                 match fence {
                     Some(Fence::Keep) => self.push_block(Block::Keep { at, blocks }),
+                    Some(Fence::Bottom) => self.push_block(Block::Bottom { at, blocks }),
                     Some(Fence::Columns) => self.push_block(Block::Columns { at, blocks }),
                     Some(Fence::FullWidth) => self.push_block(Block::FullWidth { at, blocks }),
                     Some(Fence::Table) => self.close_table(at, blocks, columns),
@@ -391,16 +400,16 @@ impl<'a> Builder<'a> {
                 return;
             }
             "page-break" => {
-                if open.contains(&Some(Fence::Keep)) {
-                    self.report(offset, "page-break is not allowed inside keep");
+                if let Some(kept) = kept {
+                    self.report(offset, format!("page-break is not allowed inside {kept}"));
                 } else {
                     self.push_block(Block::PageBreak { at });
                 }
                 return;
             }
             "bibliography" => {
-                if open.contains(&Some(Fence::Keep)) {
-                    self.report(offset, "bibliography is not allowed inside keep");
+                if let Some(kept) = kept {
+                    self.report(offset, format!("bibliography is not allowed inside {kept}"));
                 } else if let Some(first) = self.bibliography {
                     let message = format!("the bibliography is already placed on line {}", first.line);
                     self.report(offset, message);
@@ -437,8 +446,8 @@ impl<'a> Builder<'a> {
                 return;
             }
             "toc" => {
-                if open.contains(&Some(Fence::Keep)) || open.contains(&Some(Fence::Columns)) {
-                    self.report(offset, "toc is not allowed inside keep or columns");
+                if kept.is_some() || open.contains(&Some(Fence::Columns)) {
+                    self.report(offset, "toc is not allowed inside keep, bottom, or columns");
                 } else if let Some(first) = self.contents {
                     let message = format!("the table of contents is already placed on line {}", first.line);
                     self.report(offset, message);
@@ -449,14 +458,20 @@ impl<'a> Builder<'a> {
                 return;
             }
             "keep" => Some(Fence::Keep),
+            "bottom" => {
+                if !open.is_empty() {
+                    self.report(offset, "bottom is only allowed outside other directives");
+                }
+                Some(Fence::Bottom)
+            }
             "table" => Some(Fence::Table),
             "columns" => {
                 if open.contains(&Some(Fence::Columns)) {
                     self.report(offset, "columns cannot be nested");
-                } else if open.contains(&Some(Fence::Keep)) {
+                } else if let Some(kept) = kept {
                     self.report(
                         offset,
-                        "columns is not allowed inside keep; put keep groups inside columns instead",
+                        format!("columns is not allowed inside {kept}; put keep groups inside columns instead"),
                     );
                 }
                 Some(Fence::Columns)
@@ -469,8 +484,8 @@ impl<'a> Builder<'a> {
             }
             _ => {
                 let message = format!(
-                    "unknown directive \"{name}\"; use columns, full-width, keep, table, page-break, bibliography, toc, \
-                     front-matter, main-matter, or back-matter"
+                    "unknown directive \"{name}\"; use columns, full-width, keep, bottom, table, page-break, bibliography, \
+                     toc, front-matter, main-matter, or back-matter"
                 );
                 self.report(offset, message);
                 None
@@ -1887,6 +1902,7 @@ fn fence_name(fence: Fence) -> &'static str {
         Fence::Columns => "columns",
         Fence::FullWidth => "full-width",
         Fence::Keep => "keep",
+        Fence::Bottom => "bottom",
         Fence::Table => "table",
     }
 }
@@ -2265,7 +2281,7 @@ mod tests {
             (
                 "::: columns\n::: toc\n:::",
                 (2, 1),
-                "toc is not allowed inside keep or columns",
+                "toc is not allowed inside keep, bottom, or columns",
             ),
         ];
         for (body, location, message) in cases {
@@ -2313,8 +2329,8 @@ mod tests {
             (
                 "::: float\nx\n:::",
                 (1, 1),
-                "unknown directive \"float\"; use columns, full-width, keep, table, page-break, bibliography, toc, \
-                 front-matter, main-matter, or back-matter",
+                "unknown directive \"float\"; use columns, full-width, keep, bottom, table, page-break, bibliography, \
+                 toc, front-matter, main-matter, or back-matter",
             ),
             ("::: keep\nx", (1, 1), "\"::: keep\" is never closed"),
             ("x\n:::", (2, 1), "\":::\" closes no open layout directive"),
@@ -2322,6 +2338,16 @@ mod tests {
                 "::: keep\n::: page-break\n:::",
                 (2, 1),
                 "page-break is not allowed inside keep",
+            ),
+            (
+                "::: bottom\n::: page-break\n:::",
+                (2, 1),
+                "page-break is not allowed inside bottom",
+            ),
+            (
+                "::: columns\n::: bottom\nx\n:::\n:::",
+                (2, 1),
+                "bottom is only allowed outside other directives",
             ),
             ("::: columns\n::: columns\n:::\n:::", (2, 1), "columns cannot be nested"),
             (

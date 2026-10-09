@@ -278,6 +278,7 @@ impl Pass<'_> {
             space: 0.0,
             after_paragraph: false,
             keeps: Vec::new(),
+            bottoms: Vec::new(),
             columns: Vec::new(),
             wide: None,
             rectos: Vec::new(),
@@ -305,6 +306,7 @@ impl Pass<'_> {
         let matters = std::mem::take(&mut flow.matters);
         let body = std::mem::take(&mut flow.lines);
         let keeps = std::mem::take(&mut flow.keeps);
+        let bottoms = std::mem::take(&mut flow.bottoms);
         let columns = std::mem::take(&mut flow.columns);
         let tables = std::mem::take(&mut flow.table_lines);
         flow.in_notes = true;
@@ -321,6 +323,7 @@ impl Pass<'_> {
             body,
             rectos,
             keeps,
+            bottoms,
             columns,
             tables,
             notes,
@@ -467,6 +470,8 @@ struct Flow<'a> {
     after_paragraph: bool,
     /// Line ranges of keep groups with their directive locations.
     keeps: Vec<(Range<usize>, Location)>,
+    /// The first lines of `::: bottom` groups, which are also keep groups.
+    bottoms: Vec<usize>,
     /// Line ranges set in two columns. A full-width block ends one run and starts the next.
     columns: Vec<Range<usize>>,
     /// Whether a wide block is being set across the frame, with the frame width its lines leave free.
@@ -690,20 +695,18 @@ impl<'a> Flow<'a> {
                     self.image(*at, &images[*image], caption, figure, frame);
                 }
                 Block::Keep { at, blocks } => {
-                    let start = self.lines.len();
-                    let in_keep = std::mem::replace(&mut self.in_keep, true);
                     self.opening = opening;
-                    self.blocks(blocks, frame);
-                    self.in_keep = in_keep;
-                    let end = self.lines.len();
-                    if end > start {
-                        for line in &mut self.lines[start..end - 1] {
-                            line.after = Break::Never;
-                        }
-                        self.keeps.push((start..end, *at));
-                    }
+                    self.keep(*at, blocks, frame);
                     // A keep group does not interrupt the paragraph sequence around it.
                     continue;
+                }
+                Block::Bottom { at, blocks } => {
+                    self.opening = opening;
+                    let lines = self.keep(*at, blocks, frame);
+                    if !lines.is_empty() {
+                        self.bottoms.push(lines.start);
+                        self.page_break();
+                    }
                 }
                 Block::PageBreak { .. } => {
                     self.page_break();
@@ -745,6 +748,22 @@ impl<'a> Flow<'a> {
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
             self.wide = None;
         }
+    }
+
+    /// Sets `blocks` as a group that stays on one page and returns its lines.
+    fn keep(&mut self, at: Location, blocks: &[Block], frame: Frame<'a>) -> Range<usize> {
+        let start = self.lines.len();
+        let in_keep = std::mem::replace(&mut self.in_keep, true);
+        self.blocks(blocks, frame);
+        self.in_keep = in_keep;
+        let end = self.lines.len();
+        if end > start {
+            for line in &mut self.lines[start..end - 1] {
+                line.after = Break::Never;
+            }
+            self.keeps.push((start..end, at));
+        }
+        start..end
     }
 
     /// Ends the page after the last line set so far.

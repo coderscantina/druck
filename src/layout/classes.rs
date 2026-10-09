@@ -62,6 +62,7 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&Class, BlockKind)) {
             }
             Block::Quote { blocks, .. }
             | Block::Keep { blocks, .. }
+            | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }
             | Block::FullWidth { blocks, .. } => walk(blocks, visit),
             _ => {}

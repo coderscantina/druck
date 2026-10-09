@@ -121,6 +121,7 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&[Inline])) {
             Block::List { items, .. } => items.iter().for_each(|item| walk(item, visit)),
             Block::Quote { blocks, .. }
             | Block::Keep { blocks, .. }
+            | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }
             | Block::FullWidth { blocks, .. } => walk(blocks, visit),
             Block::Code { .. }

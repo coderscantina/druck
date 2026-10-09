@@ -7,13 +7,13 @@ meta:
   publisher: Harbour Press
 ---
 
+::: bottom
 This is a work of fiction. Names, characters, places, and incidents are the product of the author's imagination. Any resemblance to actual persons, living or dead, is entirely coincidental. {.copyright}
 
 First edition 2026. Set in Libertinus Serif with Druck. {.copyright}
 
 © Mara Ellison. All rights reserved. No part of this book may be reproduced without the written permission of the publisher. {.copyright}
-
-::: page-break
+:::
 
 For everyone who kept a light burning. {.dedication}
 

@@ -123,6 +123,12 @@ pub enum Block {
         at: Location,
         blocks: Vec<Block>,
     },
+    /// `::: bottom`: content that stays together at the bottom of the page, such as a copyright notice.
+    /// What follows starts a new page.
+    Bottom {
+        at: Location,
+        blocks: Vec<Block>,
+    },
     /// `::: columns`: content in two columns.
     Columns {
         at: Location,
@@ -168,6 +174,7 @@ impl Block {
             | Self::Image { at, .. }
             | Self::Table { at, .. }
             | Self::Keep { at, .. }
+            | Self::Bottom { at, .. }
             | Self::Columns { at, .. }
             | Self::FullWidth { at, .. }
             | Self::PageBreak { at }

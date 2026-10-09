@@ -16,6 +16,9 @@
 //! starts below the taller column. Column regions take part in the search like any other lines:
 //! their balanced height counts toward the page, and the cost of their column break toward its cost.
 //!
+//! A `::: bottom` group is a keep group that ends its page. It is set at the bottom of the text area,
+//! above the footnotes.
+//!
 //! A table's rows are lines like any other. Where a page or column starts at one of its rows, the
 //! table's header row is set again above it, and its height counts toward that page or column.
 
@@ -97,6 +100,8 @@ pub(super) struct Content {
     pub rectos: Vec<usize>,
     /// Line ranges of keep groups with their directive locations.
     pub keeps: Vec<(Range<usize>, Location)>,
+    /// The first lines of the keep groups set at the bottom of their page.
+    pub bottoms: Vec<usize>,
     /// Line ranges set in two columns, in order.
     pub columns: Vec<Range<usize>>,
     /// Tables in order.
@@ -129,6 +134,7 @@ pub(super) fn compose(
         mut body,
         rectos,
         keeps,
+        bottoms,
         columns,
         tables,
         notes,
@@ -150,14 +156,22 @@ pub(super) fn compose(
         config.page.text_height().0,
         body_line,
     );
-    composer.check(&keeps, &tables, source)?;
+    composer.check(&keeps, &bottoms, &tables, source)?;
     let plans = composer.search().ok_or_else(|| {
         vec![Diagnostic::new(
             Some(source.clone()),
             "no page breaks satisfy the layout constraints",
         )]
     })?;
-    Ok(render(&plans, &mut body, &headers, notes, (first, &rectos), config))
+    Ok(render(
+        &plans,
+        &mut body,
+        &headers,
+        notes,
+        (first, &rectos),
+        &bottoms,
+        config,
+    ))
 }
 
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
@@ -370,6 +384,7 @@ impl<'a> Composer<'a> {
     fn check(
         &self,
         keeps: &[(Range<usize>, Location)],
+        bottoms: &[usize],
         tables: &[Table],
         source: &Source,
     ) -> Result<(), Vec<Diagnostic>> {
@@ -407,6 +422,7 @@ impl<'a> Composer<'a> {
                 };
                 let table = tables.iter().find(|table| table.lines.start == start);
                 let (at, what) = match keep {
+                    Some((lines, at)) if bottoms.contains(&lines.start) => (*at, "this bottom group"),
                     Some((_, at)) => (*at, "this keep group"),
                     None if self.headers[start].is_some() => (line.at, "this table row with the repeated header"),
                     None if let Some(table) = table => (table.at, "the start of this table up to its first row"),
@@ -704,6 +720,7 @@ fn render(
     headers: &[Option<&Line>],
     mut notes: Notes,
     (first, rectos): (usize, &[usize]),
+    bottoms: &[usize],
     config: &Config,
 ) -> Composed {
     let geometry = &config.page;
@@ -729,6 +746,11 @@ fn render(
             items.extend(line.into_iter().map(|item| translate(item, left + shift, top + y)));
         };
 
+        let notes_height = if plan.notes.is_empty() {
+            0.0
+        } else {
+            notes.area(plan.notes.start, plan.notes.end)
+        };
         let mut y = top;
         for region in &plan.regions {
             let first = match region {
@@ -741,16 +763,31 @@ fn render(
             match region {
                 Region::Full(lines) => {
                     let x = (left, shift);
-                    y = stack(
-                        &mut items,
-                        body,
-                        headers,
-                        lines.clone(),
-                        x,
-                        y,
-                        plan.stretch,
-                        plan.lines.start,
-                    );
+                    // A bottom group ends its page, so it ends the page's last region.
+                    let split = bottoms.iter().copied().find(|start| lines.contains(start));
+                    let above = lines.start..split.unwrap_or(lines.end);
+                    y = stack(&mut items, body, headers, above, x, y, plan.stretch, plan.lines.start);
+                    if let Some(split) = split {
+                        let group = split..lines.end;
+                        let natural: f64 = group
+                            .clone()
+                            .map(|index| {
+                                let space = if index > split { body[index].space_before } else { 0.0 };
+                                space + body[index].line.height
+                            })
+                            .sum();
+                        let floor = top + height - notes_height;
+                        y = stack(
+                            &mut items,
+                            body,
+                            headers,
+                            group,
+                            x,
+                            floor - natural,
+                            0.0,
+                            plan.lines.start,
+                        );
+                    }
                 }
                 Region::Columns(columns) => {
                     // Each column stretches to the region's height if its spaces allow, else stays natural.

@@ -263,6 +263,7 @@ impl Walk<'_> {
                 Block::List { items, .. } => items.iter().for_each(|item| self.blocks(item)),
                 Block::Quote { blocks, .. }
                 | Block::Keep { blocks, .. }
+                | Block::Bottom { blocks, .. }
                 | Block::Columns { blocks, .. }
                 | Block::FullWidth { blocks, .. } => self.blocks(blocks),
                 Block::Bibliography { at } => {
