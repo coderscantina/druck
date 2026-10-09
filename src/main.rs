@@ -28,6 +28,7 @@ use config::front_matter::{self, FrontMatter};
 use config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use config::resolved::{Config, FontFiles};
 use config::source::{Origin, Resource, Source, normalize, show_relative_to, shown};
+use config::values::{Length, Pt};
 use diagnostic::Diagnostic;
 use image::Image;
 use text::Fonts;
@@ -57,6 +58,12 @@ enum Command {
         /// Output PDF path. Defaults to the document path with a `.pdf` extension.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Extend each page by a bleed for print, as in `--bleed 3mm`. The page size stays the trim size.
+        #[arg(long, value_name = "LENGTH", value_parser = parse_bleed)]
+        bleed: Option<Pt>,
+        /// Draw crop marks at the corners of each page, outside the bleed.
+        #[arg(long)]
+        crop_marks: bool,
     },
 }
 
@@ -97,14 +104,23 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             }
             Ok(())
         }
-        Command::Render { input, output } => {
+        Command::Render {
+            input,
+            output,
+            bleed,
+            crop_marks,
+        } => {
             let (config, document) = load(&input)?;
             let output = match output {
                 Some(path) => normalize(&document.working_dir.join(path)),
                 None => document.path.with_extension("pdf"),
             };
             let (fonts, laid) = typeset(&config, &document)?;
-            let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang)
+            let print = pdf::Print {
+                bleed: bleed.unwrap_or(Pt(0.0)),
+                crop_marks,
+            };
+            let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang, print)
                 .map_err(|e| vec![Diagnostic::new(None, e)])?;
             let used: BTreeSet<_> = laid
                 .pages
@@ -128,6 +144,14 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             );
             Ok(())
         }
+    }
+}
+
+/// Reads a bleed as an absolute length, such as `3mm` or `0.125in`.
+fn parse_bleed(input: &str) -> Result<Pt, String> {
+    match Length::parse(input)? {
+        Length::Pt(pt) => Ok(Pt(pt)),
+        Length::Em(_) => Err(format!("bleed \"{input}\" needs an absolute unit (pt, mm, cm, or in)")),
     }
 }
 

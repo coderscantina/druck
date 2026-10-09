@@ -1,5 +1,6 @@
 //! PDF output: embeds and subsets fonts, writes text as selectable glyph runs, adds links to URLs and
-//! anchors, and writes the heading outline as bookmarks and page numbers as page labels.
+//! anchors, and writes the heading outline as bookmarks and page numbers as page labels. For print, it adds
+//! a bleed and crop marks around each page.
 //!
 //! krilla uses the same coordinates as [`Page`]: points from the top-left corner, y growing down.
 
@@ -9,6 +10,7 @@ use krilla::Document;
 use krilla::action::LinkAction;
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
+use krilla::color::separation::{self, SeparationColorant, SeparationSpace};
 use krilla::destination::XyzDestination;
 use krilla::geom::{PathBuilder, Point, Rect as PdfRect, Size, Transform};
 use krilla::metadata::{DateTime, Metadata as PdfMetadata};
@@ -21,7 +23,7 @@ use krilla_svg::{SurfaceExt, SvgSettings};
 
 use crate::config::front_matter::Metadata;
 use crate::config::theme::{Lang, NumberFormat};
-use crate::config::values::Color;
+use crate::config::values::{Color, Pt};
 use crate::date::Date;
 use crate::document::Link;
 use crate::image::{Image, Pixels};
@@ -32,10 +34,46 @@ use crate::text::{Fonts, ShapedRun};
 const CREATOR: &str = concat!("Druck ", env!("CARGO_PKG_VERSION"));
 const PRODUCER: &str = concat!("Coder's Cantina Druck ", env!("CARGO_PKG_VERSION"));
 
+/// The least distance between the trim edge and a crop mark, as InDesign's default.
+const MARK_OFFSET: f32 = 6.0;
+const MARK_LENGTH: f32 = 15.0;
+const MARK_THICKNESS: f32 = 0.25;
+
+/// What a print shop needs around each page, from the command line. A zero bleed without marks adds nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Print {
+    /// How far the bleed box reaches past the trim box on each side.
+    pub bleed: Pt,
+    /// Whether crop marks show the trim box at the corners, outside the bleed.
+    pub crop_marks: bool,
+}
+
+impl Print {
+    fn bleed(self) -> f32 {
+        self.bleed.0 as f32
+    }
+
+    /// The distance from the trim box to a crop mark.
+    fn mark_offset(self) -> f32 {
+        self.bleed().max(MARK_OFFSET)
+    }
+
+    /// The space around the trim box on each side of the media box.
+    fn margin(self) -> f32 {
+        if self.crop_marks {
+            self.mark_offset() + MARK_LENGTH
+        } else {
+            self.bleed()
+        }
+    }
+}
+
 /// Writes the pages of `output` as a PDF document, with links, anchors, and bookmarks. The document
 /// info holds the title, authors, subject, language, and application, and a creation date only from an
-/// ISO `date`, so the same input gives the same bytes.
-pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) -> Result<Vec<u8>, String> {
+/// ISO `date`, so the same input gives the same bytes. With a bleed or crop marks, each page is the trim
+/// box inside a larger media box.
+pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang, print: Print) -> Result<Vec<u8>, String> {
+    let margin = print.margin();
     let destination = |anchor: usize| {
         let position = output
             .anchors
@@ -44,19 +82,38 @@ pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) ->
             .ok_or_else(|| format!("link to anchor {anchor}, which is on no page"))?;
         Ok::<_, String>(XyzDestination::new(
             position.page,
-            Point::from_xy(position.x.0 as f32, position.y.0 as f32),
+            Point::from_xy(position.x.0 as f32 + margin, position.y.0 as f32 + margin),
         ))
     };
     let mut document = Document::new();
     document.set_metadata(document_info(metadata, output.heading_title.as_deref(), lang));
     for (index, page) in output.pages.iter().enumerate() {
-        let mut settings = PageSettings::from_wh(page.width.0 as f32, page.height.0 as f32)
-            .ok_or_else(|| format!("invalid page size {} x {} pt", page.width.0, page.height.0))?;
+        let (width, height) = (page.width.0 as f32, page.height.0 as f32);
+        let invalid = || format!("invalid page size {} x {} pt", page.width.0, page.height.0);
+        let mut settings = PageSettings::from_wh(width + 2.0 * margin, height + 2.0 * margin).ok_or_else(invalid)?;
+        if margin > 0.0 {
+            let bleed = print.bleed();
+            let trim = PdfRect::from_xywh(margin, margin, width, height).ok_or_else(invalid)?;
+            let bleed_box = PdfRect::from_xywh(
+                margin - bleed,
+                margin - bleed,
+                width + 2.0 * bleed,
+                height + 2.0 * bleed,
+            )
+            .ok_or_else(invalid)?;
+            settings = settings.with_trim_box(Some(trim)).with_bleed_box(Some(bleed_box));
+        }
         if let Some(number) = output.page_numbers.get(index) {
             settings = settings.with_page_label(page_label(*number));
         }
         let mut pdf_page = document.start_page_with(settings);
         let mut surface = pdf_page.surface();
+        if print.crop_marks {
+            draw_crop_marks(&mut surface, print, width, height)?;
+        }
+        if margin > 0.0 {
+            surface.push_transform(&Transform::from_translate(margin, margin));
+        }
         let mut links = Vec::new();
         for item in &page.items {
             match item {
@@ -82,9 +139,16 @@ pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) ->
                 Item::Anchor { .. } => {}
             }
         }
+        if margin > 0.0 {
+            surface.pop();
+        }
         surface.finish();
         for (rect, link) in links {
-            let rect = pdf_rect(rect)?;
+            let rect = pdf_rect(&Rect {
+                x: Pt(rect.x.0 + f64::from(margin)),
+                y: Pt(rect.y.0 + f64::from(margin)),
+                ..*rect
+            })?;
             let target = match link {
                 Link::Url(url) => Target::Action(LinkAction::new(url.clone()).into()),
                 Link::Anchor(anchor) => Target::Destination(destination(*anchor)?.into()),
@@ -200,6 +264,34 @@ fn draw_run(surface: &mut Surface, fonts: &Fonts, run: &ShapedRun, start: Point,
     surface.draw_glyphs(start, &glyphs, fonts.pdf_font(run.face).clone(), &run.text, size, false);
 }
 
+/// Draws two marks at each corner of the `width` by `height` trim box, which starts `print.margin()` from
+/// the media box's top left. They are in the registration color, which prints on every plate.
+fn draw_crop_marks(surface: &mut Surface, print: Print, width: f32, height: f32) -> Result<(), String> {
+    let (margin, offset) = (print.margin(), print.mark_offset());
+    let (left, top) = (margin, margin);
+    let (right, bottom) = (margin + width, margin + height);
+    let half = MARK_THICKNESS / 2.0;
+    let mut path = PathBuilder::new();
+    for y in [top, bottom] {
+        for x in [left - offset - MARK_LENGTH, right + offset] {
+            path.push_rect(PdfRect::from_xywh(x, y - half, MARK_LENGTH, MARK_THICKNESS).ok_or("invalid crop mark")?);
+        }
+    }
+    for x in [left, right] {
+        for y in [top - offset - MARK_LENGTH, bottom + offset] {
+            path.push_rect(PdfRect::from_xywh(x - half, y, MARK_THICKNESS, MARK_LENGTH).ok_or("invalid crop mark")?);
+        }
+    }
+    let path = path.finish().ok_or("no crop marks")?;
+    let registration = SeparationSpace::new(SeparationColorant::AllColorants, rgb::Color::black().into());
+    surface.set_fill(Some(Fill {
+        paint: krilla::color::Color::from(separation::Color::new(255, registration)).into(),
+        ..Fill::default()
+    }));
+    surface.draw_path(&path);
+    Ok(())
+}
+
 fn draw_rect(surface: &mut Surface, rect: &Rect, color: Color) -> Result<(), String> {
     let mut path = PathBuilder::new();
     path.push_rect(pdf_rect(rect)?);
@@ -246,6 +338,11 @@ mod tests {
     use crate::config::theme::{Face, FontStyle, Weight};
     use crate::config::values::Pt;
     use crate::page::{Page, Position};
+
+    const PLAIN: Print = Print {
+        bleed: Pt(0.0),
+        crop_marks: false,
+    };
 
     fn fonts() -> Fonts {
         let regular = FaceFile {
@@ -296,7 +393,7 @@ mod tests {
             authors: vec!["Mike".to_owned()],
             ..Metadata::default()
         };
-        let bytes = write(&output(vec![page]), &fonts, &metadata, Lang::De).expect("pdf");
+        let bytes = write(&output(vec![page]), &fonts, &metadata, Lang::De, PLAIN).expect("pdf");
         assert!(bytes.starts_with(b"%PDF"));
     }
 
@@ -348,7 +445,7 @@ mod tests {
             heading_title: None,
             page_numbers: Vec::new(),
         };
-        let bytes = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let bytes = write(&output, &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
         let pdf = String::from_utf8_lossy(&bytes);
 
         // Each dictionary up to its first nested one, found by a key it holds.
@@ -366,7 +463,7 @@ mod tests {
             outline: vec![bookmark(1, "Lost", 7)],
             ..output
         };
-        assert!(write(&missing, &fonts(), &Metadata::default(), Lang::En).is_err());
+        assert!(write(&missing, &fonts(), &Metadata::default(), Lang::En, PLAIN).is_err());
     }
 
     #[test]
@@ -376,7 +473,7 @@ mod tests {
                 heading_title: heading_title.map(str::to_owned),
                 ..output(Vec::new())
             };
-            let bytes = write(&output, &fonts(), metadata, Lang::En).expect("pdf");
+            let bytes = write(&output, &fonts(), metadata, Lang::En, PLAIN).expect("pdf");
             let text = String::from_utf8_lossy(&bytes).into_owned();
             let producer = text.find("/Producer").expect("document info");
             let start = text[..producer].rfind("<<").expect("dictionary start");
@@ -438,9 +535,70 @@ mod tests {
             ],
         };
         let output = output(vec![page]);
-        let first = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
-        let second = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
+        let first = write(&output, &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
+        let second = write(&output, &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
         assert!(first.starts_with(b"%PDF"));
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_bleed_and_crop_marks_put_the_trim_box_inside_a_larger_media_box() {
+        let link = Rect {
+            x: Pt(10.0),
+            y: Pt(10.0),
+            width: Pt(50.0),
+            height: Pt(12.0),
+        };
+        let page = Page {
+            width: Pt(200.0),
+            height: Pt(100.0),
+            items: vec![Item::Link {
+                rect: link,
+                link: Link::Url("https://example.com".to_owned()),
+            }],
+        };
+        let print = Print {
+            bleed: Pt(10.0),
+            crop_marks: true,
+        };
+        let bytes = write(
+            &output(vec![page.clone()]),
+            &fonts(),
+            &Metadata::default(),
+            Lang::En,
+            print,
+        )
+        .expect("pdf");
+        let pdf = String::from_utf8_lossy(&bytes);
+
+        // The marks start 10pt out and are 15pt long, so the media box grows by 25pt on each side.
+        assert!(pdf.contains("/MediaBox[0 0 250 150]"), "{pdf}");
+        assert!(pdf.contains("/TrimBox[25 25 225 125]"), "{pdf}");
+        assert!(pdf.contains("/BleedBox[15 15 235 135]"), "{pdf}");
+        assert!(pdf.contains("/All"), "registration color");
+        assert!(
+            pdf.contains("/Rect[35 103 85 115]"),
+            "the link moves with the content: {pdf}"
+        );
+
+        let bleed_only = Print {
+            crop_marks: false,
+            ..print
+        };
+        let bytes = write(
+            &output(vec![page.clone()]),
+            &fonts(),
+            &Metadata::default(),
+            Lang::En,
+            bleed_only,
+        )
+        .expect("pdf");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/MediaBox[0 0 220 120]") && pdf.contains("/TrimBox[10 10 210 110]"));
+        assert!(!pdf.contains("/All"));
+
+        let bytes = write(&output(vec![page]), &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/MediaBox[0 0 200 100]") && !pdf.contains("/TrimBox"));
     }
 }

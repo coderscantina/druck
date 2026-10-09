@@ -368,6 +368,25 @@ fn renders_the_samples() {
 }
 
 #[test]
+fn renders_print_pdfs_with_a_bleed_and_crop_marks_and_rejects_relative_bleeds() {
+    let sandbox = Sandbox::new("print");
+    let document = sandbox.write("doc.md", "# Print\n\nText.\n");
+    let output = sandbox.root.join("doc.pdf");
+    let path = output.to_str().unwrap();
+    let pdf = render(
+        &sandbox,
+        &[&document, "-o", path, "--bleed", "3mm", "--crop-marks"],
+        &output,
+    );
+    let pdf = String::from_utf8_lossy(&pdf);
+    assert!(pdf.contains("/TrimBox") && pdf.contains("/BleedBox"));
+
+    let run = sandbox.run(&["render", &document, "-o", path, "--bleed", "1em"]);
+    assert_ne!(run.code, 0);
+    assert!(run.stderr.contains("needs an absolute unit"), "{}", run.stderr);
+}
+
+#[test]
 fn renders_variable_weights_and_italics_and_rejects_unavailable_faces() {
     let sandbox = Sandbox::new("variable-fonts");
     fs::copy(
