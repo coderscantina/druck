@@ -1,0 +1,95 @@
+{
+  "$schema": "../../schema/theme.v1.schema.json",
+  "version": 1,
+  "document": {
+    "title-page": true,
+    "duplex": true,
+    "numbering-depth": 1,
+    "toc-depth": 1
+  },
+  "images": {
+    "ornament": "ornament.svg"
+  },
+  "page": {
+    "size": { "width": "5.5in", "height": "8.5in" },
+    "margins": {
+      "top": "0.75in",
+      "bottom": "0.85in",
+      "inner": "0.75in",
+      "outer": "0.6in"
+    },
+    "header-offset": "0.3in",
+    "footer-offset": "0.4in"
+  },
+  "styles": {
+    "body": { "size": "10.5pt", "line-height": 1.4 },
+    "heading-1": {
+      "size": "1.5em",
+      "weight": "regular",
+      "align": "center",
+      "space-before": "0pt",
+      "space-after": "2em",
+      "tracking": 0.08,
+      "uppercase": true
+    },
+    "toc-heading": {
+      "weight": "regular",
+      "align": "center",
+      "space-after": "1.5em",
+      "tracking": 0.08,
+      "uppercase": true
+    },
+    "header": { "size": "0.8em", "tracking": 0.12, "uppercase": true, "align": "center" },
+    "footer": { "size": "0.9em" },
+    "scene-break": { "space-before": "0.7em", "space-after": "0.7em" }
+  },
+  "custom-styles": {
+    "chapter-number": { "based-on": "heading-1", "size": "2.6em", "tracking": 0, "space-after": "0.4em" },
+    "copyright": { "based-on": "body", "size": "0.8em", "align": "left", "first-line-indent": "0pt", "space-after": "0.6em" },
+    "dedication": { "based-on": "body", "style": "italic", "align": "center", "first-line-indent": "0pt" }
+  },
+  "chapters": {
+    "break-before": "recto",
+    "sink": "7em",
+    "number-format": "upper-roman",
+    "number-position": "above",
+    "number-style": "chapter-number",
+    "ornament": { "image": "ornament", "width": "6em", "space-before": "0.8em" },
+    "drop-cap": 2,
+    "lead-in": 3
+  },
+  "toc": { "leader": false },
+  "title-page": {
+    "groups": [
+      {
+        "anchor": "top-left",
+        "align": "center",
+        "slots": [
+          { "text": "{author}", "style": "author", "space-before": "6em" },
+          { "text": "{title}", "style": "title", "required": true, "space-before": "1em" },
+          { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" }
+        ]
+      },
+      {
+        "anchor": "bottom-left",
+        "align": "center",
+        "slots": [{ "text": "{meta.publisher}", "style": "date" }]
+      }
+    ]
+  },
+  "pages": {
+    "first": null,
+    "opening": {
+      "header": null,
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    },
+    "odd": {
+      "header": [{ "anchor": "bottom-left", "align": "center", "slots": [{ "text": "{section}" }] }],
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    },
+    "even": {
+      "header": [{ "anchor": "bottom-left", "align": "center", "slots": [{ "text": "{title}" }] }],
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    }
+  }
+}
