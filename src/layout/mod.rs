@@ -101,8 +101,13 @@ pub fn layout(
     } else {
         None
     };
-    // In duplex a blank page follows the title page, so the body starts on an odd page.
-    let blank = (title_page.is_some() && config.document.duplex).then(|| blank_page(config));
+    // In duplex a blank page follows the title page, so the body starts on an odd page. A book's parts
+    // start odd pages themselves, so a copyright page before them goes on the back of the title page.
+    let parts = document
+        .blocks
+        .iter()
+        .any(|block| matches!(block, Block::Matter { .. }));
+    let blank = (title_page.is_some() && config.document.duplex && !parts).then(|| blank_page(config));
     let pass = Pass {
         document,
         cited,

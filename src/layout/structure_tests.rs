@@ -983,6 +983,22 @@ fn book_parts_number_their_pages_and_only_main_matter_headings_count() {
 }
 
 #[test]
+fn a_duplex_book_sets_its_copyright_page_on_the_back_of_the_title_page() {
+    let config = config("title: Book\ntitle-page: true\nduplex: true", theme());
+    let output = render(&config, "Copyright.\n\n::: front-matter\n# Preface {-}\n\nText.");
+
+    assert_eq!(texts(&output.pages[1]), ["Copyright."]);
+    assert_eq!(
+        texts(&output.pages[2])[0],
+        "Preface",
+        "the front matter still starts an odd page"
+    );
+
+    let without_parts = render(&config, "Copyright.\n\n# One\n\nText.");
+    assert!(texts(&without_parts.pages[1]).is_empty(), "the body starts an odd page");
+}
+
+#[test]
 fn a_page_reference_to_a_page_without_a_number_is_an_error() {
     let config = config("toc: false", theme());
     let result = render_images(
