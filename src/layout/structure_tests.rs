@@ -1,5 +1,6 @@
 //! Document structures: title blocks and pages, page variants, headers and footers, numbering,
-//! the table of contents, cross-references, settling page numbers, and page geometry.
+//! the table of contents, cross-references, settling page numbers, page geometry, and the parts,
+//! chapters, and scene breaks of books.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -449,9 +450,11 @@ fn settling_repeats_layout_until_shown_pages_agree_and_reports_pages_that_keep_m
     };
     let run = |shown: &[usize], next: fn(usize) -> usize| {
         let mut passes = 0;
+        let numbers: Vec<String> = (1..=5).map(|page: usize| page.to_string()).collect();
         let result = settle(&anchors, shown, &source(), |assumed| {
             passes += 1;
-            Ok(((), vec![position(next(assumed[0]))]))
+            let page = next(assumed[0].parse().expect("a number"));
+            Ok(((), vec![position(page)], numbers.clone()))
         });
         (passes, result.map(|_| ()))
     };
@@ -937,4 +940,156 @@ fn a_missing_meta_value_omits_its_slot_unless_it_is_required() {
         errors[0].message,
         "this required slot needs {meta.client}; set meta.client in the front matter"
     );
+}
+
+fn footers(output: &Output, config: &Config) -> Vec<String> {
+    (output.pages.iter())
+        .map(|page| footer(page, config).join(" "))
+        .collect()
+}
+
+#[test]
+fn book_parts_number_their_pages_and_only_main_matter_headings_count() {
+    let pages = json!({"version": 1, "pages": {
+        "first": null, "body": {"header": null, "footer": [group("center", "{page}/{pages}")]},
+    }});
+    let config = config("toc: false", pages);
+    let body = "Copyright.\n\n::: front-matter\n# Preface\n\nText.\n\n::: page-break\n::: toc\n\n::: main-matter\n\
+        # One\n\nText.\n\n# Two {-}\n\nText.\n\n# Three\n\nSee [@sec:three, page].\n\n::: page-break\n\
+        More.\n\n::: back-matter\n# Notes {#sec:three}\n\nText.";
+    let output = render(&config, body);
+
+    assert_eq!(footers(&output, &config), ["", "i/ii", "ii/ii", "1/3", "2/3", "3/3"]);
+    let titles: Vec<_> = output.outline.iter().map(|bookmark| bookmark.title.as_str()).collect();
+    assert_eq!(titles, ["Preface", "1 One", "Two", "2 Three", "Notes"]);
+    let contents = texts(&output.pages[2]);
+    assert!(
+        contents
+            .iter()
+            .any(|line| line.starts_with("Preface") && line.ends_with('i')),
+        "{contents:?}"
+    );
+    assert!(
+        texts(&output.pages[3]).iter().any(|line| line == "See page\u{a0}3."),
+        "{:?}",
+        texts(&output.pages[3])
+    );
+    let labels: Vec<_> = output
+        .page_numbers
+        .iter()
+        .map(|number| number.map(|number| number.format.format(number.value)))
+        .collect();
+    assert_eq!(labels[..3], [None, Some("i".to_owned()), Some("ii".to_owned())]);
+}
+
+#[test]
+fn a_page_reference_to_a_page_without_a_number_is_an_error() {
+    let config = config("toc: false", theme());
+    let result = render_images(
+        &config,
+        "# Cover {#sec:cover}\n\n::: main-matter\nSee [@sec:cover, page].",
+        &[],
+    );
+
+    let errors = result.expect_err("an error");
+    assert_eq!(errors[0].location, Some((1, 1)));
+    assert!(
+        errors[0].message.contains("on a page without a number"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn chapters_start_on_odd_pages_sunk_below_their_number_and_open_their_variant() {
+    let band = |name: &str| json!({"header": [group("center", name)], "footer": null});
+    let theme = json!({"version": 1,
+        "chapters": {"break-before": "recto", "sink": "100pt", "number-format": "upper-roman",
+            "number-position": "above", "number-label": true},
+        "pages": {"first": null, "opening": band("opening"), "body": band("body")},
+    });
+    let config = config("toc: false", theme);
+    let output = render(&config, &format!("# One\n\n{PROSE}\n\n# Two\n\n{PROSE}"));
+
+    assert_eq!(output.pages.len(), 3, "a blank page puts the second chapter on page 3");
+    assert!(output.pages[1].items.is_empty());
+    let headers: Vec<_> = output
+        .pages
+        .iter()
+        .map(|page| header(page, &config).join(" "))
+        .collect();
+    assert_eq!(headers, ["opening", "", "opening"]);
+    let page = &output.pages[2];
+    let top = config.page.margin_top.0;
+    let anchor = output.anchors[output.outline[1].anchor];
+    assert_eq!(anchor.page, 2);
+    assert!(
+        close(anchor.y.0, top + 100.0),
+        "the number line starts at the sink: {anchor:?}"
+    );
+    assert!(baseline(page, "Two") > baseline(page, "Chapter II"));
+}
+
+#[test]
+fn a_blank_scene_break_shows_its_mark_only_at_the_top_of_a_page() {
+    let blank = config(
+        "toc: false",
+        json!({"version": 1, "scene-break": {"text": "* * *", "blank": true}}),
+    );
+    let output = render(&blank, "Before.\n\n***\n\nAfter.\n\n::: page-break\n\n---\n\nLater.");
+
+    assert!(!texts(&output.pages[0]).iter().any(|line| line == "* * *"));
+    assert_eq!(texts(&output.pages[1])[0], "* * *");
+    let visible = render(&config("toc: false", theme()), "Before.\n\n***\n\nAfter.");
+    assert!(texts(&visible.pages[0]).iter().any(|line| line == "* * *"));
+}
+
+#[test]
+fn a_chapter_opens_with_a_drop_capital_and_a_lead_in_unless_turned_off() {
+    let theme = json!({"version": 1, "chapters": {"drop-cap": 3, "lead-in": 2}});
+    let config = config("toc: false\nnumbered-headings: false", theme);
+    let output = render(
+        &config,
+        &format!("# One\n\n{PROSE}\n\n{PROSE}\n\n# Two\n\n{PROSE} {{.no-drop-cap}}"),
+    );
+
+    let page = &output.pages[0];
+    let runs: Vec<_> = (page.items.iter())
+        .filter_map(|item| match item {
+            Item::Text { x, y, run, .. } => Some((x.0, y.0, run)),
+            _ => None,
+        })
+        .collect();
+    let (x, y, initial) = runs.iter().find(|(.., run)| run.text == "T").expect("a drop capital");
+    let body = config.styles.body.size;
+    assert!(initial.size.0 > 2.0 * body.0);
+    let lines = lines(page);
+    let text = lines
+        .iter()
+        .position(|line| line.2.contains("design of a page"))
+        .expect("the first line");
+    assert!(close(*y, lines[text + 2].0), "on the baseline of the third line");
+    let left = |line: &(f64, f64, String)| {
+        (runs.iter())
+            .filter(|(_, y, run)| close(*y, line.0) && run.text != "T")
+            .map(|(x, ..)| *x)
+            .fold(f64::MAX, f64::min)
+    };
+    for line in &lines[text..text + 3] {
+        assert!(left(line) > x + initial.width.0, "beside the capital: {line:?}");
+    }
+    assert!(
+        left(&lines[text + 3]) < x + initial.width.0,
+        "the fourth line is not indented"
+    );
+    let glyphs = |run: &crate::text::ShapedRun| run.glyphs.iter().map(|glyph| glyph.id).collect::<Vec<_>>();
+    let designs: Vec<_> = runs.iter().filter(|(.., run)| run.text == "design").collect();
+    assert!(close(designs[0].1, lines[text].0), "the lead-in is on the first line");
+    assert_ne!(
+        glyphs(designs[0].2),
+        glyphs(designs[1].2),
+        "small capitals replace the lead-in's letters"
+    );
+    let second = runs.iter().filter(|(.., run)| run.size.0 > 2.0 * body.0).count();
+    assert_eq!(second, 1, "the paragraph styled no-drop-cap has none");
 }

@@ -123,7 +123,12 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&[Inline])) {
             | Block::Keep { blocks, .. }
             | Block::Columns { blocks, .. }
             | Block::FullWidth { blocks, .. } => walk(blocks, visit),
-            Block::Code { .. } | Block::PageBreak { .. } | Block::Bibliography { .. } => {}
+            Block::Code { .. }
+            | Block::PageBreak { .. }
+            | Block::Matter { .. }
+            | Block::Contents { .. }
+            | Block::SceneBreak { .. }
+            | Block::Bibliography { .. } => {}
         }
     }
 }

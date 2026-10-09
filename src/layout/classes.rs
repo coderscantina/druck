@@ -7,6 +7,7 @@ use crate::document::{Block, Class, Document};
 
 /// Reports, at the attribute, each style name the theme does not define and each style applied to a
 /// kind of block it is not for. A style's kind follows its built-in base: headings, lists, or paragraphs.
+/// `{.no-drop-cap}` on a paragraph is no theme style; it turns off a chapter's drop capital and lead-in.
 pub(super) fn check(document: &Document, config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let mut visit = |class: &Class, kind: BlockKind| {
@@ -41,7 +42,10 @@ pub(super) fn check(document: &Document, config: &Config, source: &Source) -> Re
 fn walk(blocks: &[Block], visit: &mut impl FnMut(&Class, BlockKind)) {
     for block in blocks {
         match block {
-            Block::Paragraph { class, .. } => class.iter().for_each(|class| visit(class, BlockKind::Paragraph)),
+            Block::Paragraph { class, .. } => class
+                .iter()
+                .filter(|class| class.name != super::NO_DROP_CAP)
+                .for_each(|class| visit(class, BlockKind::Paragraph)),
             Block::Heading { class, .. } => class.iter().for_each(|class| visit(class, BlockKind::Heading)),
             Block::List { class, items, .. } => {
                 class.iter().for_each(|class| visit(class, BlockKind::List));

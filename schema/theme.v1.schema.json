@@ -342,6 +342,10 @@
         "watermark": {
           "description": "Watermark text. Font, size, weight, style, color, tracking, and uppercase apply.",
           "$ref": "#/$defs/blockStyle"
+        },
+        "scene-break": {
+          "description": "The text of a scene break, set as one line. Its line height and spacing also size a blank break.",
+          "$ref": "#/$defs/blockStyle"
         }
       },
       "description": "Block element styles."
@@ -565,6 +569,148 @@
       },
       "description": "Table of contents layout."
     },
+    "matter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "front": {
+          "description": "Pages from ::: front-matter.",
+          "$ref": "#/$defs/matterPages"
+        },
+        "main": {
+          "description": "Pages from ::: main-matter.",
+          "$ref": "#/$defs/matterPages"
+        },
+        "back": {
+          "description": "Pages from ::: back-matter.",
+          "$ref": "#/$defs/matterPages"
+        }
+      },
+      "description": "Page numbers of the parts of a book. Pages before the first part have no number."
+    },
+    "chapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "break-before": {
+          "enum": [
+            "none",
+            "page",
+            "recto"
+          ],
+          "description": "Whether a level 1 heading starts a new page, or a new odd page."
+        },
+        "sink": {
+          "description": "Distance from the top of the text area to a level 1 heading that starts a page after break-before. em is relative to the heading-1 size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "number-format": {
+          "description": "How the chapter part of heading numbers is written.",
+          "$ref": "#/$defs/numberFormat"
+        },
+        "number-position": {
+          "enum": [
+            "inline",
+            "above"
+          ],
+          "description": "Whether a level 1 heading number precedes the text or stands on a line of its own above it."
+        },
+        "number-style": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "The built-in or custom style of a number above the heading."
+        },
+        "number-label": {
+          "type": "boolean",
+          "description": "Whether a number above the heading follows the chapter label, as in \"Chapter 2\"."
+        },
+        "ornament": {
+          "description": "An image centered below every level 1 heading of the body, or null for none.",
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "image",
+                "width"
+              ],
+              "properties": {
+                "image": {
+                  "type": "string",
+                  "description": "Name of an entry in images."
+                },
+                "width": {
+                  "description": "Image width. em is relative to the heading-1 size.",
+                  "$ref": "#/$defs/spacingSpec"
+                },
+                "space-before": {
+                  "description": "Space between the heading and the image.",
+                  "$ref": "#/$defs/spacingSpec"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "drop-cap": {
+          "type": "integer",
+          "enum": [
+            0,
+            2,
+            3,
+            4,
+            5
+          ],
+          "description": "Lines spanned by a drop capital at the start of the first paragraph after a level 1 heading, or 0 for none."
+        },
+        "lead-in": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Words at the start of the first paragraph after a level 1 heading set in small capitals."
+        }
+      },
+      "description": "How level 1 headings open chapters."
+    },
+    "scene-break": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The mark of a thematic break, set in the scene-break style."
+        },
+        "image": {
+          "description": "Name of an entry in images to set instead of the text, or null.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width": {
+          "description": "Image width, required with an image. em is relative to the scene-break size.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spacingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blank": {
+          "type": "boolean",
+          "description": "Whether a scene break is an empty line that shows the mark only where it starts a page."
+        }
+      },
+      "description": "The mark that *** and --- set between scenes."
+    },
     "title-block": {
       "description": "Title block at the start of the body, set when the document has metadata for it.",
       "$ref": "#/$defs/titleBlock"
@@ -590,6 +736,17 @@
         },
         "first": {
           "description": "First body page. null removes the variant.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pageVariant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opening": {
+          "description": "Pages where a level 1 heading starts. null removes the variant.",
           "anyOf": [
             {
               "$ref": "#/$defs/pageVariant"
@@ -669,6 +826,29 @@
     }
   },
   "$defs": {
+    "numberFormat": {
+      "enum": [
+        "decimal",
+        "decimal-leading-zero",
+        "lower-roman",
+        "upper-roman"
+      ],
+      "description": "1, 01, i, or I."
+    },
+    "matterPages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "page-numbers": {
+          "description": "How the part's page numbers are written.",
+          "$ref": "#/$defs/numberFormat"
+        },
+        "restart": {
+          "type": "boolean",
+          "description": "Whether the part counts its pages from 1 instead of continuing the count before it."
+        }
+      }
+    },
     "length": {
       "type": "string",
       "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(pt|mm|cm|in|em)$",
@@ -1403,6 +1583,10 @@
         "draft": {
           "type": "string",
           "description": "The value of {draft} in drafts."
+        },
+        "chapter": {
+          "type": "string",
+          "description": "Label before a chapter number above the heading, as in \"Chapter 2\"."
         }
       },
       "description": "Generated text for one language."

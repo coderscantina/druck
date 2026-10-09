@@ -10,16 +10,22 @@
 //!
 //! Before layout, [`structure`] numbers headings, figures, and tables and gives each an anchor. The
 //! body may start with a [title block](titles) and a [table of contents](toc), and a separate title
-//! page may precede it. A document that cites has a [bibliography] section. Page numbers shown in the
+//! page may precede it. A document that cites has a [bibliography] section. Front, main, and back
+//! matter start new pages and set how pages are [numbered](numbering). Page numbers shown in the
 //! text, in the table of contents and in page references, are only known after layout, so layout
 //! repeats until they agree with the pages it produced. Headers and footers are drawn on the final
 //! pages; see [`bands`].
+//!
+//! A level 1 heading opens a chapter as the theme's `chapters` section sets: on a new page, sunk
+//! below the top of the text area, with its number on a line above it and an ornament below it. The
+//! chapter's first paragraph may start with a drop capital and a lead-in in small capitals.
 
 mod bands;
 mod bibliography;
 mod classes;
 mod fields;
 mod notes;
+mod numbering;
 mod pages;
 mod paragraph;
 mod structure;
@@ -42,20 +48,26 @@ use std::ops::Range;
 
 use self::fields::Fields;
 use self::notes::NoteStyles;
+use self::numbering::Numbering;
 use self::structure::Structure;
 use crate::citations::Cited;
-use crate::config::resolved::{Config, CustomStyle, PageGeometry, Style};
+use crate::config::resolved::{Config, CustomStyle, PageGeometry, SceneMark, Style};
 use crate::config::source::{Resource, Source};
-use crate::config::theme::{Align, FontStyle, Weight, WideBlock};
+use crate::config::theme::{Align, BreakBefore, FontStyle, NumberPosition, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location};
+use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location, Matter};
 use crate::image::Image;
 use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::text::{Fonts, ShapedRun};
 
-pub use self::titles::images as title_images;
+pub use self::titles::images as theme_images;
+
+/// The paragraph style that turns off the drop capital and lead-in of a chapter's first paragraph.
+const NO_DROP_CAP: &str = "no-drop-cap";
+/// Space between a drop capital and the text beside it, in ems of the paragraph.
+const DROP_CAP_GAP: f64 = 0.25;
 
 /// The most layout passes spent on page numbers that change the layout they come from.
 const PASSES: usize = 5;
@@ -105,14 +117,26 @@ pub fn layout(
         first: usize::from(title_page.is_some()) + usize::from(blank.is_some()),
     };
     let shown = structure.shown_pages(config);
-    let (body, anchors) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
+    let (Laid { body, numbering }, anchors) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
+    let unnumbered: Vec<Diagnostic> = structure
+        .paged()
+        .filter(|&anchor| numbering.page(anchors[anchor].page).is_none())
+        .map(|anchor| {
+            let (at, what) = &structure.anchors[anchor];
+            let message = format!("{what} is on a page without a number, so a page reference to it shows nothing");
+            Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)
+        })
+        .collect();
+    if !unnumbered.is_empty() {
+        return Err(unnumbered);
+    }
     let mut blanks = body.blanks;
     if blank.is_some() {
         blanks.insert(0, 1);
     }
     let mut pages: Vec<Page> = title_page.into_iter().chain(blank).chain(body.pages).collect();
     bands::draw(
-        &mut pages, pass.first, &blanks, &structure, &anchors, config, &fields, fonts,
+        &mut pages, pass.first, &blanks, &structure, &anchors, &numbering, config, &fields, fonts,
     )?;
     let outline = structure
         .headings
@@ -136,28 +160,27 @@ pub fn layout(
         anchors,
         outline,
         heading_title,
+        page_numbers: numbering.labels(),
     })
 }
 
-/// Repeats `pass` until the page of every anchor in `shown` is the page the pass assumed for it, and
-/// returns the pages and anchor positions of that pass. The first pass assumes page 1 everywhere.
-/// Without shown pages one pass is enough. Page numbers that keep moving are reported at the anchor
-/// that moved, after [`PASSES`] passes.
+/// Repeats `pass` until the page number of every anchor in `shown` is the one the pass assumed for it,
+/// and returns the pages and anchor positions of that pass. A pass also returns the number each page
+/// shows, empty for none. The first pass assumes page 1 everywhere. Without shown pages one pass is
+/// enough. Page numbers that keep moving are reported at the anchor that moved, after [`PASSES`] passes.
 fn settle<T>(
     anchors: &[(Location, String)],
     shown: &[usize],
     source: &Source,
-    mut pass: impl FnMut(&[usize]) -> Result<(T, Vec<Position>), Vec<Diagnostic>>,
+    mut pass: impl FnMut(&[String]) -> Result<(T, Vec<Position>, Vec<String>), Vec<Diagnostic>>,
 ) -> Result<(T, Vec<Position>), Vec<Diagnostic>> {
-    let mut assumed = vec![1; anchors.len()];
+    let mut assumed = vec!["1".to_owned(); anchors.len()];
     let mut count = 0;
     loop {
-        let (laid, positions) = pass(&assumed)?;
+        let (laid, positions, numbers) = pass(&assumed)?;
         count += 1;
-        let moved = shown
-            .iter()
-            .copied()
-            .find(|&anchor| positions[anchor].page + 1 != assumed[anchor]);
+        let number = |anchor: usize| &numbers[positions[anchor].page];
+        let moved = shown.iter().copied().find(|&anchor| *number(anchor) != assumed[anchor]);
         let Some(anchor) = moved else {
             return Ok((laid, positions));
         };
@@ -167,13 +190,16 @@ fn settle<T>(
                 "page numbers did not settle after {PASSES} layout passes: {what} moves between page {} and \
                  page {}",
                 assumed[anchor],
-                positions[anchor].page + 1
+                number(anchor)
             );
             return Err(vec![
                 Diagnostic::new(Some(source.clone()), message).at(at.line, at.column),
             ]);
         }
-        assumed = positions.iter().map(|position| position.page + 1).collect();
+        assumed = positions
+            .iter()
+            .map(|position| numbers[position.page].clone())
+            .collect();
     }
 }
 
@@ -194,10 +220,10 @@ struct Pass<'a> {
 }
 
 impl Pass<'_> {
-    /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages and
-    /// where each anchor is in the whole document.
-    fn run(&self, assumed: &[usize]) -> Result<(pages::Composed, Vec<Position>), Vec<Diagnostic>> {
-        let content = self.content(assumed)?;
+    /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages with the
+    /// numbers of all pages, where each anchor is in the whole document, and the number each page shows.
+    fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Vec<Diagnostic>> {
+        let (content, matters) = self.content(assumed)?;
         let body = pages::compose(content, self.first, self.config, self.source)?;
         let mut positions = vec![None; self.structure.anchors.len()];
         for (index, page) in body.pages.iter().enumerate() {
@@ -215,12 +241,22 @@ impl Pass<'_> {
             .into_iter()
             .map(|position| position.expect("layout places every anchor"))
             .collect();
-        Ok((body, positions))
+        // A part starts on the page of its first line, which a forced break put at the top of a page.
+        let starts: Vec<(usize, Matter)> = matters
+            .into_iter()
+            .filter_map(|(line, matter)| {
+                let page = body.starts.iter().position(|start| *start == Some(line))?;
+                Some((self.first + page, matter))
+            })
+            .collect();
+        let numbering = Numbering::new(self.first + body.pages.len(), &starts, self.config);
+        let numbers = numbering.texts();
+        Ok((Laid { body, numbering }, positions, numbers))
     }
 
     /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
-    /// the anchors.
-    fn content(&self, assumed: &[usize]) -> Result<pages::Content, Vec<Diagnostic>> {
+    /// the anchors. Also returns the line each part of the book starts at.
+    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts), Vec<Diagnostic>> {
         let config = self.config;
         let mut flow = Flow {
             config,
@@ -244,6 +280,10 @@ impl Pass<'_> {
             keeps: Vec::new(),
             columns: Vec::new(),
             wide: None,
+            rectos: Vec::new(),
+            matters: Vec::new(),
+            in_keep: false,
+            opening: false,
             errors: Vec::new(),
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
@@ -252,15 +292,17 @@ impl Pass<'_> {
         {
             flow.title(slots, frame);
         }
-        let mut recto = None;
-        if config.document.toc {
+        // `::: toc` places the contents itself.
+        if config.document.toc && !self.structure.contents {
             flow.contents(frame);
             if config.document.duplex {
                 flow.lines.last_mut().expect("the contents have a heading").after = Break::Forced;
-                recto = Some(flow.lines.len());
+                flow.rectos.push(flow.lines.len());
             }
         }
         flow.blocks(&self.document.blocks, frame);
+        let rectos = std::mem::take(&mut flow.rectos);
+        let matters = std::mem::take(&mut flow.matters);
         let body = std::mem::take(&mut flow.lines);
         let keeps = std::mem::take(&mut flow.keeps);
         let columns = std::mem::take(&mut flow.columns);
@@ -275,17 +317,27 @@ impl Pass<'_> {
         if !flow.errors.is_empty() {
             return Err(flow.errors);
         }
-        Ok(pages::Content {
+        let content = pages::Content {
             body,
-            recto,
+            rectos,
             keeps,
             columns,
             tables,
             notes,
             continued,
-        })
+        };
+        Ok((content, matters))
     }
 }
+
+/// The body pages of a layout pass and the numbers of all pages.
+struct Laid {
+    body: pages::Composed,
+    numbering: Numbering,
+}
+
+/// The line each part of a book starts at, in order.
+type Parts = Vec<(usize, Matter)>;
 
 /// A page left blank, without header or footer.
 fn blank_page(config: &Config) -> Page {
@@ -347,6 +399,8 @@ struct FlowLine {
     /// `None` for a line in the prose width, which moves to the inner edge with the prose. For a wide line,
     /// how far it may move right with the prose, which is the frame width it leaves free.
     wide: Option<f64>,
+    /// Whether the line is only drawn where it starts a page, as the mark of a blank scene break.
+    top_only: bool,
 }
 
 /// How a text block takes part in page breaking.
@@ -396,8 +450,8 @@ struct Flow<'a> {
     theme_images: &'a HashMap<Resource, Image>,
     structure: &'a Structure,
     notes: &'a NoteStyles,
-    /// The page number this pass assumes for each anchor.
-    assumed: &'a [usize],
+    /// The page number this pass assumes for each anchor, empty on a page without one.
+    assumed: &'a [String],
     /// The headings, images, and tables set so far, which index their entries in `structure`.
     headings: usize,
     figures: usize,
@@ -417,6 +471,14 @@ struct Flow<'a> {
     columns: Vec<Range<usize>>,
     /// Whether a wide block is being set across the frame, with the frame width its lines leave free.
     wide: Option<f64>,
+    /// The lines that start an odd page.
+    rectos: Vec<usize>,
+    /// The line each part of the book starts at.
+    matters: Parts,
+    /// Whether a keep group is being set, which a chapter does not break.
+    in_keep: bool,
+    /// Whether a chapter heading waits for its first paragraph, which may get a drop capital and a lead-in.
+    opening: bool,
     errors: Vec<Diagnostic>,
 }
 
@@ -511,6 +573,8 @@ impl<'a> Flow<'a> {
                 line.after = line.after.costlier(pages::INTRODUCTION);
             }
             previous = Some(block);
+            // Only the first paragraph after a chapter heading opens the chapter.
+            let opening = std::mem::take(&mut self.opening);
             match block {
                 Block::Paragraph { at, content, class } => {
                     let style = self.paragraph_style(class.as_ref(), &frame);
@@ -520,7 +584,15 @@ impl<'a> Flow<'a> {
                     } else {
                         0.0
                     };
-                    self.text_block(*at, content, &style, frame, indent, Role::Text);
+                    match class {
+                        // A styled paragraph, such as an epigraph, leaves the opening to the next one.
+                        Some(class) if class.name != NO_DROP_CAP && opening => {
+                            self.opening = true;
+                            self.text_block(*at, content, &style, frame, indent, Role::Text);
+                        }
+                        None if opening => self.opening_paragraph(*at, content, &style, frame),
+                        _ => self.text_block(*at, content, &style, frame, indent, Role::Text),
+                    }
                 }
                 Block::Heading {
                     at,
@@ -529,31 +601,60 @@ impl<'a> Flow<'a> {
                     class,
                     ..
                 } => {
-                    let (style, typed_gap) = match class.as_ref().map(|class| self.custom(class)) {
-                        None => (heading_style(self.config, *level), None),
-                        Some(CustomStyle::Heading { style, number_gap }) => (style, *number_gap),
+                    let (mut style, typed_gap) = match class.as_ref().map(|class| self.custom(class)) {
+                        None => (Cow::Borrowed(heading_style(self.config, *level)), None),
+                        Some(CustomStyle::Heading { style, number_gap }) => (Cow::Borrowed(style), *number_gap),
                         Some(_) => unreachable!("classes are checked before layout"),
                     };
                     let typed = |gap: Option<Pt>| {
                         let (number, rest) = typed_number(content)?;
                         Some((gap?, number, rest))
                     };
+                    let chapter = *level == 1 && !self.in_notes;
+                    if chapter && self.open_chapter(*at) {
+                        style.to_mut().space_before = Pt(0.0);
+                    }
                     let heading = &self.structure.headings[self.headings];
                     self.headings += 1;
-                    let anchor = heading.anchor;
+                    let anchor = Some(heading.anchor);
+                    let chapters = &self.config.chapters;
                     match (&heading.number, style.number_gap) {
+                        (Some(number), _) if chapter && chapters.number_position == NumberPosition::Above => {
+                            let text = if chapters.number_label {
+                                format!("{} {number}", self.config.labels.chapter)
+                            } else {
+                                number.clone()
+                            };
+                            let number = [Inline::Text {
+                                text,
+                                style: InlineStyle::default(),
+                            }];
+                            // The number takes the heading's place at the top, and its own space after
+                            // separates it from the heading text.
+                            let number_style = Style {
+                                space_before: style.space_before,
+                                ..self.config.named_style(&chapters.number_style).clone()
+                            };
+                            self.text_block(*at, &number, &number_style, frame, 0.0, Role::Heading(anchor));
+                            style.to_mut().space_before = Pt(0.0);
+                            self.heading(*at, content, None, &style, frame, None);
+                        }
                         (Some(number), Some(gap)) => {
-                            self.heading(*at, content, Some((gap, number)), style, frame, anchor);
+                            self.heading(*at, content, Some((gap, number)), &style, frame, anchor);
                         }
                         (Some(number), None) => {
-                            self.heading(*at, &numbered(number, content), None, style, frame, anchor);
+                            self.heading(*at, &numbered(number, content), None, &style, frame, anchor);
                         }
                         (None, _) => match typed(typed_gap) {
                             Some((gap, number, rest)) => {
-                                self.heading(*at, &rest, Some((gap, &number)), style, frame, anchor);
+                                self.heading(*at, &rest, Some((gap, &number)), &style, frame, anchor);
                             }
-                            None => self.heading(*at, content, None, style, frame, anchor),
+                            None => self.heading(*at, content, None, &style, frame, anchor),
                         },
+                    }
+                    if chapter {
+                        self.ornament(*at, &style, frame);
+                        self.opening = chapters.drop_cap > 0 || chapters.lead_in > 0;
                     }
                 }
                 Block::List {
@@ -590,7 +691,10 @@ impl<'a> Flow<'a> {
                 }
                 Block::Keep { at, blocks } => {
                     let start = self.lines.len();
+                    let in_keep = std::mem::replace(&mut self.in_keep, true);
+                    self.opening = opening;
                     self.blocks(blocks, frame);
+                    self.in_keep = in_keep;
                     let end = self.lines.len();
                     if end > start {
                         for line in &mut self.lines[start..end - 1] {
@@ -602,11 +706,18 @@ impl<'a> Flow<'a> {
                     continue;
                 }
                 Block::PageBreak { .. } => {
-                    if let Some(line) = self.lines.last_mut() {
-                        line.after = Break::Forced;
-                    }
+                    self.page_break();
                     continue;
                 }
+                Block::Matter { matter, .. } => {
+                    self.page_break();
+                    if self.config.document.duplex {
+                        self.rectos.push(self.lines.len());
+                    }
+                    self.matters.push((self.lines.len(), *matter));
+                }
+                Block::Contents { .. } => self.contents(frame),
+                Block::SceneBreak { at } => self.scene_break(*at, frame),
                 Block::Table {
                     at,
                     columns,
@@ -636,6 +747,183 @@ impl<'a> Flow<'a> {
         }
     }
 
+    /// Ends the page after the last line set so far.
+    fn page_break(&mut self) {
+        if let Some(line) = self.lines.last_mut() {
+            line.after = Break::Forced;
+        }
+    }
+
+    /// Starts a chapter on a new page or a new odd page, as the theme sets, outside keep groups. A chapter
+    /// that starts a page is sunk by an empty line. Returns whether it starts a page, whose space above
+    /// the heading the sink replaces.
+    fn open_chapter(&mut self, at: Location) -> bool {
+        let chapters = &self.config.chapters;
+        if chapters.break_before == BreakBefore::None || self.in_keep {
+            return false;
+        }
+        self.page_break();
+        if chapters.break_before == BreakBefore::Recto {
+            self.rectos.push(self.lines.len());
+        }
+        if chapters.sink.0 > 0.0 {
+            self.space = 0.0;
+            let sink = Line {
+                height: chapters.sink.0,
+                baseline: 0.0,
+                items: Vec::new(),
+                notes: Vec::new(),
+                hyphenated: false,
+            };
+            self.push(sink, at, Break::Never);
+        }
+        true
+    }
+
+    /// Sets the theme's chapter ornament centered below a chapter heading in `style`, kept with what
+    /// follows. The heading's space after goes below the ornament.
+    fn ornament(&mut self, at: Location, style: &Style, frame: Frame<'a>) {
+        let Some(ornament) = &self.config.chapters.ornament else {
+            return;
+        };
+        let image = &self.theme_images[&ornament.image];
+        self.space = 0.0;
+        self.space(ornament.space_before.0);
+        let width = ornament.width.0.min(self.width(frame));
+        let (natural_width, natural_height) = image.size();
+        let height = width * natural_height.0 / natural_width.0;
+        let rect = Rect {
+            x: Pt(frame.left + (self.width(frame) - width) / 2.0),
+            y: Pt(0.0),
+            width: Pt(width),
+            height: Pt(height),
+        };
+        let line = Line {
+            height,
+            baseline: height,
+            items: vec![Item::Image {
+                rect,
+                image: image.clone(),
+            }],
+            notes: Vec::new(),
+            hyphenated: false,
+        };
+        self.push(line, at, Break::Never);
+        self.space(style.space_after.0);
+    }
+
+    /// Sets a thematic break: the theme's mark in the `scene-break` style, kept with the text after it. A
+    /// blank break keeps the mark's room but shows it only where it starts a page, where an empty line
+    /// would go unnoticed.
+    fn scene_break(&mut self, at: Location, frame: Frame<'a>) {
+        let config = self.config;
+        let style = &config.styles.scene_break;
+        let width = self.width(frame);
+        self.space(style.space_before.0);
+        let lines = match &config.scene_break.mark {
+            SceneMark::Text(text) => {
+                let content = [Inline::Text {
+                    text: text.clone(),
+                    style: InlineStyle::default(),
+                }];
+                match self.set(&content, style, width - 2.0 * style.indent.0, 0.0) {
+                    Ok(lines) => lines
+                        .into_iter()
+                        .map(|line| translate_line(line, frame.left + style.indent.0))
+                        .collect(),
+                    Err(problem) => {
+                        self.errors.push(self.error(at, format!("scene break: {problem}")));
+                        return;
+                    }
+                }
+            }
+            SceneMark::Image { image, width: wanted } => {
+                let image = &self.theme_images[image];
+                let wanted = wanted.0.min(width);
+                let (natural_width, natural_height) = image.size();
+                let height = wanted * natural_height.0 / natural_width.0;
+                let x = match style.align {
+                    Align::Left | Align::Justify => 0.0,
+                    Align::Center => (width - wanted) / 2.0,
+                    Align::Right => width - wanted,
+                };
+                let rect = Rect {
+                    x: Pt(frame.left + x),
+                    y: Pt(0.0),
+                    width: Pt(wanted),
+                    height: Pt(height),
+                };
+                vec![Line {
+                    height,
+                    baseline: height,
+                    items: vec![Item::Image {
+                        rect,
+                        image: image.clone(),
+                    }],
+                    notes: Vec::new(),
+                    hyphenated: false,
+                }]
+            }
+        };
+        for line in lines {
+            self.push(line, at, Break::Never);
+            if let Some(line) = self.lines.last_mut() {
+                line.top_only = config.scene_break.blank;
+            }
+        }
+        self.space(style.space_after.0);
+    }
+
+    /// Sets the first paragraph of a chapter with the theme's lead-in in small capitals and drop capital.
+    /// The drop capital is the first letter, with any punctuation before it, as tall as the lines it spans
+    /// from the cap height of the first to the baseline of the last, which stay on one page. A paragraph
+    /// too short for it, or one that does not start with text, has none.
+    fn opening_paragraph(&mut self, at: Location, content: &[Inline], style: &Style, frame: Frame<'a>) {
+        let chapters = &self.config.chapters;
+        let content = lead_in(content, chapters.lead_in);
+        let span = chapters.drop_cap;
+        let Some((initial, rest)) = (span > 0).then(|| drop_initial(&content)).flatten() else {
+            self.text_block(at, &content, style, frame, 0.0, Role::Text);
+            return;
+        };
+        let fonts = self.fonts;
+        let lang = self.config.document.lang;
+        let face = fonts.face(&style.font, style.weight, FontStyle::Normal);
+        let line_height = style.size.0 * style.line_height;
+        let unit = fonts.cap_height(face, Pt(1.0)).0;
+        let height = (span - 1) as f64 * line_height + fonts.cap_height(face, style.size).0;
+        let run = fonts.shape(&initial, face, Pt(height / unit), lang);
+        if let Some(problem) = paragraph::missing_glyph(&run) {
+            self.errors.push(self.error(at, problem));
+            return;
+        }
+        let indent = run.width.0 + DROP_CAP_GAP * style.size.0;
+        let width = self.width(frame) - 2.0 * style.indent.0;
+        let resolved = self.resolve(&rest);
+        let lines = paragraph::prepare(&resolved, style, &self.config.inline, fonts, lang)
+            .and_then(|prepared| prepared.lines_beside(width, indent, span));
+        let mut lines = match lines {
+            Ok(lines) if lines.len() >= span => lines,
+            Ok(_) => {
+                self.text_block(at, &content, style, frame, 0.0, Role::Text);
+                return;
+            }
+            Err(problem) => {
+                self.errors.push(self.error(at, problem));
+                return;
+            }
+        };
+        let baseline = lines[..span - 1].iter().map(|line| line.height).sum::<f64>() + lines[span - 1].baseline;
+        lines[0].items.push(text_item(0.0, baseline, run, style.color));
+        let first = self.lines.len();
+        self.space(style.space_before.0);
+        self.place(at, lines, style, frame, Role::Text);
+        for line in &mut self.lines[first..first + span - 1] {
+            line.after = Break::Never;
+        }
+        self.space(style.space_after.0);
+    }
+
     /// The custom style of a class, which [`classes::check`] has found in the theme.
     fn custom(&self, class: &Class) -> &'a CustomStyle {
         &self.config.custom_styles[&class.name]
@@ -644,6 +932,7 @@ impl<'a> Flow<'a> {
     /// The style of a paragraph in `frame`: its custom style, or the frame's with the frame's alignment
     /// and, in a list item, without block spacing.
     fn paragraph_style(&self, class: Option<&Class>, frame: &Frame<'a>) -> Cow<'a, Style> {
+        let class = class.filter(|class| class.name != NO_DROP_CAP);
         let mut style = match (class, frame.align) {
             (Some(class), _) => return Cow::Borrowed(self.custom(class).style()),
             (None, Some(align)) => Cow::Owned(Style {
@@ -684,8 +973,8 @@ impl<'a> Flow<'a> {
         (style, bullets, marker)
     }
 
-    /// Sets a heading. A `hanging` number, with the gap after it, is set before the text, which starts
-    /// the gap after the number on every line.
+    /// Sets a heading whose first line marks `anchor`. A `hanging` number, with the gap after it, is set
+    /// before the text, which starts the gap after the number on every line.
     fn heading(
         &mut self,
         at: Location,
@@ -693,10 +982,10 @@ impl<'a> Flow<'a> {
         hanging: Option<(Pt, &str)>,
         style: &Style,
         frame: Frame<'a>,
-        anchor: usize,
+        anchor: Option<usize>,
     ) {
         let Some((gap, number)) = hanging else {
-            self.text_block(at, content, style, frame, 0.0, Role::Heading(Some(anchor)));
+            self.text_block(at, content, style, frame, 0.0, Role::Heading(anchor));
             return;
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
@@ -710,7 +999,7 @@ impl<'a> Flow<'a> {
             ..frame
         };
         let first = self.lines.len();
-        self.text_block(at, content, style, text, 0.0, Role::Heading(Some(anchor)));
+        self.text_block(at, content, style, text, 0.0, Role::Heading(anchor));
         if let Some(line) = self.lines.get_mut(first) {
             let y = line.line.baseline;
             line.line.items.push(text_item(x, y, run, style.color));
@@ -730,32 +1019,36 @@ impl<'a> Flow<'a> {
         role: Role,
     ) {
         let width = self.width(frame) - 2.0 * style.indent.0;
-        let kept = self.lines.last().is_some_and(|line| line.after == Break::Never);
         self.space(style.space_before.0);
         match self.set(content, style, width, first_indent) {
-            Ok(lines) => {
-                let dx = frame.left + style.indent.0;
-                let count = lines.len();
-                for (index, mut line) in lines.into_iter().enumerate() {
-                    let after = match role {
-                        Role::Heading(anchor) => {
-                            if let Some(id) = anchor.filter(|_| index == 0) {
-                                line.items.push(anchor_item(id, 0.0));
-                            }
-                            Break::Never
-                        }
-                        Role::Text if kept && index == 0 && count > 1 => Break::Never,
-                        Role::Text => pages::line_break(index, count),
-                    };
-                    self.push(translate_line(line, dx), at, after);
-                }
-                if style.keep_with_next && count > 0 {
-                    self.keep_last();
-                }
-            }
+            Ok(lines) => self.place(at, lines, style, frame, role),
             Err(problem) => self.errors.push(self.error(at, problem)),
         }
         self.space(style.space_after.0);
+    }
+
+    /// Adds the lines of a paragraph or heading in `style` to the flow, with the break rules of
+    /// [`Flow::text_block`].
+    fn place(&mut self, at: Location, lines: Vec<Line>, style: &Style, frame: Frame<'a>, role: Role) {
+        let kept = self.lines.last().is_some_and(|line| line.after == Break::Never);
+        let dx = frame.left + style.indent.0;
+        let count = lines.len();
+        for (index, mut line) in lines.into_iter().enumerate() {
+            let after = match role {
+                Role::Heading(anchor) => {
+                    if let Some(id) = anchor.filter(|_| index == 0) {
+                        line.items.push(anchor_item(id, 0.0));
+                    }
+                    Break::Never
+                }
+                Role::Text if kept && index == 0 && count > 1 => Break::Never,
+                Role::Text => pages::line_break(index, count),
+            };
+            self.push(translate_line(line, dx), at, after);
+        }
+        if style.keep_with_next && count > 0 {
+            self.keep_last();
+        }
     }
 
     /// Keeps the last line set with the line that follows it.
@@ -1122,6 +1415,7 @@ impl<'a> Flow<'a> {
             after,
             at,
             wide: self.wide,
+            top_only: false,
         });
     }
 
@@ -1166,6 +1460,84 @@ fn typed_number(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
         };
     }
     (!content.is_empty()).then(|| (text[..=digits].to_owned(), content))
+}
+
+/// Content whose first `words` words are set in small capitals.
+fn lead_in(content: &[Inline], words: usize) -> Vec<Inline> {
+    let mut left = words;
+    let mut started = false;
+    let mut result = Vec::with_capacity(content.len() + 1);
+    for inline in content {
+        let Inline::Text { text, style } = inline else {
+            result.push(inline.clone());
+            continue;
+        };
+        if left == 0 || style.code {
+            result.push(inline.clone());
+            continue;
+        }
+        // The byte where the lead-in ends in this piece: before the space after its last word.
+        let mut end = text.len();
+        let mut in_word = started;
+        for (index, character) in text.char_indices() {
+            if character == ' ' {
+                if in_word {
+                    left -= 1;
+                    in_word = false;
+                    if left == 0 {
+                        end = index;
+                        break;
+                    }
+                }
+            } else {
+                in_word = true;
+            }
+        }
+        started = in_word;
+        let small = InlineStyle {
+            small_caps: true,
+            ..style.clone()
+        };
+        if end > 0 {
+            result.push(Inline::Text {
+                text: text[..end].to_owned(),
+                style: small,
+            });
+        }
+        if end < text.len() {
+            result.push(Inline::Text {
+                text: text[end..].to_owned(),
+                style: style.clone(),
+            });
+        }
+    }
+    result
+}
+
+/// The first letter of content that starts with text, with any punctuation before it, and the content
+/// without it. `None` if the content starts otherwise, with code, or without a letter.
+fn drop_initial(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
+    let Some(Inline::Text { text, style }) = content.first() else {
+        return None;
+    };
+    if style.code {
+        return None;
+    }
+    let letter = text.char_indices().find(|(_, character)| character.is_alphanumeric())?;
+    let end = letter.0 + letter.1.len_utf8();
+    if text[..letter.0].contains(' ') {
+        return None;
+    }
+    let mut rest = content.to_vec();
+    if end == text.len() {
+        rest.remove(0);
+    } else {
+        rest[0] = Inline::Text {
+            text: text[end..].to_owned(),
+            style: style.clone(),
+        };
+    }
+    Some((text[..end].to_owned(), rest))
 }
 
 /// Heading content after its number and a space.

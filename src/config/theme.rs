@@ -38,6 +38,9 @@ pub struct Theme {
     pub captions: Captions,
     pub bibliography: Bibliography,
     pub toc: Toc,
+    pub matter: Matters,
+    pub chapters: Chapters,
+    pub scene_break: SceneBreak,
     pub title_block: TitleBlock,
     pub title_page: TitleLayout,
     pub pages: PageVariants,
@@ -491,6 +494,7 @@ pub struct Styles<B> {
     pub header: B,
     pub footer: B,
     pub watermark: B,
+    pub scene_break: B,
 }
 
 impl<B> Styles<B> {
@@ -523,6 +527,7 @@ impl<B> Styles<B> {
             header: f("header", self.header)?,
             footer: f("footer", self.footer)?,
             watermark: f("watermark", self.watermark)?,
+            scene_break: f("scene-break", self.scene_break)?,
         })
     }
 
@@ -567,6 +572,7 @@ impl<B> Styles<B> {
             "header" => &self.header,
             "footer" => &self.footer,
             "watermark" => &self.watermark,
+            "scene-break" => &self.scene_break,
             _ => return None,
         })
     }
@@ -803,6 +809,164 @@ pub struct Toc {
     pub level_styles: Vec<String>,
 }
 
+/// The page numbers of the parts of a book, which `::: front-matter`, `::: main-matter`, and `::: back-matter`
+/// start.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Matters {
+    pub front: MatterPages,
+    pub main: MatterPages,
+    pub back: MatterPages,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MatterPages {
+    pub page_numbers: NumberFormat,
+    /// Whether the part counts its pages from 1. Otherwise it continues the count of the part before it.
+    pub restart: bool,
+}
+
+/// How a page or chapter number is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NumberFormat {
+    /// 1, 2, 3
+    Decimal,
+    /// 01, 02, 03
+    DecimalLeadingZero,
+    /// i, ii, iii
+    LowerRoman,
+    /// I, II, III
+    UpperRoman,
+}
+
+impl NumberFormat {
+    /// `number`, which is at least 1, in this format.
+    pub fn format(self, number: usize) -> String {
+        match self {
+            Self::Decimal => number.to_string(),
+            Self::DecimalLeadingZero => format!("{number:02}"),
+            Self::LowerRoman => roman(number).to_lowercase(),
+            Self::UpperRoman => roman(number),
+        }
+    }
+}
+
+/// Roman numerals in capitals. Numbers from 4000 repeat the M.
+fn roman(mut number: usize) -> String {
+    const DIGITS: [(usize, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut text = String::new();
+    for (value, digits) in DIGITS {
+        while number >= value {
+            text.push_str(digits);
+            number -= value;
+        }
+    }
+    text
+}
+
+/// How level 1 headings open a chapter. `em` lengths refer to the `heading-1` size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Chapters {
+    pub break_before: BreakBefore,
+    /// The distance from the top of the text area to a chapter that starts a page.
+    pub sink: Spec<Spacing>,
+    /// How the chapter's own part of a heading number is written, as in "II" or "II.3".
+    pub number_format: NumberFormat,
+    pub number_position: NumberPosition,
+    /// The built-in or custom style of a number set above the heading.
+    pub number_style: String,
+    /// Whether a number set above the heading follows the `chapter` label, as in "Chapter 2".
+    pub number_label: bool,
+    /// An image below the heading, or `null` for none.
+    pub ornament: Option<Ornament>,
+    /// The number of lines a drop capital spans in the chapter's first paragraph; 0 for none.
+    pub drop_cap: DropCapLines,
+    /// The number of words at the start of the chapter's first paragraph set in small capitals.
+    pub lead_in: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BreakBefore {
+    None,
+    Page,
+    /// A new odd page, the right-hand page in a bound book.
+    Recto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NumberPosition {
+    /// Before the heading text on its first line.
+    Inline,
+    /// On a line of its own above the heading.
+    Above,
+}
+
+/// The lines a drop capital spans: 0 for none, otherwise 2 to 5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct DropCapLines(u8);
+
+impl DropCapLines {
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for DropCapLines {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let lines = u8::deserialize(deserializer)?;
+        if lines == 1 || lines > 5 {
+            return Err(serde::de::Error::custom(format!(
+                "a drop capital spans 2 to 5 lines, or 0 for none, not {lines}"
+            )));
+        }
+        Ok(Self(lines))
+    }
+}
+
+/// An image centered below a chapter heading.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Ornament {
+    /// Name of an entry in the theme `images` map.
+    pub image: String,
+    pub width: Spec<Spacing>,
+    #[serde(default = "Spec::zero")]
+    pub space_before: Spec<Spacing>,
+}
+
+/// The mark a thematic break sets between scenes: `text` in the `scene-break` style, or an image.
+/// `em` lengths refer to the `scene-break` size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SceneBreak {
+    pub text: String,
+    /// Name of an entry in the theme `images` map, set instead of the text.
+    pub image: Option<String>,
+    /// The image width. Required with an image.
+    pub width: Option<Spec<Spacing>>,
+    /// Whether the break is an empty line, which shows the mark only where it starts a page.
+    pub blank: bool,
+}
+
 /// Ordered content slots for the title block at the start of the body, and the space below it. `em`
 /// refers to the body size.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -964,6 +1128,8 @@ impl Spec<Spacing> {
 pub struct PageVariants {
     pub title: Option<PageVariant>,
     pub first: Option<PageVariant>,
+    /// Pages where a level 1 heading starts.
+    pub opening: Option<PageVariant>,
     pub odd: Option<PageVariant>,
     pub even: Option<PageVariant>,
     pub body: PageVariant,
@@ -1033,6 +1199,7 @@ pub struct LabelSet {
     pub references: String,
     pub continued: String,
     pub draft: String,
+    pub chapter: String,
 }
 
 impl fmt::Display for Lang {

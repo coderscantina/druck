@@ -1,9 +1,11 @@
 //! Headers and footers, drawn on the final pages in the top and bottom margins.
 //!
-//! Each page uses the first variant present in its chain. The title page: `title`, `body`. The first
-//! body page: `first`, then `odd` or `even`, then `body`. Other pages: `odd` or `even`, then `body`.
-//! Parity, `{page}`, and `{pages}` follow the physical pages, counted from 1 and including the title
-//! page and blank pages, which have no bands.
+//! Each page uses the first variant present in its chain. The title page, and in a book with parts the
+//! pages before the first one, which have no number: `title`, `body`. Other pages start with `opening`
+//! where a level 1 heading starts on them. Then the first body page: `first`, then
+//! `odd` or `even`, then `body`; other pages: `odd` or `even`, then `body`. Parity follows the physical
+//! pages, counted from 1 and including the title page and blank pages, which have no bands. `{page}` and
+//! `{pages}` are the page [numbers](super::numbering).
 //!
 //! `{section}` is the first level 1 heading that starts on the page, otherwise the last one on an
 //! earlier page. `{subsection}` is the first level 2 heading that starts on the page after the
@@ -24,6 +26,7 @@
 //! The [watermark] is drawn here too, behind the content of the same pages, with the same values.
 
 use super::fields::Fields;
+use super::numbering::Numbering;
 use super::structure::Structure;
 use super::{paragraph, text_item, titles, watermark};
 use crate::config::resolved::{BandSlot, Config, Group, PageVariant, Style};
@@ -43,6 +46,7 @@ pub(super) fn draw(
     blanks: &[usize],
     structure: &Structure,
     anchors: &[Position],
+    numbering: &Numbering,
     config: &Config,
     fields: &Fields,
     fonts: &Fonts,
@@ -56,22 +60,28 @@ pub(super) fn draw(
     let marks = marks(&headings, pages.len());
     let section_pages = section_pages(&marks);
     let title_page = config.document.title_page;
-    let total = pages.len().to_string();
+    let mut openings: Vec<usize> = (headings.iter())
+        .filter(|heading| heading.1 == 1)
+        .map(|heading| heading.0)
+        .collect();
+    openings.dedup();
     let mut errors = Vec::new();
     for (index, page) in pages.iter_mut().enumerate() {
         if blanks.contains(&index) {
             continue;
         }
-        let (name, variant) = variant(config, index, title_page, first);
-        let number = (index + 1).to_string();
+        let opening = openings.binary_search(&index).is_ok();
+        let (number, total) = (numbering.page(index), numbering.pages(index));
+        let title_like = (title_page && index == 0) || number.is_none();
+        let (name, variant) = variant(config, index, title_like, first, opening);
         let (section, subsection) = marks[index];
         let title = |heading: Option<usize>| heading.map(|heading| Value::Text(headings[heading].2.clone()));
         let in_section = section_pages[index];
         let value = |placeholder: &Placeholder| match placeholder {
             Placeholder::Section => title(section),
             Placeholder::Subsection => title(subsection),
-            Placeholder::Page => Some(Value::Text(number.clone())),
-            Placeholder::Pages => Some(Value::Text(total.clone())),
+            Placeholder::Page => number.clone().map(Value::Text),
+            Placeholder::Pages => total.clone().map(Value::Text),
             Placeholder::SectionPage => in_section.map(|(page, _)| Value::Text(page.to_string())),
             Placeholder::SectionPages => in_section.map(|(_, pages)| Value::Text(pages.to_string())),
             other => fields.value(other),
@@ -117,8 +127,9 @@ pub(super) fn draw(
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The variant of the page at `index`, counted from 0, and its name. The body starts at `first`.
-fn variant(config: &Config, index: usize, title_page: bool, first: usize) -> (&'static str, &PageVariant) {
+/// The variant of the page at `index`, counted from 0, and its name. The body starts at `first`, and a
+/// level 1 heading on an `opening` page. A `title` page is the title page or a page before the first part.
+fn variant(config: &Config, index: usize, title: bool, first: usize, opening: bool) -> (&'static str, &PageVariant) {
     let variants = &config.pages;
     let parity = if index.is_multiple_of(2) {
         ("odd", variants.odd.as_ref())
@@ -126,12 +137,16 @@ fn variant(config: &Config, index: usize, title_page: bool, first: usize) -> (&'
         ("even", variants.even.as_ref())
     };
     let body = ("body", Some(&variants.body));
-    let chain = if title_page && index == 0 {
+    let opening = opening.then_some(("opening", variants.opening.as_ref()));
+    let chain = if title {
         vec![("title", variants.title.as_ref()), body]
     } else if index == first {
-        vec![("first", variants.first.as_ref()), parity, body]
+        opening
+            .into_iter()
+            .chain([("first", variants.first.as_ref()), parity, body])
+            .collect()
     } else {
-        vec![parity, body]
+        opening.into_iter().chain([parity, body]).collect()
     };
     chain
         .into_iter()

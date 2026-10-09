@@ -498,7 +498,7 @@ fn uses_font_files_relative_to_the_document() {
 #[test]
 fn reports_unsupported_content_with_its_location_and_writes_nothing() {
     let sandbox = Sandbox::new("unsupported");
-    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n~~gone~~\n\n---\n");
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n~~gone~~\n\na <b>x</b>\n");
     let run = sandbox.run(&["render", &document]);
 
     assert_eq!(run.code, 1);
@@ -510,7 +510,7 @@ fn reports_unsupported_content_with_its_location_and_writes_nothing() {
     );
     assert!(
         run.stderr
-            .contains(&format!("{document}:9:1: thematic breaks are not supported")),
+            .contains(&format!("{document}:9:3: raw HTML is not rendered")),
         "{}",
         run.stderr
     );

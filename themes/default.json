@@ -528,6 +528,23 @@
       "tracking": 0.04,
       "uppercase": true,
       "keep-with-next": false
+    },
+    "scene-break": {
+      "font": "$fonts.body",
+      "size": "$sizes.body",
+      "weight": "regular",
+      "style": "normal",
+      "color": "$colors.text",
+      "line-height": 1.35,
+      "align": "center",
+      "hyphenate": false,
+      "space-before": "$spacing.block",
+      "space-after": "$spacing.block",
+      "indent": "$spacing.none",
+      "first-line-indent": "$spacing.none",
+      "tracking": 0,
+      "uppercase": false,
+      "keep-with-next": false
     }
   },
   "custom-styles": {},
@@ -580,6 +597,28 @@
     "level-indent": "1.5em",
     "leader": true,
     "level-styles": []
+  },
+  "matter": {
+    "front": { "page-numbers": "lower-roman", "restart": true },
+    "main": { "page-numbers": "decimal", "restart": true },
+    "back": { "page-numbers": "decimal", "restart": false }
+  },
+  "chapters": {
+    "break-before": "none",
+    "sink": "0pt",
+    "number-format": "decimal",
+    "number-position": "inline",
+    "number-style": "heading-1",
+    "number-label": false,
+    "ornament": null,
+    "drop-cap": 0,
+    "lead-in": 0
+  },
+  "scene-break": {
+    "text": "* * *",
+    "image": null,
+    "width": null,
+    "blank": false
   },
   "title-block": {
     "slots": [
@@ -670,6 +709,7 @@
         }
       ]
     },
+    "opening": null,
     "odd": null,
     "even": null,
     "body": {
@@ -703,7 +743,8 @@
       "abstract": "Abstract",
       "references": "References",
       "continued": "(continued)",
-      "draft": "Draft"
+      "draft": "Draft",
+      "chapter": "Chapter"
     },
     "de": {
       "figure": "Abbildung",
@@ -714,7 +755,8 @@
       "abstract": "Zusammenfassung",
       "references": "Literatur",
       "continued": "(Fortsetzung)",
-      "draft": "Entwurf"
+      "draft": "Entwurf",
+      "chapter": "Kapitel"
     }
   }
 }

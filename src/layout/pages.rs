@@ -93,8 +93,8 @@ pub(super) struct Table {
 /// Everything that goes on the pages.
 pub(super) struct Content {
     pub body: Vec<FlowLine>,
-    /// The body line that starts an odd page, after a blank page if needed.
-    pub recto: Option<usize>,
+    /// The body lines that start an odd page, after a blank page if needed, in order.
+    pub rectos: Vec<usize>,
     /// Line ranges of keep groups with their directive locations.
     pub keeps: Vec<(Range<usize>, Location)>,
     /// Line ranges set in two columns, in order.
@@ -112,11 +112,13 @@ pub(super) struct Composed {
     pub pages: Vec<Page>,
     /// The physical indices of blank pages among them.
     pub blanks: Vec<usize>,
+    /// The first body line of each page, `None` for a blank page.
+    pub starts: Vec<Option<usize>>,
 }
 
 /// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
 /// page, which decides parity: odd pages, counted from 1, have the inner margin on the left. Blank pages
-/// are inserted so that the `recto` line starts an odd page.
+/// are inserted so that the `rectos` lines start odd pages.
 pub(super) fn compose(
     content: Content,
     first: usize,
@@ -125,7 +127,7 @@ pub(super) fn compose(
 ) -> Result<Composed, Vec<Diagnostic>> {
     let Content {
         mut body,
-        recto,
+        rectos,
         keeps,
         columns,
         tables,
@@ -155,7 +157,7 @@ pub(super) fn compose(
             "no page breaks satisfy the layout constraints",
         )]
     })?;
-    Ok(render(&plans, &mut body, &headers, notes, (first, recto), config))
+    Ok(render(&plans, &mut body, &headers, notes, (first, &rectos), config))
 }
 
 /// A planned page: body regions stacked from the top and one footnote area at the bottom.
@@ -701,7 +703,7 @@ fn render(
     body: &mut [FlowLine],
     headers: &[Option<&Line>],
     mut notes: Notes,
-    (first, recto): (usize, Option<usize>),
+    (first, rectos): (usize, &[usize]),
     config: &Config,
 ) -> Composed {
     let geometry = &config.page;
@@ -710,11 +712,14 @@ fn render(
     let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
     let mut blanks = Vec::new();
+    let mut starts = Vec::with_capacity(plans.len());
     for plan in plans {
-        if recto == Some(plan.lines.start) && !(first + pages.len()).is_multiple_of(2) {
+        if rectos.binary_search(&plan.lines.start).is_ok() && !(first + pages.len()).is_multiple_of(2) {
             blanks.push(first + pages.len());
             pages.push(super::blank_page(config));
+            starts.push(None);
         }
+        starts.push(Some(plan.lines.start));
         let index = first + pages.len();
         let left = geometry.left_margin(index).0;
         let shift = geometry.prose_shift(index);
@@ -736,7 +741,16 @@ fn render(
             match region {
                 Region::Full(lines) => {
                     let x = (left, shift);
-                    y = stack(&mut items, body, headers, lines.clone(), x, y, plan.stretch);
+                    y = stack(
+                        &mut items,
+                        body,
+                        headers,
+                        lines.clone(),
+                        x,
+                        y,
+                        plan.stretch,
+                        plan.lines.start,
+                    );
                 }
                 Region::Columns(columns) => {
                     // Each column stretches to the region's height if its spaces allow, else stays natural.
@@ -750,7 +764,7 @@ fn render(
                             0.0
                         };
                         let x = (left + index as f64 * second_column, shift);
-                        stack(&mut items, body, headers, lines, x, y, ratio);
+                        stack(&mut items, body, headers, lines, x, y, ratio, plan.lines.start);
                     }
                     y += height;
                 }
@@ -798,13 +812,16 @@ fn render(
     }
     if pages.is_empty() {
         pages.push(super::blank_page(config));
+        starts.push(None);
     }
-    Composed { pages, blanks }
+    Composed { pages, blanks, starts }
 }
 
 /// Places body lines from `y` down, after the repeated header row if the first one has one, dropping
 /// the space above the first line and stretching the others by `ratio` of their bound. `x` is the left
-/// edge and how far prose lines move right from it. Returns the bottom of the last line.
+/// edge and how far prose lines move right from it. A line shown only at a page top is empty unless it is
+/// the page's first line, `top`. Returns the bottom of the last line.
+#[allow(clippy::too_many_arguments, reason = "the region and where its page starts")]
 fn stack(
     items: &mut Vec<Item>,
     body: &mut [FlowLine],
@@ -813,6 +830,7 @@ fn stack(
     (x, shift): (f64, f64),
     mut y: f64,
     ratio: f64,
+    top: usize,
 ) -> f64 {
     let left = |line: &FlowLine| x + line.wide.map_or(shift, |room| shift.min(room));
     if let Some(Some(header)) = headers.get(lines.start).filter(|_| !lines.is_empty()) {
@@ -827,7 +845,9 @@ fn stack(
         }
         let x = left(line);
         let placed = std::mem::take(&mut line.line.items);
-        items.extend(placed.into_iter().map(|item| translate(item, x, y)));
+        if !line.top_only || index == top {
+            items.extend(placed.into_iter().map(|item| translate(item, x, y)));
+        }
         y += line.line.height;
     }
     y
@@ -854,6 +874,7 @@ mod tests {
             after,
             at: Location { line: 1, column: 1 },
             wide: None,
+            top_only: false,
         }
     }
 

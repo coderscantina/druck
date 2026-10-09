@@ -1,7 +1,9 @@
 //! The document's structure, found before layout: heading, figure, and table numbers, the anchors
 //! that links and bookmarks go to, and the text each label is referenced by.
 //!
-//! Numbers do not depend on pages, so they are final before the first layout pass. Layout visits
+//! Numbers do not depend on pages, so they are final before the first layout pass. Headings marked
+//! unnumbered and the headings of front and back matter have no number and do not count. The chapter part of
+//! a number, from level 1 headings, is written in `chapters.number-format`. Layout visits
 //! headings, images, and tables in the same order as this pass and takes their entries in turn.
 //!
 //! The bibliography's heading is an unnumbered level 1 heading with the `references` label, so it is in
@@ -11,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::bibliography::Reference;
 use crate::config::resolved::{Config, CustomStyle};
-use crate::document::{Block, Document, Inline, Location};
+use crate::document::{Block, Document, Inline, Location, Matter};
 
 /// Numbers, anchors, and labels of a document.
 pub(super) struct Structure {
@@ -25,6 +27,8 @@ pub(super) struct Structure {
     pub anchors: Vec<(Location, String)>,
     /// The anchor of each bibliography entry, in bibliography order.
     pub entries: Vec<usize>,
+    /// Whether `::: toc` places the table of contents.
+    pub contents: bool,
     /// The labels that page references point to.
     paged: Vec<String>,
     /// The anchor and reference text of each label.
@@ -39,6 +43,8 @@ pub(super) struct Heading {
     /// The heading text without its number.
     pub text: String,
     pub anchor: usize,
+    /// Whether the heading is in the table of contents.
+    pub listed: bool,
 }
 
 impl Heading {
@@ -66,6 +72,7 @@ impl Structure {
             tables: Vec::new(),
             anchors: Vec::new(),
             entries: Vec::new(),
+            contents: false,
             paged: Vec::new(),
             labels: HashMap::new(),
         };
@@ -74,6 +81,7 @@ impl Structure {
             config,
             references,
             counters: [0; 6],
+            matter: None,
         };
         walk.blocks(&document.blocks);
         for footnote in &document.footnotes {
@@ -90,13 +98,23 @@ impl Structure {
         let contents = self
             .headings
             .iter()
-            .filter(|heading| document.toc && heading.level <= document.toc_depth.get())
+            .filter(|heading| self.has_contents(config) && heading.listed && heading.level <= document.toc_depth.get())
             .map(|heading| heading.anchor);
-        let references = self.paged.iter().map(|label| self.labels[label].0);
+        let references = self.paged();
         let mut anchors: Vec<usize> = contents.chain(references).collect();
         anchors.sort_unstable();
         anchors.dedup();
         anchors
+    }
+
+    /// Whether the document has a table of contents, from `toc` or `::: toc`.
+    pub fn has_contents(&self, config: &Config) -> bool {
+        config.document.toc || self.contents
+    }
+
+    /// The anchors that page references point to.
+    pub fn paged(&self) -> impl Iterator<Item = usize> {
+        self.paged.iter().map(|label| self.labels[label].0)
     }
 
     /// The anchor of `label` and the text a reference to it shows: the label of its kind and its
@@ -113,6 +131,8 @@ struct Walk<'a> {
     references: &'a [Reference],
     /// The current number at each heading level.
     counters: [usize; 6],
+    /// The part of the book the blocks are in.
+    matter: Option<Matter>,
 }
 
 impl Walk<'_> {
@@ -160,6 +180,8 @@ impl Walk<'_> {
                     content,
                     label,
                     class,
+                    unnumbered,
+                    unlisted,
                 } => {
                     let level = *level;
                     let depth = usize::from(level);
@@ -174,13 +196,20 @@ impl Walk<'_> {
                             })
                         )
                     });
-                    let numbered = document.numbered_headings && level <= document.numbering_depth.get() && !typed;
-                    if !typed {
+                    let counted = !typed && !unnumbered && matches!(self.matter, None | Some(Matter::Main));
+                    let numbered = counted && document.numbered_headings && level <= document.numbering_depth.get();
+                    if counted {
                         self.counters[depth - 1] += 1;
                         self.counters[depth..].fill(0);
                     }
+                    let format = self.config.chapters.number_format;
                     let number = numbered.then(|| {
-                        let parts: Vec<String> = self.counters[..depth].iter().map(usize::to_string).collect();
+                        let parts: Vec<String> = (self.counters[..depth].iter().enumerate())
+                            .map(|(index, &count)| match index {
+                                0 if count > 0 => format.format(count),
+                                _ => count.to_string(),
+                            })
+                            .collect();
                         parts.join(".")
                     });
                     let text = plain(content);
@@ -196,6 +225,7 @@ impl Walk<'_> {
                         number,
                         text,
                         anchor,
+                        listed: !unlisted,
                     });
                 }
                 Block::Image { at, caption, label, .. } => {
@@ -248,13 +278,16 @@ impl Walk<'_> {
                         number: None,
                         text,
                         anchor,
+                        listed: true,
                     });
                     for reference in self.references {
                         let anchor = self.anchor(*at, format!("the bibliography entry `{}`", reference.key));
                         self.structure.entries.push(anchor);
                     }
                 }
-                Block::Code { .. } | Block::PageBreak { .. } => {}
+                Block::Matter { matter, .. } => self.matter = Some(*matter),
+                Block::Contents { .. } => self.structure.contents = true,
+                Block::Code { .. } | Block::PageBreak { .. } | Block::SceneBreak { .. } => {}
             }
         }
     }

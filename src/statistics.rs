@@ -124,7 +124,12 @@ impl Counter {
                     }
                     self.text(caption, false);
                 }
-                Block::Code { .. } | Block::PageBreak { .. } | Block::Bibliography { .. } => {}
+                Block::Code { .. }
+                | Block::PageBreak { .. }
+                | Block::Matter { .. }
+                | Block::Contents { .. }
+                | Block::SceneBreak { .. }
+                | Block::Bibliography { .. } => {}
             }
         }
     }
@@ -334,6 +339,8 @@ mod tests {
                 content: vec![text("Two words")],
                 label: None,
                 class: None,
+                unnumbered: false,
+                unlisted: false,
             },
             Block::Table {
                 at: AT,

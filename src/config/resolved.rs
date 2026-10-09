@@ -12,7 +12,8 @@ use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
 use super::theme::{
-    Align, Anchor, DocumentDefaults, Face, FontStyle, LabelSet, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
+    Align, Anchor, BreakBefore, DocumentDefaults, Face, FontStyle, LabelSet, Matters, NumberFormat, NumberPosition,
+    RuleBelow, SlotStyle, Styles, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
 use crate::diagnostic::Diagnostic;
@@ -44,6 +45,9 @@ pub struct Config {
     pub caption_separator: String,
     pub bibliography: Bibliography,
     pub toc: Toc,
+    pub matter: Matters,
+    pub chapters: Chapters,
+    pub scene_break: SceneBreak,
     pub title_block: TitleBlock,
     pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,
@@ -159,6 +163,7 @@ pub struct Group<S> {
 pub struct PageVariants {
     pub title: Option<PageVariant>,
     pub first: Option<PageVariant>,
+    pub opening: Option<PageVariant>,
     pub odd: Option<PageVariant>,
     pub even: Option<PageVariant>,
     pub body: PageVariant,
@@ -344,6 +349,47 @@ pub struct Toc {
     pub leader: bool,
     /// The entry style per heading level, the last repeating for deeper levels; empty for `toc-entry` throughout.
     pub level_styles: Vec<Style>,
+}
+
+/// How level 1 headings open chapters.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Chapters {
+    pub break_before: BreakBefore,
+    pub sink: Pt,
+    pub number_format: NumberFormat,
+    pub number_position: NumberPosition,
+    /// See [`Config::named_style`].
+    pub number_style: String,
+    pub number_label: bool,
+    pub ornament: Option<Ornament>,
+    /// Lines spanned by a drop capital, 0 for none.
+    pub drop_cap: usize,
+    /// Words of the lead-in in small capitals.
+    pub lead_in: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Ornament {
+    pub image: Resource,
+    pub width: Pt,
+    pub space_before: Pt,
+}
+
+/// The mark of a scene break, and whether the break is an empty line that shows it only at a page top.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SceneBreak {
+    pub mark: SceneMark,
+    pub blank: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SceneMark {
+    Text(String),
+    Image { image: Resource, width: Pt },
 }
 
 /// The title block's slots and the space below it.

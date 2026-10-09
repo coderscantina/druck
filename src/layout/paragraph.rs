@@ -27,6 +27,8 @@ const SHRINK: f64 = 1.0 / 3.0;
 const RAGGED: f64 = 3.0;
 /// Cost of a break at a hyphenation point or after an explicit hyphen.
 const HYPHEN_COST: f64 = 50.0;
+/// The size of lowercase letters set as capitals, for small capitals in a font that has none.
+const SYNTHETIC_SMALL_CAPS: f64 = 0.8;
 
 /// A piece of a word in one face and size.
 struct Fragment {
@@ -215,10 +217,17 @@ impl Prepared<'_> {
     /// Breaks the content into positioned lines of `width`, the first indented by `first_indent`.
     /// Fails for a word wider than its line even after hyphenation.
     pub fn lines(&self, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
+        self.lines_beside(width, first_indent, 1)
+    }
+
+    /// Breaks the content into positioned lines of `width`, the first `count` indented by `indent`, as
+    /// beside a drop capital. Fails for a word wider than its line even after hyphenation.
+    pub fn lines_beside(&self, width: f64, indent: f64, count: usize) -> Result<Vec<Line>, String> {
         let (style, fonts, lang) = (self.style, self.fonts, self.lang);
         let justify = style.align == Align::Justify;
         let measure = Measure {
-            first: width - first_indent,
+            first: width - indent,
+            narrow: count,
             rest: width,
             stretch: if justify { 0.0 } else { RAGGED * style.size.0 },
             hang: match self.words.first() {
@@ -232,7 +241,7 @@ impl Prepared<'_> {
                 .iter()
                 .enumerate()
                 .map(|(index, &(first, rest))| {
-                    let available = if index == 0 { width - first_indent } else { width };
+                    let available = if index == 0 { width - indent } else { width };
                     (index, (first - available).max(rest - width))
                 })
                 .max_by(|a, b| a.1.total_cmp(&b.1))
@@ -254,13 +263,13 @@ impl Prepared<'_> {
                 let runs = line_runs(&self.words, start, mark, fonts, lang);
                 let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
                 start = mark.at;
-                let indent = if index == 0 { first_indent } else { 0.0 };
+                let line_indent = if index < count { indent } else { 0.0 };
                 let items = position(
                     runs,
                     &self.spaces,
                     style.align,
-                    width - indent,
-                    indent,
+                    width - line_indent,
+                    line_indent,
                     mark.forced,
                     baseline,
                     self.inline.link_underline,
@@ -693,6 +702,19 @@ pub fn missing_glyph(run: &ShapedRun) -> Option<String> {
     ))
 }
 
+/// The pieces of a word that are lowercase or not, in order.
+fn case_runs(word: &str) -> Vec<(bool, &str)> {
+    let characters: Vec<(usize, char)> = word.char_indices().collect();
+    characters
+        .chunk_by(|a, b| a.1.is_lowercase() == b.1.is_lowercase())
+        .map(|run| {
+            let (start, first) = run[0];
+            let (last, character) = run[run.len() - 1];
+            (first.is_lowercase(), &word[start..last + character.len_utf8()])
+        })
+        .collect()
+}
+
 fn tokens(
     content: &[Inline],
     style: &Style,
@@ -761,6 +783,9 @@ fn tokens(
             (None, false) => style.color,
         };
         let metrics = fonts.metrics(face, size);
+        // Small capitals are never hyphenated, since a word cut by a break is reshaped without them.
+        let small_caps = text_style.small_caps && !text_style.code;
+        let synthetic = small_caps && !fonts.has_small_caps(face);
         for (index, part) in text.split(' ').enumerate() {
             if index > 0 {
                 finish(&mut word, &mut tokens);
@@ -775,13 +800,37 @@ fn tokens(
             if part.is_empty() {
                 continue;
             }
-            let run = fonts.shape_tracked(part, face, size, lang, tracking);
+            if synthetic {
+                for (lower, piece) in case_runs(part) {
+                    let (piece, size) = if lower {
+                        (piece.to_uppercase(), Pt(size.0 * SYNTHETIC_SMALL_CAPS))
+                    } else {
+                        (piece.to_owned(), size)
+                    };
+                    let run = fonts.shape_tracked(&piece, face, size, lang, tracking);
+                    if let Some(problem) = missing_glyph(&run) {
+                        return Err(problem);
+                    }
+                    word.fragments.push(Fragment {
+                        run,
+                        color,
+                        link: text_style.link.clone(),
+                        metrics: fonts.metrics(face, size),
+                        breaks: Breaks::Never,
+                        rise: 0.0,
+                        note: None,
+                        tracking,
+                    });
+                }
+                continue;
+            }
+            let run = fonts.shape_with(part, face, size, lang, tracking, small_caps);
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
             }
             let spells_url = matches!(&text_style.link,
                 Some(Link::Url(url)) if url == part || url.strip_prefix("mailto:") == Some(part));
-            let breaks = if text_style.code || text_style.unbreakable {
+            let breaks = if text_style.code || text_style.unbreakable || small_caps {
                 Breaks::Never
             } else if spells_url {
                 Breaks::Url

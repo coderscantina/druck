@@ -60,11 +60,13 @@ pub enum Item<P> {
     Break { at: P, hang: Hang },
 }
 
-/// The lines to fill. `stretch` is extra stretch for every line, which sets ragged text against
-/// a soft right edge. `hang` is the left protrusion of the first line.
+/// The lines to fill: the first `narrow` lines `first` wide, the rest `rest` wide. `stretch` is extra
+/// stretch for every line, which sets ragged text against a soft right edge. `hang` is the left
+/// protrusion of the first line.
 #[derive(Debug, Clone, Copy)]
 pub struct Measure {
     pub first: f64,
+    pub narrow: usize,
     pub rest: f64,
     pub stretch: f64,
     pub hang: f64,
@@ -194,7 +196,11 @@ fn pass<P>(items: &[Item<P>], sums: &[Sums], measure: &Measure, tolerance: f64) 
             }
             let (start, end) = (sums[node.after], sums[position]);
             let natural = end.width - start.width + width;
-            let line_width = if node.line == 0 { measure.first } else { measure.rest };
+            let line_width = if node.line < measure.narrow {
+                measure.first
+            } else {
+                measure.rest
+            };
             let target = line_width + node.hang + hang.end;
             let ratio = ratio(
                 natural,
@@ -338,6 +344,7 @@ mod tests {
     fn measure(width: f64) -> Measure {
         Measure {
             first: width,
+            narrow: 1,
             rest: width,
             stretch: 0.0,
             hang: 0.0,

@@ -32,7 +32,7 @@ use crate::config::template::Placeholder;
 use crate::diagnostic::Diagnostic;
 use crate::document::{
     Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, Inline, InlineStyle,
-    LabelKind, Link, Location, Reference, Row,
+    LabelKind, Link, Location, Matter, Reference, Row,
 };
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
@@ -162,6 +162,9 @@ struct Leaf {
     label: Option<String>,
     /// The custom style of a heading.
     class: Option<Class>,
+    /// Whether a heading is marked `{-}` or `{.unnumbered}`, and `{.unlisted}`.
+    unnumbered: bool,
+    unlisted: bool,
     /// The source offset where the last text event ended, which locates a trailing `{.name}`.
     text_end: usize,
 }
@@ -230,6 +233,10 @@ struct Builder<'a> {
     citations: Vec<Citation>,
     /// Where `::: bibliography` stands, if it does.
     bibliography: Option<Location>,
+    /// The last matter directive and where it stands.
+    matter: Option<(Matter, Location)>,
+    /// Where `::: toc` stands, if it does.
+    contents: Option<Location>,
     /// Source text before this offset was read as a label, reference, or citation, so text events in it are skipped.
     consumed: usize,
     /// A `{.name}` on a line of its own, waiting for the list it must precede.
@@ -266,6 +273,8 @@ impl<'a> Builder<'a> {
             references_to: Vec::new(),
             citations: Vec::new(),
             bibliography: None,
+            matter: None,
+            contents: None,
             consumed: 0,
             pending_class: None,
         }
@@ -401,6 +410,44 @@ impl<'a> Builder<'a> {
                 }
                 return;
             }
+            "front-matter" | "main-matter" | "back-matter" => {
+                let matter = match name {
+                    "front-matter" => Matter::Front,
+                    "main-matter" => Matter::Main,
+                    _ => Matter::Back,
+                };
+                match self.matter {
+                    _ if !open.is_empty() => {
+                        self.report(offset, format!("{name} is only allowed outside other directives"))
+                    }
+                    Some((previous, first)) if previous >= matter => {
+                        let message = format!(
+                            "{name} cannot follow the {} on line {}; use front-matter, main-matter, and back-matter \
+                             once each, in this order",
+                            matter_name(previous),
+                            first.line
+                        );
+                        self.report(offset, message);
+                    }
+                    _ => {
+                        self.matter = Some((matter, at));
+                        self.push_block(Block::Matter { at, matter });
+                    }
+                }
+                return;
+            }
+            "toc" => {
+                if open.contains(&Some(Fence::Keep)) || open.contains(&Some(Fence::Columns)) {
+                    self.report(offset, "toc is not allowed inside keep or columns");
+                } else if let Some(first) = self.contents {
+                    let message = format!("the table of contents is already placed on line {}", first.line);
+                    self.report(offset, message);
+                } else {
+                    self.contents = Some(at);
+                    self.push_block(Block::Contents { at });
+                }
+                return;
+            }
             "keep" => Some(Fence::Keep),
             "table" => Some(Fence::Table),
             "columns" => {
@@ -422,7 +469,8 @@ impl<'a> Builder<'a> {
             }
             _ => {
                 let message = format!(
-                    "unknown directive \"{name}\"; use columns, full-width, keep, table, page-break, or bibliography"
+                    "unknown directive \"{name}\"; use columns, full-width, keep, table, page-break, bibliography, toc, \
+                     front-matter, main-matter, or back-matter"
                 );
                 self.report(offset, message);
                 None
@@ -459,6 +507,7 @@ impl<'a> Builder<'a> {
             code,
             link: self.links.last().cloned().map(Link::Url),
             unbreakable: false,
+            small_caps: false,
         }
     }
 
@@ -482,6 +531,8 @@ impl<'a> Builder<'a> {
             image: None,
             label: None,
             class: None,
+            unnumbered: false,
+            unlisted: false,
             text_end: offset,
         });
         if level.is_none() {
@@ -695,6 +746,8 @@ impl<'a> Builder<'a> {
             image,
             label,
             class,
+            unnumbered,
+            unlisted,
             text_end,
             ..
         }) = self.leaf.take()
@@ -708,6 +761,8 @@ impl<'a> Builder<'a> {
                 content,
                 label,
                 class,
+                unnumbered,
+                unlisted,
             },
             (None, Some(image)) => {
                 if label.is_some() && content.is_empty() {
@@ -976,7 +1031,8 @@ impl<'a> Builder<'a> {
             Event::HardBreak => self.push_inline(offset, Inline::LineBreak),
             Event::Rule => {
                 self.close_implicit_leaf();
-                self.report(offset, "thematic breaks are not supported");
+                let at = self.location(offset);
+                self.push_block(Block::SceneBreak { at });
             }
             Event::InlineHtml(_) => self.report(offset, "raw HTML is not rendered"),
             Event::FootnoteReference(label) => self.footnote_reference(offset, &label),
@@ -1302,7 +1358,22 @@ impl<'a> Builder<'a> {
                     return;
                 }
                 self.open_leaf(offset, Some(level as u8), false);
-                let brace = self.body[range].rfind('{').map_or(offset, |index| offset + index);
+                let source = &self.body[range];
+                let brace = source.rfind('{');
+                // pulldown-cmark drops one-character attributes, so `{-}` is read from the source.
+                let dash = brace.is_some_and(|brace| {
+                    let block = source[brace + 1..].trim_end().trim_end_matches('#').trim_end();
+                    block
+                        .strip_suffix('}')
+                        .is_some_and(|block| block.split_ascii_whitespace().any(|token| token == "-"))
+                });
+                let brace = brace.map_or(offset, |index| offset + index);
+                let flag = |name: &str| classes.iter().any(|class| class.as_ref() == name);
+                let (unnumbered, unlisted) = (dash || flag("unnumbered"), flag("unlisted"));
+                let classes: Vec<_> = classes
+                    .iter()
+                    .filter(|class| !matches!(class.as_ref(), "unnumbered" | "unlisted"))
+                    .collect();
                 if !attrs.is_empty() || classes.len() > 1 {
                     let message = "a heading takes a label and one style, as in # Heading {#sec:name .style}";
                     self.report(brace, message);
@@ -1323,6 +1394,8 @@ impl<'a> Builder<'a> {
                 if let Some(leaf) = self.leaf.as_mut() {
                     leaf.label = label;
                     leaf.class = class;
+                    leaf.unnumbered = unnumbered;
+                    leaf.unlisted = unlisted;
                 }
             }
             Tag::BlockQuote(_) => {
@@ -1416,6 +1489,8 @@ impl<'a> Builder<'a> {
                     image: None,
                     label: None,
                     class: None,
+                    unnumbered: false,
+                    unlisted: false,
                     text_end: start,
                 });
             }
@@ -1799,6 +1874,14 @@ fn label_name_length(text: &str) -> usize {
         .unwrap_or(text.len())
 }
 
+fn matter_name(matter: Matter) -> &'static str {
+    match matter {
+        Matter::Front => "front-matter",
+        Matter::Main => "main-matter",
+        Matter::Back => "back-matter",
+    }
+}
+
 fn fence_name(fence: Fence) -> &'static str {
     match fence {
         Fence::Columns => "columns",
@@ -1868,6 +1951,8 @@ mod tests {
                     content: vec![plain("Title")],
                     label: None,
                     class: None,
+                    unnumbered: false,
+                    unlisted: false,
                 },
                 Block::Heading {
                     at: at(3, 1),
@@ -1875,6 +1960,8 @@ mod tests {
                     content: vec![plain("Setext")],
                     label: None,
                     class: None,
+                    unnumbered: false,
+                    unlisted: false,
                 },
                 paragraph(6, 1, "Text"),
                 Block::Quote {
@@ -2001,7 +2088,6 @@ mod tests {
         let cases = [
             ("<div>\nhi\n</div>", "raw HTML is not rendered"),
             ("a <b>x</b>", "raw HTML is not rendered"),
-            ("---", "thematic breaks are not supported"),
             ("- [ ] todo", "task lists are not supported"),
             ("~~gone~~", "strikethrough is not supported"),
         ];
@@ -2017,7 +2103,6 @@ mod tests {
             diagnostics("a ![b](c.png)\n\n---\n\ntext <i>x</i>\n", 3),
             vec![
                 (Some((3, 3)), ALONE.to_string()),
-                (Some((5, 1)), "thematic breaks are not supported".to_string()),
                 (Some((7, 6)), "raw HTML is not rendered".to_string()),
                 (Some((7, 10)), "raw HTML is not rendered".to_string()),
             ]
@@ -2111,6 +2196,88 @@ mod tests {
     }
 
     #[test]
+    fn parses_book_parts_the_contents_and_scene_breaks() {
+        let body = "::: front-matter\n::: toc\n::: main-matter\na\n\n***\n\nb\n\n---\n::: back-matter";
+        assert_eq!(
+            blocks(body),
+            vec![
+                Block::Matter {
+                    at: at(1, 1),
+                    matter: Matter::Front
+                },
+                Block::Contents { at: at(2, 1) },
+                Block::Matter {
+                    at: at(3, 1),
+                    matter: Matter::Main
+                },
+                paragraph(4, 1, "a"),
+                Block::SceneBreak { at: at(6, 1) },
+                paragraph(8, 1, "b"),
+                Block::SceneBreak { at: at(10, 1) },
+                Block::Matter {
+                    at: at(11, 1),
+                    matter: Matter::Back
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_unnumbered_and_unlisted_headings_beside_a_label_and_style() {
+        let flags = |body: &str| match &blocks(body)[0] {
+            Block::Heading {
+                unnumbered,
+                unlisted,
+                class,
+                ..
+            } => (*unnumbered, *unlisted, class.as_ref().map(|class| class.name.clone())),
+            block => panic!("not a heading: {block:?}"),
+        };
+
+        assert_eq!(flags("# Preface {-}"), (true, false, None));
+        assert_eq!(flags("# Preface {.unnumbered .unlisted}"), (true, true, None));
+        assert_eq!(
+            flags("# Note {#sec:n - .aside}"),
+            (true, false, Some("aside".to_owned()))
+        );
+        assert_eq!(flags("# Range 1-2"), (false, false, None));
+    }
+
+    #[test]
+    fn reports_misplaced_and_repeated_book_parts() {
+        let cases = [
+            (
+                "::: main-matter\n::: front-matter",
+                (2, 1),
+                "front-matter cannot follow the main-matter on line 1; use front-matter, main-matter, and \
+                 back-matter once each, in this order",
+            ),
+            (
+                "::: keep\n::: main-matter\n:::",
+                (2, 1),
+                "main-matter is only allowed outside other directives",
+            ),
+            (
+                "::: toc\n::: toc",
+                (2, 1),
+                "the table of contents is already placed on line 1",
+            ),
+            (
+                "::: columns\n::: toc\n:::",
+                (2, 1),
+                "toc is not allowed inside keep or columns",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_directives_between_blocks_but_not_inside_code() {
         let body = "::: keep\nOne\n\nTwo\n:::\n::: page-break\n\n:::: columns\nA\n\n::: full-width\nB\n:::\n::::\n\n```\n::: keep\n```\n";
         assert_eq!(
@@ -2146,7 +2313,8 @@ mod tests {
             (
                 "::: float\nx\n:::",
                 (1, 1),
-                "unknown directive \"float\"; use columns, full-width, keep, table, page-break, or bibliography",
+                "unknown directive \"float\"; use columns, full-width, keep, table, page-break, bibliography, toc, \
+                 front-matter, main-matter, or back-matter",
             ),
             ("::: keep\nx", (1, 1), "\"::: keep\" is never closed"),
             ("x\n:::", (2, 1), "\":::\" closes no open layout directive"),

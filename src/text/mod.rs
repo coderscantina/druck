@@ -191,6 +191,27 @@ impl Fonts {
     /// Shapes text like [`Fonts::shape`], with `tracking` em added after every character. Tracked text
     /// sets no ligatures, whose letters could not be spaced.
     pub fn shape_tracked(&self, text: &str, face: FaceId, size: Pt, lang: Lang, tracking: f64) -> ShapedRun {
+        self.shape_with(text, face, size, lang, tracking, false)
+    }
+
+    /// Whether a face has small capitals of its own, the OpenType `smcp` feature.
+    pub fn has_small_caps(&self, face: FaceId) -> bool {
+        let tag = rustybuzz::ttf_parser::Tag::from_bytes(b"smcp");
+        let gsub = self.faces[face.0].buzz.tables().gsub;
+        gsub.is_some_and(|gsub| gsub.features.into_iter().any(|feature| feature.tag == tag))
+    }
+
+    /// Shapes text like [`Fonts::shape_tracked`], with the face's small capitals for lowercase letters if
+    /// `small_caps` is set.
+    pub fn shape_with(
+        &self,
+        text: &str,
+        face: FaceId,
+        size: Pt,
+        lang: Lang,
+        tracking: f64,
+        small_caps: bool,
+    ) -> ShapedRun {
         let buzz = &self.faces[face.0].buzz;
         let mut buffer = rustybuzz::UnicodeBuffer::new();
         buffer.push_str(text);
@@ -202,7 +223,7 @@ impl Fonts {
         buffer.set_language(rustybuzz::Language::from_str(language).expect("language tag"));
         buffer.guess_segment_properties();
         let ligatures = u32::from(tracking == 0.0);
-        let features = [(b"kern", 1), (b"liga", ligatures)]
+        let features = [(b"kern", 1), (b"liga", ligatures), (b"smcp", u32::from(small_caps))]
             .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..));
         let shaped = rustybuzz::shape(buzz, &features, buffer);
 

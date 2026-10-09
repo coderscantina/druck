@@ -848,12 +848,14 @@ impl<'a> Resolver<'a> {
         };
         let title = optional("title", &pages.title);
         let first = optional("first", &pages.first);
+        let opening = optional("opening", &pages.opening);
         let odd = optional("odd", &pages.odd);
         let even = optional("even", &pages.even);
         let body = variant("body", &pages.body);
         Some(resolved::PageVariants {
             title: title?,
             first: first?,
+            opening: opening?,
             odd: odd?,
             even: even?,
             body: body?,
@@ -994,6 +996,82 @@ impl<'a> Resolver<'a> {
             })
         })();
 
+        let heading_em = em_of(s.map(|s| &s.heading_1));
+        let image = |property: &str, name: &str| {
+            let image = images.get(name).cloned();
+            if image.is_none() {
+                self.error(property, format!("image \"{name}\" is not defined in images"));
+            }
+            image
+        };
+        let raw = &theme.chapters;
+        let style_exists = s.is_some_and(|styles| styles.named(&raw.number_style).is_some())
+            || custom_styles
+                .as_ref()
+                .is_some_and(|custom| custom.contains_key(&raw.number_style));
+        if (s.is_some() && custom_styles.is_some()) && !style_exists {
+            self.error(
+                "chapters.number-style",
+                format!(
+                    "style \"{}\" is neither a built-in nor a custom style",
+                    raw.number_style
+                ),
+            );
+        }
+        let ornament = raw.ornament.as_ref().map(|ornament| {
+            Some(resolved::Ornament {
+                image: image("chapters.ornament.image", &ornament.image)?,
+                width: self.spacing(&ornament.width, "chapters.ornament.width", heading_em)?,
+                space_before: self.spacing(&ornament.space_before, "chapters.ornament.space-before", heading_em)?,
+            })
+        });
+        let chapters = (|| {
+            Some(resolved::Chapters {
+                break_before: raw.break_before,
+                sink: self.spacing(&raw.sink, "chapters.sink", heading_em)?,
+                number_format: raw.number_format,
+                number_position: raw.number_position,
+                number_style: style_exists.then(|| raw.number_style.clone())?,
+                number_label: raw.number_label,
+                ornament: match ornament {
+                    Some(ornament) => Some(ornament?),
+                    None => None,
+                },
+                drop_cap: usize::from(raw.drop_cap.get()),
+                lead_in: usize::from(raw.lead_in),
+            })
+        })();
+        let scene = &theme.scene_break;
+        let scene_em = em_of(s.map(|s| &s.scene_break));
+        let mark = match (&scene.image, &scene.width) {
+            (Some(name), Some(width)) => (|| {
+                Some(resolved::SceneMark::Image {
+                    image: image("scene-break.image", name)?,
+                    width: self.spacing(width, "scene-break.width", scene_em)?,
+                })
+            })(),
+            (Some(_), None) => {
+                self.error_among("scene-break.width", &["scene-break.image"], "an image needs a width");
+                None
+            }
+            (None, Some(_)) => {
+                self.error("scene-break.width", "width applies only to an image");
+                None
+            }
+            (None, None) if scene.text.trim().is_empty() => {
+                self.error(
+                    "scene-break.text",
+                    "the text is empty; for a blank break set blank to true and keep a mark for page tops",
+                );
+                None
+            }
+            (None, None) => Some(resolved::SceneMark::Text(scene.text.clone())),
+        };
+        let scene_break = mark.map(|mark| resolved::SceneBreak {
+            mark,
+            blank: scene.blank,
+        });
+
         let page = page?;
         let slot_styles = SlotStyles {
             builtin: s,
@@ -1070,6 +1148,9 @@ impl<'a> Resolver<'a> {
             caption_separator: theme.captions.separator.clone(),
             bibliography: bibliography?,
             toc: toc?,
+            matter: theme.matter,
+            chapters: chapters?,
+            scene_break: scene_break?,
             title_block: resolved::TitleBlock {
                 slots: title_block?,
                 space_after: title_block_space?,
@@ -1194,6 +1275,33 @@ mod tests {
             ]
         );
         assert_eq!(errors[0].property.as_deref(), Some("title-page.groups.0.slots.0.text"));
+    }
+
+    #[test]
+    fn rejects_chapter_and_scene_break_settings_that_cannot_be_set() {
+        let (property, message) = rejection(json!({"version": 1, "chapters": {"number-style": "missing"}}));
+        assert_eq!(property, "chapters.number-style");
+        assert_eq!(message, "style \"missing\" is neither a built-in nor a custom style");
+        let (property, message) = rejection(json!({"version": 1, "chapters": {"drop-cap": 1}}));
+        assert_eq!(property, "chapters.drop-cap");
+        assert!(
+            message.contains("a drop capital spans 2 to 5 lines, or 0 for none, not 1"),
+            "{message}"
+        );
+        let (property, message) =
+            rejection(json!({"version": 1, "chapters": {"ornament": {"image": "x", "width": "1em"}}}));
+        assert_eq!(
+            (property.as_str(), message.as_str()),
+            ("chapters.ornament.image", "image \"x\" is not defined in images")
+        );
+        let (property, message) =
+            rejection(json!({"version": 1, "images": {"x": "x.svg"}, "scene-break": {"image": "x"}}));
+        assert_eq!(
+            (property.as_str(), message.as_str()),
+            ("scene-break.width", "an image needs a width")
+        );
+        let (property, _) = rejection(json!({"version": 1, "scene-break": {"text": " "}}));
+        assert_eq!(property, "scene-break.text");
     }
 
     #[test]

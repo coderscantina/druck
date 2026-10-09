@@ -2,6 +2,7 @@
 //!
 //! Coordinates are points from the top-left corner of the page, with y growing downward.
 
+use crate::config::theme::NumberFormat;
 use crate::config::values::{Color, Pt};
 use crate::document::Link;
 use crate::image::Image;
@@ -17,6 +18,16 @@ pub struct Output {
     pub outline: Vec<Bookmark>,
     /// The text of the first top-level level 1 heading, the PDF title when the metadata has none.
     pub heading_title: Option<String>,
+    /// The number each page shows, for PDF page labels: empty for a document without parts, whose
+    /// pages show their physical number, and `None` for a page before the first part.
+    pub page_numbers: Vec<Option<PageNumber>>,
+}
+
+/// A page number and how it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageNumber {
+    pub format: NumberFormat,
+    pub value: usize,
 }
 
 /// A place on a page: the page index from zero and a point on it.

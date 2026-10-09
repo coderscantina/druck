@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use super::fields::Fields;
 use super::paragraph;
 use super::{Break, Flow, Frame, Line, translate_line};
-use crate::config::resolved::{Config, Group, SlotContent, Style, TitleSlot};
+use crate::config::resolved::{Config, Group, SceneMark, SlotContent, Style, TitleSlot};
 use crate::config::source::{Resource, Source};
 use crate::config::theme::{Align, SlotStyle, TemplateStyle, Vertical};
 use crate::config::values::Pt;
@@ -59,13 +59,18 @@ pub(super) fn check(config: &Config, fields: &Fields, source: &Source) -> Result
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The theme images that the title layout in use may show. A title block's are included even if the
-/// document has no values for it.
+/// The theme images that the title layout in use, the chapter ornament, and the scene break may show. A
+/// title block's are included even if the document has no values for it.
 pub fn images(config: &Config) -> HashSet<&Resource> {
     let slots: Vec<&TitleSlot> = if config.document.title_page {
         config.title_page.iter().flat_map(|group| &group.slots).collect()
     } else {
         config.title_block.slots.iter().collect()
+    };
+    let ornament = config.chapters.ornament.as_ref().map(|ornament| &ornament.image);
+    let scene_break = match &config.scene_break.mark {
+        SceneMark::Image { image, .. } => Some(image),
+        SceneMark::Text(_) => None,
     };
     slots
         .into_iter()
@@ -73,6 +78,8 @@ pub fn images(config: &Config) -> HashSet<&Resource> {
             SlotContent::Image { image, .. } => Some(image),
             SlotContent::Text(_) => None,
         })
+        .chain(ornament)
+        .chain(scene_break)
         .collect()
 }
 

@@ -17,7 +17,7 @@ fn source() -> Source {
     Source::Document("/fake/doc.md".into())
 }
 
-fn config() -> Config {
+pub(super) fn config() -> Config {
     let settings = |source| SettingsInput {
         source,
         settings: FrontMatter::default(),
@@ -943,6 +943,8 @@ fn a_tall_image_shrinks_to_fit_below_its_heading() {
         content: vec![text_inline("Results")],
         label: None,
         class: None,
+        unnumbered: false,
+        unlisted: false,
     };
     let blocks = vec![numbered(0), heading, figure(3, 0, vec![text_inline("Tall.")])];
     let pages = render_with_images(blocks, Vec::new(), &[svg(300.0, 3000.0)]).unwrap();
@@ -1365,8 +1367,8 @@ fn flow(markdown: &str) -> Vec<FlowLine> {
         notes: &notes,
         first: 0,
     };
-    let assumed = vec![1; structure.anchors.len()];
-    pass.content(&assumed).expect("content is set").body
+    let assumed = vec!["1".to_owned(); structure.anchors.len()];
+    pass.content(&assumed).expect("content is set").0.body
 }
 
 /// The rules after the lines of the block that starts on source line `line`.

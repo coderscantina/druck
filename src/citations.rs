@@ -115,7 +115,12 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             | Block::Keep { blocks, .. }
             | Block::Columns { blocks, .. }
             | Block::FullWidth { blocks, .. } => reading_order(blocks, document, order),
-            Block::Code { .. } | Block::PageBreak { .. } | Block::Bibliography { .. } => {}
+            Block::Code { .. }
+            | Block::PageBreak { .. }
+            | Block::Matter { .. }
+            | Block::Contents { .. }
+            | Block::SceneBreak { .. }
+            | Block::Bibliography { .. } => {}
         }
     }
 }

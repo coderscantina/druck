@@ -1,5 +1,6 @@
 //! The table of contents: the `contents` label in the `toc-heading` style, then one entry per heading
 //! up to `document.toc-depth`, in the `toc-entry` style or the style `toc.level-styles` names for its level.
+//! Unlisted headings have no entry, and a heading on a page without a number shows none.
 //!
 //! An entry is indented by `toc.level-indent` per level below the first and shows the heading's
 //! number and text. Lines after its first are indented by one more level. The page number is right
@@ -38,7 +39,7 @@ impl<'a> Flow<'a> {
         );
         let depth = config.document.toc_depth.get();
         let structure = self.structure;
-        for heading in structure.headings.iter().filter(|heading| heading.level <= depth) {
+        for heading in (structure.headings.iter()).filter(|heading| heading.listed && heading.level <= depth) {
             self.entry(heading, frame);
         }
         self.after_paragraph = false;
@@ -57,7 +58,7 @@ impl<'a> Flow<'a> {
         let hang = config.toc.level_indent.0;
         let width = self.width(frame);
 
-        let number = fonts.shape(&self.assumed[heading.anchor].to_string(), face, style.size, lang);
+        let number = fonts.shape(&self.assumed[heading.anchor], face, style.size, lang);
         let column = number.width.0.max(fonts.shape("000", face, style.size, lang).width.0);
         let measure = width - indent - hang - column - 2.0 * GAP * em;
         let content = [Inline::Text {

@@ -198,9 +198,9 @@ fn load_bibliography(config: &Config) -> Result<Option<Bibliography>, Vec<Diagno
     Bibliography::parse(&text, &path).map(Some)
 }
 
-/// Reads and decodes the theme images that the title layout in use shows. Errors name the property.
+/// Reads and decodes the theme images that layout may show. Errors name the property.
 fn load_theme_images(config: &Config) -> Result<HashMap<Resource, Image>, Vec<Diagnostic>> {
-    let used = layout::title_images(config);
+    let used = layout::theme_images(config);
     let mut images = HashMap::new();
     let mut errors = Vec::new();
     for (name, resource) in config.images.iter().filter(|(_, resource)| used.contains(resource)) {

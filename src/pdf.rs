@@ -1,7 +1,9 @@
 //! PDF output: embeds and subsets fonts, writes text as selectable glyph runs, adds links to URLs and
-//! anchors, and writes the heading outline as bookmarks.
+//! anchors, and writes the heading outline as bookmarks and page numbers as page labels.
 //!
 //! krilla uses the same coordinates as [`Page`]: points from the top-left corner, y growing down.
+
+use std::num::NonZeroU32;
 
 use krilla::Document;
 use krilla::action::LinkAction;
@@ -11,19 +13,19 @@ use krilla::destination::XyzDestination;
 use krilla::geom::{PathBuilder, Point, Rect as PdfRect, Size, Transform};
 use krilla::metadata::{DateTime, Metadata as PdfMetadata};
 use krilla::outline::{Outline, OutlineNode};
-use krilla::page::PageSettings;
+use krilla::page::{NumberingStyle, PageLabel, PageSettings};
 use krilla::paint::Fill;
 use krilla::surface::Surface;
 use krilla::text::{GlyphId, KrillaGlyph};
 use krilla_svg::{SurfaceExt, SvgSettings};
 
 use crate::config::front_matter::Metadata;
-use crate::config::theme::Lang;
+use crate::config::theme::{Lang, NumberFormat};
 use crate::config::values::Color;
 use crate::date::Date;
 use crate::document::Link;
 use crate::image::{Image, Pixels};
-use crate::page::{Bookmark, Item, Output, Rect};
+use crate::page::{Bookmark, Item, Output, PageNumber, Rect};
 use crate::text::{Fonts, ShapedRun};
 
 /// The application, as named in the creator and producer fields of every PDF.
@@ -47,9 +49,12 @@ pub fn write(output: &Output, fonts: &Fonts, metadata: &Metadata, lang: Lang) ->
     };
     let mut document = Document::new();
     document.set_metadata(document_info(metadata, output.heading_title.as_deref(), lang));
-    for page in &output.pages {
-        let settings = PageSettings::from_wh(page.width.0 as f32, page.height.0 as f32)
+    for (index, page) in output.pages.iter().enumerate() {
+        let mut settings = PageSettings::from_wh(page.width.0 as f32, page.height.0 as f32)
             .ok_or_else(|| format!("invalid page size {} x {} pt", page.width.0, page.height.0))?;
+        if let Some(number) = output.page_numbers.get(index) {
+            settings = settings.with_page_label(page_label(*number));
+        }
         let mut pdf_page = document.start_page_with(settings);
         let mut surface = pdf_page.surface();
         let mut links = Vec::new();
@@ -144,6 +149,21 @@ fn document_info(metadata: &Metadata, heading_title: Option<&str>, lang: Lang) -
         info = info.creation_date(DateTime::new(date.year as u16).month(date.month).day(date.day));
     }
     info
+}
+
+/// The label of a page: its number, or an empty label for a page without one. A leading zero is a prefix.
+fn page_label(number: Option<PageNumber>) -> PageLabel {
+    let Some(PageNumber { format, value }) = number else {
+        return PageLabel::new(None, None, None);
+    };
+    let (style, prefix) = match format {
+        NumberFormat::Decimal => (NumberingStyle::Arabic, None),
+        NumberFormat::DecimalLeadingZero => (NumberingStyle::Arabic, (value < 10).then(|| "0".to_owned())),
+        NumberFormat::LowerRoman => (NumberingStyle::LowerRoman, None),
+        NumberFormat::UpperRoman => (NumberingStyle::UpperRoman, None),
+    };
+    let start = u32::try_from(value).ok().and_then(NonZeroU32::new);
+    PageLabel::new(Some(style), prefix, start)
 }
 
 fn fill(color: Color) -> Fill {
@@ -286,6 +306,7 @@ mod tests {
             anchors: Vec::new(),
             outline: Vec::new(),
             heading_title: None,
+            page_numbers: Vec::new(),
         }
     }
 
@@ -325,6 +346,7 @@ mod tests {
                 bookmark(1, "Close", 2),
             ],
             heading_title: None,
+            page_numbers: Vec::new(),
         };
         let bytes = write(&output, &fonts(), &Metadata::default(), Lang::En).expect("pdf");
         let pdf = String::from_utf8_lossy(&bytes);

@@ -73,6 +73,10 @@ pub enum Block {
         label: Option<String>,
         /// A custom style from `{.name}` at the end of the heading.
         class: Option<Class>,
+        /// `{-}` or `{.unnumbered}`: the heading has no number and does not count.
+        unnumbered: bool,
+        /// `{.unlisted}`: the heading is not in the table of contents.
+        unlisted: bool,
     },
     List {
         at: Location,
@@ -133,6 +137,19 @@ pub enum Block {
     PageBreak {
         at: Location,
     },
+    /// `::: front-matter`, `::: main-matter`, or `::: back-matter`: starts a new page and a part of a book.
+    Matter {
+        at: Location,
+        matter: Matter,
+    },
+    /// `::: toc`: the table of contents.
+    Contents {
+        at: Location,
+    },
+    /// A thematic break, `***` or `---`: a break between scenes.
+    SceneBreak {
+        at: Location,
+    },
     /// The bibliography: `::: bibliography`, or added at the end of a document that cites without one.
     Bibliography {
         at: Location,
@@ -154,9 +171,20 @@ impl Block {
             | Self::Columns { at, .. }
             | Self::FullWidth { at, .. }
             | Self::PageBreak { at }
+            | Self::Matter { at, .. }
+            | Self::Contents { at }
+            | Self::SceneBreak { at }
             | Self::Bibliography { at } => *at,
         }
     }
+}
+
+/// A part of a book. Each takes its page numbering from the theme's `matter` section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Matter {
+    Front,
+    Main,
+    Back,
 }
 
 /// A table column: its alignment and how its width is chosen.
@@ -280,4 +308,6 @@ pub struct InlineStyle {
     pub link: Option<Link>,
     /// Text that never breaks across lines. Layout sets it on cross-reference text.
     pub unbreakable: bool,
+    /// Lowercase letters set as small capitals. Layout sets it on the lead-in of a chapter's first paragraph.
+    pub small_caps: bool,
 }
