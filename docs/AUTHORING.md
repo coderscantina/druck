@@ -63,6 +63,7 @@ Paths are relative to the document.
 | --- | --- | --- |
 | `theme` | name or path | The theme to use. `--theme` overrides it. See [named themes](THEMES.md#named-themes). |
 | `bibliography` | path | BibTeX file for citations, see [citations](#citations-and-bibliography). |
+| `cover` | path | PNG, JPEG, or SVG cover image of the EPUB, see [EPUB](#epub). The PDF ignores it. |
 | `font-files` | map | Adds font families, see below. |
 
 `font-files` maps a family name to files, in the same shape as theme `fonts`, including other weights and faces of collections (see [fonts](THEMES.md#fonts-and-images)):
@@ -113,12 +114,14 @@ Notes:
 
 ```
 druck check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
-druck render <doc.md> [-o PATH]
+druck render <doc.md> [-o PATH] [--bleed LENGTH] [--crop-marks]
 ```
 
 `check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, and a layout that does not settle. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
 
-`render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written.
+`render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written. An output path ending in `.epub` writes an [EPUB](#epub) instead.
+
+For a print shop, `--bleed 3mm` adds a bleed around every page and `--crop-marks` draws crop marks at its corners, outside the bleed. The page size of the theme stays the trim size: the PDF gets a larger media box with a trim box and a bleed box, so the document lays out the same with and without them. Use `--bleed` alone where a printer wants no marks, as print-on-demand services usually do. Nothing in a document reaches into the bleed yet, so it stays empty. The bleed takes an absolute length (`pt`, `mm`, `cm`, `in`).
 
 `--theme NAME_OR_PATH` selects a theme and overrides the `theme` key in front matter. A path is relative to the working directory; a bare name also searches the [shared theme directory](THEMES.md#named-themes).
 
@@ -321,6 +324,10 @@ More two-column text.
 Content kept on one page.
 :::
 
+::: bottom
+Content at the bottom of the page.
+:::
+
 ::: page-break
 ```
 
@@ -329,6 +336,7 @@ Content kept on one page.
 | `columns` | Lays the content out in two equal columns. |
 | `full-width` | A block across the whole text area inside `columns`. The columns before it are balanced first. |
 | `keep` | Keeps the content together on one page. If it cannot fit, that is reported, not silently split. |
+| `bottom` | Keeps the content together at the bottom of the page and starts a new page after it, see [copyright page](#copyright-page). |
 | `page-break` | Starts a new page. |
 | `table` | A list table, see [list tables](#list-tables). |
 | `bibliography` | Places the bibliography here instead of at the end, see [citations](#citations-and-bibliography). |
@@ -343,10 +351,11 @@ Rules:
 - `page-break`, `bibliography`, `toc`, and the three parts stand alone. They have no body and no closing line.
 - `columns` cannot nest.
 - `full-width` is only allowed directly inside `columns`.
-- `page-break` and `bibliography` are not allowed inside `keep`. Inside `columns` a page break ends the page, see [columns](#columns).
-- `bibliography` and `toc` appear at most once. `toc` is not allowed inside `keep` or `columns`.
+- `bottom` is only allowed outside other directives.
+- `page-break` and `bibliography` are not allowed inside `keep` or `bottom`. Inside `columns` a page break ends the page, see [columns](#columns).
+- `bibliography` and `toc` appear at most once. `toc` is not allowed inside `keep`, `bottom`, or `columns`.
 - `front-matter`, `main-matter`, and `back-matter` appear at most once each, in this order, and only outside other directives.
-- `columns` is not allowed inside `keep`. Put keep groups inside the columns instead.
+- `columns` is not allowed inside `keep` or `bottom`. Put keep groups inside the columns instead.
 - Directive lines inside fenced code blocks are code, not directives.
 - Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line. So is a directive line between the items of a list or inside another block.
 - Several page breaks in a row start one new page. A page break before all content or after it has no effect.
@@ -376,7 +385,7 @@ Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default 
 
 `::: toc` sets the contents where it stands instead, such as after a preface, and needs no `toc: true`. Nothing else changes there: write `::: page-break` around it for a page of its own.
 
-`duplex: true` prepares a document for printing on both sides: the text starts on an odd page, the right-hand page. A blank page follows the title page, and the contents end their page and are followed by a blank page if needed. Blank pages have no header or footer and count in the page numbers.
+`duplex: true` prepares a document for printing on both sides: the text starts on an odd page, the right-hand page. A blank page follows the title page, except in a book with [parts](#parts), whose pages before the first part start on the back of the title page, as a copyright page does. The contents end their page and are followed by a blank page if needed. Blank pages have no header or footer and count in the page numbers.
 
 ### Page numbers and running headers
 
@@ -389,7 +398,9 @@ Headings appear as bookmarks in the PDF, nested by level.
 A book divides into parts, opens its chapters on new pages, and separates scenes. The document marks the structure; the theme decides how it looks. [`samples/book.md`](../samples/book.md) with [its theme](../samples/themes/novel.json) shows all of it.
 
 ```markdown
+::: bottom
 Copyright page text.
+:::
 
 ::: front-matter
 
@@ -423,6 +434,12 @@ Pages before the first part, such as a half title, copyright page, or dedication
 
 A document without parts is numbered from its first page as before.
 
+### Copyright page
+
+`::: bottom` sets its content at the bottom of the page, the usual place for a copyright notice or imprint. What follows starts a new page, so the closing line also ends the copyright page. Content before the group shares its page, at the top.
+
+The group stays on one page like `keep`, sits above any footnotes, and is only allowed outside other directives. A group taller than the text area is an error.
+
 ### Chapters
 
 Every level 1 heading opens a chapter. The theme can start chapters on a new page or a new odd page, lower them on the page, set the number on a line of its own, as in "II" or "Chapter 2", and put an ornament below. Running headers can change on chapter pages through the theme's `opening` page variant. A chapter heading inside `keep` never breaks the page.
@@ -434,6 +451,37 @@ The first paragraph of a chapter may start with a drop capital and a lead-in of 
 A thematic break, `***` or `---` on a line of its own, separates two scenes. The theme sets its mark, such as "* * *" or an ornament, and the paragraph after it has no indent. The mark stays on the page of the text after it. A theme can make breaks blank lines that show the mark only where a break starts a page, so readers still see it there.
 
 `---` directly below a line of text makes that line a heading, as in all CommonMark. Leave a blank line before it.
+
+## EPUB
+
+`druck render book.md -o book.epub` writes the same document as a reflowable EPUB 3 ebook. The output path's extension picks the format; there is no flag for it. Nothing is laid out, since readers set the pages themselves, so `render` reports only the problems that do not depend on pages, such as unknown styles and placeholders without a value. `check` still checks the PDF layout.
+
+The book takes its design from the theme: fonts, sizes, colors, spacing, headings, chapter openings, scene breaks, and custom styles. [Themes](THEMES.md#epub) lists what carries over and what is left out.
+
+What changes from the PDF:
+
+- **Files:** each level 1 heading, the bibliography, each part of a book, and each `::: page-break` starts a new file, which readers start on a new page. A page break inside another directive asks the reader for a new page instead.
+- **Contents:** the reader's table of contents lists the headings in the table of contents of the PDF, honouring `{.unlisted}` and `toc-depth`. `::: toc` or `toc: true` also puts it in the reading order as a contents page.
+- **Parts:** pages before the first part and the front matter are front matter, the main matter is body matter, and the back matter is back matter. Readers open the book at the first file of the main matter. A document without parts is all body matter.
+- **Title page:** the slots of the title page or title block are stacked on a page of their own, each in its style with its space above.
+- **References:** cross-references keep their numbers and link to their targets. A page reference has no page in a reflowable book, so `[@sec:intro, page]` shows the same text as `@sec:intro`. Write around it where a sentence needs a page.
+- **Footnotes:** notes follow at the end of the file that references them, and readers that support EPUB notes show them in a pop-up.
+- **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF.
+- **Bottom groups:** a `::: bottom` group ends its file, so a copyright page stays a page of its own, but its text starts at the top, since readers cannot place text at the bottom of a screen.
+- **Left out:** page numbers, headers and footers, page variants, two columns, keep groups, and the draft watermark. `--bleed` and `--crop-marks` are errors with an EPUB output path.
+
+Metadata comes from the front matter: `title` (else the first level 1 heading, else the file name), `subtitle`, `author`, `lang`, a `date` written as `2026-10-07`, and `abstract` as the description. `meta.isbn` becomes the book's identifier; without it, the identifier is derived from the title, authors, and language, so it stays the same while the text changes. The modification date is the day of `SOURCE_DATE_EPOCH` if set, else the `date`, else today, so the same input gives the same file. `cover` adds a cover page and the reader's cover image.
+
+```yaml
+---
+title: The Lighthouse Keeper
+author: Mara Ellison
+date: 2026-10-09
+cover: images/cover.jpg
+meta:
+  isbn: 978-3-16-148410-0
+---
+```
 
 ## Labels and cross-references
 

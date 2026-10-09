@@ -495,6 +495,27 @@ A drop capital is the paragraph's first letter, with any punctuation before it, 
 
 The `scene-break` style's spacing goes around the mark. The default centers it at body size with block spacing.
 
+## EPUB
+
+An [EPUB](AUTHORING.md#epub) takes a stylesheet derived from the theme. Readers reflow the text and let their users change the size, so the mapping keeps proportions rather than positions.
+
+What carries over:
+
+- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, and `scene-break`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, and capitals as `text-transform`.
+- **Sizes** are relative to the `body` size, which is the reader's text size, so a heading at 15pt over a 10pt body is `1.5rem`. Space before and after, indents, and `first-line-indent` are in ems of the style's own size. Only a paragraph that follows another one has a first-line indent, as in the PDF.
+- **Custom styles** become classes named `s-` and the style name, such as `.s-epigraph`, on the paragraphs, headings, lists, table rows, and cells that apply them. So do the built-in and custom styles that title slots, `chapters.number-style`, and list markers name. A row style's `rule-below` sets the border below its row.
+- **Lists** take `lists.indent`, `lists.item-spacing`, and the bullets by depth. Readers without text bullets show discs.
+- **Tables** take `tables.cell-padding` and the top, header, and row rules. Column alignment applies as in the PDF.
+- **Inline styles** take the code font, size, and color, the link color and underline, and the footnote marker's size and raise.
+- **Footnotes** follow the chapter below a separator of `footnotes.separator-width`, `separator-thickness`, and `separator-color`, `footnotes.gap` below the text and `footnotes.spacing` apart.
+- **Chapters** keep `sink` as the space above a chapter heading, the number above the heading with the `chapter` label, the ornament, the lead-in in small capitals, and the drop capital. The drop capital uses CSS `initial-letter` where readers support it, and a floated letter of about the same size elsewhere.
+- **Scene breaks** show the text or image mark. A `blank` break shows its mark too, since a reader's page breaks are unknown.
+- **Images** keep their size relative to the text: an image half as wide as the prose width in the PDF is half as wide as the text.
+
+Fonts are embedded when they ship with Druck or the theme or front matter names their files. A variable file is embedded whole and declared for the weight range of its `wght` axis; an `ital` axis is not used, so give italics their own entry. Faces in collections (`.ttc`, `.otc`) are not embedded, since readers cannot load them, and a warning names the file. Installed fonts are never embedded, since their licenses rarely allow passing them on: the stylesheet names the family with a serif fallback, monospace for the code font, and `render` prints a warning. A font whose license restricts embedding is embedded with the same warning as in the PDF.
+
+Left out, because readers lay out the pages: the page size, margins, text width, and `wide`, the title page's anchors and positions, headers, footers, and page variants, `matter` page numbers, `chapters.break-before` (every chapter starts a new file), two-column layout, the watermark, `toc.leader`, and the scored page breaking. Headings and styles with `keep-with-next` ask readers not to break the page after them. A numeric bibliography uses `bibliography.hanging-indent` instead of a column as wide as its labels.
+
 ## Resources and distribution
 
 A path resolves relative to the layer that supplied it:

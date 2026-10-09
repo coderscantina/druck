@@ -28,6 +28,7 @@ It is one binary. Fonts and hyphenation patterns are built in, and it never touc
 - **Citations** from a BibTeX file in author-date or numeric style, with a linked bibliography.
 - **Business documents** with covers, address blocks, and three-column footers, set in your own installed fonts.
 - **Placeholders** for word counts, reading time, and the build date, and a draft watermark.
+- **EPUB** from the same source and theme, so a book ships as a print PDF and an ebook.
 
 It is fast. A 93-page document full of tables renders in 0.3 seconds on an Apple M1 Pro.
 
@@ -71,6 +72,7 @@ Then render it:
 ```sh
 druck render notes.md                 # writes notes.pdf next to the source
 druck render notes.md --theme brand.json -o out/notes.pdf
+druck render notes.md -o notes.epub   # an EPUB 3 ebook instead
 druck check notes.md                  # lays it out and reports every problem, writes nothing
 ```
 
