@@ -62,7 +62,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `version`, `$schema` | Format version and editor hint. |
 | `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`, `draft`. |
 | `fonts` | Font families and their files. |
-| `images` | Named images used by title slots. |
+| `images` | Named images used by title slots, the chapter ornament, and scene breaks. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
 | `page` | Page size, margins and their mirroring, prose width and wide blocks, column gap, header and footer offsets. |
 | `styles` | One style per block element. |
@@ -74,6 +74,9 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `captions` | Separator between label and caption text. |
 | `bibliography` | Hanging indent and entry spacing. |
 | `toc` | Level indent and dot leaders. |
+| `matter` | Page numbers of the front, main, and back matter of a book. |
+| `chapters` | How level 1 headings open chapters: page breaks, sink, number, ornament, drop capital, and lead-in. |
+| `scene-break` | The mark of a thematic break. |
 | `title-block` | Title slots at the start of the body, and the space below them. |
 | `title-page` | Slot groups for a separate title page. |
 | `pages` | Header and footer slot groups per page variant. |
@@ -205,7 +208,7 @@ With `number-gap` on a heading style, the automatic number is set hanging and th
 
 `indent` narrows the block on both sides, as for a quotation. `first-line-indent` applies to a paragraph that follows another paragraph. Vertical spacing between blocks collapses: the larger of one block's `space-after` and the next block's `space-before` applies, and space at the top of a page is dropped. Lines are `size × line-height` apart.
 
-Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
+Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`, `scene-break`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
 
@@ -385,15 +388,15 @@ A slot marked `required` whose value is missing is an error. Title slots are che
 
 ## Page variants
 
-`pages` has the variants `title`, `first`, `odd`, `even`, and `body`. Only `body` is required. Which variant applies to a page:
+`pages` has the variants `title`, `first`, `opening`, `odd`, `even`, and `body`. Only `body` is required. Which variant applies to a page:
 
 | Page | Order tried |
 | --- | --- |
-| Title page | `title`, then `body`. |
-| First body page | `first`, then `odd` or `even` by parity, then `body`. |
-| Other body pages | `odd` or `even` by parity, then `body`. |
+| Title page, and in a book with parts the pages before the first part | `title`, then `body`. |
+| First body page | `opening` if a level 1 heading starts on it, `first`, then `odd` or `even` by parity, then `body`. |
+| Other body pages | `opening` if a level 1 heading starts on it, then `odd` or `even` by parity, then `body`. |
 
-A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page and blank pages. The displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one, or the third with `document.duplex`.
+A null variant is skipped. Parity follows the physical page index in the PDF, counted from 1 and including the title page and blank pages. Without [parts](#books) the displayed page number `{page}` is the same number, so odd numbers are on odd pages, the right-hand pages in duplex printing. The first body page is the first page without a title page and the second page with one, or the third with `document.duplex`.
 
 With `document.duplex: true` the body starts on an odd page: a blank page follows the title page, and the table of contents ends its page and is followed by a blank page if the text would otherwise start on an even one. Blank pages have no header or footer but count in `{page}` and `{pages}`.
 
@@ -414,7 +417,7 @@ The default theme follows LaTeX's `draftwatermark` package: `{draft}` at 45 degr
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`. The set for `document.lang` is used.
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`, `chapter`. The set for `document.lang` is used.
 
 | Key | Used for |
 | --- | --- |
@@ -426,6 +429,7 @@ The default theme follows LaTeX's `draftwatermark` package: `{draft}` at 45 degr
 | `references` | The bibliography heading, also in the table of contents, bookmarks, and running headers. |
 | `continued` | The continuation of a footnote on the next page. |
 | `draft` | The value of `{draft}` in drafts. |
+| `chapter` | Before a chapter number above its heading with `chapters.number-label`, as in "Chapter 2". |
 
 A reference joins the label and the number with a no-break space. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 
@@ -451,6 +455,45 @@ A document that cites sets a bibliography: the `references` label as an unnumber
 | `bibliography.entry-spacing` | Minimum space between entries. The style's own `space-before` and `space-after` also apply around each entry, and the larger space wins. |
 
 Links in entries use `inline.link`, and so do citations, which link to their entry. Entry content and ordering are described in [authoring](AUTHORING.md#citations-and-bibliography).
+
+## Books
+
+These sections shape the [parts, chapters, and scene breaks](AUTHORING.md#books) of a book. [`samples/themes/novel.json`](../samples/themes/novel.json) uses all of them.
+
+`matter` has a `front`, `main`, and `back` entry for the parts that `::: front-matter`, `::: main-matter`, and `::: back-matter` start:
+
+| Field | Values |
+| --- | --- |
+| `page-numbers` | `decimal` (1), `decimal-leading-zero` (01), `lower-roman` (i), or `upper-roman` (I). |
+| `restart` | `true` counts the part's pages from 1. `false` continues the count of the part before it. |
+
+The default theme numbers the front matter in lower-case roman numerals and the main matter from 1, and the back matter continues the main matter. `{pages}` is the last number of the count a page belongs to.
+
+`chapters` applies to every level 1 heading of the body, the bibliography's included. `em` lengths refer to the `heading-1` size.
+
+| Field | Values |
+| --- | --- |
+| `break-before` | `none`, `page` for a new page, or `recto` for a new odd page, after a blank page if needed. Default `none`. |
+| `sink` | The distance from the top of the text area to a chapter that starts a page, replacing the heading's `space-before`. Default `0pt`. |
+| `number-format` | How the chapter part of heading numbers is written, as in "II" or "II.3", with the values of `page-numbers`. Default `decimal`. |
+| `number-position` | `inline` before the heading text, or `above` on a line of its own. Default `inline`. |
+| `number-style` | The built-in or custom style of a number above the heading. It takes the heading's `space-before`; its own `space-after` separates it from the heading text. Default `heading-1`. |
+| `number-label` | `true` puts the `chapter` label before a number above the heading. Default `false`. |
+| `ornament` | `null`, or an image centered below the heading: `{"image": name, "width": length, "space-before": length}`. The heading's `space-after` goes below the image. |
+| `drop-cap` | The lines a drop capital spans in a chapter's first paragraph, 2 to 5, or 0 for none. Default `0`. |
+| `lead-in` | The number of words at the start of a chapter's first paragraph set in small capitals. Default `0`. |
+
+A drop capital is the paragraph's first letter, with any punctuation before it, in the paragraph's font and weight, upright and in its color. It reaches from the cap height of the first line to the baseline of the last line it spans, and those lines start a quarter em after it. The lead-in uses the font's own small capitals, the OpenType `smcp` feature, and capitals at 80% size if the font has none. Libertinus has them.
+
+`scene-break` sets the mark of a thematic break:
+
+| Field | Values |
+| --- | --- |
+| `text` | The mark, set as one line in the `scene-break` style. Default `* * *`. |
+| `image`, `width` | A name from `images` and its width, set instead of the text and aligned like the style. Default `null`. |
+| `blank` | `true` makes the break an empty line as high as the mark, which shows the mark only where a break starts a page. Default `false`. |
+
+The `scene-break` style's spacing goes around the mark. The default centers it at body size with block spacing.
 
 ## Resources and distribution
 

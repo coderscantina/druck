@@ -168,6 +168,7 @@ The body is CommonMark. These constructs render:
 - [Labels and cross-references](#labels-and-cross-references) to headings, figures, and tables.
 - [Custom styles](#custom-styles) from the theme on headings, paragraphs, and lists.
 - [Placeholders](#placeholders) such as `{words}` and `{build-date}`.
+- Thematic breaks (`***`, `---`, or `___`) as [scene breaks](#scene-breaks), and the other parts of a [book](#books).
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
@@ -177,7 +178,7 @@ Line breaks are chosen for each whole paragraph. Words are hyphenated by the rul
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported: thematic breaks (`---`), strikethrough, task lists, and raw HTML.
+- Not supported: strikethrough, task lists, and raw HTML.
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation.
 
@@ -331,17 +332,20 @@ Content kept on one page.
 | `page-break` | Starts a new page. |
 | `table` | A list table, see [list tables](#list-tables). |
 | `bibliography` | Places the bibliography here instead of at the end, see [citations](#citations-and-bibliography). |
+| `toc` | Places the table of contents here, see [table of contents](#table-of-contents). |
+| `front-matter`, `main-matter`, `back-matter` | Start a part of a book on a new page, see [books](#books). |
 
 Rules:
 
 - A directive line starts at the beginning of a line, outside lists, quotations, and footnotes. It needs no blank line around it.
 - An opening line is colons, a space, and a directive name. Only `table` takes attributes after its name.
 - A line of only colons closes the innermost open container.
-- `page-break` and `bibliography` stand alone. They have no body and no closing line.
+- `page-break`, `bibliography`, `toc`, and the three parts stand alone. They have no body and no closing line.
 - `columns` cannot nest.
 - `full-width` is only allowed directly inside `columns`.
 - `page-break` and `bibliography` are not allowed inside `keep`. Inside `columns` a page break ends the page, see [columns](#columns).
-- `bibliography` appears at most once.
+- `bibliography` and `toc` appear at most once. `toc` is not allowed inside `keep` or `columns`.
+- `front-matter`, `main-matter`, and `back-matter` appear at most once each, in this order, and only outside other directives.
 - `columns` is not allowed inside `keep`. Put keep groups inside the columns instead.
 - Directive lines inside fenced code blocks are code, not directives.
 - Unknown names, unclosed fences, and unmatched closing lines are errors that name the source line. So is a directive line between the items of a list or inside another block.
@@ -364,19 +368,72 @@ A theme may place several groups of slots on the title page, such as an address 
 
 ### Numbered headings
 
-Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. A number is followed by one space unless the theme sets `number-gap` on the heading style, which sets the number hanging. `numbered-headings: false` turns numbering off.
+Headings are numbered 1, 1.1, 1.1.1 down to `numbering-depth` (3 in the default theme). Deeper headings have no number. A heading marked `{-}` or `{.unnumbered}`, as in Pandoc, has no number and does not count, so the next heading takes the number it would have had. Both may stand beside a label and a style, as in `# Preface {#sec:preface - .wide}`. A number is followed by one space unless the theme sets `number-gap` on the heading style, which sets the number hanging. `numbered-headings: false` turns numbering off.
 
 ### Table of contents
 
-`toc: true` sets a table of contents after the title block, or at the top of the first page after a title page. It lists headings down to `toc-depth` (2 in the default theme) with their numbers and pages, and each entry is a link to its heading. To start the text on a new page after the contents, begin the body with `::: page-break`.
+`toc: true` sets a table of contents after the title block, or at the top of the first page after a title page. It lists headings down to `toc-depth` (2 in the default theme) with their numbers and pages, and each entry is a link to its heading. A heading marked `{.unlisted}` has no entry but stays in the PDF bookmarks. To start the text on a new page after the contents, begin the body with `::: page-break`.
+
+`::: toc` sets the contents where it stands instead, such as after a preface, and needs no `toc: true`. Nothing else changes there: write `::: page-break` around it for a page of its own.
 
 `duplex: true` prepares a document for printing on both sides: the text starts on an odd page, the right-hand page. A blank page follows the title page, and the contents end their page and are followed by a blank page if needed. Blank pages have no header or footer and count in the page numbers.
 
 ### Page numbers and running headers
 
-Pages are numbered from 1, counting the title page, so the number on a page is the one a PDF viewer shows. Themes can also show the total, as in "Page 2|4". The default theme puts the page number at the foot of every page except the title page, and the current section in the header of every page after the first. The section shown is the first numbered top-level heading that starts on the page, or the last one before it. Themes change all of this, see [themes](THEMES.md#header-and-footer-bands).
+Pages are numbered from 1, counting the title page, so the number on a page is the one a PDF viewer shows. A book with [parts](#books) numbers each part instead. Themes can also show the total, as in "Page 2|4". The default theme puts the page number at the foot of every page except the title page, and the current section in the header of every page after the first. The section shown is the first numbered top-level heading that starts on the page, or the last one before it. Themes change all of this, see [themes](THEMES.md#header-and-footer-bands).
 
 Headings appear as bookmarks in the PDF, nested by level.
+
+## Books
+
+A book divides into parts, opens its chapters on new pages, and separates scenes. The document marks the structure; the theme decides how it looks. [`samples/book.md`](../samples/book.md) with [its theme](../samples/themes/novel.json) shows all of it.
+
+```markdown
+Copyright page text.
+
+::: front-matter
+
+# Preface {-}
+
+…
+
+::: page-break
+::: toc
+
+::: main-matter
+
+# The arrival
+
+It was a dark night.
+
+***
+
+Three days later…
+
+::: back-matter
+
+# About the author {-}
+```
+
+### Parts
+
+`::: front-matter`, `::: main-matter`, and `::: back-matter` each start a new page, with `duplex` an odd one. They number their pages as the theme's [`matter`](THEMES.md#books) section says. In the default theme the front matter counts i, ii, iii, the main matter starts again at 1, and the back matter continues it. Headings in front and back matter have no number and do not count.
+
+Pages before the first part, such as a half title, copyright page, or dedication, have no number: `{page}` has no value there, and they take the header and footer of the title page. The table of contents and page references show each page's number as written, as in "page iv". A page reference to a page without a number is an error. The PDF's page labels show the same numbers in viewers.
+
+A document without parts is numbered from its first page as before.
+
+### Chapters
+
+Every level 1 heading opens a chapter. The theme can start chapters on a new page or a new odd page, lower them on the page, set the number on a line of its own, as in "II" or "Chapter 2", and put an ornament below. Running headers can change on chapter pages through the theme's `opening` page variant. A chapter heading inside `keep` never breaks the page.
+
+The first paragraph of a chapter may start with a drop capital and a lead-in of a few words in small capitals. A paragraph with a custom style, such as an epigraph, leaves this to the next paragraph. To turn it off for a paragraph, end it with `{.no-drop-cap}`. A paragraph that starts with something other than a letter, or is shorter than the drop capital, gets none.
+
+### Scene breaks
+
+A thematic break, `***` or `---` on a line of its own, separates two scenes. The theme sets its mark, such as "* * *" or an ornament, and the paragraph after it has no indent. The mark stays on the page of the text after it. A theme can make breaks blank lines that show the mark only where a break starts a page, so readers still see it there.
+
+`---` directly below a line of text makes that line a heading, as in all CommonMark. Leave a blank line before it.
 
 ## Labels and cross-references
 
