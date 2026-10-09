@@ -298,6 +298,7 @@ name = "druck"
 version = "26.10.9"
 dependencies = [
  "clap",
+ "flate2",
  "fontdb",
  "hypher",
  "jsonschema",
