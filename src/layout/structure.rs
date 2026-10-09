@@ -16,7 +16,7 @@ use crate::config::resolved::{Config, CustomStyle};
 use crate::document::{Block, Document, Inline, Location, Matter};
 
 /// Numbers, anchors, and labels of a document.
-pub(super) struct Structure {
+pub(crate) struct Structure {
     /// Headings of the body in document order.
     pub headings: Vec<Heading>,
     /// Each image of the body in document order: its number and anchor, or `None` without a caption.
@@ -35,7 +35,7 @@ pub(super) struct Structure {
     labels: HashMap<String, (usize, String)>,
 }
 
-pub(super) struct Heading {
+pub(crate) struct Heading {
     pub at: Location,
     pub level: u8,
     /// The number, such as `2.1`, if headings of this level are numbered.
@@ -58,7 +58,7 @@ impl Heading {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Numbered {
+pub(crate) struct Numbered {
     pub number: usize,
     pub anchor: usize,
 }
@@ -295,7 +295,7 @@ impl Walk<'_> {
 }
 
 /// The text of inline content without styles, notes, or line breaks.
-pub(super) fn plain(content: &[Inline]) -> String {
+pub(crate) fn plain(content: &[Inline]) -> String {
     let mut text = String::new();
     for inline in content {
         match inline {

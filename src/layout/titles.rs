@@ -98,6 +98,23 @@ fn active<'a>(config: &'a Config, fields: &Fields) -> Vec<(String, &'a [TitleSlo
     }
 }
 
+/// The slots of the title layout in use, each with the alignment its group sets: the title page's groups in
+/// order, else the title block's slots if the document has values for them.
+pub(crate) fn slots_in_use<'a>(config: &'a Config, fields: &Fields) -> Vec<(&'a TitleSlot, Option<Align>)> {
+    if config.document.title_page {
+        let groups = config.title_page.iter();
+        groups
+            .flat_map(|group| group.slots.iter().map(|slot| (slot, group.align)))
+            .collect()
+    } else {
+        block(config, fields)
+            .into_iter()
+            .flatten()
+            .map(|slot| (slot, None))
+            .collect()
+    }
+}
+
 /// The title block's slots, if the document has a value for one of its placeholders.
 pub(super) fn block<'a>(config: &'a Config, fields: &Fields) -> Option<&'a [TitleSlot]> {
     let slots = &config.title_block.slots;

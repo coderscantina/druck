@@ -38,6 +38,9 @@ pub struct FrontMatter {
     /// BibTeX file, relative to the document.
     #[serde(default, deserialize_with = "non_null")]
     pub bibliography: Option<String>,
+    /// Cover image of an EPUB, relative to the document.
+    #[serde(default, deserialize_with = "non_null")]
+    pub cover: Option<String>,
 
     #[serde(default, deserialize_with = "non_null")]
     pub lang: Option<Lang>,

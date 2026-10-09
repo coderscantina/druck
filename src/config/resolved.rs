@@ -24,6 +24,8 @@ pub struct Config {
     pub metadata: Metadata,
     pub document: DocumentDefaults,
     pub bibliography_file: Option<Resource>,
+    /// The EPUB cover image from front matter `cover`.
+    pub cover_file: Option<Resource>,
     pub page: PageGeometry,
     pub fonts: BTreeMap<String, FontFiles>,
     /// Font families that `fonts` does not define, to be looked up among installed fonts: each face a
@@ -74,7 +76,8 @@ impl Config {
             .bibliography_file
             .iter()
             .map(|file| ("bibliography".to_owned(), file));
-        fonts.chain(images).chain(bibliography).collect()
+        let cover = self.cover_file.iter().map(|file| ("cover".to_owned(), file));
+        fonts.chain(images).chain(bibliography).chain(cover).collect()
     }
 
     /// The style a title or band slot names. Resolution has checked that custom names exist.

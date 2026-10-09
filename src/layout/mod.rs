@@ -23,12 +23,12 @@
 mod bands;
 mod bibliography;
 mod classes;
-mod fields;
+pub(crate) mod fields;
 mod notes;
 mod numbering;
 mod pages;
 mod paragraph;
-mod structure;
+pub(crate) mod structure;
 #[cfg(test)]
 mod structure_tests;
 #[cfg(test)]
@@ -38,7 +38,7 @@ mod table;
 mod table_tests;
 #[cfg(test)]
 mod tests;
-mod titles;
+pub(crate) mod titles;
 mod toc;
 mod watermark;
 
@@ -65,7 +65,7 @@ use crate::text::{Fonts, ShapedRun};
 pub use self::titles::images as theme_images;
 
 /// The paragraph style that turns off the drop capital and lead-in of a chapter's first paragraph.
-const NO_DROP_CAP: &str = "no-drop-cap";
+pub(crate) const NO_DROP_CAP: &str = "no-drop-cap";
 /// Space between a drop capital and the text beside it, in ems of the paragraph.
 const DROP_CAP_GAP: f64 = 0.25;
 
@@ -91,9 +91,7 @@ pub fn layout(
     today: Date,
 ) -> Result<Output, Vec<Diagnostic>> {
     let fields = Fields::new(document, config, today);
-    titles::check(config, &fields, source)?;
-    classes::check(document, config, source)?;
-    fields.check(document, source)?;
+    check(document, config, &fields, source)?;
     let structure = Structure::new(document, config, cited.references());
     let notes = NoteStyles::new(config);
     let title_page = if config.document.title_page {
@@ -167,6 +165,19 @@ pub fn layout(
         heading_title,
         page_numbers: numbering.labels(),
     })
+}
+
+/// Checks what does not depend on pages: required title slots, custom styles, and placeholders. Layout and
+/// EPUB output run it before setting anything.
+pub(crate) fn check(
+    document: &Document,
+    config: &Config,
+    fields: &Fields,
+    source: &Source,
+) -> Result<(), Vec<Diagnostic>> {
+    titles::check(config, fields, source)?;
+    classes::check(document, config, source)?;
+    fields.check(document, source)
 }
 
 /// Repeats `pass` until the page number of every anchor in `shown` is the one the pass assumed for it,
@@ -1487,7 +1498,7 @@ fn typed_number(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
 }
 
 /// Content whose first `words` words are set in small capitals.
-fn lead_in(content: &[Inline], words: usize) -> Vec<Inline> {
+pub(crate) fn lead_in(content: &[Inline], words: usize) -> Vec<Inline> {
     let mut left = words;
     let mut started = false;
     let mut result = Vec::with_capacity(content.len() + 1);

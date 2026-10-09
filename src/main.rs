@@ -6,6 +6,7 @@ mod config;
 mod date;
 mod diagnostic;
 mod document;
+mod epub;
 mod image;
 mod installed;
 mod layout;
@@ -33,7 +34,7 @@ use diagnostic::Diagnostic;
 use image::Image;
 use text::Fonts;
 
-/// Typeset Markdown documents as PDF.
+/// Typeset Markdown documents as PDF and EPUB.
 #[derive(Parser)]
 #[command(version = env!("DRUCK_VERSION"))]
 struct Cli {
@@ -51,11 +52,12 @@ enum Command {
         #[arg(long)]
         print_config: bool,
     },
-    /// Render a document to PDF.
+    /// Render a document to PDF, or to EPUB for an output path ending in `.epub`.
     Render {
         #[command(flatten)]
         input: InputArgs,
-        /// Output PDF path. Defaults to the document path with a `.pdf` extension.
+        /// Output path: `.epub` writes an EPUB, anything else a PDF. Defaults to the document path with a
+        /// `.pdf` extension.
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Extend each page by a bleed for print, as in `--bleed 3mm`. The page size stays the trim size.
@@ -115,6 +117,16 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 Some(path) => normalize(&document.working_dir.join(path)),
                 None => document.path.with_extension("pdf"),
             };
+            if output
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"))
+            {
+                if bleed.is_some() || crop_marks {
+                    let message = "--bleed and --crop-marks apply to PDF output only, not to EPUB";
+                    return Err(vec![Diagnostic::new(None, message)]);
+                }
+                return render_epub(&config, &document, &output);
+            }
             let (fonts, laid) = typeset(&config, &document)?;
             let print = pdf::Print {
                 bleed: bleed.unwrap_or(Pt(0.0)),
@@ -153,6 +165,51 @@ fn parse_bleed(input: &str) -> Result<Pt, String> {
         Length::Pt(pt) => Ok(Pt(pt)),
         Length::Em(_) => Err(format!("bleed \"{input}\" needs an absolute unit (pt, mm, cm, or in)")),
     }
+}
+
+/// Writes the document as an EPUB. Nothing is laid out, so the fonts are only read to be embedded.
+fn render_epub(config: &Config, document: &DocumentFile, output: &Path) -> Result<(), Vec<Diagnostic>> {
+    let prepared = prepare(config, document)?;
+    let today = date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?;
+    // `SOURCE_DATE_EPOCH` fixes the build day; without it an ISO `date` does, so the same input gives the
+    // same bytes.
+    let iso = config
+        .metadata
+        .date
+        .as_deref()
+        .and_then(|text| date::Date::iso(text.trim()));
+    let modified = match std::env::var_os("SOURCE_DATE_EPOCH") {
+        Some(_) => today,
+        None => iso.unwrap_or(today),
+    };
+    let stem = document
+        .path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("Untitled");
+    let written = epub::write(&epub::Book {
+        document: &prepared.content,
+        cited: &prepared.cited,
+        config,
+        source: &document.source,
+        images: &prepared.images,
+        dir: document.path.parent().expect("an absolute file path has a parent"),
+        today,
+        modified,
+        fallback_title: stem,
+    })?;
+    for warning in &written.warnings {
+        eprintln!("warning: {warning}");
+    }
+    std::fs::write(output, written.bytes)
+        .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(output)))])?;
+    let count = written.documents;
+    println!(
+        "{}: wrote {count} section{}",
+        shown(output),
+        if count == 1 { "" } else { "s" }
+    );
+    Ok(())
 }
 
 /// The document file as read, with where it came from.

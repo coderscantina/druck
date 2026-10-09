@@ -307,9 +307,7 @@ fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, Str
         .map(|variation| (krilla::text::Tag::new(&variation.tag.to_bytes()), variation.value))
         .collect();
     let font = krilla::text::Font::new_variable(data.into(), file.index, &pdf_coordinates).ok_or_else(invalid)?;
-    let restricted = buzz.permissions() == Some(rustybuzz::ttf_parser::Permissions::Restricted)
-        || !buzz.is_subsetting_allowed()
-        || !buzz.is_outline_embedding_allowed();
+    let restricted = restricts_embedding(&buzz);
     let file = match file.index {
         0 => resource.to_string(),
         index => format!("face {index} of {resource}"),
@@ -320,6 +318,13 @@ fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, Str
         file,
         restricted,
     })
+}
+
+/// Whether a font's license, its OS/2 `fsType`, restricts embedding or subsetting.
+pub(crate) fn restricts_embedding(face: &rustybuzz::Face<'_>) -> bool {
+    face.permissions() == Some(rustybuzz::ttf_parser::Permissions::Restricted)
+        || !face.is_subsetting_allowed()
+        || !face.is_outline_embedding_allowed()
 }
 
 /// How well a face of weight `have` serves a request for `wanted`; lower is better. See [`Fonts::face`].

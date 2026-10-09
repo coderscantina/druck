@@ -816,3 +816,59 @@ fn check_reports_layout_errors_without_writing_a_pdf() {
     assert!(stderr.contains("cannot be broken"), "{stderr}");
     assert!(!sandbox.root.join("doc.pdf").exists());
 }
+
+/// Renders `args` to the EPUB at `output` and returns its bytes.
+fn render_epub(sandbox: &Sandbox, args: &[&str], output: &Path) -> Vec<u8> {
+    let run = sandbox.run(&[&["render"], args, &["-o", output.to_str().unwrap()]].concat());
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(run.stdout.contains("wrote"), "{}", run.stdout);
+    fs::read(output).expect("EPUB written")
+}
+
+#[test]
+fn renders_an_epub_by_the_output_extension_the_same_every_time() {
+    let sandbox = Sandbox::new("epub");
+    let document = format!("{REPO}/samples/book.md");
+    let output = sandbox.root.join("book.EPUB");
+    let first = render_epub(&sandbox, &[&document], &output);
+    assert!(
+        first == render_epub(&sandbox, &[&document], &output),
+        "renders are identical"
+    );
+    assert_eq!(
+        &first[30..58],
+        b"mimetypeapplication/epub+zip",
+        "the stored mimetype comes first"
+    );
+    let names = String::from_utf8_lossy(&first);
+    for name in [
+        "EPUB/package.opf",
+        "EPUB/nav.xhtml",
+        "EPUB/titlepage.xhtml",
+        "EPUB/text-004.xhtml",
+        "EPUB/fonts/font-1.otf",
+    ] {
+        assert!(names.contains(name), "{name}");
+    }
+}
+
+#[test]
+fn embeds_the_cover_from_front_matter_and_checks_the_isbn() {
+    let sandbox = image_sandbox("epub-cover");
+    let document = sandbox.write(
+        "doc.md",
+        "---\ntitle: T\ncover: images/photo.jpg\n---\n# One\n\nText.\n",
+    );
+    let epub = render_epub(&sandbox, &[&document], &sandbox.root.join("doc.epub"));
+    let names = String::from_utf8_lossy(&epub);
+    assert!(names.contains("EPUB/cover.xhtml") && names.contains("EPUB/images/cover.jpg"));
+
+    let run = sandbox.run(&["render", &document, "--set", "meta.isbn=12-34", "-o", "../doc.epub"]);
+    assert_eq!(run.code, 1);
+    assert!(
+        run.stderr
+            .contains("meta.isbn: meta.isbn must be an ISBN of 10 or 13 digits"),
+        "{}",
+        run.stderr
+    );
+}

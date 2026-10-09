@@ -1108,18 +1108,23 @@ impl<'a> Resolver<'a> {
             }
         });
 
-        let bibliography_file = [overrides, document].into_iter().find_map(|input| {
-            let path = input.settings.bibliography.as_ref()?;
-            Some(Resource {
-                origin: input.source.origin(),
-                path: path.clone(),
+        // A file setting resolves against the layer that sets it.
+        let file = |setting: fn(&FrontMatter) -> Option<&String>| {
+            [overrides, document].into_iter().find_map(|input| {
+                Some(Resource {
+                    origin: input.source.origin(),
+                    path: setting(&input.settings)?.clone(),
+                })
             })
-        });
+        };
+        let bibliography_file = file(|settings| settings.bibliography.as_ref());
+        let cover_file = file(|settings| settings.cover.as_ref());
 
         Some(Config {
             metadata: document.settings.metadata_overridden_by(&overrides.settings),
             document: theme.document.clone(),
             bibliography_file,
+            cover_file,
             page,
             fonts: self.fonts(),
             installed_fonts: self.installed.take(),
