@@ -4,6 +4,23 @@
 
 ### Features
 
+- Write books as EPUB 3 with `render -o book.epub` (b26fbbc)
+- Add a bleed and crop marks to print PDFs with `--bleed` and `--crop-marks` (d4cdcb0)
+- Set copyright pages and imprints at the bottom of the page with `::: bottom` (55e4a7a)
+
+### Fixes
+
+- Put a duplex book's copyright page on the back of the title page (c4f92fc)
+
+### Dependencies
+
+- Add flate2 to deflate EPUB containers (b120556)
+
+
+## 26.10.9, 9 October 2026
+
+### Features
+
 - Add a novel sample with front matter, chapters, and scene breaks (9ac018f)
 - Number book parts and open chapters with breaks, sinks, ornaments, and drop capitals (aed2d55)
 
