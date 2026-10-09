@@ -1,6 +1,6 @@
 [package]
 name = "druck"
-version = "26.10.7"
+version = "26.10.9"
 edition = "2024"
 description = "A typesetter for beautiful Markdown documents: optimal line breaking, footnotes, columns, tables, citations, and JSON themes, fully offline"
 authors = ["Michael Wallner <m.wallner@coderscantina.com>"]

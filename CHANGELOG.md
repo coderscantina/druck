@@ -1,5 +1,13 @@
 # Changelog
 
+## 26.10.9, 9 October 2026
+
+### Features
+
+- Add a novel sample with front matter, chapters, and scene breaks (9ac018f)
+- Number book parts and open chapters with breaks, sinks, ornaments, and drop capitals (aed2d55)
+
+
 ## 26.10.7, 7 October 2026
 
 ### Features
@@ -66,4 +74,3 @@
 
 - Add unicode-segmentation for UAX #29 character, word, and sentence counts (0021d8a)
 - Bundle English and German hyphenation patterns with hypher (f0e6356)
-
