@@ -36,7 +36,7 @@ pub(super) fn item(
     }
     let lang = config.document.lang;
     let face = fonts.face(&style.font, style.weight, style.style);
-    let mut run = fonts.shape_tracked(&text, face, style.size, lang, style.tracking);
+    let mut run = fonts.shape_with(&text, face, style.size, lang, style.tracking, false, style.figures);
     if let Some(problem) = paragraph::missing_glyph(&run) {
         return Err(problem);
     }
@@ -49,7 +49,7 @@ pub(super) fn item(
         .min(1.0);
     let (width, height) = if scale < 1.0 {
         let size = Pt(style.size.0 * scale);
-        run = fonts.shape_tracked(&text, face, size, lang, style.tracking);
+        run = fonts.shape_with(&text, face, size, lang, style.tracking, false, style.figures);
         (run.set_width().0, fonts.cap_height(face, size).0)
     } else {
         (width, height)

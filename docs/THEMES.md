@@ -197,6 +197,7 @@ Each entry of `styles` has the same fields, all inherited from the default when 
 | `tracking` | Letter spacing in em of the style's size, from -0.2 to 1. Default `0`. |
 | `uppercase` | `true` sets the text in capitals. Default `false`. |
 | `keep-with-next` | `true` keeps the block on the page or in the column of the next block. Default `false`. |
+| `figures` | `style`: `lining`, `oldstyle`, or `default`; `spacing`: `proportional`, `tabular`, or `default`. Both default to `default`, the font's own figures. |
 | `number-gap` | Only on `heading-1` to `heading-6`. The space between an automatic heading number and the text. `null`, as in the default theme, sets one space after the number. |
 
 `tracking` adds space after every character, spaces included. Tracked text sets no ligatures, so "fi" stays two spaced letters. `uppercase` follows Unicode case mapping, so "Straße" becomes "STRASSE"; the PDF text is the capitals. Inline code keeps its case and spacing. Both apply wherever the style sets text: blocks, title slots, header and footer slots, table cells, and contents entries. List markers and contents page numbers ignore them.
@@ -212,6 +213,17 @@ With `number-gap` on a heading style, the automatic number is set hanging and th
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`, `scene-break`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
+
+`figures` turns on the OpenType features `lnum`, `onum`, `pnum`, and `tnum`. Oldstyle figures suit running text; tabular lining figures line up in table columns:
+
+```json
+"styles": {
+  "body": { "figures": { "style": "oldstyle" } },
+  "table-cell": { "figures": { "style": "lining", "spacing": "tabular" } }
+}
+```
+
+A font without a feature keeps its default figures, without a warning. The figures apply wherever the style sets text, also to automatic heading numbers, list numbers, contents page numbers, and numeric bibliography labels. Inline code keeps the code font's default figures. A custom style's `figures` replaces its base style's as a whole.
 
 ## Inline code
 
@@ -520,7 +532,7 @@ An [EPUB](AUTHORING.md#epub) takes a stylesheet derived from the theme. Readers 
 
 What carries over:
 
-- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, and `scene-break`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, and capitals as `text-transform`.
+- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, and `scene-break`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, capitals as `text-transform`, and figures as `font-variant-numeric`.
 - **Sizes** are relative to the `body` size, which is the reader's text size, so a heading at 15pt over a 10pt body is `1.5rem`. Space before and after, indents, and `first-line-indent` are in ems of the style's own size. Only a paragraph that follows another one has a first-line indent, as in the PDF.
 - **Custom styles** become classes named `s-` and the style name, such as `.s-epigraph`, on the paragraphs, headings, lists, table rows, and cells that apply them. So do the built-in and custom styles that title slots, `chapters.number-style`, and list markers name. A row style's `rule-below` sets the border below its row.
 - **Lists** take `lists.indent`, `lists.item-spacing`, and the bullets by depth. Readers without text bullets show discs.

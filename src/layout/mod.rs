@@ -927,7 +927,7 @@ impl<'a> Flow<'a> {
         let line_height = style.size.0 * style.line_height;
         let unit = fonts.cap_height(face, Pt(1.0)).0;
         let height = (span - 1) as f64 * line_height + fonts.cap_height(face, style.size).0;
-        let run = fonts.shape(&initial, face, Pt(height / unit), lang);
+        let run = fonts.shape_figures(&initial, face, Pt(height / unit), lang, style.figures);
         if let Some(problem) = paragraph::missing_glyph(&run) {
             self.errors.push(self.error(at, problem));
             return;
@@ -1024,7 +1024,15 @@ impl<'a> Flow<'a> {
             return;
         };
         let face = self.fonts.face(&style.font, style.weight, style.style);
-        let run = (self.fonts).shape_tracked(number, face, style.size, self.config.document.lang, style.tracking);
+        let run = (self.fonts).shape_with(
+            number,
+            face,
+            style.size,
+            self.config.document.lang,
+            style.tracking,
+            false,
+            style.figures,
+        );
         if let Some(problem) = paragraph::missing_glyph(&run) {
             self.errors.push(self.error(at, problem));
         }
@@ -1192,7 +1200,13 @@ impl<'a> Flow<'a> {
                 Some(first) => format!("{}.", first + index as u64),
                 None => bullets[frame.list_depth.min(bullets.len() - 1)].clone(),
             };
-            let run = (self.fonts).shape(&marker, face, marker_style.size, self.config.document.lang);
+            let run = (self.fonts).shape_figures(
+                &marker,
+                face,
+                marker_style.size,
+                self.config.document.lang,
+                marker_style.figures,
+            );
             if let Some(problem) = paragraph::missing_glyph(&run) {
                 self.errors.push(self.error(at, problem.to_string()));
             }
@@ -1405,7 +1419,9 @@ impl<'a> Flow<'a> {
             let mut line = self.empty_line(style);
             let text = text.replace('\t', "    ");
             if !text.trim().is_empty() {
-                let run = self.fonts.shape(&text, face, style.size, self.config.document.lang);
+                let run = self
+                    .fonts
+                    .shape_figures(&text, face, style.size, self.config.document.lang, style.figures);
                 if let Some(problem) = paragraph::missing_glyph(&run) {
                     self.errors.push(self.error(line_at, problem.to_string()));
                 }

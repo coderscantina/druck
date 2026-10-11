@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::config::resolved::{Config, FaceFile, FontFiles};
-use crate::config::theme::{Face, FontStyle, Lang, Weight};
+use crate::config::theme::{Face, FigureSpacing, FigureStyle, Figures, FontStyle, Lang, Weight};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 
@@ -191,7 +191,12 @@ impl Fonts {
     /// Shapes text like [`Fonts::shape`], with `tracking` em added after every character. Tracked text
     /// sets no ligatures, whose letters could not be spaced.
     pub fn shape_tracked(&self, text: &str, face: FaceId, size: Pt, lang: Lang, tracking: f64) -> ShapedRun {
-        self.shape_with(text, face, size, lang, tracking, false)
+        self.shape_with(text, face, size, lang, tracking, false, Figures::default())
+    }
+
+    /// Shapes text like [`Fonts::shape`] with the `figures` of a style.
+    pub fn shape_figures(&self, text: &str, face: FaceId, size: Pt, lang: Lang, figures: Figures) -> ShapedRun {
+        self.shape_with(text, face, size, lang, 0.0, false, figures)
     }
 
     /// Whether a face has small capitals of its own, the OpenType `smcp` feature.
@@ -202,7 +207,9 @@ impl Fonts {
     }
 
     /// Shapes text like [`Fonts::shape_tracked`], with the face's small capitals for lowercase letters if
-    /// `small_caps` is set.
+    /// `small_caps` is set, and the OpenType features for `figures`. A font without them keeps its
+    /// default figures.
+    #[allow(clippy::too_many_arguments)]
     pub fn shape_with(
         &self,
         text: &str,
@@ -211,6 +218,7 @@ impl Fonts {
         lang: Lang,
         tracking: f64,
         small_caps: bool,
+        figures: Figures,
     ) -> ShapedRun {
         let buzz = &self.faces[face.0].buzz;
         let mut buffer = rustybuzz::UnicodeBuffer::new();
@@ -223,8 +231,17 @@ impl Fonts {
         buffer.set_language(rustybuzz::Language::from_str(language).expect("language tag"));
         buffer.guess_segment_properties();
         let ligatures = u32::from(tracking == 0.0);
-        let features = [(b"kern", 1), (b"liga", ligatures), (b"smcp", u32::from(small_caps))]
-            .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..));
+        let on = u32::from;
+        let features = [
+            (b"kern", 1),
+            (b"liga", ligatures),
+            (b"smcp", on(small_caps)),
+            (b"lnum", on(figures.style == FigureStyle::Lining)),
+            (b"onum", on(figures.style == FigureStyle::Oldstyle)),
+            (b"pnum", on(figures.spacing == FigureSpacing::Proportional)),
+            (b"tnum", on(figures.spacing == FigureSpacing::Tabular)),
+        ]
+        .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..));
         let shaped = rustybuzz::shape(buzz, &features, buffer);
 
         let scale = size.0 / f64::from(buzz.units_per_em());

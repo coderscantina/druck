@@ -871,6 +871,12 @@ Not included: page references with print page numbers, font subsetting, a cover 
 - **Deferred:** rounded corners. `Item::Rect` has none, and square boxes print cleanly; add a radius when a theme needs it.
 - **EPUB:** `background-color` and horizontal `padding` on `code`, with the padding converted to em of the code size. `pre code` resets both, so code blocks keep their plain look.
 
+## 2026-10-11: Figure styles
+
+- **Syntax:** a `figures` object on block and custom styles with `style` (`lining`, `oldstyle`) and `spacing` (`proportional`, `tabular`), each `default` when omitted. An object keeps the two OpenType axes typed, so a theme cannot ask for lining and oldstyle at once, and layers merge it per key. A list of keywords would need a conflict check; raw feature tags would leak OpenType into themes for four values.
+- **Shaping:** `Fonts::shape_with` takes the figures and sets `lnum`, `onum`, `pnum`, and `tnum` for Rustybuzz. Every place that shapes text in a style passes that style's figures: paragraphs, bands, heading and list numbers, contents page numbers, bibliography labels, drop capitals, code blocks, and the watermark. Inline code and footnote markers keep the font's defaults. With `default`, all four features are off, so existing output is byte-identical.
+- **EPUB:** `font-variant-numeric` on every block style, `normal` on inline code.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

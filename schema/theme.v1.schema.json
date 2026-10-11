@@ -1087,6 +1087,29 @@
       },
       "description": "Font files for one family by face. Styles may only request faces that are present."
     },
+    "figures": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "enum": [
+            "default",
+            "lining",
+            "oldstyle"
+          ],
+          "description": "Lining figures of capital height (OpenType lnum), oldstyle figures that rise and descend like lowercase letters (onum), or the font's default."
+        },
+        "spacing": {
+          "enum": [
+            "default",
+            "proportional",
+            "tabular"
+          ],
+          "description": "Proportional figures as wide as their shapes (pnum), tabular figures of one width that line up in columns (tnum), or the font's default."
+        }
+      },
+      "description": "The figures this style asks of its font. An omitted field is the font's default."
+    },
     "blockStyle": {
       "type": "object",
       "additionalProperties": false,
@@ -1159,6 +1182,9 @@
         "keep-with-next": {
           "type": "boolean",
           "description": "Whether the block stays on the page or in the column of the next block."
+        },
+        "figures": {
+          "$ref": "#/$defs/figures"
         }
       },
       "description": "Style of one block element."
@@ -1236,6 +1262,9 @@
           "type": "boolean",
           "description": "Whether the block stays on the page or in the column of the next block."
         },
+        "figures": {
+          "$ref": "#/$defs/figures"
+        },
         "number-gap": {
           "description": "Space between an automatic heading number and the heading text, which hangs. null sets one space after the number.",
           "anyOf": [
@@ -1306,6 +1335,9 @@
         },
         "keep-with-next": {
           "$ref": "#/$defs/blockStyle/properties/keep-with-next"
+        },
+        "figures": {
+          "$ref": "#/$defs/figures"
         },
         "bullets": {
           "type": "array",

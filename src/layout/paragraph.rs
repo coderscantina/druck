@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use self::breaking::{Hang, Item as Element, Measure};
 use super::{Line, inline_face, text_item};
 use crate::config::resolved::{InlineStyles, Style};
-use crate::config::theme::{Align, FontStyle, Lang, Weight};
+use crate::config::theme::{Align, Figures, FontStyle, Lang, Weight};
 use crate::config::values::{Color, Pt};
 use crate::document::{Inline, Link};
 use crate::page::{Item, Rect};
@@ -43,6 +43,8 @@ struct Fragment {
     note: Option<usize>,
     /// Letter spacing in em, which reshaping keeps.
     tracking: f64,
+    /// The figures of the style, which reshaping keeps.
+    figures: Figures,
     /// The code span this fragment belongs to, by its index in the content, and its box color.
     background: Option<(usize, Color)>,
 }
@@ -593,7 +595,16 @@ fn line_runs<'a>(
                 if hyphen {
                     piece.push('-');
                 }
-                fonts.shape_tracked(&piece, fragment.run.face, fragment.run.size, lang, fragment.tracking)
+                let run = &fragment.run;
+                fonts.shape_with(
+                    &piece,
+                    run.face,
+                    run.size,
+                    lang,
+                    fragment.tracking,
+                    false,
+                    fragment.figures,
+                )
             };
             let space = (first && index > start.word).then_some(index);
             runs.push((run, fragment, space));
@@ -794,18 +805,24 @@ fn tokens(
                     rise: inline.footnote_marker_raise.to_pt(style.size).0,
                     note: Some(*index),
                     tracking: 0.0,
+                    figures: Figures::default(),
                     background: None,
                 });
                 continue;
             }
         };
-        // Code keeps its case and spacing.
-        let (face, size, tracking) = if text_style.code {
+        // Code keeps its case, spacing, and figures.
+        let (face, size, tracking, figures) = if text_style.code {
             let face = fonts.face(&inline.code_font, Weight::REGULAR, FontStyle::Normal);
-            (face, inline.code_size.to_pt(style.size), 0.0)
+            (face, inline.code_size.to_pt(style.size), 0.0, Figures::default())
         } else {
             let (weight, font_style) = inline_face(style, text_style.emphasis, text_style.strong);
-            (fonts.face(&style.font, weight, font_style), style.size, style.tracking)
+            (
+                fonts.face(&style.font, weight, font_style),
+                style.size,
+                style.tracking,
+                style.figures,
+            )
         };
         let upper;
         let text = if style.uppercase && !text_style.code {
@@ -849,7 +866,7 @@ fn tokens(
                     } else {
                         (piece.to_owned(), size)
                     };
-                    let run = fonts.shape_tracked(&piece, face, size, lang, tracking);
+                    let run = fonts.shape_with(&piece, face, size, lang, tracking, false, figures);
                     if let Some(problem) = missing_glyph(&run) {
                         return Err(problem);
                     }
@@ -862,12 +879,13 @@ fn tokens(
                         rise: 0.0,
                         note: None,
                         tracking,
+                        figures,
                         background: None,
                     });
                 }
                 continue;
             }
-            let mut run = fonts.shape_with(part, face, size, lang, tracking, small_caps);
+            let mut run = fonts.shape_with(part, face, size, lang, tracking, small_caps, figures);
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
             }
@@ -897,6 +915,7 @@ fn tokens(
                 rise: 0.0,
                 note: None,
                 tracking,
+                figures,
                 background: inline
                     .code_background
                     .filter(|_| text_style.code)

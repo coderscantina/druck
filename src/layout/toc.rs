@@ -58,8 +58,13 @@ impl<'a> Flow<'a> {
         let hang = config.toc.level_indent.0;
         let width = self.width(frame);
 
-        let number = fonts.shape(&self.assumed[heading.anchor], face, style.size, lang);
-        let column = number.width.0.max(fonts.shape("000", face, style.size, lang).width.0);
+        let number = fonts.shape_figures(&self.assumed[heading.anchor], face, style.size, lang, style.figures);
+        let column = number.width.0.max(
+            fonts
+                .shape_figures("000", face, style.size, lang, style.figures)
+                .width
+                .0,
+        );
         let measure = width - indent - hang - column - 2.0 * GAP * em;
         let content = [Inline::Text {
             text: heading.title(),

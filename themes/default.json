@@ -96,7 +96,11 @@
       "first-line-indent": "$spacing.paragraph-indent",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "heading-1": {
       "font": "$fonts.heading",
@@ -114,6 +118,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "heading-2": {
@@ -132,6 +140,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "heading-3": {
@@ -150,6 +162,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "heading-4": {
@@ -168,6 +184,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "heading-5": {
@@ -186,6 +206,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "heading-6": {
@@ -204,6 +228,10 @@
       "tracking": 0,
       "uppercase": false,
       "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      },
       "number-gap": null
     },
     "title": {
@@ -221,7 +249,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "subtitle": {
       "font": "$fonts.heading",
@@ -238,7 +270,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "author": {
       "font": "$fonts.body",
@@ -255,7 +291,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "date": {
       "font": "$fonts.body",
@@ -272,7 +312,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "abstract-heading": {
       "font": "$fonts.heading",
@@ -289,7 +333,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "abstract": {
       "font": "$fonts.body",
@@ -306,7 +354,11 @@
       "first-line-indent": "$spacing.paragraph-indent",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "quote": {
       "font": "$fonts.body",
@@ -323,7 +375,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "list": {
       "font": "$fonts.body",
@@ -340,7 +396,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "code-block": {
       "font": "$fonts.mono",
@@ -357,7 +417,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "caption": {
       "font": "$fonts.body",
@@ -374,7 +438,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "table-cell": {
       "font": "$fonts.body",
@@ -391,7 +459,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "table-header": {
       "font": "$fonts.body",
@@ -408,7 +480,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "footnote": {
       "font": "$fonts.body",
@@ -425,7 +501,11 @@
       "first-line-indent": "$spacing.paragraph-indent",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "bibliography": {
       "font": "$fonts.body",
@@ -442,7 +522,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "toc-heading": {
       "font": "$fonts.heading",
@@ -459,7 +543,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "toc-entry": {
       "font": "$fonts.body",
@@ -476,7 +564,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "header": {
       "font": "$fonts.body",
@@ -493,7 +585,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "footer": {
       "font": "$fonts.body",
@@ -510,7 +606,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "watermark": {
       "font": "$fonts.body",
@@ -527,7 +627,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0.04,
       "uppercase": true,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     },
     "scene-break": {
       "font": "$fonts.body",
@@ -544,7 +648,11 @@
       "first-line-indent": "$spacing.none",
       "tracking": 0,
       "uppercase": false,
-      "keep-with-next": false
+      "keep-with-next": false,
+      "figures": {
+        "style": "default",
+        "spacing": "default"
+      }
     }
   },
   "custom-styles": {},

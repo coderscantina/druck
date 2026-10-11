@@ -598,6 +598,7 @@ pub struct BlockStyle {
     pub uppercase: bool,
     /// The block never ends a page or column without the next block.
     pub keep_with_next: bool,
+    pub figures: Figures,
     /// Space between an automatic heading number and the heading text, for `heading-1` to `heading-6`.
     /// Without it, one space follows the number.
     #[serde(default)]
@@ -641,6 +642,9 @@ pub struct CustomStyle {
     pub uppercase: Option<bool>,
     #[serde(default, deserialize_with = "non_null")]
     pub keep_with_next: Option<bool>,
+    /// Replaces the base style's figures as a whole.
+    #[serde(default, deserialize_with = "non_null")]
+    pub figures: Option<Figures>,
     /// List markers per nesting level, as in `lists.bullets`.
     #[serde(default, deserialize_with = "non_null")]
     pub bullets: Option<Vec<String>>,
@@ -675,9 +679,42 @@ impl CustomStyle {
             tracking: self.tracking.unwrap_or(base.tracking),
             uppercase: self.uppercase.unwrap_or(base.uppercase),
             keep_with_next: self.keep_with_next.unwrap_or(base.keep_with_next),
+            figures: self.figures.unwrap_or(base.figures),
             number_gap: base.number_gap,
         }
     }
+}
+
+/// The figures a style asks of its font through OpenType features. `default` keeps the font's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Figures {
+    #[serde(default)]
+    pub style: FigureStyle,
+    #[serde(default)]
+    pub spacing: FigureSpacing,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FigureStyle {
+    #[default]
+    Default,
+    /// Figures of capital height, the OpenType `lnum` feature.
+    Lining,
+    /// Figures that rise and descend like lowercase letters, `onum`.
+    Oldstyle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FigureSpacing {
+    #[default]
+    Default,
+    /// Figures as wide as their shapes, `pnum`.
+    Proportional,
+    /// Figures of one width, which line up in columns, `tnum`.
+    Tabular,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]

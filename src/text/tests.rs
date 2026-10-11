@@ -119,6 +119,26 @@ fn tracking_spaces_every_character_and_sets_no_ligatures() {
 }
 
 #[test]
+fn figures_select_oldstyle_and_tabular_glyphs() {
+    let fonts = load(serif());
+    let face = fonts.face("Test", Weight::REGULAR, FontStyle::Normal);
+    let shaped = |style, spacing| fonts.shape_figures("1180", face, Pt(10.0), Lang::En, Figures { style, spacing });
+    let ids = |run: &ShapedRun| run.glyphs.iter().map(|glyph| glyph.id).collect::<Vec<_>>();
+    let default = shaped(FigureStyle::Default, FigureSpacing::Default);
+
+    let oldstyle = shaped(FigureStyle::Oldstyle, FigureSpacing::Default);
+    assert_ne!(ids(&oldstyle), ids(&default));
+    let tabular = shaped(FigureStyle::Default, FigureSpacing::Tabular);
+    let advances: Vec<f64> = tabular.glyphs.iter().map(|glyph| glyph.x_advance.0).collect();
+    assert!(advances.iter().all(|&advance| advance == advances[0]), "{advances:?}");
+    let proportional = shaped(FigureStyle::Default, FigureSpacing::Proportional);
+    assert!(
+        proportional.glyphs[0].x_advance.0 < proportional.glyphs[3].x_advance.0,
+        "1 is narrower than 0"
+    );
+}
+
+#[test]
 fn missing_faces_fall_back() {
     let fonts = load(family(&[
         ("regular", "LibertinusSerif-Regular.otf"),

@@ -34,7 +34,7 @@ impl<'a> Flow<'a> {
             .references
             .iter()
             .filter_map(|reference| reference.label.as_deref())
-            .map(|label| self.fonts.shape(label, face, style.size, lang))
+            .map(|label| self.fonts.shape_figures(label, face, style.size, lang, style.figures))
             .collect();
         // Text starts after the label column of a numeric bibliography, which has no hanging indent.
         let column = (labels.iter().map(|run| run.width.0).reduce(f64::max)).map(|widest| widest + 0.5 * style.size.0);

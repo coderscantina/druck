@@ -15,7 +15,9 @@ use std::fmt::Write;
 
 use super::fonts::FontFace;
 use crate::config::resolved::{Config, CustomStyle, Rule, SceneMark, Style};
-use crate::config::theme::{Align, FontStyle, RuleBelow, SlotStyle, TemplateStyle};
+use crate::config::theme::{
+    Align, FigureSpacing, FigureStyle, Figures, FontStyle, RuleBelow, SlotStyle, TemplateStyle,
+};
 use crate::config::values::{Length, Pt};
 
 /// The class of a built-in or custom style that elements name, such as `s-chapter-number`.
@@ -78,6 +80,7 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
         ("font-family", code_family),
         ("font-size", length(inline.code_size, body.size)),
         ("color", inline.code_color.to_string()),
+        ("font-variant-numeric", "normal".to_owned()),
     ];
     if let Some(background) = inline.code_background {
         code.push(("background-color", background.to_string()));
@@ -198,6 +201,7 @@ impl Sheet<'_> {
                 "text-transform",
                 if style.uppercase { "uppercase" } else { "none" }.to_owned(),
             ),
+            ("font-variant-numeric", figures(style.figures)),
         ]
     }
 
@@ -635,6 +639,26 @@ fn em(length: Pt, size: Pt) -> String {
 }
 
 /// An inline length, whose `em` refers to the surrounding text, in ems of `size` if absolute.
+/// The `font-variant-numeric` value for `figures`.
+fn figures(figures: Figures) -> String {
+    let style = match figures.style {
+        FigureStyle::Default => None,
+        FigureStyle::Lining => Some("lining-nums"),
+        FigureStyle::Oldstyle => Some("oldstyle-nums"),
+    };
+    let spacing = match figures.spacing {
+        FigureSpacing::Default => None,
+        FigureSpacing::Proportional => Some("proportional-nums"),
+        FigureSpacing::Tabular => Some("tabular-nums"),
+    };
+    let values: Vec<&str> = style.into_iter().chain(spacing).collect();
+    if values.is_empty() {
+        "normal".to_owned()
+    } else {
+        values.join(" ")
+    }
+}
+
 fn length(length: Length, size: Pt) -> String {
     match length {
         Length::Em(value) => format!("{}em", number(value)),
@@ -683,7 +707,10 @@ mod tests {
             "version": 1,
             "styles": {
                 "body": { "size": "10pt", "first-line-indent": "1.5em", "space-after": "0pt" },
-                "heading-2": { "size": "15pt", "space-before": "30pt", "tracking": 0.05, "uppercase": true }
+                "heading-2": {
+                    "size": "15pt", "space-before": "30pt", "tracking": 0.05, "uppercase": true,
+                    "figures": { "style": "oldstyle", "spacing": "tabular" }
+                }
             }
         }));
         assert!(css.contains("p + p { text-indent: 1.5em; }"), "{css}");
@@ -693,6 +720,7 @@ mod tests {
             "margin: 2em 0 ",
             "letter-spacing: 0.05em;",
             "text-transform: uppercase;",
+            "font-variant-numeric: oldstyle-nums tabular-nums;",
             "break-after: avoid;",
         ] {
             assert!(heading.contains(declaration), "{declaration} in {heading}");

@@ -299,7 +299,15 @@ impl BandLines<'_> {
                 if style.uppercase {
                     text = text.to_uppercase();
                 }
-                let run = fonts.shape_tracked(&text, face, style.size, config.document.lang, style.tracking);
+                let run = fonts.shape_with(
+                    &text,
+                    face,
+                    style.size,
+                    config.document.lang,
+                    style.tracking,
+                    false,
+                    style.figures,
+                );
                 if let Some(problem) = paragraph::missing_glyph(&run) {
                     return Err(error(property, format!("{problem}, on page {}", self.page)));
                 }

@@ -404,6 +404,7 @@ impl<'a> Resolver<'a> {
             tracking: raw.tracking.get(),
             uppercase: raw.uppercase,
             keep_with_next: raw.keep_with_next,
+            figures: raw.figures,
             number_gap: match number_gap {
                 Some(gap) => Some(gap?),
                 None => None,

@@ -12,8 +12,8 @@ use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
 use super::theme::{
-    Align, Anchor, BreakBefore, DocumentDefaults, Face, FontStyle, LabelSet, Matters, NumberFormat, NumberPosition,
-    RuleBelow, SlotStyle, Styles, Weight, WideBlock,
+    Align, Anchor, BreakBefore, DocumentDefaults, Face, Figures, FontStyle, LabelSet, Matters, NumberFormat,
+    NumberPosition, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
 use crate::diagnostic::Diagnostic;
@@ -230,6 +230,7 @@ pub struct Style {
     pub tracking: f64,
     pub uppercase: bool,
     pub keep_with_next: bool,
+    pub figures: Figures,
     /// Space after an automatic heading number; `None` is one space. Only heading styles have it.
     pub number_gap: Option<Pt>,
 }
