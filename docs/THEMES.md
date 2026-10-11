@@ -51,6 +51,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `page.text-width` | Prose uses the whole margin frame. |
 | `page.column-change-spacing` | The column gap. |
 | `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
+| `inline.code.background` | No box behind inline code. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
 `pages.body` itself cannot be null, and `fonts.<family>.regular` is required.
@@ -211,6 +212,24 @@ With `number-gap` on a heading style, the automatic number is set hanging and th
 Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`, `scene-break`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
+
+## Inline code
+
+`inline.code` styles code spans in running text, such as `` `git blame` ``:
+
+| Field | Values |
+| --- | --- |
+| `font`, `size`, `color` | The code font, its size relative to the surrounding text, and its color. Code uses the regular face. |
+| `background` | `#rrggbb` or `$colors.x` for a box behind the code, or `null`, the default, for none. |
+| `padding` | Space before and after the code, inside its box, in em of the surrounding text. Default `0pt`. |
+
+The box spans the code from its ascender to its descender, spaces inside the span included. Code that wraps gets a box on each line, padded only at the span's own start and end. The padding counts in the line width, so it applies with or without a background. Code blocks use `styles.code-block` instead.
+
+```json
+"inline": {
+  "code": { "color": "#24292f", "background": "#eff1f3", "padding": "0.2em" }
+}
+```
 
 ## Custom styles
 
@@ -506,7 +525,7 @@ What carries over:
 - **Custom styles** become classes named `s-` and the style name, such as `.s-epigraph`, on the paragraphs, headings, lists, table rows, and cells that apply them. So do the built-in and custom styles that title slots, `chapters.number-style`, and list markers name. A row style's `rule-below` sets the border below its row.
 - **Lists** take `lists.indent`, `lists.item-spacing`, and the bullets by depth. Readers without text bullets show discs.
 - **Tables** take `tables.cell-padding` and the top, header, and row rules. Column alignment applies as in the PDF.
-- **Inline styles** take the code font, size, and color, the link color and underline, and the footnote marker's size and raise.
+- **Inline styles** take the code font, size, color, background, and padding, the link color and underline, and the footnote marker's size and raise.
 - **Footnotes** follow the chapter below a separator of `footnotes.separator-width`, `separator-thickness`, and `separator-color`, `footnotes.gap` below the text and `footnotes.spacing` apart.
 - **Chapters** keep `sink` as the space above a chapter heading, the number above the heading with the `chapter` label, the ornament, the lead-in in small capitals, and the drop capital. The drop capital uses CSS `initial-letter` where readers support it, and a floated letter of about the same size elsewhere.
 - **Scene breaks** show the text or image mark. A `blank` break shows its mark too, since a reader's page breaks are unknown.

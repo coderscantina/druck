@@ -68,18 +68,29 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
             ("font-family", inherit()),
             ("font-size", "1em".to_owned()),
             ("color", inherit()),
+            ("background", "none".to_owned()),
+            ("padding", "0".to_owned()),
         ],
     );
     let inline = &config.inline;
     let code_family = sheet.family(&inline.code_font);
-    sheet.rule(
-        "code",
-        vec![
-            ("font-family", code_family),
-            ("font-size", length(inline.code_size, body.size)),
-            ("color", inline.code_color.to_string()),
-        ],
-    );
+    let mut code = vec![
+        ("font-family", code_family),
+        ("font-size", length(inline.code_size, body.size)),
+        ("color", inline.code_color.to_string()),
+    ];
+    if let Some(background) = inline.code_background {
+        code.push(("background-color", background.to_string()));
+    }
+    // The padding is relative to the surrounding text, CSS em inside `code` to the code size.
+    let padding = inline.code_padding.to_pt(body.size);
+    if padding.0 > 0.0 {
+        code.push((
+            "padding",
+            format!("0 {}", em(padding, inline.code_size.to_pt(body.size))),
+        ));
+    }
+    sheet.rule("code", code);
     let underline = if inline.link_underline { "underline" } else { "none" };
     sheet.rule(
         "a",

@@ -552,7 +552,9 @@
     "code": {
       "font": "$fonts.mono",
       "size": "$sizes.code",
-      "color": "$colors.text"
+      "color": "$colors.text",
+      "background": null,
+      "padding": "0pt"
     },
     "link": {
       "color": "$colors.accent",

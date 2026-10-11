@@ -864,6 +864,13 @@ At the owner's request, outside the milestone plan, so authors can release a boo
 
 Not included: page references with print page numbers, font subsetting, a cover from the theme, `meta.publisher` and other metadata beyond the front matter keys, and accessibility metadata such as `schema:accessMode`.
 
+## 2026-10-11: Inline code background and padding
+
+- **Syntax:** `inline.code.background` (a color or `null`) and `inline.code.padding` (a length, em of the surrounding text, like the other inline lengths). The defaults, `null` and `0pt`, keep existing output unchanged.
+- **Layout:** padding widens the first glyph of a span's first word and the last glyph of its last word, so breaking, alignment, and drawing measure it without special cases. Code never breaks inside a word, so the padding is never reshaped away. The box is a filled rectangle from the code's ascender to its descender, extended across spaces inside the same span and started again on each line.
+- **Deferred:** rounded corners. `Item::Rect` has none, and square boxes print cleanly; add a radius when a theme needs it.
+- **EPUB:** `background-color` and horizontal `padding` on `code`, with the padding converted to em of the code size. `pre code` resets both, so code blocks keep their plain look.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

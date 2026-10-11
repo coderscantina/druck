@@ -7,6 +7,7 @@ use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, resolve};
 use crate::config::resolved::PageGeometry;
 use crate::config::theme::Lang;
+use crate::config::values::Length;
 use crate::document::{Footnote, InlineStyle};
 
 const PROSE: &str = "The design of a page begins with its proportions. A text block that is too wide tires the \
@@ -337,6 +338,64 @@ fn link_text_that_spells_its_url_breaks_after_slashes_without_a_hyphen() {
         texts[..texts.len() - 1].iter().all(|text| text.ends_with('/')),
         "{texts:?}"
     );
+}
+
+#[test]
+fn inline_code_sits_on_one_padded_box_per_line() {
+    let mut config = config();
+    config.inline.code_background = Some(Color([240, 240, 240]));
+    config.inline.code_padding = Length::Pt(2.0);
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    let code = InlineStyle {
+        code: true,
+        ..InlineStyle::default()
+    };
+    let content = [
+        text("Run ", InlineStyle::default()),
+        text("git blame", code),
+        text(" now.", InlineStyle::default()),
+    ];
+    let lines = paragraph::lines(
+        &content,
+        &config.styles.body,
+        &config.inline,
+        &fonts,
+        Lang::En,
+        300.0,
+        0.0,
+    )
+    .unwrap();
+
+    let items = &lines[0].items;
+    let boxes: Vec<Rect> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Rect { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    let runs: Vec<(f64, &ShapedRun)> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Text { x, run, .. } => Some((x.0, run)),
+            _ => None,
+        })
+        .collect();
+    let (git, blame) = (runs[1], runs[2]);
+    assert_eq!(boxes.len(), 1, "one box across the space inside the span");
+    assert_eq!(boxes[0].x.0, git.0);
+    assert!((boxes[0].x.0 + boxes[0].width.0 - (blame.0 + blame.1.width.0)).abs() < 1e-9);
+    assert_eq!(git.1.glyphs[0].x_offset.0, 2.0, "padding before the first glyph");
+    assert!(
+        runs[3].0 > boxes[0].x.0 + boxes[0].width.0,
+        "the next word follows the box"
+    );
+    let first_rect = items.iter().position(|item| matches!(item, Item::Rect { .. })).unwrap();
+    let first_code = items
+        .iter()
+        .position(|item| matches!(item, Item::Text { run, .. } if run.text == "git"))
+        .unwrap();
+    assert!(first_rect < first_code, "the box is drawn below the code");
 }
 
 #[test]

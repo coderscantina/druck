@@ -296,6 +296,8 @@ pub struct InlineStyles {
     pub code_font: String,
     pub code_size: Length,
     pub code_color: Color,
+    pub code_background: Option<Color>,
+    pub code_padding: Length,
     pub link_color: Color,
     pub link_underline: bool,
     pub footnote_marker_size: Length,

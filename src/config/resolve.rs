@@ -902,6 +902,13 @@ impl<'a> Resolver<'a> {
                 )?,
                 code_size: self.value(&self.tokens.sizes, &inline.code.size, "inline.code.size")?.0,
                 code_color: self.color(&inline.code.color, "inline.code.color")?,
+                code_background: match &inline.code.background {
+                    Some(color) => Some(self.color(color, "inline.code.background")?),
+                    None => None,
+                },
+                code_padding: self
+                    .value(&self.tokens.spacing, &inline.code.padding, "inline.code.padding")?
+                    .0,
                 link_color: self.color(&inline.link.color, "inline.link.color")?,
                 link_underline: inline.link.underline,
                 footnote_marker_size: self

@@ -711,6 +711,10 @@ pub struct InlineCode {
     pub font: Spec<FontName>,
     pub size: Spec<Size>,
     pub color: Spec<Color>,
+    /// A box behind the code, or `null` for none.
+    pub background: Option<Spec<Color>>,
+    /// Space before and after the code, inside its box.
+    pub padding: Spec<Spacing>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

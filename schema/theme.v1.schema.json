@@ -379,6 +379,21 @@
             "color": {
               "description": "Text color.",
               "$ref": "#/$defs/colorSpec"
+            },
+            "background": {
+              "description": "Color of a box behind the code, or null for none.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/colorSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "padding": {
+              "description": "Space before and after the code, inside its box. em is relative to the surrounding text.",
+              "$ref": "#/$defs/spacingSpec"
             }
           },
           "description": "Inline code."

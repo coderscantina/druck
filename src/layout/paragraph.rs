@@ -43,6 +43,8 @@ struct Fragment {
     note: Option<usize>,
     /// Letter spacing in em, which reshaping keeps.
     tracking: f64,
+    /// The code span this fragment belongs to, by its index in the content, and its box color.
+    background: Option<(usize, Color)>,
 }
 
 /// Where a fragment may break inside a word.
@@ -639,12 +641,34 @@ fn position(
 
     let mut items = Vec::new();
     let mut open_link: Option<usize> = None;
+    let mut open_code: Option<(usize, usize)> = None;
     let mut x = indent + start;
     for (run, fragment, space) in runs {
         if let Some(word) = space {
             x += spaces[word] * (1.0 + adjust);
         }
         let width = run.width.0;
+        match (fragment.background, open_code) {
+            (Some((span, _)), Some((open, item))) if span == open => {
+                if let Item::Rect { rect, .. } = &mut items[item] {
+                    rect.width = Pt(x + width - rect.x.0);
+                }
+            }
+            (Some((span, color)), _) => {
+                let metrics = fragment.metrics;
+                open_code = Some((span, items.len()));
+                items.push(Item::Rect {
+                    rect: Rect {
+                        x: Pt(x),
+                        y: Pt(baseline - metrics.ascender.0),
+                        width: Pt(width),
+                        height: Pt(metrics.ascender.0 + metrics.descender.0),
+                    },
+                    color,
+                });
+            }
+            (None, _) => open_code = None,
+        }
         if let Some(link) = &fragment.link {
             let metrics = fragment.metrics;
             let extends = open_link.and_then(|i| match &mut items[i] {
@@ -685,6 +709,18 @@ fn position(
         x += width;
     }
     items
+}
+
+/// Widens `run` by `before` ahead of its first glyph and `after` behind its last.
+fn pad(run: &mut ShapedRun, before: f64, after: f64) {
+    if let Some(first) = run.glyphs.first_mut() {
+        first.x_offset.0 += before;
+        first.x_advance.0 += before;
+    }
+    if let Some(last) = run.glyphs.last_mut() {
+        last.x_advance.0 += after;
+    }
+    run.width.0 += before + after;
 }
 
 /// The baseline offset from the top of a line of `height`, centering the font's ascender and descender.
@@ -730,7 +766,7 @@ fn tokens(
             tokens.push(Token::Word(std::mem::take(word)));
         }
     };
-    for piece in content {
+    for (span, piece) in content.iter().enumerate() {
         let (text, text_style) = match piece {
             Inline::LineBreak => {
                 finish(&mut word, &mut tokens);
@@ -758,6 +794,7 @@ fn tokens(
                     rise: inline.footnote_marker_raise.to_pt(style.size).0,
                     note: Some(*index),
                     tracking: 0.0,
+                    background: None,
                 });
                 continue;
             }
@@ -783,10 +820,15 @@ fn tokens(
             (None, false) => style.color,
         };
         let metrics = fonts.metrics(face, size);
+        // Code pads its first and last part, so spaces at its edges do not move the padding.
+        let padding = inline.code_padding.to_pt(style.size).0;
+        let parts: Vec<&str> = text.split(' ').collect();
+        let first_part = parts.iter().position(|part| !part.is_empty()).unwrap_or(0);
+        let last_part = parts.iter().rposition(|part| !part.is_empty()).unwrap_or(0);
         // Small capitals are never hyphenated, since a word cut by a break is reshaped without them.
         let small_caps = text_style.small_caps && !text_style.code;
         let synthetic = small_caps && !fonts.has_small_caps(face);
-        for (index, part) in text.split(' ').enumerate() {
+        for (index, part) in parts.into_iter().enumerate() {
             if index > 0 {
                 finish(&mut word, &mut tokens);
                 let space = *space_widths
@@ -820,13 +862,22 @@ fn tokens(
                         rise: 0.0,
                         note: None,
                         tracking,
+                        background: None,
                     });
                 }
                 continue;
             }
-            let run = fonts.shape_with(part, face, size, lang, tracking, small_caps);
+            let mut run = fonts.shape_with(part, face, size, lang, tracking, small_caps);
             if let Some(problem) = missing_glyph(&run) {
                 return Err(problem);
+            }
+            if text_style.code {
+                let (before, after) = (index == first_part, index == last_part);
+                pad(
+                    &mut run,
+                    if before { padding } else { 0.0 },
+                    if after { padding } else { 0.0 },
+                );
             }
             let spells_url = matches!(&text_style.link,
                 Some(Link::Url(url)) if url == part || url.strip_prefix("mailto:") == Some(part));
@@ -846,6 +897,10 @@ fn tokens(
                 rise: 0.0,
                 note: None,
                 tracking,
+                background: inline
+                    .code_background
+                    .filter(|_| text_style.code)
+                    .map(|color| (span, color)),
             });
         }
     }
