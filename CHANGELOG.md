@@ -1,5 +1,13 @@
 # Changelog
 
+## 26.10.11, 11 October 2026
+
+### Features
+
+- Choose lining, oldstyle, and tabular figures per style with `figures` (5549004)
+- Put inline code on a padded box with `inline.code.background` and `padding` (ea19e82)
+
+
 ## 26.10.9, 9 October 2026
 
 ### Features
