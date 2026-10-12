@@ -18,17 +18,19 @@ It is one binary. Fonts and hyphenation patterns are built in, and it never touc
 
 ## What it sets
 
-- **Paragraphs** broken with total-fit optimization, English and German hyphenation, hanging punctuation, and ligatures.
+- **Paragraphs** broken with total-fit optimization, English and German hyphenation, hanging punctuation, ligatures, and the quotes and dashes of the language: "this" -- that becomes “this” – that, or „this“ in German.
 - **Pages** with scored breaks: no stranded lines, headings kept with their text, and keep groups that start a fresh page when needed.
-- **Footnotes** that continue across pages, also from two-column sections.
+- **Footnotes** that continue across pages, also from two-column sections, and margin notes and sidenotes beside the text.
 - **Columns** that start and end mid-page, balanced, with full-width blocks in between.
-- **Images and figures** in PNG, JPEG, and SVG, with numbered captions.
+- **Images and figures** in PNG, JPEG, and SVG, with numbered captions, set where they stand or at the top or bottom of the page.
 - **Tables** that run over many pages with repeated headers, plus list tables with paragraphs, lists, and spanning cells inside.
 - **Reports** with title pages, a table of contents, numbered headings, running headers, and cross-references to sections, figures, tables, and pages.
-- **Citations** from a BibTeX file in author-date or numeric style, with a linked bibliography.
+- **Citations** from a BibTeX file in author-date or numeric style, with a linked bibliography, and a back-of-book index with page numbers from the final layout.
+- **Code** highlighted for over 200 languages, and GitHub callouts such as `> [!NOTE]` set as boxes.
 - **Business documents** with covers, address blocks, and three-column footers, set in your own installed fonts.
 - **Placeholders** for word counts, reading time, and the build date, and a draft watermark.
 - **EPUB** from the same source and theme, so a book ships as a print PDF and an ebook.
+- **Accessible PDFs**: every PDF is tagged, and `conformance: [pdf/a-2a, pdf/ua-1]` checks for PDF/A and PDF/UA. EPUBs carry accessibility metadata.
 
 It is fast. A 93-page document full of tables renders in 0.3 seconds on an Apple M1 Pro.
 

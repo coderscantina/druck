@@ -201,7 +201,7 @@ Required PDF features are:
 
 For identical document inputs, resolved theme and settings, resource contents, and renderer versions, layout must be identical across supported platforms. Custom fonts and theme assets are part of the input resources. Byte-for-byte identical PDF files are not required.
 
-Tagged accessibility and PDF/A compliance are deferred.
+Tagged accessibility and PDF/A compliance arrive with the [typesetting amendment](#typesetting-amendment).
 
 ## Phase 1 delivery stages
 
@@ -239,6 +239,18 @@ Added on 2026-10-07 so a theme can set business documents such as a multi-page o
 - **Anchored slot groups.** The title page and headers and footers are lists of slot groups. Each group is anchored to the margin frame with an offset, a width, and an alignment, and holds multi-line slots. Free document metadata from front matter and the page total are slot values.
 - **Rich tables.** A list-based table directive allows block content in cells, column spans, column alignment and widths, row and cell styles, and theme rules below the header and below rows.
 
+## Typesetting amendment
+
+Added on 2026-10-12 at the owner's request, to meet what authors expect from a typesetter in 2026. Each item has a dated entry in [decisions](DECISIONS.md).
+
+- **Accessible and archival PDF.** Every PDF is tagged, with a structure tree in reading order, the document language, and decoration marked as artifacts. A setting asks for PDF/UA or PDF/A conformance, checked when writing. EPUBs carry accessibility metadata. This replaces the deferral of tagged accessibility and PDF/A below.
+- **Smart punctuation.** Straight quotes become the quotes of the document language, and double hyphens and three dots become dashes and an ellipsis.
+- **Syntax highlighting.** Fenced code blocks with a language are colored by token, from theme colors. Highlighting changes no metrics.
+- **Index.** Authors mark index terms; a generated index lists them with page numbers, sub-entries, and see references.
+- **Margin notes and sidenotes.** Notes set in the outer margin beside their reference, and a theme option that sets footnotes there.
+- **Callouts.** GitHub alert quotations such as `> [!NOTE]` render as labeled, styled blocks.
+- **Figure placement.** Images and tables may go to the top or bottom of a page or column, keeping their order. This is a bounded exception to the exclusion of automatic floats.
+
 ## Acceptance and performance
 
 Judge visual quality against the project's own reviewed English and German sample documents. LaTeX reference PDFs and matching LaTeX line or page breaks are not acceptance requirements.
@@ -257,7 +269,7 @@ Benchmark 10-, 50-, and 100-page documents. Set runtime and memory limits after 
 
 ## Explicit boundaries and remaining implementation decisions
 
-The first release excludes math, automatic floats, image text wrapping, unequal or three-column layouts, row-spanning table cells, split table rows, arbitrary typesetting commands, embedded HTML rendering, remote resource fetching, arbitrary CSL styles, broad BibTeX compatibility, glyph-width adjustments, right-to-left and CJK layout, tagged accessibility, and PDF/A compliance. Theme inheritance chains, multiple theme overlays, cascading selectors, arbitrary template trees, expressions, and absolute positioning are also excluded. The public Rust API is deferred to phase 2.
+The first release excludes math, automatic floats beyond the top and bottom placement of the [typesetting amendment](#typesetting-amendment), image text wrapping, unequal or three-column layouts, row-spanning table cells, split table rows, arbitrary typesetting commands, embedded HTML rendering, remote resource fetching, arbitrary CSL styles, broad BibTeX compatibility, glyph-width adjustments, and right-to-left and CJK layout. Theme inheritance chains, multiple theme overlays, cascading selectors, arbitrary template trees, expressions, and absolute positioning are also excluded. The public Rust API is deferred to phase 2.
 
 Dependency crate choices, internal module interfaces, exact directive spelling, the front-matter schema, exact JSON properties and slot identifiers, page-variant fallback order, measurement encoding, default font selection, numeric typography settings, concrete citation formatting, and CLI flags remain implementation decisions within this contract. These choices must be documented and deterministic. Performance limits will be set from prototype measurements.
 

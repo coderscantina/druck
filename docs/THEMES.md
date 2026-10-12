@@ -52,6 +52,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `page.column-change-spacing` | The column gap. |
 | `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
 | `inline.code.background` | No box behind inline code. |
+| `highlight` | No highlighting: code blocks are set in the `code-block` color. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
 `pages.body` itself cannot be null, and `fonts.<family>.regular` is required.
@@ -61,7 +62,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | Key | Purpose |
 | --- | --- |
 | `version`, `$schema` | Format version and editor hint. |
-| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`, `draft`. |
+| `document` | Defaults for document settings: `lang`, `title-page`, `toc`, `duplex`, `numbered-headings`, `numbering-depth`, `toc-depth`, `citation-style`, `draft`, `conformance` (see [accessibility and archiving](AUTHORING.md#accessibility-and-archiving)). |
 | `fonts` | Font families and their files. |
 | `images` | Named images used by title slots, the chapter ornament, and scene breaks. |
 | `tokens` | Named fonts, sizes, spacing, and colors. |
@@ -71,10 +72,14 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `inline` | Inline code, links, footnote markers. |
 | `lists` | Indent, item spacing, bullets per level, and the marker style. |
 | `tables` | Cell padding and rules. |
+| `callouts` | Padding, background, and bar of the five callout kinds. |
 | `footnotes` | Footnote gap and separator. |
+| `margin-notes` | The note column for margin notes and sidenotes. |
 | `captions` | Separator between label and caption text. |
+| `placement` | Whether figures and tables go to the top or bottom of a page by default. |
 | `bibliography` | Hanging indent and entry spacing. |
 | `toc` | Level indent and dot leaders. |
+| `index` | Columns, indents, and the separator of the index. |
 | `matter` | Page numbers of the front, main, and back matter of a book. |
 | `chapters` | How level 1 headings open chapters: page breaks, sink, number, ornament, drop capital, and lead-in. |
 | `scene-break` | The mark of a thematic break. |
@@ -82,6 +87,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `title-page` | Slot groups for a separate title page. |
 | `pages` | Header and footer slot groups per page variant. |
 | `watermark` | Text turned behind the content of each page, such as "DRAFT". |
+| `highlight` | Token colors of code blocks with a language. |
 | `labels` | Generated text per language. |
 
 `document` values are defaults. Front matter and `--set` can override each of them. `document.lang` must be `en` or `de`, `citation-style` is `author-date` or `numeric`, and both depths are integers from 1 to 6.
@@ -122,8 +128,10 @@ Lengths are strings with a unit: `pt`, `mm`, `cm`, `in`, or `em`. Examples: `"10
 | `lists.*` | The `styles.list` size. |
 | `tables.*` | The `styles.table-cell` size. |
 | `footnotes.*` | The `styles.footnote` size. |
+| `margin-notes.*` | The size of the style `margin-notes.style` names. |
 | `bibliography.*` | The `styles.bibliography` size. |
 | `toc.*` | The `styles.toc-entry` size. |
+| `index.*` | The `styles.index-entry` size. |
 | `title-block.space-after` | The body font size. |
 | Title slot `width` and `space-before` | The size of the slot's style. |
 | `inline.*` | The surrounding text size. This is resolved during layout. |
@@ -210,7 +218,7 @@ With `number-gap` on a heading style, the automatic number is set hanging and th
 
 `indent` narrows the block on both sides, as for a quotation. `first-line-indent` applies to a paragraph that follows another paragraph. Vertical spacing between blocks collapses: the larger of one block's `space-after` and the next block's `space-before` applies, and space at the top of a page is dropped. Lines are `size × line-height` apart.
 
-Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`, `scene-break`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
+Style names: `body`, `heading-1` to `heading-6`, `title`, `subtitle`, `author`, `date`, `abstract-heading`, `abstract`, `quote`, `list`, `code-block`, `caption`, `table-cell`, `table-header`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `header`, `footer`, `watermark`, `scene-break`, `index-letter`, `index-entry`, `index-sub-entry`. The `watermark` style uses only `font`, `size`, `weight`, `style`, `color`, `tracking`, and `uppercase`.
 
 Space between blocks (`space-before` and `space-after`) may grow by up to half its natural height so that page bottoms line up. Inside two columns, the same bound lets the shorter column's spaces grow so that both columns end level. Lines within a block never move apart.
 
@@ -242,6 +250,64 @@ The box spans the code from its ascender to its descender, spaces inside the spa
   "code": { "color": "#24292f", "background": "#eff1f3", "padding": "0.2em" }
 }
 ```
+
+## Callouts
+
+A [callout](AUTHORING.md#callouts) is set in two block styles and a `callouts` section. `styles.callout` sets the text and the space around the box, and `indent` narrows the box on both sides. `styles.callout-label` sets the label above the text; its `space-after` is the gap between label and text. The default theme sets the label in bold small capitals, tracked, and the text upright.
+
+| Key | Effect |
+| --- | --- |
+| `callouts.padding` | Space between the box edge and the text on all sides, in em of the `callout` style. |
+| `callouts.note`, `tip`, `important`, `warning`, `caution` | One entry per kind with `background` and `rule`. |
+| `background` | `#rrggbb` or `$colors.x` for the box, or `null` for none. |
+| `rule` | `{ "thickness": ..., "color": ... }` for a bar along the left edge of the box, or `null` for none. The text starts after the bar and the padding. |
+
+The label of each kind is in `labels`, see [labels](#labels). An empty label leaves the label line out.
+
+The default theme prints well in grayscale: all kinds sit on a light gray, and the bar grows from a medium gray at 2pt for notes and tips, to dark gray at 3pt for important and warnings, to the text color at 4pt for cautions.
+
+```json
+"callouts": {
+  "padding": "0.8em",
+  "tip": { "background": null, "rule": { "thickness": "1pt", "color": "$colors.accent" } }
+}
+```
+
+Lines of a callout keep the usual rules against single lines at the top and bottom of a page, and a callout of fewer than four lines is not split. A split callout draws its background and bar on both pages, reaching its padding into the margin where it continues. Inside a footnote a callout is set like a quotation, without box or label.
+
+## Code highlighting
+
+`highlight` colors the tokens of fenced code blocks that name a language. It is `null` to turn highlighting off, or an object with a color for each category, as `#rrggbb` or `$colors.x`:
+
+| Category | Covers |
+| --- | --- |
+| `comment` | Comments, including doc comments. |
+| `keyword` | Keywords and storage words such as `fn`, `let`, `if`, `const`, `export`. |
+| `string` | Strings and characters with their quotes and escapes. |
+| `number` | Numeric literals. |
+| `constant` | Named constants such as `true`, `null`, `None`, and CSS values. |
+| `type` | Type, class, and trait names and built-in types. |
+| `function` | Names of functions, methods, and macros, and commands in shell code. |
+| `operator` | Operators such as `+`, `=>`, `&&`. |
+| `punctuation` | Brackets, commas, semicolons, and other delimiters. |
+| `tag` | Markup tags, and the keys of YAML and TOML. |
+| `attribute` | Attribute names, CSS properties, and annotations. |
+
+Anything else in the code, such as identifiers, keeps the `code-block` color, and so does a category the object leaves out. An unknown category is an error. Layers merge the object by category, so a theme can change one color. `"highlight": null` replaces the whole object, and a later layer that wants it back must list every category it still wants colored.
+
+Only the color changes. The code keeps the `code-block` font, weight, and style, so line widths and page breaks are the same with and without highlighting, and a line that is too wide is still an error. Inline code is never highlighted. A fence without a language, or with one the highlighter does not know, is set in the `code-block` color.
+
+The bundled default colors keywords and tags with the accent color, comments with the muted color, and strings, numbers, types, and functions with dark green, brown, teal, and purple. Operators and punctuation keep the text color. All are dark enough to stay readable in grayscale, where comments are the lightest.
+
+```json
+"highlight": {
+  "comment": "$colors.muted",
+  "keyword": "#1f3d6e",
+  "string": "#2d6a4f"
+}
+```
+
+An EPUB colors the same tokens with `hl-` classes in its stylesheet.
 
 ## Custom styles
 
@@ -288,6 +354,34 @@ Footnote text uses `styles.footnote`. Lists, quotations, and code in a note use 
 | `inline.footnote-marker.size`, `raise` | Size and baseline shift of the note number, in the text and at the start of the note, relative to the surrounding text. |
 
 A note that continues on the next page starts there with its number and the `continued` label (see [labels](#labels)).
+
+## Margin notes
+
+`margin-notes` sets the column that holds [margin notes](AUTHORING.md#margin-notes), and footnotes when they are sidenotes:
+
+| Key | Effect |
+| --- | --- |
+| `margin-notes.width` | The width of the column. |
+| `margin-notes.gap` | The space between the outer edge of the prose and the column. |
+| `margin-notes.spacing` | The least space between two notes stacked in the column. |
+| `margin-notes.style` | The built-in or custom style of the notes. Default `footnote`. |
+| `margin-notes.align` | The alignment of note text, instead of the style's: `left`, `right`, `center`, or `justify`. Default `left`, since narrow columns justify poorly. |
+| `margin-notes.sidenotes` | `true` sets numbered footnotes in the column instead of at the foot of the page. Default `false`. |
+
+The column is measured from the outer edge of the prose: on the right of odd pages and on the left of even pages, or always on the right with `page.margins.mirror: false`. With `page.text-width` narrower than the frame, the column falls into the free part of the frame, which gives a layout in the style of Tufte's books:
+
+```json
+"page": { "margins": { "inner": "22mm", "outer": "16mm" }, "text-width": "112mm", "wide": [] },
+"margin-notes": { "width": "46mm", "gap": "6mm", "sidenotes": true }
+```
+
+Two configurations are errors, reported only for documents that have margin notes, or footnotes with `sidenotes`: a column that runs off the page, and a column that reaches into the frame while `page.wide` lists block kinds, since wide blocks would run under the notes. The default theme sets a 20mm column 3mm from the prose, which fits the default margins. Sidenotes start with their raised number, as footnotes do. Lists, quotations, and code in notes are scaled like those in footnotes.
+
+## Placement
+
+`placement.figure` and `placement.table` are `here`, `top`, or `bottom`, the placement of figures and tables without a `placement` attribute, see [authoring](AUTHORING.md#placement). Both are `here` in the default theme. The default applies only where placement is allowed, in the main text and in `full-width` blocks of column sections, and not to tables with notes.
+
+A placed block is spaced from the text by the caption style's `space-after`, as figures and tables are in the text.
 
 ## Captions
 
@@ -448,7 +542,9 @@ The default theme follows LaTeX's `draftwatermark` package: `{draft}` at 45 degr
 
 ## Labels
 
-`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`, `chapter`. The set for `document.lang` is used.
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`, `chapter`, and the callout labels `note`, `tip`, `important`, `warning`, `caution`. The set for `document.lang` is used.
+
+`labels` has an `en` and a `de` set with the keys `figure`, `table`, `section`, `page`, `contents`, `abstract`, `references`, `continued`, `draft`, `chapter`, `index`, `see`, `see-also`, `symbols`. The set for `document.lang` is used.
 
 | Key | Used for |
 | --- | --- |
@@ -461,6 +557,9 @@ The default theme follows LaTeX's `draftwatermark` package: `{draft}` at 45 degr
 | `continued` | The continuation of a footnote on the next page. |
 | `draft` | The value of `{draft}` in drafts. |
 | `chapter` | Before a chapter number above its heading with `chapters.number-label`, as in "Chapter 2". |
+| `index` | The index heading, also in the table of contents, bookmarks, and running headers. |
+| `see`, `see-also` | Before the entries an index entry refers to, as in "see Line breaking". |
+| `symbols` | Above the index entries that start with a digit or symbol. |
 
 A reference joins the label and the number with a no-break space. `captions.separator` is the text between the label and the caption, as in "Figure 1: ".
 
@@ -486,6 +585,27 @@ A document that cites sets a bibliography: the `references` label as an unnumber
 | `bibliography.entry-spacing` | Minimum space between entries. The style's own `space-before` and `space-after` also apply around each entry, and the larger space wins. |
 
 Links in entries use `inline.link`, and so do citations, which link to their entry. Entry content and ordering are described in [authoring](AUTHORING.md#citations-and-bibliography).
+
+## Index
+
+A document with [index marks](AUTHORING.md#index) sets an index: the `index` label as an unnumbered heading in the `heading-1` style, which opens a chapter as `chapters` sets, then the entries grouped under their first letter.
+
+| Key | Effect |
+| --- | --- |
+| `index.columns` | `2` sets the entries in two columns below the heading, with the column gap of `page.column-gap`; `1` across the prose width. Inside a `columns` section the index takes the section's columns. Default `2`. |
+| `index.level-indent` | Indent of sub-entries per level. Default `1em`. |
+| `index.hanging-indent` | Indent of an entry's lines after its first, beyond its level. Default `2em`. |
+| `index.separator` | Text between a term and its first page number or reference, as in "Hyphenation, 3". Default `", "`. |
+
+The styles:
+
+| Style | Sets |
+| --- | --- |
+| `index-letter` | The letter above each group, or the `symbols` label. It stays with the first entry below it. |
+| `index-entry` | Entries. |
+| `index-sub-entry` | Sub-entries, at both levels. |
+
+An entry stays with its first sub-entry, and its last sub-entry with the one before. Page numbers are links and use `inline.link`. "see" and "see also" are set in italics. Page numbers are separated by a comma, ranges joined by an en dash, and references by a semicolon.
 
 ## Books
 
@@ -532,20 +652,27 @@ An [EPUB](AUTHORING.md#epub) takes a stylesheet derived from the theme. Readers 
 
 What carries over:
 
-- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, and `scene-break`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, capitals as `text-transform`, and figures as `font-variant-numeric`.
+- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `callout`, `callout-label`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, and `scene-break`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, capitals as `text-transform`, and figures as `font-variant-numeric`.
+
+- **Block styles** become CSS for the elements they style: `body` for paragraphs, `heading-1` to `heading-6`, `quote`, `list`, `code-block`, `caption`, `table-header`, `table-cell`, `footnote`, `bibliography`, `toc-heading`, `toc-entry`, `scene-break`, `index-letter`, `index-entry`, and `index-sub-entry`. Each sets the font, weight, style, color, line height, alignment, hyphenation, tracking as `letter-spacing`, capitals as `text-transform`, and figures as `font-variant-numeric`.
 - **Sizes** are relative to the `body` size, which is the reader's text size, so a heading at 15pt over a 10pt body is `1.5rem`. Space before and after, indents, and `first-line-indent` are in ems of the style's own size. Only a paragraph that follows another one has a first-line indent, as in the PDF.
 - **Custom styles** become classes named `s-` and the style name, such as `.s-epigraph`, on the paragraphs, headings, lists, table rows, and cells that apply them. So do the built-in and custom styles that title slots, `chapters.number-style`, and list markers name. A row style's `rule-below` sets the border below its row.
+- **Callouts** become an `aside` with the classes `callout` and the kind. The text style, margins, and padding go on `aside.callout`, the label style on its first paragraph, and each kind's background and bar (as a left border) on `aside.callout.note` and its siblings.
 - **Lists** take `lists.indent`, `lists.item-spacing`, and the bullets by depth. Readers without text bullets show discs.
 - **Tables** take `tables.cell-padding` and the top, header, and row rules. Column alignment applies as in the PDF.
+- **Code highlighting** becomes a class per category, such as `.hl-keyword`, with the category's color on `pre` content.
 - **Inline styles** take the code font, size, color, background, and padding, the link color and underline, and the footnote marker's size and raise.
-- **Footnotes** follow the chapter below a separator of `footnotes.separator-width`, `separator-thickness`, and `separator-color`, `footnotes.gap` below the text and `footnotes.spacing` apart.
+- **Footnotes** follow the chapter below a separator of `footnotes.separator-width`, `separator-thickness`, and `separator-color`, `footnotes.gap` below the text and `footnotes.spacing` apart. Sidenotes are footnotes there.
+- **Margin notes** follow the block that references them in the style `margin-notes.style` names, indented by `margin-notes.gap` and `margin-notes.spacing` above and below.
 - **Chapters** keep `sink` as the space above a chapter heading, the number above the heading with the `chapter` label, the ornament, the lead-in in small capitals, and the drop capital. The drop capital uses CSS `initial-letter` where readers support it, and a floated letter of about the same size elsewhere.
 - **Scene breaks** show the text or image mark. A `blank` break shows its mark too, since a reader's page breaks are unknown.
 - **Images** keep their size relative to the text: an image half as wide as the prose width in the PDF is half as wide as the text.
 
 Fonts are embedded when they ship with Druck or the theme or front matter names their files. A variable file is embedded whole and declared for the weight range of its `wght` axis; an `ital` axis is not used, so give italics their own entry. Faces in collections (`.ttc`, `.otc`) are not embedded, since readers cannot load them, and a warning names the file. Installed fonts are never embedded, since their licenses rarely allow passing them on: the stylesheet names the family with a serif fallback, monospace for the code font, and `render` prints a warning. A font whose license restricts embedding is embedded with the same warning as in the PDF.
 
-Left out, because readers lay out the pages: the page size, margins, text width, and `wide`, the title page's anchors and positions, headers, footers, and page variants, `matter` page numbers, `chapters.break-before` (every chapter starts a new file), two-column layout, the watermark, `toc.leader`, and the scored page breaking. Headings and styles with `keep-with-next` ask readers not to break the page after them. A numeric bibliography uses `bibliography.hanging-indent` instead of a column as wide as its labels.
+Left out, because readers lay out the pages: the page size, margins, text width, and `wide`, the title page's anchors and positions, headers, footers, and page variants, `matter` page numbers, `chapters.break-before` (every chapter starts a new file), two-column layout, `index.columns`, the watermark, `toc.leader`, and the scored page breaking. Headings and styles with `keep-with-next` ask readers not to break the page after them. A numeric bibliography uses `bibliography.hanging-indent` instead of a column as wide as its labels.
+
+Left out, because readers lay out the pages: the page size, margins, text width, and `wide`, the note column's width and `align`, `placement`, the title page's anchors and positions, headers, footers, and page variants, `matter` page numbers, `chapters.break-before` (every chapter starts a new file), two-column layout, the watermark, `toc.leader`, and the scored page breaking. Headings and styles with `keep-with-next` ask readers not to break the page after them. A numeric bibliography uses `bibliography.hanging-indent` instead of a column as wide as its labels.
 
 ## Resources and distribution
 

@@ -95,6 +95,7 @@ Each setting writes one property of the resolved theme.
 | `toc-depth` | 1 to 6 | `document.toc-depth` |
 | `citation-style` | `author-date`, `numeric` | `document.citation-style` |
 | `draft` | `true`, `false` | `document.draft` |
+| `conformance` | `pdf/ua-1`, `pdf/a-2b`, `pdf/a-2u`, `pdf/a-2a`, or a list of them | `document.conformance` |
 | `page-size` | `a4`, `a5`, `b5`, `letter`, `legal`, or `{width, height}` | `page.size` |
 | `margins` | one length, or `{top, bottom, inner, outer}` | `page.margins.*` |
 | `column-gap` | length | `page.column-gap` |
@@ -117,7 +118,7 @@ druck check <doc.md> [--theme PATH] [--set KEY=VALUE]... [--print-config]
 druck render <doc.md> [-o PATH] [--bleed LENGTH] [--crop-marks]
 ```
 
-`check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, and a layout that does not settle. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
+`check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, a layout that does not settle, and what a [standard](#accessibility-and-archiving) the PDF must conform to rejects. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
 
 `render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written. An output path ending in `.epub` writes an [EPUB](#epub) instead.
 
@@ -162,16 +163,19 @@ The body is CommonMark. These constructs render:
 
 - Paragraphs and headings (`#` to `######`, or underlined).
 - Bulleted and numbered lists, nested to any depth. Numbered lists keep their start number.
-- Block quotations.
-- Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces.
+- Block quotations, and [callouts](#callouts) written as GitHub alerts.
+- Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces. A fence with a language, as in ```` ```rust ````, is colored by token, see [syntax highlighting](#syntax-highlighting).
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
 - [Images](#images-and-captions) with captions.
 - [Tables](#tables) with captions.
-- [Footnotes](#footnotes) and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
+- [Footnotes](#footnotes), [margin notes](#margin-notes), and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
 - [Labels and cross-references](#labels-and-cross-references) to headings, figures, and tables.
 - [Custom styles](#custom-styles) from the theme on headings, paragraphs, and lists.
 - [Placeholders](#placeholders) such as `{words}` and `{build-date}`.
+- [Index marks](#index) such as `{^term}`, which build an index with page numbers.
 - Thematic breaks (`***`, `---`, or `___`) as [scene breaks](#scene-breaks), and the other parts of a [book](#books).
+
+Punctuation is set typographically. Straight quotes become the curly quotes of `lang`: `"Peter's 'best' day"` reads “Peter’s ‘best’ day” in English and „Peter’s ‚best‘ day“ in German. `--` becomes an en dash (–), `---` an em dash (—), and `...` an ellipsis (…). A backslash keeps a character as typed, as in `\"`, and code is never changed. Front matter values such as `title` are not Markdown and keep what you type.
 
 Emphasis switches between upright and italic, so it is upright inside an italic quotation. Links are clickable and use the theme's link color.
 
@@ -208,8 +212,9 @@ An image stands alone in its paragraph. Its description becomes the caption:
 - A caption cannot hold a footnote, because CommonMark does not read `[^note]` inside an image description. Reference the note from the text next to the image.
 - Image titles, `![Caption](file.png "Title")`, are errors. Write the caption as the description.
 - A label right after the image, `![Caption](file.png){#fig:chart}`, lets the text refer to the figure, see [labels](#labels-and-cross-references). Only a figure with a caption can have one.
+- `placement=top` or `placement=bottom` in the same braces, as in `{#fig:chart placement=top}` or `{placement=top}`, moves the figure to the top or bottom of a page, see [placement](#placement).
 
-An image keeps its place in the text. There are no floats and text never wraps around an image. The image is centered and its caption follows below it. The two stay together: when they do not fit in the rest of a page or column, both move to the next column or page, and the page or column they leave ends short.
+An image keeps its place in the text unless it is [placed](#placement). Text never wraps around an image. The image is centered and its caption follows below it. The two stay together: when they do not fit in the rest of a page or column, both move to the next column or page, and the page or column they leave ends short.
 
 A PNG or JPEG with a stored density (PNG `pHYs` in meters, JPEG JFIF, else JPEG EXIF resolution) appears at its pixels divided by that density, so a 144 dpi screenshot is half as wide as its pixel count in points. Without a density, raster images count one pixel as one point (72 per inch). Aspect-only JFIF values do not count. SVG images use 96 pixels per inch. An image appears at that natural size unless it is too large. Then it shrinks, keeping its proportions, to the width of the text area or, inside `columns`, of the column. It also shrinks until it fits the height of a page together with its caption and a heading directly above it. Images never grow beyond their natural size. Put an image in a `full-width` block to give it the whole text width inside a column section.
 
@@ -234,7 +239,7 @@ Tables are pipe tables as on GitHub, or [list tables](#list-tables) for cells wi
 - A row with fewer cells than the header gets empty cells. A row with more cells is an error.
 - Leave a blank line between the table and its caption, or the caption line becomes a row; that is reported.
 - The caption is numbered and labelled in the document language, as in "Table 1: Two events in the history of typesetting.", and set above the table, as wide as the table and starting at its left edge. Over a table narrower than a third of the text width the caption runs on to the right edge of the text instead. Tables are numbered apart from figures. A table without a caption has no number.
-- A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references).
+- A caption must directly follow its table, and a table has at most one. A caption cannot hold footnotes. A label such as `{#tbl:events}` at its end lets the text refer to the table, see [labels](#labels-and-cross-references). `placement=top` or `placement=bottom` in the same braces, as in `{#tbl:events placement=bottom}`, moves the table to the top or bottom of a page, see [placement](#placement).
 
 Column widths come from the cell text. A table whose cells all fit on one line keeps that natural width and is centered. A wider table fills the text width, or the column width inside `columns`: columns of short entries stay on one line, and columns of longer text share the rest equally and wrap. A word too wide even when every column is at its narrowest is an error at its cell.
 
@@ -266,12 +271,41 @@ A `::: table` directive holds a list table: a list with one item per row, and in
 : Estimated costs {#tbl:costs}
 ```
 
+- `placement=top` or `placement=bottom` places the table, see [placement](#placement). It also works for a pipe table inside `::: table`, which needs no caption for it.
 - `align` lists `left`, `center`, or `right` for each column, and `widths` lists `*` or `auto`. Both are optional, separated by spaces, and need one entry per column. Without `widths` every column is `auto`, which fits its content as for pipe tables. A `*` column takes the width the `auto` columns leave, shared equally among `*` columns, so a table with one fills its frame.
 - `{span=n}` at the start of a cell makes it span `n` columns. The cells of every row must span as many columns as the header's; otherwise the row is an error. Rows cannot span.
 - `{.name}` at the start of a row item styles all its cells, and at the start of a cell item, alone or with a span as in `{.name span=2}`, that cell. A cell's own style wins over its row's, and the column's alignment applies only to cells without a style of their own. Styles for rows and cells are paragraph styles; one with `rule-below` changes the rule below its row, see [themes](THEMES.md#custom-styles).
 - The attributes may stand alone on the item's line, with the cells or text on the lines below.
 - A caption, label, repeated header, rows that never split, and the errors for rows too tall work as for pipe tables. A cell spanning columns widens them where its text needs it.
 - These are errors with their location: text in a row item outside its cells, a cell holding anything but paragraphs and lists, other attributes, and content in the directive besides the list. `align` or `widths` with the wrong number of entries is an error at the directive.
+
+## Callouts
+
+A callout is a quotation that starts with a GitHub alert marker. Five kinds exist:
+
+```markdown
+> [!NOTE]
+> Page references can move the page they name, so Druck lays the report out again until they settle.
+
+> [!WARNING]
+> A callout holds any block a quotation holds:
+>
+> - paragraphs and lists,
+> - code blocks,
+> - tables.
+```
+
+The kinds are `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and `CAUTION`, in capitals, alone on the first line of the quotation. GitHub shows the same file as alerts, so a document reads the same there.
+
+Each kind starts with a label in the language of the document: "Note", "Tip", "Important", "Warning", "Caution", and in German "Hinweis", "Tipp", "Wichtig", "Warnung", "Vorsicht". The theme can change the labels, the background, the bar, and the padding, see [themes](THEMES.md#callouts).
+
+Some details:
+
+- There is no custom title. A marker with text after it, such as `> [!NOTE] Own title`, and an unknown kind, such as `> [!HINT]`, are plain quotations that show the marker as text, as on GitHub. To change a label for the whole document, set it in the theme.
+- A callout may break across pages. Its background and bar continue on the next page. A callout of fewer than four lines stays on one page, and a longer one leaves at least two lines on each page. The label stays with the first lines.
+- In two columns a callout takes the column width.
+- In a footnote a callout is set as a plain quotation, without label or box.
+- In an EPUB a callout is an `aside` with the classes `callout` and the kind, for example `callout tip`.
 
 ## Footnotes
 
@@ -295,13 +329,63 @@ These are errors:
 - A reference inside a footnote.
 - A heading inside a footnote.
 
+A theme can set footnotes as sidenotes in the margin instead, see [margin notes](#margin-notes).
+
+## Margin notes
+
+A margin note is a footnote whose definition starts with `{-}`. It has no number and no mark in the text. It stands in a column beside the prose, on the outer side of the page, with its first line on the baseline of the line that references it:
+
+```markdown
+Gutenberg printed about 180 copies.[^copies]
+
+[^copies]: {-} Estimates range from 158 to 180.
+```
+
+- The outer side is on the right of odd pages and on the left of even pages, or always on the right when the theme keeps margins the same on every page. A note referenced in a table cell stands beside the line of its cell.
+- Notes that would overlap stack downward. If the last note of a page would run past the bottom of the text area, the notes of the page move up together as far as needed, so a note may start above its line. Page breaks take the notes into account, so the notes of a page always fit.
+- In a two-column section, notes from both columns stand in the same outer margin, each beside its line. So do notes in a `full-width` block.
+- Margin notes follow all footnote rules: one reference per note, no reference inside a footnote, no definition without a reference. Footnote numbers skip them. Write `\{-}` for a footnote that starts with those characters.
+- A note too tall for the page, or notes that cannot share a page with the lines they belong to, are errors that name the note's line.
+
+With the theme's `margin-notes.sidenotes`, numbered footnotes become sidenotes: they keep their numbers and stand in the same column as margin notes, starting with their number, and the foot of the page stays empty. Width, gap, style, and the side setting are theme settings, see [themes](THEMES.md#margin-notes).
+
+## Placement
+
+A figure or table goes where it stands in the text, unless a `placement` attribute or the theme says otherwise:
+
+| Placement | Where it goes |
+| --- | --- |
+| `here` | Where it stands. The default. |
+| `top` | The top of the page its anchor falls on if it still fits there, otherwise the top of the next page. |
+| `bottom` | The same at the bottom of the page, above the footnotes. |
+
+```markdown
+![Pages typeset per year.](chart.svg){#fig:chart placement=top}
+
+: Paper sizes {#tbl:sizes placement=bottom}
+
+::: table {placement=top}
+| A | B |
+|---|---|
+| 1 | 2 |
+:::
+```
+
+The anchor is where the block is written. The text after it keeps filling the page, and a paragraph after a placed figure continues the paragraph before it, with its first-line indent. Cross-references and page references name the page where the block lands.
+
+- Placed blocks keep their order among themselves: a figure never passes another placed figure or table. On one page, blocks at the top come before blocks at the bottom in the order of the text, so a top block that follows a bottom block waits for the next page. A figure left in place can come before a placed one that waits; numbers stay in the order of the text.
+- A block still waiting at a page break, a chapter or part that starts a new page, a `::: bottom` group, or the end of the document is set before it, on a page of its own if no text is left to share one.
+- Placement works in the main text and in a `full-width` block of a column section, where the block goes to the top or bottom of the page across both columns and the columns stay balanced around it. `placement=top` or `bottom` anywhere else, such as in a list, a quotation, a keep group, or a column, is an error.
+- A placed table must fit on one page, and it cannot hold footnotes or margin notes. Both are errors at the table.
+- The theme can place all figures or tables by default, see [themes](THEMES.md#placement). That default does not apply where placement is not allowed, or to a table with notes; those stay where they are.
+
 ## Columns
 
 Text in a `columns` section is set in two columns of equal width with `column-gap` between them. It runs down the first column, then down the second, then on to the next page if the section is longer than the room left on the page. Outside a section the text runs across the whole text area.
 
 When a section ends, its last columns are balanced: the column break goes where both columns are most even, and the next block starts below the taller column. A `full-width` block inside a section does the same before it, runs across the text area, and the columns resume below it. Changing between one and two columns never starts a new page by itself. At least `column-gap` separates the columns from the full-width text above and below them.
 
-Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, a table breaks between rows with its header repeated, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order.
+Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, a table breaks between rows with its header repeated, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order. Margin notes from either column stand in the outer margin beside their lines.
 
 `page-break` inside a section ends the page. The columns above it are balanced, and the section continues in two columns on the next page.
 
@@ -460,12 +544,14 @@ The book takes its design from the theme: fonts, sizes, colors, spacing, heading
 
 What changes from the PDF:
 
-- **Files:** each level 1 heading, the bibliography, each part of a book, and each `::: page-break` starts a new file, which readers start on a new page. A page break inside another directive asks the reader for a new page instead.
+- **Files:** each level 1 heading, the bibliography, the index, each part of a book, and each `::: page-break` starts a new file, which readers start on a new page. A page break inside another directive asks the reader for a new page instead.
 - **Contents:** the reader's table of contents lists the headings in the table of contents of the PDF, honouring `{.unlisted}` and `toc-depth`. `::: toc` or `toc: true` also puts it in the reading order as a contents page.
 - **Parts:** pages before the first part and the front matter are front matter, the main matter is body matter, and the back matter is back matter. Readers open the book at the first file of the main matter. A document without parts is all body matter.
 - **Title page:** the slots of the title page or title block are stacked on a page of their own, each in its style with its space above.
 - **References:** cross-references keep their numbers and link to their targets. A page reference has no page in a reflowable book, so `[@sec:intro, page]` shows the same text as `@sec:intro`. Write around it where a sentence needs a page.
-- **Footnotes:** notes follow at the end of the file that references them, and readers that support EPUB notes show them in a pop-up.
+- **Footnotes:** notes follow at the end of the file that references them, and readers that support EPUB notes show them in a pop-up. Sidenotes are footnotes there too.
+- **Margin notes:** a margin note follows the paragraph, heading, or list item that references it, set apart in the note style, since an ebook has no margin column.
+- **Placement:** figures and tables stay where they are written.
 - **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF.
 - **Bottom groups:** a `::: bottom` group ends its file, so a copyright page stays a page of its own, but its text starts at the top, since readers cannot place text at the bottom of a screen.
 - **Left out:** page numbers, headers and footers, page variants, two columns, keep groups, and the draft watermark. `--bleed` and `--crop-marks` are errors with an EPUB output path.
@@ -482,6 +568,37 @@ meta:
   isbn: 978-3-16-148410-0
 ---
 ```
+
+## Accessibility and archiving
+
+Every PDF is a tagged PDF. Screen readers and other assistive technology read it in document order, also across two columns and with footnotes, which follow their reference. Headings, paragraphs, lists, quotations, code, figures with their captions, tables with their header row, footnotes, links, the table of contents, bibliography entries, and the title page are marked as what they are. Running headers and footers, page numbers, the draft watermark, rules, chapter ornaments, scene breaks, and crop marks are marked as decoration and skipped. The document language comes from `lang`.
+
+An image's description, the text between the brackets of `![A chart of sales by month](chart.png)`, is both its caption and its alternative text. An image without one is fine in a plain PDF.
+
+`conformance` makes the PDF conform to a standard, checks it, and declares it in the file:
+
+| Value | Standard |
+| --- | --- |
+| `pdf/ua-1` | PDF/UA-1, for accessibility. It needs a title (`title` or a level 1 heading), at least one heading, and a description for every image. Viewers then show the title instead of the file name. |
+| `pdf/a-2b` | PDF/A-2b, for archiving: the file looks the same in the future. It needs fonts whose license allows embedding. |
+| `pdf/a-2u` | PDF/A-2u: PDF/A-2b, and all text can be extracted. |
+| `pdf/a-2a` | PDF/A-2a: PDF/A-2u, tagged, with a description for every image. |
+
+Write one standard or a list with one PDF/A level and PDF/UA-1:
+
+```yaml
+conformance: [pdf/a-2a, pdf/ua-1]
+```
+
+`--set conformance=pdf/ua-1` works as well, and a theme can set `document.conformance` for every document. What a standard rejects is an error and no PDF is written, as for any other problem:
+
+```
+error: report.md:42:1: PDF/UA-1 needs a description of this image; write it between the brackets, as in ![Sales by month](chart.png)
+```
+
+PDF/A needs a creation date. A `date` written as `2026-10-07` is used; otherwise the build day, which `SOURCE_DATE_EPOCH` fixes for reproducible files. The checks cover what a program can check. Whether descriptions are meaningful, headings follow a logical order, and colors have enough contrast is up to the author and the theme. The EPUB ignores `conformance`.
+
+An EPUB carries accessibility metadata after EPUB Accessibility 1.1: how it can be read, its navigation, a summary, and no hazards. It claims WCAG 2.1 Level AA conformance only when every image has a description and every text color of the theme has a contrast of at least 4.5:1 on white. Otherwise the summary says why it makes no claim.
 
 ## Labels and cross-references
 
@@ -513,6 +630,22 @@ These are errors with their location:
 - A label on an image without a caption, or on a heading together with attributes other than one [style](#custom-styles).
 - A reference in a heading or inside a link.
 - Brackets that hold more than the reference or `, page`, as in `[@sec:a; @sec:b]`.
+
+## Syntax highlighting
+
+A code fence that starts with a language is colored by token in the PDF and in an EPUB:
+
+````markdown
+```rust
+fn main() {
+    println!("Hello");
+}
+```
+````
+
+The language is the first word after the fence, in any case: `rust`, `ts`, `json`, `bash`, `python`, `yaml`, `toml`, `html`, `css`, `sql`, and about 200 more, by name or file extension, such as `typescript`, `js`, `sh`, `yml`, `c++`, `go`, `java`, `php`, `ruby`, `swift`, `kotlin`, `markdown`, `dockerfile`, and `diff`. The aliases `shell`, `jsonc`, `jsx`, `golang`, `objc`, and `csharp` work too. A word after a comma or a space, as in `rust,ignore`, is ignored.
+
+A fence without a language, with `text`, or with a language Druck does not know is set plain, without a warning. Indented code blocks and inline code are never highlighted. Highlighting changes only the color: the code keeps its font and line lengths, and a line that is too wide is still an error. The theme chooses the colors or turns highlighting off, see [code highlighting](THEMES.md#code-highlighting).
 
 ## Placeholders
 
@@ -682,3 +815,53 @@ These are errors, reported with their location:
 - A second `::: bibliography`, or one inside `keep`.
 - A bibliography file that does not exist, by the `bibliography` setting.
 - In the BibTeX file, at its line and column: syntax errors, unsupported entry types, keys defined twice, missing required fields, other LaTeX commands, `@string` macros, and `crossref`.
+
+## Index
+
+An index lists the terms a reader may look for, each with the pages that treat it. Mark a term where the text treats it:
+
+```markdown
+Paragraphs are broken as a whole{^line breaking}. The [Knuth-Plass algorithm]{^}
+weighs every break{^line breaking!optimal}, and hyphenation{^hyphenation|see also line breaking}
+helps it.
+```
+
+| Mark | Adds |
+| --- | --- |
+| `{^term}` | The term with the page the mark is on. The mark shows nothing. |
+| `[text]{^}` | The text in brackets, which stays in the sentence, as the term. |
+| `[text]{^term}` | `term` for the text in brackets, as in `[Knuth]{^Knuth, Donald}`. |
+| `{^term!sub-entry}` | A sub-entry below the term, and `{^term!sub-entry!detail}` one level more. In `[text]{^!sub-entry}` the text is the term. |
+| `{^term\|see other}` | A reference to another entry instead of a page: "term, *see* other". |
+| `{^term\|see also other}` | A reference after the pages: "term, 3, 9; *see also* other". |
+
+Put a mark right after the word it refers to, so it stays on that word's page. Marks work in paragraphs, lists, quotations, table cells, captions, and footnotes, but not in headings: the index lists the page of the text below a heading instead. A mark is read as written, so Markdown inside it stays text, and `!`, `|`, and `}` cannot be part of a term. In a pipe table a `|` ends the cell, so put references in the text around the table. The reference target is written like a mark, as in `|see line breaking!optimal`, and `siehe` and `siehe auch` work as well. Write `\{^` for a brace that should stay text.
+
+### Where the index goes
+
+A document with marks gets an index at the end, after the bibliography. `::: index` on a line of its own places it elsewhere, for example inside `::: columns`, or at the end of a book's back matter. Without marks there is no index, even with the directive.
+
+The index starts with an unnumbered top-level heading, "Index" ("Register" in German), which is in the table of contents, the PDF bookmarks, and running headers. In a book it opens a chapter like any other top-level heading. The entries follow in two columns, grouped under their first letter. Terms that start with a digit or symbol come first, under "Symbols". A theme can set one column; inside `::: columns` the index takes the section's columns.
+
+### Entries
+
+- Entries sort the same way in English and German, following DIN 5007-1: letters with umlauts and accents sort as their base letter, so "Öl" sorts as "Ol" and comes after "Ofen", "ß" sorts as "ss", and case does not count. Spaces sort before letters, so "New York" comes before "Newark". Terms that differ only in umlauts, accents, or case put the plain lowercase one first.
+- Marks with the same term make one entry, and its pages are listed once each in order. Three or more pages in a row become a range, as in "3–5". A page in the front matter of a book shows its roman number, as in "iv".
+- Every page number is a link to the first mark of the entry on that page; in a range, the first and the last number link.
+- A sub-entry is indented below its entry, and later lines of a long entry hang below the first.
+- `see` and `see also` take the words of the document language: "see" and "see also", or "siehe" and "siehe auch".
+
+In an [EPUB](#epub), which has no pages, an entry links to its marks by the heading each one follows, as in "Hyphenation, 2 Line breaking".
+
+### Errors
+
+These are errors, reported with their location:
+
+- A mark in a heading or in a table's header row, which repeats on every page.
+- A mark without a term, such as `{^}` without bracketed text before it, or an empty sub-entry, as in `{^a!!b}`.
+- More than two levels of sub-entries.
+- A reference that is not `|see` or `|see also` followed by a term, or one to an entry that no mark makes.
+- A mark that is not closed before a blank line, bracketed text that ends in another paragraph, and bracketed text that holds a cross-reference, citation, or footnote.
+- A mark alone in its paragraph, with no text to stand beside.
+- A mark on a page without a number, such as a copyright page before a book's first part.
+- A second `::: index`, or one inside `keep` or `bottom`.
