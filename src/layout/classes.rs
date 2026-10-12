@@ -33,7 +33,7 @@ pub(super) fn check(document: &Document, config: &Config, source: &Source) -> Re
         errors.push(Diagnostic::new(Some(source.clone()), message).at(class.at.line, class.at.column));
     };
     walk(&document.blocks, &mut visit);
-    for footnote in &document.footnotes {
+    for footnote in document.footnotes.iter().chain(&document.margin_notes) {
         walk(&footnote.blocks, &mut visit);
     }
     if errors.is_empty() { Ok(()) } else { Err(errors) }
@@ -61,6 +61,7 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&Class, BlockKind)) {
                 }
             }
             Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. }
             | Block::Keep { blocks, .. }
             | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }

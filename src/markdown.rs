@@ -14,39 +14,53 @@
 //! A `{name}` in text is a [placeholder](Placeholder) such as `{words}`, unless its brace is escaped.
 //! Placeholders whose value depends on the page are rejected, as are placeholders in headings.
 //!
+//! An index mark `{^entry!sub-entry}` marks its position for the index, and `[text]{^}` indexes the text in
+//! brackets. Either may end with `|see entry` or `|see also entry`. Marks are read from the source like
+//! citations, so Markdown inside them stays as written. `::: index` places the index; without it a document
+//! with marks gets one at the end.
+//!
 //! A custom style is applied with `{.name}` at the end of a heading or paragraph, or on a line of its
 //! own directly before a list. A heading may combine it with its label, as in `{#sec:name .name}`.
 //!
 //! A `::: table` directive holds a list table: a list with an item per row, each holding a nested list
 //! with an item per cell. The first row is the header. Rows take `{.name}` and cells `{.name span=n}`
 //! at the start of their item; the directive takes `{align="left right" widths="* auto"}`.
+//!
+//! Punctuation is set typographically: `--` and `---` become en and em dashes, `...` an ellipsis,
+//! and straight quotes become the curly quotes of the document language, “…” and ‘…’ in English,
+//! „…“ and ‚…‘ in German. A backslash keeps a character straight, as in `\"`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::Source;
 use crate::config::template::Placeholder;
+use crate::config::theme::{CalloutKind, Lang};
 use crate::diagnostic::Diagnostic;
 use crate::document::{
-    Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, Inline, InlineStyle,
-    LabelKind, Link, Location, Matter, Reference, Row,
+    Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, IndexMark, Inline,
+    InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See,
 };
+use crate::highlight;
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
 /// Tables become [`Block::Table`], with a `: Caption` paragraph after the table as its caption.
 /// Every construct that cannot be rendered yet is reported with its location. The result is
 /// either the complete document or every such diagnostic, never a document with content dropped.
-pub fn parse(body: &str, first_line: u64, source: &Source) -> Result<Document, Vec<Diagnostic>> {
-    // Strikethrough and task lists are enabled only so they can be recognised and reported.
+pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result<Document, Vec<Diagnostic>> {
+    // Strikethrough and task lists are enabled only so they can be recognised and reported. GFM adds
+    // only the alert kinds of block quotations.
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_HEADING_ATTRIBUTES;
+        | Options::ENABLE_HEADING_ATTRIBUTES
+        | Options::ENABLE_SMART_PUNCTUATION
+        | Options::ENABLE_GFM;
     let directives = directive_lines(body, options);
     let mut text = String::with_capacity(body.len());
     let mut end = 0;
@@ -58,7 +72,7 @@ pub fn parse(body: &str, first_line: u64, source: &Source) -> Result<Document, V
     text.push_str(&body[end..]);
 
     let directives = directives.into_iter().map(|line| (line.start, &body[line])).collect();
-    let mut builder = Builder::new(&text, first_line, source, directives);
+    let mut builder = Builder::new(&text, first_line, source, lang, directives);
     for (event, range) in Parser::new_ext(&text, options).into_offset_iter() {
         builder.event(event, range);
     }
@@ -102,6 +116,7 @@ enum Fence {
 
 enum Container {
     Quote(Location),
+    Callout(Location, CalloutKind),
     List {
         at: Location,
         start: Option<u64>,
@@ -117,6 +132,8 @@ enum Container {
     },
     Footnote {
         at: Location,
+        /// Where the definition starts, which a margin note's `{-}` follows.
+        offset: usize,
         label: String,
     },
 }
@@ -135,11 +152,12 @@ struct ItemAttributes {
     span: Option<usize>,
 }
 
-/// The `align` and `widths` attributes of `::: table`, one entry per column.
+/// The `align` and `widths` attributes of `::: table`, one entry per column, and its `placement`.
 #[derive(Default)]
 struct ColumnAttributes {
     align: Option<Vec<ColumnAlign>>,
     widths: Option<Vec<ColumnWidth>>,
+    placement: Option<Placement>,
 }
 
 /// What a list item of a `::: table` stands for.
@@ -161,6 +179,8 @@ struct Leaf {
     image: Option<LeafImage>,
     /// The label of a heading or figure.
     label: Option<String>,
+    /// A figure's `placement=...` and where it is written.
+    placement: Option<(Placement, Location)>,
     /// The custom style of a heading.
     class: Option<Class>,
     /// Whether a heading is marked `{-}` or `{.unnumbered}`, and `{.unlisted}`.
@@ -194,6 +214,7 @@ struct TableState {
 struct CodeBlock {
     at: Location,
     first_line: u64,
+    language: Option<String>,
     text: String,
 }
 
@@ -223,8 +244,9 @@ struct Builder<'a> {
     /// Referenced footnote labels in reference order, case-folded, with the reference location.
     references: Vec<(String, Location)>,
     referenced: HashMap<String, usize>,
-    /// Footnote definitions by case-folded label: written label, location, and content.
-    definitions: HashMap<String, (String, Location, Vec<Block>)>,
+    /// Footnote definitions by case-folded label: written label, location, content, and whether it is a
+    /// margin note.
+    definitions: HashMap<String, (String, Location, Vec<Block>, bool)>,
     /// Image files in order of first use, and their indexes by path.
     images: Vec<ImageFile>,
     image_index: HashMap<String, usize>,
@@ -234,6 +256,11 @@ struct Builder<'a> {
     citations: Vec<Citation>,
     /// Where `::: bibliography` stands, if it does.
     bibliography: Option<Location>,
+    index_marks: Vec<IndexMark>,
+    /// Where `::: index` stands, if it does.
+    index: Option<Location>,
+    /// The bracketed text of a `[text]{^}` mark being read.
+    span: Option<Span>,
     /// The last matter directive and where it stands.
     matter: Option<(Matter, Location)>,
     /// Where `::: toc` stands, if it does.
@@ -242,10 +269,13 @@ struct Builder<'a> {
     consumed: usize,
     /// A `{.name}` on a line of its own, waiting for the list it must precede.
     pending_class: Option<Class>,
+    quotes: Quotes,
+    /// The tables, by location, whose placement an attribute has set.
+    placed_tables: HashSet<(u64, u64)>,
 }
 
 impl<'a> Builder<'a> {
-    fn new(body: &'a str, first_line: u64, source: &'a Source, directives: Vec<(usize, &'a str)>) -> Self {
+    fn new(body: &'a str, first_line: u64, source: &'a Source, lang: Lang, directives: Vec<(usize, &'a str)>) -> Self {
         let newlines = body.match_indices('\n').map(|(index, _)| index + 1);
         Self {
             body,
@@ -274,10 +304,15 @@ impl<'a> Builder<'a> {
             references_to: Vec::new(),
             citations: Vec::new(),
             bibliography: None,
+            index_marks: Vec::new(),
+            index: None,
+            span: None,
             matter: None,
             contents: None,
             consumed: 0,
             pending_class: None,
+            quotes: Quotes::new(lang),
+            placed_tables: HashSet::new(),
         }
     }
 
@@ -292,10 +327,23 @@ impl<'a> Builder<'a> {
         }
 
         let mut footnotes = Vec::with_capacity(self.references.len());
+        let mut margin_notes = Vec::new();
+        // What each reference becomes: footnotes and margin notes are numbered apart.
+        let mut targets = Vec::with_capacity(self.references.len());
         for (key, at) in std::mem::take(&mut self.references) {
             match self.definitions.remove(&key) {
-                Some((_, defined, blocks)) => footnotes.push(Footnote { at: defined, blocks }),
-                None => self.report_at(at, format!("footnote [^{key}] has no definition")),
+                Some((_, defined, blocks, true)) => {
+                    targets.push(Inline::MarginNote(margin_notes.len()));
+                    margin_notes.push(Footnote { at: defined, blocks });
+                }
+                Some((_, defined, blocks, false)) => {
+                    targets.push(Inline::FootnoteRef(footnotes.len()));
+                    footnotes.push(Footnote { at: defined, blocks });
+                }
+                None => {
+                    targets.push(Inline::FootnoteRef(0));
+                    self.report_at(at, format!("footnote [^{key}] has no definition"));
+                }
             }
         }
         for (label, at) in std::mem::take(&mut self.references_to) {
@@ -307,10 +355,12 @@ impl<'a> Builder<'a> {
             }
         }
 
+        self.check_see_references();
+
         let mut unused: Vec<_> = self
             .definitions
             .drain()
-            .map(|(_, (label, at, _))| (at, label))
+            .map(|(_, (label, at, ..))| (at, label))
             .collect();
         unused.sort_by_key(|(at, _)| (at.line, at.column));
         for (at, label) in unused {
@@ -323,15 +373,29 @@ impl<'a> Builder<'a> {
             return Err(self.diagnostics);
         }
         let mut blocks = self.blocks.pop().unwrap_or_default();
+        if !margin_notes.is_empty() {
+            // References are only allowed outside footnotes, so the body holds them all.
+            each_inline(&mut blocks, &mut |inline| {
+                if let Inline::FootnoteRef(reference) = inline {
+                    *inline = targets[*reference].clone();
+                }
+            });
+        }
         if !self.citations.is_empty() && self.bibliography.is_none() {
             let at = self.location(self.body.trim_end().len());
             blocks.push(Block::Bibliography { at });
         }
+        if !self.index_marks.is_empty() && self.index.is_none() {
+            let at = self.location(self.body.trim_end().len());
+            blocks.push(Block::Index { at });
+        }
         Ok(Document {
             blocks,
             footnotes,
+            margin_notes,
             images: self.images,
             citations: self.citations,
+            index_marks: self.index_marks,
         })
     }
 
@@ -419,6 +483,18 @@ impl<'a> Builder<'a> {
                 }
                 return;
             }
+            "index" => {
+                if let Some(kept) = kept {
+                    self.report(offset, format!("index is not allowed inside {kept}"));
+                } else if let Some(first) = self.index {
+                    let message = format!("the index is already placed on line {}", first.line);
+                    self.report(offset, message);
+                } else {
+                    self.index = Some(at);
+                    self.push_block(Block::Index { at });
+                }
+                return;
+            }
             "front-matter" | "main-matter" | "back-matter" => {
                 let matter = match name {
                     "front-matter" => Matter::Front,
@@ -485,7 +561,7 @@ impl<'a> Builder<'a> {
             _ => {
                 let message = format!(
                     "unknown directive \"{name}\"; use columns, full-width, keep, bottom, table, page-break, bibliography, \
-                     toc, front-matter, main-matter, or back-matter"
+                     index, toc, front-matter, main-matter, or back-matter"
                 );
                 self.report(offset, message);
                 None
@@ -493,6 +569,77 @@ impl<'a> Builder<'a> {
         };
         self.containers.push(Container::Directive { at, fence, columns });
         self.blocks.push(Vec::new());
+    }
+
+    /// Whether the footnote definition at `offset` starts with `{-}`, which makes it a margin note.
+    fn margin_mark(&self, offset: usize) -> bool {
+        let rest = &self.body[offset..];
+        let Some(colon) = rest.find("]:") else {
+            return false;
+        };
+        let text = rest[colon + 2..].trim_start_matches([' ', '\t']);
+        text.strip_prefix("{-}")
+            .is_some_and(|after| after.is_empty() || after.starts_with(char::is_whitespace))
+    }
+
+    /// Whether a figure or table here may go to the top or bottom of a page: in the main text or in a
+    /// `full-width` block of a column section.
+    fn placeable(&self) -> bool {
+        let mut fences = Vec::with_capacity(self.containers.len());
+        for container in &self.containers {
+            match container {
+                Container::Directive {
+                    fence: Some(Fence::Table),
+                    ..
+                } => {}
+                Container::Directive { fence, .. } => fences.push(*fence),
+                _ => return false,
+            }
+        }
+        matches!(fences.as_slice(), [] | [Some(Fence::Columns), Some(Fence::FullWidth)])
+    }
+
+    /// The placement of a figure or table here, from its attribute if written: `None` for the theme's
+    /// default, `Here` where it cannot be placed. `notes` tells whether the block holds note references,
+    /// which keep a table in place. A top or bottom attribute where it cannot apply is an error.
+    fn placement(&mut self, written: Option<(Placement, Location)>, notes: bool) -> Option<Placement> {
+        let placeable = self.placeable();
+        match written {
+            Some((Placement::Here, _)) => Some(Placement::Here),
+            Some((_, at)) if !placeable => {
+                let message = "placement=top and placement=bottom apply only in the main text or in a full-width \
+                    block of a column section";
+                self.report_at(at, message);
+                None
+            }
+            Some((_, at)) if notes => {
+                self.report_at(
+                    at,
+                    "a table placed at the top or bottom cannot hold footnotes or margin notes",
+                );
+                None
+            }
+            Some((placement, _)) => Some(placement),
+            None if !placeable || notes => Some(Placement::Here),
+            None => None,
+        }
+    }
+
+    /// Applies a written placement to the table at `at` that was just pushed. A table takes one.
+    fn place_table(&mut self, at: Location, written: (Placement, Location)) {
+        if !self.placed_tables.insert((at.line, at.column)) {
+            self.report_at(written.1, "this table's placement is already set");
+            return;
+        }
+        let notes = match self.blocks.last().and_then(|blocks| blocks.last()) {
+            Some(Block::Table { rows, .. }) => rows.iter().any(|row| !table_notes(row).is_empty()),
+            _ => return,
+        };
+        let placement = self.placement(Some(written), notes);
+        if let Some(Block::Table { placement: slot, .. }) = self.blocks.last_mut().and_then(|blocks| blocks.last_mut())
+        {
+            *slot = placement;
+        }
     }
 
     /// The file location of a byte offset in `body`.
@@ -545,6 +692,7 @@ impl<'a> Builder<'a> {
             content: Vec::new(),
             image: None,
             label: None,
+            placement: None,
             class: None,
             unnumbered: false,
             unlisted: false,
@@ -687,10 +835,20 @@ impl<'a> Builder<'a> {
         for at in notes {
             self.report_at(at, HEADER_NOTE);
         }
+        let marks: Vec<Location> = header
+            .cells
+            .iter()
+            .flat_map(|cell| marks(&cell.blocks))
+            .map(|index| self.index_marks[index].at)
+            .collect();
+        for at in marks {
+            self.report_at(at, HEADER_MARK);
+        }
         let column = Column {
             align: None,
             width: ColumnWidth::Auto,
         };
+        let notes = rows.iter().any(|row| !table_notes(row).is_empty());
         Some(Block::Table {
             at,
             columns: vec![column; count],
@@ -698,6 +856,7 @@ impl<'a> Builder<'a> {
             rows,
             caption: Vec::new(),
             label: None,
+            placement: self.placement(None, notes),
         })
     }
 
@@ -711,6 +870,7 @@ impl<'a> Builder<'a> {
                     rows,
                     caption,
                     label,
+                    placement,
                     ..
                 },
             ],
@@ -743,6 +903,11 @@ impl<'a> Builder<'a> {
                 column.width = *width;
             }
         }
+        // A caption inside the directive has placed the table already, at the table's own location.
+        let placement = match placement {
+            Some(Placement::Top | Placement::Bottom) => placement,
+            _ => self.placement(None, rows.iter().any(|row| !table_notes(row).is_empty())),
+        };
         self.push_block(Block::Table {
             at,
             columns,
@@ -750,7 +915,11 @@ impl<'a> Builder<'a> {
             rows,
             caption,
             label,
+            placement,
         });
+        if let Some(written) = attributes.placement {
+            self.place_table(at, (written, at));
+        }
     }
 
     fn close_leaf(&mut self) {
@@ -760,6 +929,7 @@ impl<'a> Builder<'a> {
             content,
             image,
             label,
+            placement,
             class,
             unnumbered,
             unlisted,
@@ -769,6 +939,10 @@ impl<'a> Builder<'a> {
         else {
             return;
         };
+        self.unclosed_span();
+        if level.is_none() {
+            self.lone_marks(&content);
+        }
         let block = match (level, image) {
             (Some(level), _) => Block::Heading {
                 at,
@@ -791,6 +965,7 @@ impl<'a> Builder<'a> {
                     image: image.index,
                     caption: content,
                     label,
+                    placement: self.placement(placement, false),
                 }
             }
             (None, None) => {
@@ -889,8 +1064,10 @@ impl<'a> Builder<'a> {
             self.report_at(footnote, "a table caption cannot hold footnotes");
         }
         let mut content = content;
-        let label = self.caption_label(at, &mut content);
+        let (label, placement) = self.caption_label(at, &mut content);
+        let mut table_at = None;
         if let Some(Block::Table {
+            at,
             caption,
             label: table_label,
             ..
@@ -898,29 +1075,59 @@ impl<'a> Builder<'a> {
         {
             *caption = content;
             *table_label = label;
+            table_at = Some(*at);
+        }
+        if let (Some(table), Some(placement)) = (table_at, placement) {
+            self.place_table(table, placement);
         }
     }
 
-    /// Removes a `{#tbl:name}` label from the end of a table caption and registers it.
-    fn caption_label(&mut self, at: Location, content: &mut Vec<Inline>) -> Option<String> {
+    /// Removes attributes such as `{#tbl:name placement=top}` from the end of a table caption, registers
+    /// the label, and returns it with the placement.
+    fn caption_label(
+        &mut self,
+        at: Location,
+        content: &mut Vec<Inline>,
+    ) -> (Option<String>, Option<(Placement, Location)>) {
         let Some(Inline::Text { text, style }) = content.last_mut() else {
-            return None;
+            return (None, None);
         };
         let trimmed = text.trim_end();
         if style.code || !trimmed.ends_with('}') {
-            return None;
+            return (None, None);
         }
-        let start = trimmed.rfind("{#")?;
-        let label = trimmed[start + 2..trimmed.len() - 1].to_owned();
+        let Some((start, attributes)) = trimmed.rfind('{').and_then(|start| {
+            let (attributes, length) = block_attributes(&trimmed[start..])?;
+            (start + length == trimmed.len()).then_some((start, attributes))
+        }) else {
+            return (None, None);
+        };
+        let (mut label, mut placement) = (None, None);
+        let mut problems = Vec::new();
+        for attribute in attributes {
+            match attribute {
+                BlockAttribute::Label(name) if label.is_none() => label = Some(name.to_owned()),
+                BlockAttribute::Placement(Ok(value)) if placement.is_none() => placement = Some((value, at)),
+                BlockAttribute::Placement(Err(message)) => problems.push(message),
+                _ => problems
+                    .push("a table caption takes a label and a placement, as in {#tbl:name placement=top}".to_owned()),
+            }
+        }
         text.truncate(start);
         text.truncate(text.trim_end().len());
         if text.is_empty() {
             content.pop();
         }
+        for message in problems {
+            self.report_at(at, message);
+        }
+        let Some(label) = label else {
+            return (None, placement);
+        };
         if content.is_empty() {
             self.report_at(at, "a table caption needs text before its label");
         }
-        self.define(at, &label, LabelKind::Table)
+        (self.define(at, &label, LabelKind::Table), placement)
     }
 
     /// Registers a label of `kind` defined at `at`, or reports why it cannot be one.
@@ -1033,7 +1240,8 @@ impl<'a> Builder<'a> {
                         self.open_leaf(offset, None, true);
                     }
                     let end = range.end;
-                    self.text(&text, range);
+                    let text = self.quotes.quote(&text, self.body, range.clone()).unwrap_or(&text);
+                    self.text(text, range);
                     if let Some(leaf) = self.leaf.as_mut() {
                         leaf.text_end = end;
                     }
@@ -1069,9 +1277,22 @@ impl<'a> Builder<'a> {
             text = &text[skipped.len()..];
             offset = self.consumed;
         }
+        // The `]` of a `[text]{^}` mark ends its text, and the mark after it is read from the source.
+        if let Some(close) = self.span.as_ref().map(|span| span.close)
+            && (offset..offset + text.len()).contains(&close)
+            && self.body.get(offset..offset + text.len()) == Some(text)
+        {
+            let split = close - offset;
+            if split > 0 {
+                self.text(&text[..split], offset..close);
+            }
+            self.close_span();
+            self.text(&text[split..], close..range.end);
+            return;
+        }
         if text == "[" {
             self.check_undefined_footnote(offset);
-            if self.bracketed_reference(offset) || self.bracketed_citation(offset) {
+            if self.bracketed_reference(offset) || self.bracketed_citation(offset) || self.open_span(offset) {
                 return;
             }
         }
@@ -1089,6 +1310,18 @@ impl<'a> Builder<'a> {
             if mark == "{" {
                 let escapes =
                     self.body[..offset + index].len() - self.body[..offset + index].trim_end_matches('\\').len();
+                if text[index + 1..].starts_with('^') && escapes.is_multiple_of(2) && index >= start {
+                    if index > start {
+                        self.push_text(offset + start, &text[start..index], false);
+                    }
+                    let end = self.index_mark(offset + index) - offset;
+                    if end > text.len() {
+                        self.consumed = offset + end;
+                        return;
+                    }
+                    start = end;
+                    continue;
+                }
                 let Some(length) =
                     field_name(&text[index + 1..]).filter(|_| escapes.is_multiple_of(2) && index >= start)
                 else {
@@ -1223,6 +1456,160 @@ impl<'a> Builder<'a> {
         self.push_inline(offset, Inline::Field { placeholder, at, style });
     }
 
+    /// Reads the index mark whose `{^` is at `offset` and returns where it ends. A mark after the bracketed
+    /// text of an open span takes that text for an empty entry.
+    fn index_mark(&mut self, offset: usize) -> usize {
+        let spec = offset + "{^".len();
+        let close = self.body[spec..]
+            .find('}')
+            .filter(|&close| !self.body[spec..spec + close].contains("\n\n"));
+        let Some(close) = close.map(|close| spec + close) else {
+            self.report(offset, "this index mark is not closed; end it with }");
+            return spec;
+        };
+        let end = close + 1;
+        let span = self.span.take();
+        let text = span.as_ref().map(|span| self.span_text(span));
+        let parsed = index_mark(&self.body[spec..close], text.as_ref().map(|(text, _)| text.as_str()));
+        let (mut terms, mut see) = match parsed {
+            Ok(parsed) => parsed,
+            Err(message) => {
+                self.report(offset, message);
+                return end;
+            }
+        };
+        let lang = self.quotes.lang;
+        for term in terms.iter_mut().chain(see.iter_mut().flat_map(|see| &mut see.terms)) {
+            *term = punctuate(term, lang);
+        }
+        match span {
+            Some(span) => {
+                let at = self.index_marks[span.mark].at;
+                if let Some((_, false)) = text {
+                    self.report_at(at, "the text of an index mark can hold only text and formatting");
+                }
+                self.index_marks[span.mark] = IndexMark { at, terms, see };
+            }
+            None if self.mark_allowed(offset) => {
+                let at = self.location(offset);
+                self.index_marks.push(IndexMark { at, terms, see });
+                self.push_inline(offset, Inline::IndexMark(self.index_marks.len() - 1));
+            }
+            None => {}
+        }
+        end
+    }
+
+    /// Whether an index mark may stand at `offset`, else reports why not.
+    fn mark_allowed(&mut self, offset: usize) -> bool {
+        if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
+            self.report(offset, HEADING_MARK);
+            return false;
+        }
+        if self.table.as_ref().is_some_and(|table| table.in_header) {
+            self.report(offset, HEADER_MARK);
+            return false;
+        }
+        true
+    }
+
+    /// Starts a `[text]{^}` mark at the `[` at `offset`, if one starts there, and returns whether it did. The
+    /// mark's anchor goes where the text starts. The text may not hold brackets.
+    fn open_span(&mut self, offset: usize) -> bool {
+        let Some(close) = self.body[offset + 1..].find(['[', ']']).map(|close| offset + 1 + close) else {
+            return false;
+        };
+        if self.span.is_some() || !self.body[close..].starts_with("]{^") || self.body[offset..close].contains("\n\n") {
+            return false;
+        }
+        // A misplaced mark is reported here and read on, so its text does not cause further errors.
+        self.mark_allowed(offset);
+        let mark = self.index_marks.len();
+        self.index_marks.push(IndexMark {
+            at: self.location(offset),
+            terms: Vec::new(),
+            see: None,
+        });
+        self.push_inline(offset, Inline::IndexMark(mark));
+        let start = self.leaf.as_ref().map_or(0, |leaf| leaf.content.len());
+        self.span = Some(Span { close, mark, start });
+        true
+    }
+
+    /// Reads the mark after the `]` of the open span.
+    fn close_span(&mut self) {
+        let Some(close) = self.span.as_ref().map(|span| span.close) else {
+            return;
+        };
+        let end = self.index_mark(close + "]".len());
+        self.consumed = self.consumed.max(end);
+    }
+
+    /// The text collected since `span` opened, and whether it is only text.
+    fn span_text(&self, span: &Span) -> (String, bool) {
+        let content = self
+            .leaf
+            .as_ref()
+            .map_or(&[][..], |leaf| &leaf.content[span.start.min(leaf.content.len())..]);
+        let only_text = content
+            .iter()
+            .all(|inline| matches!(inline, Inline::Text { .. } | Inline::LineBreak));
+        let text = content
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text { text, .. } => text.as_str(),
+                _ => " ",
+            })
+            .collect();
+        (text, only_text)
+    }
+
+    /// Reports a `[text]{^}` mark whose bracketed text did not end in its paragraph.
+    fn unclosed_span(&mut self) {
+        if let Some(span) = self.span.take() {
+            let message = "the bracketed text of an index mark must end in its paragraph, as in [text]{^}";
+            self.report_at(self.index_marks[span.mark].at, message);
+        }
+    }
+
+    /// Reports an index mark in content without text, since it has nothing to stand beside.
+    fn lone_marks(&mut self, content: &[Inline]) {
+        let has_text = content.iter().any(|inline| match inline {
+            Inline::Text { text, .. } => !text.trim().is_empty(),
+            Inline::IndexMark(_) | Inline::Anchor(_) | Inline::MarginNote(_) | Inline::LineBreak => false,
+            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => true,
+        });
+        let first = content.iter().find_map(|inline| match inline {
+            Inline::IndexMark(mark) => Some(*mark),
+            _ => None,
+        });
+        if let Some(mark) = first.filter(|_| !has_text) {
+            let message = "an index mark needs text beside it; put it in the paragraph it refers to";
+            self.report_at(self.index_marks[mark].at, message);
+        }
+    }
+
+    /// Reports `see` references to entries that no mark makes, at the mark.
+    fn check_see_references(&mut self) {
+        let entries: HashSet<&[String]> = self
+            .index_marks
+            .iter()
+            .flat_map(|mark| (1..=mark.terms.len()).map(|length| &mark.terms[..length]))
+            .collect();
+        let missing: Vec<(Location, String)> = self
+            .index_marks
+            .iter()
+            .filter_map(|mark| {
+                let see = mark.see.as_ref()?;
+                (!entries.contains(see.terms.as_slice())).then(|| (mark.at, see.terms.join("!")))
+            })
+            .collect();
+        for (at, target) in missing {
+            let message = format!("the index has no entry \"{target}\" for this reference; mark it with {{^{target}}}");
+            self.report_at(at, message);
+        }
+    }
+
     fn reference(&mut self, offset: usize, label: String, page: bool) {
         if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
             self.report(offset, "a heading cannot hold a cross-reference");
@@ -1238,7 +1625,8 @@ impl<'a> Builder<'a> {
         self.push_inline(offset, Inline::Ref(Reference { label, page, style }));
     }
 
-    /// Reads a `{#fig:name}` label directly after an image that ends at `end`, spaces allowed between.
+    /// Reads attributes such as `{#fig:name placement=top}` directly after an image that ends at `end`,
+    /// spaces allowed between.
     fn end_image(&mut self, end: usize) {
         let Some(image) = self.leaf.as_mut().and_then(|leaf| leaf.image.as_mut()) else {
             return;
@@ -1246,21 +1634,26 @@ impl<'a> Builder<'a> {
         image.closed = true;
         let rest = &self.body[end..];
         let spaces = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-        let Some(attribute) = rest[spaces..].strip_prefix("{#") else {
+        let Some((attributes, length)) = block_attributes(&rest[spaces..]) else {
             return;
         };
-        let Some(close) = attribute
-            .find('}')
-            .filter(|&close| !attribute[..close].contains(char::is_whitespace))
-        else {
-            return;
-        };
-        let label = attribute[..close].to_owned();
-        self.consumed = end + spaces + "{#".len() + close + 1;
+        self.consumed = end + spaces + length;
         let at = self.location(end + spaces);
-        let label = self.define(at, &label, LabelKind::Figure);
+        let (mut label, mut placement) = (None, None);
+        for attribute in attributes {
+            match attribute {
+                BlockAttribute::Label(name) if label.is_none() => label = self.define(at, name, LabelKind::Figure),
+                BlockAttribute::Placement(Ok(value)) if placement.is_none() => placement = Some((value, at)),
+                BlockAttribute::Placement(Err(message)) => self.report_at(at, message),
+                _ => self.report_at(
+                    at,
+                    "an image takes a label and a placement, as in {#fig:name placement=top}",
+                ),
+            }
+        }
         if let Some(leaf) = self.leaf.as_mut() {
             leaf.label = label;
+            leaf.placement = placement;
         }
     }
 
@@ -1389,7 +1782,10 @@ impl<'a> Builder<'a> {
                     .iter()
                     .filter(|class| !matches!(class.as_ref(), "unnumbered" | "unlisted"))
                     .collect();
-                if !attrs.is_empty() || classes.len() > 1 {
+                // CommonMark reads an index mark at the end of a heading as its attributes.
+                if self.body[brace..].starts_with("{^") {
+                    self.report(brace, HEADING_MARK);
+                } else if !attrs.is_empty() || classes.len() > 1 {
                     let message = "a heading takes a label and one style, as in # Heading {#sec:name .style}";
                     self.report(brace, message);
                 }
@@ -1413,9 +1809,13 @@ impl<'a> Builder<'a> {
                     leaf.unlisted = unlisted;
                 }
             }
-            Tag::BlockQuote(_) => {
+            Tag::BlockQuote(kind) => {
                 self.close_implicit_leaf();
-                self.containers.push(Container::Quote(self.location(offset)));
+                let at = self.location(offset);
+                self.containers.push(match kind {
+                    Some(kind) => Container::Callout(at, callout_kind(kind)),
+                    None => Container::Quote(at),
+                });
                 self.blocks.push(Vec::new());
             }
             Tag::List(start) => {
@@ -1441,13 +1841,14 @@ impl<'a> Builder<'a> {
             Tag::CodeBlock(kind) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
-                let first_line = match kind {
-                    CodeBlockKind::Fenced(_) => at.line + 1,
-                    CodeBlockKind::Indented => at.line,
+                let (first_line, language) = match &kind {
+                    CodeBlockKind::Fenced(info) => (at.line + 1, highlight::language_of(info).map(str::to_owned)),
+                    CodeBlockKind::Indented => (at.line, None),
                 };
                 self.code = Some(CodeBlock {
                     at,
                     first_line,
+                    language,
                     text: String::new(),
                 });
             }
@@ -1503,6 +1904,7 @@ impl<'a> Builder<'a> {
                     content: Vec::new(),
                     image: None,
                     label: None,
+                    placement: None,
                     class: None,
                     unnumbered: false,
                     unlisted: false,
@@ -1514,6 +1916,7 @@ impl<'a> Builder<'a> {
                 let at = self.location(offset);
                 self.containers.push(Container::Footnote {
                     at,
+                    offset,
                     label: label.into_string(),
                 });
                 self.blocks.push(Vec::new());
@@ -1598,8 +2001,10 @@ impl<'a> Builder<'a> {
             TagEnd::Paragraph | TagEnd::Heading(_) => self.close_leaf(),
             TagEnd::BlockQuote(_) => {
                 let blocks = self.blocks.pop().unwrap_or_default();
-                if let Some(Container::Quote(at)) = self.containers.pop() {
-                    self.push_block(Block::Quote { at, blocks });
+                match self.containers.pop() {
+                    Some(Container::Quote(at)) => self.push_block(Block::Quote { at, blocks }),
+                    Some(Container::Callout(at, kind)) => self.push_block(Block::Callout { at, kind, blocks }),
+                    _ => {}
                 }
             }
             TagEnd::Item => {
@@ -1623,28 +2028,45 @@ impl<'a> Builder<'a> {
                 }
             }
             TagEnd::CodeBlock => {
-                if let Some(CodeBlock { at, first_line, text }) = self.code.take() {
+                if let Some(CodeBlock {
+                    at,
+                    first_line,
+                    language,
+                    text,
+                }) = self.code.take()
+                {
                     let lines = text.lines().map(str::to_owned).collect();
-                    self.push_block(Block::Code { at, first_line, lines });
+                    self.push_block(Block::Code {
+                        at,
+                        first_line,
+                        language,
+                        lines,
+                    });
                 }
             }
             TagEnd::FootnoteDefinition => {
                 self.close_implicit_leaf();
-                let blocks = self.blocks.pop().unwrap_or_default();
-                if let Some(Container::Footnote { at, label }) = self.containers.pop() {
+                let mut blocks = self.blocks.pop().unwrap_or_default();
+                if let Some(Container::Footnote { at, offset, label }) = self.containers.pop() {
+                    let margin = self.margin_mark(offset) && strip_margin_mark(&mut blocks);
                     let key = label.to_lowercase();
                     match self.definitions.get(&key) {
-                        Some((_, first, _)) => {
+                        Some((_, first, ..)) => {
                             let message = format!("footnote [^{label}] is already defined on line {}", first.line);
                             self.report_at(at, message);
                         }
                         None => {
-                            self.definitions.insert(key, (label, at, blocks));
+                            self.definitions.insert(key, (label, at, blocks, margin));
                         }
                     }
                 }
             }
             TagEnd::TableCell => {
+                self.unclosed_span();
+                if let Some(leaf) = &self.leaf {
+                    let content = leaf.content.clone();
+                    self.lone_marks(&content);
+                }
                 if let (Some(Leaf { at, content, .. }), Some(table)) = (self.leaf.take(), self.table.as_mut()) {
                     let paragraph = Block::Paragraph {
                         at,
@@ -1679,6 +2101,8 @@ impl<'a> Builder<'a> {
                     ..
                 }) = self.table.take()
                 {
+                    let notes = rows.iter().any(|row| !table_notes(row).is_empty());
+                    let placement = self.placement(None, notes);
                     self.push_block(Block::Table {
                         at,
                         columns,
@@ -1686,6 +2110,7 @@ impl<'a> Builder<'a> {
                         rows,
                         caption: Vec::new(),
                         label: None,
+                        placement,
                     });
                 }
             }
@@ -1701,8 +2126,20 @@ impl<'a> Builder<'a> {
 
 const ALONE: &str = "an image must stand alone in its paragraph";
 const HEADER_NOTE: &str = "a table header cannot hold footnotes, because it repeats on every page";
+const HEADING_MARK: &str = "a heading cannot hold an index mark; put it in the text below the heading";
+const HEADER_MARK: &str = "a table header cannot hold index marks, because it repeats on every page";
 const BROKEN_IMAGE: &str = "this image is not valid Markdown: write ![Caption](file.png), with <> around a path \
     that has spaces; a caption cannot hold footnotes";
+
+fn callout_kind(kind: BlockQuoteKind) -> CalloutKind {
+    match kind {
+        BlockQuoteKind::Note => CalloutKind::Note,
+        BlockQuoteKind::Tip => CalloutKind::Tip,
+        BlockQuoteKind::Important => CalloutKind::Important,
+        BlockQuoteKind::Warning => CalloutKind::Warning,
+        BlockQuoteKind::Caution => CalloutKind::Caution,
+    }
+}
 
 fn column_align(align: Alignment) -> Option<ColumnAlign> {
     match align {
@@ -1762,6 +2199,262 @@ fn footnotes(blocks: &[Block]) -> Vec<usize> {
     notes
 }
 
+/// The index marks in `blocks`, which hold paragraphs and lists.
+fn marks(blocks: &[Block]) -> Vec<usize> {
+    let mut marks = Vec::new();
+    for block in blocks {
+        match block {
+            Block::Paragraph { content, .. } => marks.extend(content.iter().filter_map(|inline| match inline {
+                Inline::IndexMark(index) => Some(*index),
+                _ => None,
+            })),
+            Block::List { items, .. } => marks.extend(items.iter().flat_map(|item| self::marks(item))),
+            _ => {}
+        }
+    }
+    marks
+}
+
+/// The bracketed text of a `[text]{^}` mark: where its `]` is, its mark, and where its content starts in the
+/// paragraph.
+struct Span {
+    close: usize,
+    mark: usize,
+    start: usize,
+}
+
+/// Maps the English quotes of smart punctuation to the quotes of a language, see [`Quotes::quote`].
+struct Quotes {
+    lang: Lang,
+    /// Whether an opening single quote waits for its closing quote.
+    single_open: bool,
+}
+
+impl Quotes {
+    fn new(lang: Lang) -> Self {
+        Self {
+            lang,
+            single_open: false,
+        }
+    }
+
+    /// The quote of the document language for a curly quote that smart punctuation made of a straight
+    /// one, which comes in English form. CommonMark pairs single quotes like the closing check here,
+    /// so the first closing quote after a paired opening one closes it; any other is an apostrophe.
+    fn quote(&mut self, text: &str, body: &str, range: Range<usize>) -> Option<&'static str> {
+        let [double_open, double_close, single_open, single_close] = match self.lang {
+            Lang::En => ["“", "”", "‘", "’"],
+            Lang::De => ["„", "“", "‚", "‘"],
+        };
+        let quote = match (text, &body[range.clone()]) {
+            ("“", "\"") => double_open,
+            ("”", "\"") => double_close,
+            ("‘", "'") => {
+                self.single_open = true;
+                single_open
+            }
+            ("’", "'") => {
+                let before = body[..range.start].chars().next_back();
+                let after = body[range.end..].chars().next();
+                let closes = before.is_some_and(|c| !c.is_whitespace()) && !after.is_some_and(char::is_alphanumeric);
+                if self.single_open && closes {
+                    self.single_open = false;
+                    single_close
+                } else {
+                    "’"
+                }
+            }
+            _ => return None,
+        };
+        Some(quote)
+    }
+}
+
+/// `text` with the punctuation that body text gets, for text read from the source outside the
+/// Markdown parser, such as the terms of index marks. Other Markdown syntax in it stays as typed.
+fn punctuate(text: &str, lang: Lang) -> String {
+    let mut escaped = String::with_capacity(text.len() * 2);
+    for (index, c) in text.char_indices() {
+        let ellipsis = c == '.' && (text[index..].starts_with("...") || text[..index].ends_with('.'));
+        if c.is_ascii_punctuation() && !matches!(c, '\'' | '"' | '-') && !ellipsis {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    let mut quotes = Quotes::new(lang);
+    let mut out = String::with_capacity(text.len());
+    for (event, range) in Parser::new_ext(&escaped, Options::ENABLE_SMART_PUNCTUATION).into_offset_iter() {
+        match event {
+            Event::Text(part) => out.push_str(quotes.quote(&part, &escaped, range).unwrap_or(&part)),
+            Event::SoftBreak => out.push(' '),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The most terms of an index mark: an entry and two levels of sub-entries.
+const MARK_LEVELS: usize = 3;
+
+/// Reads the terms and the `see` reference of an index mark from the text between `{^` and `}`. `text`, the
+/// bracketed text before the mark, stands in for an empty entry.
+fn index_mark(spec: &str, text: Option<&str>) -> Result<(Vec<String>, Option<See>), String> {
+    let terms = |part: &str| -> Result<Vec<String>, String> {
+        let terms: Vec<String> = part
+            .split('!')
+            .map(|term| term.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect();
+        if terms.len() > MARK_LEVELS {
+            let message = "an index mark takes an entry and at most two levels of sub-entries, as in \
+                {^entry!sub-entry!detail}";
+            return Err(message.to_owned());
+        }
+        Ok(terms)
+    };
+    let (entry, see) = match spec.split_once('|') {
+        Some((entry, see)) => (entry, Some(see)),
+        None => (spec, None),
+    };
+    let mut entry = terms(entry)?;
+    if let (Some(first), Some(text)) = (entry.first_mut(), text)
+        && first.is_empty()
+    {
+        *first = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    }
+    if entry.iter().any(String::is_empty) {
+        let message = "an index mark needs a term for the entry and each sub-entry, as in {^entry!sub-entry} or \
+            [text]{^}";
+        return Err(message.to_owned());
+    }
+    let Some(see) = see else {
+        return Ok((entry, None));
+    };
+    let see = see.trim_start();
+    let word = |prefix: &str| {
+        see.strip_prefix(prefix)
+            .filter(|rest| rest.starts_with(char::is_whitespace))
+    };
+    let (also, target) = match (word("see also").or(word("siehe auch")), word("see").or(word("siehe"))) {
+        (Some(target), _) => (true, target),
+        (None, Some(target)) => (false, target),
+        (None, None) => {
+            return Err("write a cross-reference in an index mark as |see entry or |see also entry".to_owned());
+        }
+    };
+    let target = terms(target)?;
+    if target.iter().any(String::is_empty) {
+        return Err("a see reference needs the entry it refers to, as in |see entry!sub-entry".to_owned());
+    }
+    Ok((entry, Some(See { also, terms: target })))
+}
+
+/// The footnote and margin note references in the cells of a table row.
+fn table_notes(row: &Row) -> Vec<usize> {
+    row.cells.iter().flat_map(|cell| footnotes(&cell.blocks)).collect()
+}
+
+/// Calls `visit` on every inline of `blocks` and the blocks they hold.
+fn each_inline(blocks: &mut [Block], visit: &mut impl FnMut(&mut Inline)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph { content, .. } | Block::Heading { content, .. } => {
+                content.iter_mut().for_each(&mut *visit)
+            }
+            Block::Image { caption, .. } => caption.iter_mut().for_each(&mut *visit),
+            Block::List { items, .. } => items.iter_mut().for_each(|item| each_inline(item, visit)),
+            Block::Table {
+                header, rows, caption, ..
+            } => {
+                caption.iter_mut().for_each(&mut *visit);
+                for row in std::iter::once(header).chain(rows) {
+                    row.cells
+                        .iter_mut()
+                        .for_each(|cell| each_inline(&mut cell.blocks, visit));
+                }
+            }
+            Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. }
+            | Block::Keep { blocks, .. }
+            | Block::Bottom { blocks, .. }
+            | Block::Columns { blocks, .. }
+            | Block::FullWidth { blocks, .. } => each_inline(blocks, visit),
+            Block::Code { .. }
+            | Block::PageBreak { .. }
+            | Block::Matter { .. }
+            | Block::Contents { .. }
+            | Block::SceneBreak { .. }
+            | Block::Bibliography { .. }
+            | Block::Index { .. } => {}
+        }
+    }
+}
+
+/// Removes the `{-}` that starts a margin note's first paragraph, and returns whether it was there.
+fn strip_margin_mark(blocks: &mut Vec<Block>) -> bool {
+    let Some(Block::Paragraph { content, .. }) = blocks.first_mut() else {
+        return false;
+    };
+    let Some(Inline::Text { text, style }) = content.first_mut() else {
+        return false;
+    };
+    let Some(rest) = text.strip_prefix("{-}").filter(|_| !style.code) else {
+        return false;
+    };
+    *text = rest.trim_start().to_owned();
+    if text.is_empty() {
+        content.remove(0);
+        if content.is_empty() {
+            blocks.remove(0);
+        }
+    }
+    true
+}
+
+/// An attribute after an image or at the end of a table caption.
+enum BlockAttribute<'s> {
+    /// `#name`, the label without its `#`.
+    Label(&'s str),
+    /// `placement=value`, or the problem with the value.
+    Placement(Result<Placement, String>),
+    Other,
+}
+
+/// The attributes in the braces that `text` starts with and the length up to the closing brace, if
+/// the braces hold a label or a placement. Attributes are separated by spaces and stay on one line.
+fn block_attributes(text: &str) -> Option<(Vec<BlockAttribute<'_>>, usize)> {
+    let inner = text.strip_prefix('{')?;
+    let close = inner.find(['}', '\n'])?;
+    if !inner[close..].starts_with('}') {
+        return None;
+    }
+    let attributes: Vec<BlockAttribute> = inner[..close]
+        .split_whitespace()
+        .map(|word| {
+            if let Some(name) = word.strip_prefix('#') {
+                BlockAttribute::Label(name)
+            } else if let Some(value) = word.strip_prefix("placement=") {
+                BlockAttribute::Placement(placement_value(value))
+            } else {
+                BlockAttribute::Other
+            }
+        })
+        .collect();
+    let ours = attributes
+        .iter()
+        .any(|attribute| !matches!(attribute, BlockAttribute::Other));
+    ours.then_some((attributes, close + 2))
+}
+
+/// A `placement` value: `here`, `top`, or `bottom`.
+fn placement_value(value: &str) -> Result<Placement, String> {
+    match value.trim_matches('"') {
+        "here" => Ok(Placement::Here),
+        "top" => Ok(Placement::Top),
+        "bottom" => Ok(Placement::Bottom),
+        other => Err(format!("placement \"{other}\" is not here, top, or bottom")),
+    }
+}
+
 /// An attribute in braces: `.name`, or `key=value` with the value in quotes if it holds spaces.
 enum Attribute<'s> {
     Class(&'s str),
@@ -1809,7 +2502,7 @@ fn attributes(text: &str) -> Option<(Vec<Attribute<'_>>, usize)> {
 
 /// The `align` and `widths` attributes written after a directive's name.
 fn column_attributes(name: &str, text: &str) -> Result<ColumnAttributes, String> {
-    const SYNTAX: &str = "write table attributes as {align=\"left right\" widths=\"* auto\"}";
+    const SYNTAX: &str = "write table attributes as {align=\"left right\" widths=\"* auto\" placement=top}";
     if name != "table" {
         return Err(format!("\"{name}\" takes no attributes; only table does"));
     }
@@ -1835,6 +2528,9 @@ fn column_attributes(name: &str, text: &str) -> Result<ColumnAttributes, String>
                     _ => Err(format!("width \"{word}\" is not * or auto")),
                 });
                 columns.widths = Some(widths.collect::<Result<_, _>>()?);
+            }
+            Attribute::Pair("placement", value) if columns.placement.is_none() => {
+                columns.placement = Some(placement_value(value)?);
             }
             _ => return Err(SYNTAX.to_owned()),
         }
@@ -1916,11 +2612,11 @@ mod tests {
     }
 
     fn blocks(body: &str) -> Vec<Block> {
-        parse(body, 1, &source()).expect("parses").blocks
+        parse(body, 1, &source(), Lang::En).expect("parses").blocks
     }
 
     fn diagnostics(body: &str, first_line: u64) -> Vec<(Option<(u64, u64)>, String)> {
-        let errors = parse(body, first_line, &source()).expect_err("reports");
+        let errors = parse(body, first_line, &source(), Lang::En).expect_err("reports");
         errors.into_iter().map(|d| (d.location, d.message)).collect()
     }
 
@@ -1987,11 +2683,13 @@ mod tests {
                 Block::Code {
                     at: at(10, 1),
                     first_line: 11,
+                    language: Some("rust".into()),
                     lines: vec!["let a = 1;".into(), "".into(), "let b = 2;".into()],
                 },
                 Block::Code {
                     at: at(16, 5),
                     first_line: 16,
+                    language: None,
                     lines: vec!["indented".into()]
                 },
             ]
@@ -2081,7 +2779,7 @@ mod tests {
 
     #[test]
     fn locations_use_the_file_line_and_character_columns() {
-        let document = parse("intro\n\n> ünï **bold** after\n", 10, &source()).unwrap();
+        let document = parse("intro\n\n> ünï **bold** after\n", 10, &source(), Lang::En).unwrap();
         let Block::Quote { at: quote, blocks } = &document.blocks[1] else {
             panic!("quote")
         };
@@ -2125,12 +2823,61 @@ mod tests {
         );
     }
 
+    /// The text of the first paragraph of `body` in `lang`, with code spans in backticks.
+    fn typeset(body: &str, lang: Lang) -> String {
+        let Block::Paragraph { content, .. } = parse(body, 1, &source(), lang).expect("parses").blocks.remove(0) else {
+            panic!("expected a paragraph");
+        };
+        content
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text { text, style } if style.code => format!("`{text}`"),
+                Inline::Text { text, .. } => text.clone(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sets_dashes_ellipses_and_quotes_of_the_language() {
+        let body = "\"Peter's 'best' day\" -- 1990--95 --- and so on...\n";
+        assert_eq!(typeset(body, Lang::En), "“Peter’s ‘best’ day” – 1990–95 — and so on…");
+        assert_eq!(typeset(body, Lang::De), "„Peter’s ‚best‘ day“ – 1990–95 — and so on…");
+        assert_eq!(
+            typeset("Geht's 'gut', ihr Jungs'?\n", Lang::De),
+            "Geht’s ‚gut‘, ihr Jungs’?"
+        );
+    }
+
+    #[test]
+    fn punctuates_index_terms_like_text() {
+        let document = parse(
+            "Text{^Peter's \"lamp\"!1990--95...|see C++ *x*}{^C++ *x*}.\n",
+            1,
+            &source(),
+            Lang::De,
+        )
+        .unwrap();
+        let mark = &document.index_marks[0];
+        assert_eq!(mark.terms, ["Peter’s „lamp“", "1990–95…"]);
+        assert_eq!(mark.see.as_ref().unwrap().terms, ["C++ *x*"]);
+    }
+
+    #[test]
+    fn keeps_escaped_and_code_punctuation_straight() {
+        assert_eq!(
+            typeset("\\\"a\\\" `\"b\" -- c...`\n", Lang::De),
+            "\"a\" `\"b\" -- c...`"
+        );
+    }
+
     #[test]
     fn parses_images_alone_in_a_paragraph_with_the_description_as_caption() {
         let document = parse(
             "![A *plot*](img/a.png)\n\n- ![](b.svg)\n\n![Again](img/a.png)\n",
             1,
             &source(),
+            Lang::En,
         )
         .unwrap();
         let em = InlineStyle {
@@ -2145,6 +2892,7 @@ mod tests {
                     image: 0,
                     caption: vec![plain("A "), text("plot", em)],
                     label: None,
+                    placement: None,
                 },
                 Block::List {
                     at: at(3, 1),
@@ -2154,6 +2902,7 @@ mod tests {
                         image: 1,
                         caption: Vec::new(),
                         label: None,
+                        placement: Some(Placement::Here),
                     }]],
                     class: None,
                 },
@@ -2162,6 +2911,7 @@ mod tests {
                     image: 0,
                     caption: vec![plain("Again")],
                     label: None,
+                    placement: None,
                 },
             ]
         );
@@ -2317,6 +3067,7 @@ mod tests {
                 Block::Code {
                     at: at(16, 1),
                     first_line: 17,
+                    language: None,
                     lines: vec!["::: keep".into()],
                 },
             ]
@@ -2330,7 +3081,7 @@ mod tests {
                 "::: float\nx\n:::",
                 (1, 1),
                 "unknown directive \"float\"; use columns, full-width, keep, bottom, table, page-break, bibliography, \
-                 toc, front-matter, main-matter, or back-matter",
+                 index, toc, front-matter, main-matter, or back-matter",
             ),
             ("::: keep\nx", (1, 1), "\"::: keep\" is never closed"),
             ("x\n:::", (2, 1), "\":::\" closes no open layout directive"),
@@ -2383,7 +3134,7 @@ mod tests {
     #[test]
     fn numbers_footnotes_in_reference_order() {
         let body = "[^b]: Bee.\n\nA[^a] and b[^B].\n\n[^a]: Ay.\n";
-        let document = parse(body, 1, &source()).unwrap();
+        let document = parse(body, 1, &source(), Lang::En).unwrap();
         assert_eq!(
             document.blocks,
             vec![Block::Paragraph {
@@ -2445,7 +3196,108 @@ mod tests {
                 "{body:?}: {errors:?}"
             );
         }
-        assert!(parse("a \\[^x] b", 1, &source()).is_ok());
+        assert!(parse("a \\[^x] b", 1, &source(), Lang::En).is_ok());
+    }
+
+    #[test]
+    fn reads_margin_notes_apart_from_numbered_footnotes() {
+        let body = "A[^m] b[^n] c[^o].\n\n[^m]: {-} Aside.\n\n[^n]: Note.\n\n[^o]:   {-}\n    Second aside.\n";
+        let document = parse(body, 1, &source(), Lang::En).unwrap();
+        let [Block::Paragraph { content, .. }] = document.blocks.as_slice() else {
+            panic!("one paragraph")
+        };
+        let marks: Vec<&Inline> = content
+            .iter()
+            .filter(|inline| !matches!(inline, Inline::Text { .. }))
+            .collect();
+        assert_eq!(
+            marks,
+            [&Inline::MarginNote(0), &Inline::FootnoteRef(0), &Inline::MarginNote(1)]
+        );
+        assert_eq!(document.footnotes[0].blocks, vec![paragraph(5, 7, "Note.")]);
+        let texts: Vec<String> = document
+            .margin_notes
+            .iter()
+            .map(|note| match note.blocks.as_slice() {
+                [Block::Paragraph { content, .. }] => crate::layout::structure::plain(content),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, ["Aside.", "Second aside."]);
+        // An escaped mark is text, and so is `{-}` later in a note.
+        let document = parse("A[^m].\n\n[^m]: \\{-} Not {-} an aside.\n", 1, &source(), Lang::En).unwrap();
+        assert!(document.margin_notes.is_empty());
+        let errors = diagnostics("A[^n]\n\n[^n]: Note[^m].\n\n[^m]: {-} Aside.\n", 1);
+        assert!(errors.contains(&(Some((3, 11)), "a footnote cannot reference another footnote".to_owned())));
+    }
+
+    #[test]
+    fn reads_placement_after_images_captions_and_on_the_table_directive() {
+        let placement = |block: &Block| match block {
+            Block::Image { placement, .. } | Block::Table { placement, .. } => *placement,
+            other => panic!("{other:?}"),
+        };
+        let body = "![A](a.png){#fig:a placement=top}\n\n![B](b.png){placement=bottom}\n\n![C](c.png)\n\n\
+            | A |\n|---|\n| 1 |\n\n: Caption {#tbl:a placement=bottom}\n\n::: table {placement=top}\n| B |\n|---|\n\
+            | 2 |\n:::\n\n- ![In a list](d.png)\n";
+        let document = parse(body, 1, &source(), Lang::En).unwrap();
+        let found: Vec<Option<Placement>> = document.blocks[..5].iter().map(placement).collect();
+        use Placement::{Bottom, Here, Top};
+        assert_eq!(found, [Some(Top), Some(Bottom), None, Some(Bottom), Some(Top)]);
+        let Block::List { items, .. } = &document.blocks[5] else {
+            panic!("a list")
+        };
+        assert_eq!(
+            placement(&items[0][0]),
+            Some(Here),
+            "the theme's default does not apply in a list"
+        );
+        let Block::Image { label, .. } = &document.blocks[0] else {
+            panic!("an image")
+        };
+        assert_eq!(label.as_deref(), Some("fig:a"));
+
+        let cases = [
+            (
+                "![A](a.png){placement=left}",
+                (1, 12),
+                "placement \"left\" is not here, top, or bottom",
+            ),
+            (
+                "![A](a.png){placement=top .wide}",
+                (1, 12),
+                "an image takes a label and a placement, as in {#fig:name placement=top}",
+            ),
+            (
+                "> ![A](a.png){placement=top}",
+                (1, 14),
+                "placement=top and placement=bottom apply only in the main text or in a full-width block of a column \
+                 section",
+            ),
+            (
+                "::: columns\n![A](a.png){placement=top}\n:::",
+                (2, 12),
+                "placement=top and placement=bottom apply only in the main text or in a full-width block of a column \
+                 section",
+            ),
+            (
+                "| A |\n|---|\n| 1[^n] |\n\n: Noted {placement=top}\n\n[^n]: Note.",
+                (5, 1),
+                "a table placed at the top or bottom cannot hold footnotes or margin notes",
+            ),
+            (
+                "::: table {placement=top}\n| A |\n|---|\n| 1 |\n:::\n\n: Twice {placement=bottom}",
+                (7, 1),
+                "this table's placement is already set",
+            ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
     }
 
     fn cell(line: u64, column: u64, content: Vec<Inline>) -> Cell {
@@ -2532,6 +3384,7 @@ mod tests {
                 ],
                 caption: Vec::new(),
                 label: None,
+                placement: None,
             }
         );
     }
@@ -2663,6 +3516,7 @@ mod tests {
             rows,
             caption,
             label,
+            ..
         } = table(body)
         else {
             panic!("a table")
@@ -2762,7 +3616,7 @@ mod tests {
     #[test]
     fn numbers_footnotes_in_table_cells_in_reading_order() {
         let body = "A[^a]\n\n| h |\n|---|\n| b[^b] |\n\nC[^c]\n\n[^a]: a\n\n[^b]: b\n\n[^c]: c\n";
-        let document = parse(body, 1, &source()).unwrap();
+        let document = parse(body, 1, &source(), Lang::En).unwrap();
         let Block::Table { rows, .. } = &document.blocks[1] else {
             panic!("table")
         };
@@ -2996,7 +3850,7 @@ mod tests {
     #[test]
     fn parses_citations_with_their_key_locations_and_adds_the_bibliography_at_the_end() {
         let body = "As [@a, p. 3; @b] and @c [pp. 3-5] show,\n[@d;\n@e] and [ask @f](https://x.org/).\n\n# End\n";
-        let document = parse(body, 1, &source()).expect("parses");
+        let document = parse(body, 1, &source(), Lang::En).expect("parses");
         let link = InlineStyle {
             link: Some(Link::Url("https://x.org/".into())),
             ..Default::default()
@@ -3071,6 +3925,177 @@ mod tests {
                 (2, 1),
                 "bibliography is not allowed inside keep",
             ),
+        ];
+        for (body, location, message) in cases {
+            let errors = diagnostics(body, 1);
+            assert!(
+                errors.contains(&(Some(location), message.to_string())),
+                "{body:?}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_github_alerts_as_callouts_and_leaves_other_quotations_alone() {
+        let kinds = [
+            ("NOTE", CalloutKind::Note),
+            ("TIP", CalloutKind::Tip),
+            ("IMPORTANT", CalloutKind::Important),
+            ("WARNING", CalloutKind::Warning),
+            ("CAUTION", CalloutKind::Caution),
+        ];
+        for (marker, expected) in kinds {
+            let blocks = blocks(&format!("> [!{marker}]\n> Text.\n>\n> - Item\n"));
+            let [Block::Callout { kind, blocks, .. }] = blocks.as_slice() else {
+                panic!("{marker}: {blocks:?}")
+            };
+            assert_eq!(*kind, expected);
+            assert!(matches!(
+                blocks.as_slice(),
+                [Block::Paragraph { .. }, Block::List { .. }]
+            ));
+        }
+        for body in ["> Quoted\n", "> [!HINT]\n> Text.\n", "> [!NOTE] Own title\n> Text.\n"] {
+            assert!(matches!(blocks(body).as_slice(), [Block::Quote { .. }]), "{body:?}");
+        }
+    }
+
+    fn mark(line: u64, column: u64, terms: &[&str], see: Option<(bool, &[&str])>) -> IndexMark {
+        let owned = |terms: &[&str]| terms.iter().map(|term| (*term).to_owned()).collect();
+        IndexMark {
+            at: at(line, column),
+            terms: owned(terms),
+            see: see.map(|(also, terms)| See {
+                also,
+                terms: owned(terms),
+            }),
+        }
+    }
+
+    #[test]
+    fn parses_index_marks_with_visible_text_sub_entries_and_see_references() {
+        let body = "Text{^Hyphenation!patterns!German} on [line *breaking*]{^}.\n\n\
+            - [Knuth]{^Knuth, Donald|see also TeX} and {^TeX|siehe Knuth, Donald}\n\n\
+            > Quoted {^quote}.[^n]\n\n\
+            | A | B |\n|---|---|\n| cell{^cell} | `{^code}` \\{^escaped} |\n\n\
+            [^n]: Noted{^note}.\n";
+        let document = parse(body, 1, &source(), Lang::En).expect("parses");
+        assert_eq!(
+            document.index_marks,
+            [
+                mark(1, 5, &["Hyphenation", "patterns", "German"], None),
+                mark(1, 39, &["line breaking"], None),
+                mark(3, 3, &["Knuth, Donald"], Some((true, &["TeX"]))),
+                mark(3, 44, &["TeX"], Some((false, &["Knuth, Donald"]))),
+                mark(5, 10, &["quote"], None),
+                mark(9, 7, &["cell"], None),
+                mark(11, 12, &["note"], None),
+            ]
+        );
+        let Block::Paragraph { content, .. } = &document.blocks[0] else {
+            panic!("a paragraph")
+        };
+        let emphasis = InlineStyle {
+            emphasis: true,
+            ..InlineStyle::default()
+        };
+        assert_eq!(
+            content,
+            &[
+                plain("Text"),
+                Inline::IndexMark(0),
+                plain(" on "),
+                Inline::IndexMark(1),
+                plain("line "),
+                text("breaking", emphasis),
+                plain("."),
+            ]
+        );
+        assert_eq!(document.blocks.last(), Some(&Block::Index { at: at(11, 20) }));
+        let Block::Table { rows, .. } = &document.blocks[3] else {
+            panic!("a table")
+        };
+        let code = InlineStyle {
+            code: true,
+            ..InlineStyle::default()
+        };
+        let cell = rows[0].cells[1].blocks.clone();
+        let expected = vec![text("{^code}", code), plain(" {^escaped}")];
+        assert!(
+            matches!(&cell[..], [Block::Paragraph { content, .. }] if *content == expected),
+            "{cell:?}"
+        );
+    }
+
+    #[test]
+    fn places_the_index_where_the_directive_stands_also_without_marks() {
+        let placed = blocks("::: columns\n::: index\n:::\n\nText{^a}.\n");
+        assert_eq!(
+            placed[0],
+            Block::Columns {
+                at: at(1, 1),
+                blocks: vec![Block::Index { at: at(2, 1) }],
+            }
+        );
+        assert_eq!(placed.len(), 2, "the directive places the only index");
+        assert_eq!(blocks("::: index\n"), [Block::Index { at: at(1, 1) }]);
+    }
+
+    #[test]
+    fn reports_index_mark_errors_at_their_location() {
+        let empty =
+            "an index mark needs a term for the entry and each sub-entry, as in {^entry!sub-entry} or [text]{^}";
+        let cases = [
+            ("# Heading{^a}\n", (1, 10), HEADING_MARK),
+            ("# Heading {^a} text\n", (1, 11), HEADING_MARK),
+            (
+                "| A{^a} |\n|---|\n| b |\n",
+                (1, 4),
+                "a table header cannot hold index marks, because it repeats on every page",
+            ),
+            ("Text {^}.\n", (1, 6), empty),
+            ("Text {^a!!b}.\n", (1, 6), empty),
+            (
+                "Text {^a!b!c!d}.\n",
+                (1, 6),
+                "an index mark takes an entry and at most two levels of sub-entries, as in {^entry!sub-entry!detail}",
+            ),
+            (
+                "Text {^a|compare b}.\n",
+                (1, 6),
+                "write a cross-reference in an index mark as |see entry or |see also entry",
+            ),
+            (
+                "Text {^a|see }.\n",
+                (1, 6),
+                "a see reference needs the entry it refers to, as in |see entry!sub-entry",
+            ),
+            (
+                "Text {^a|see b!c}{^b}.\n",
+                (1, 6),
+                "the index has no entry \"b!c\" for this reference; mark it with {^b!c}",
+            ),
+            (
+                "Text {^a\n\nmore}.\n",
+                (1, 6),
+                "this index mark is not closed; end it with }",
+            ),
+            (
+                "{^lonely}\n",
+                (1, 1),
+                "an index mark needs text beside it; put it in the paragraph it refers to",
+            ),
+            (
+                "[*a* @sec:x]{^}\n\n# X {#sec:x}\n",
+                (1, 1),
+                "the text of an index mark can hold only text and formatting",
+            ),
+            (
+                "::: index\n\n::: index\n",
+                (3, 1),
+                "the index is already placed on line 1",
+            ),
+            ("::: keep\n::: index\n:::\n", (2, 1), "index is not allowed inside keep"),
         ];
         for (body, location, message) in cases {
             let errors = diagnostics(body, 1);

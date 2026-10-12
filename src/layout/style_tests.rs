@@ -42,7 +42,7 @@ fn config() -> Config {
 }
 
 fn render(config: &Config, fonts: &Fonts, body: &str) -> Result<Vec<Page>, Vec<Diagnostic>> {
-    let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
+    let document = crate::markdown::parse(body, 1, &source(), Lang::En).expect("document parses");
     let cited = Cited::default();
     layout(
         &document,

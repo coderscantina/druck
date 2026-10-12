@@ -951,6 +951,29 @@ impl<'a> Resolver<'a> {
                 row_rule: self.rule(theme.tables.row_rule.as_ref(), "tables.row-rule", table_em)?,
             })
         })();
+        let callout_em = em_of(s.map(|s| &s.callout));
+        let callouts = (|| {
+            let look = |look: &theme::CalloutLook, name: &str| {
+                let property = format!("callouts.{name}");
+                let background = match &look.background {
+                    Some(color) => Some(self.color(color, &format!("{property}.background"))?),
+                    None => None,
+                };
+                Some(resolved::CalloutLook {
+                    background,
+                    rule: self.rule(look.rule.as_ref(), &format!("{property}.rule"), callout_em)?,
+                })
+            };
+            let kinds = &theme.callouts;
+            Some(resolved::Callouts {
+                padding: self.spacing(&kinds.padding, "callouts.padding", callout_em)?,
+                note: look(&kinds.note, "note")?,
+                tip: look(&kinds.tip, "tip")?,
+                important: look(&kinds.important, "important")?,
+                warning: look(&kinds.warning, "warning")?,
+                caution: look(&kinds.caution, "caution")?,
+            })
+        })();
         let notes = &theme.footnotes;
         let footnotes = (|| {
             Some(resolved::Footnotes {
@@ -963,6 +986,27 @@ impl<'a> Resolver<'a> {
                 )?,
                 separator_color: self.color(&notes.separator_color, "footnotes.separator-color")?,
                 spacing: self.spacing(&notes.spacing, "footnotes.spacing", footnote_em)?,
+            })
+        })();
+        let raw = &theme.margin_notes;
+        let note_style = s
+            .and_then(|styles| styles.named(&raw.style))
+            .or_else(|| custom_styles.as_ref()?.get(&raw.style).map(CustomStyle::style));
+        if s.is_some() && custom_styles.is_some() && note_style.is_none() {
+            self.error(
+                "margin-notes.style",
+                format!("style \"{}\" is neither a built-in nor a custom style", raw.style),
+            );
+        }
+        let note_em = em_of(note_style);
+        let margin_notes = (|| {
+            Some(resolved::MarginNotes {
+                width: self.spacing(&raw.width, "margin-notes.width", note_em)?,
+                gap: self.spacing(&raw.gap, "margin-notes.gap", note_em)?,
+                spacing: self.spacing(&raw.spacing, "margin-notes.spacing", note_em)?,
+                style: note_style.map(|_| raw.style.clone())?,
+                align: raw.align,
+                sidenotes: raw.sidenotes,
             })
         })();
         let bibliography_em = em_of(s.map(|s| &s.bibliography));
@@ -1001,6 +1045,15 @@ impl<'a> Resolver<'a> {
                 level_indent,
                 leader: theme.toc.leader,
                 level_styles: level_styles.collect::<Option<_>>()?,
+            })
+        })();
+        let index_em = em_of(s.map(|s| &s.index_entry));
+        let index = (|| {
+            Some(resolved::Index {
+                columns: theme.index.columns.get(),
+                level_indent: self.spacing(&theme.index.level_indent, "index.level-indent", index_em)?,
+                hanging_indent: self.spacing(&theme.index.hanging_indent, "index.hanging-indent", index_em)?,
+                separator: theme.index.separator.clone(),
             })
         })();
 
@@ -1116,6 +1169,16 @@ impl<'a> Resolver<'a> {
             }
         });
 
+        let highlight = theme.highlight.as_ref().map(|colors| {
+            colors
+                .iter()
+                .filter_map(|(category, color)| {
+                    let color = self.color(color, &format!("highlight.{}", category.name()))?;
+                    Some((*category, color))
+                })
+                .collect()
+        });
+
         // A file setting resolves against the layer that sets it.
         let file = |setting: fn(&FrontMatter) -> Option<&String>| {
             [overrides, document].into_iter().find_map(|input| {
@@ -1157,10 +1220,14 @@ impl<'a> Resolver<'a> {
             inline: inline?,
             lists: lists?,
             tables: tables?,
+            callouts: callouts?,
             footnotes: footnotes?,
+            margin_notes: margin_notes?,
             caption_separator: theme.captions.separator.clone(),
+            placement: theme.placement,
             bibliography: bibliography?,
             toc: toc?,
+            index: index?,
             matter: theme.matter,
             chapters: chapters?,
             scene_break: scene_break?,
@@ -1171,6 +1238,7 @@ impl<'a> Resolver<'a> {
             title_page: title_page?,
             pages: pages?,
             watermark,
+            highlight,
             labels: theme.labels.get(theme.document.lang).clone(),
             warnings: self.unused_font_warnings(document, overrides),
         })
@@ -1210,6 +1278,8 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::config::theme::CalloutKind;
+    use crate::highlight::Category;
 
     fn inputs(theme: Value) -> Inputs {
         Inputs {
@@ -1237,6 +1307,25 @@ mod tests {
         let error = &errors[0];
         assert_eq!(error.source, Some(Source::Theme("/fake/themes/t.json".into())));
         (error.property.clone().expect("property named"), error.message.clone())
+    }
+
+    #[test]
+    fn highlight_colors_follow_tokens_and_null_turns_highlighting_off() {
+        let theme =
+            json!({"version": 1, "tokens": {"colors": {"ink": "#112233"}}, "highlight": {"comment": "$colors.ink"}});
+        let colors = resolve(inputs(theme)).expect("theme resolves").highlight.expect("on");
+        assert_eq!(colors[&Category::Comment], Color([0x11, 0x22, 0x33]));
+        assert!(colors.contains_key(&Category::Keyword), "the default colors remain");
+
+        let off = resolve(inputs(json!({"version": 1, "highlight": null}))).expect("theme resolves");
+        assert!(off.highlight.is_none());
+    }
+
+    #[test]
+    fn rejects_a_highlight_color_of_an_undefined_token() {
+        let (property, message) = rejection(json!({"version": 1, "highlight": {"string": "$colors.nope"}}));
+        assert_eq!(property, "highlight.string");
+        assert!(message.contains("nope"), "{message}");
     }
 
     #[test]
@@ -1515,5 +1604,33 @@ mod tests {
             message,
             "marker style \"bold\" is neither a built-in nor a custom style"
         );
+    }
+
+    #[test]
+    fn rejects_callout_colors_that_name_no_token() {
+        let (property, message) = rejection(json!({
+            "version": 1,
+            "callouts": {"warning": {"rule": {"thickness": "2pt", "color": "$colors.missing"}}},
+        }));
+        assert_eq!(property, "callouts.warning.rule.color");
+        assert!(message.contains("missing"), "{message}");
+    }
+
+    #[test]
+    fn labels_callouts_per_language_and_lets_the_theme_replace_them() {
+        let labels = |theme: Value| resolve(inputs(theme)).expect("theme resolves").labels;
+        let english = labels(json!({"version": 1, "labels": {"en": {"tip": "Hint"}}}));
+        assert_eq!(english.callout(CalloutKind::Note), "Note");
+        assert_eq!(english.callout(CalloutKind::Tip), "Hint");
+        let german = labels(json!({"version": 1, "document": {"lang": "de"}}));
+        let all = [
+            CalloutKind::Note,
+            CalloutKind::Tip,
+            CalloutKind::Important,
+            CalloutKind::Warning,
+            CalloutKind::Caution,
+        ];
+        let words: Vec<_> = all.into_iter().map(|kind| german.callout(kind)).collect();
+        assert_eq!(words, ["Hinweis", "Tipp", "Wichtig", "Warnung", "Vorsicht"]);
     }
 }

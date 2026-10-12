@@ -94,7 +94,13 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             match inline {
                 Inline::Citation { index, .. } => order.push(*index),
                 Inline::FootnoteRef(note) => reading_order(&document.footnotes[*note].blocks, document, order),
-                Inline::Text { .. } | Inline::LineBreak | Inline::Ref(_) | Inline::Field { .. } => {}
+                Inline::MarginNote(note) => reading_order(&document.margin_notes[*note].blocks, document, order),
+                Inline::Text { .. }
+                | Inline::LineBreak
+                | Inline::Ref(_)
+                | Inline::Field { .. }
+                | Inline::IndexMark(_)
+                | Inline::Anchor(_) => {}
             }
         }
     };
@@ -112,6 +118,7 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             }
             Block::List { items, .. } => items.iter().for_each(|item| reading_order(item, document, order)),
             Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. }
             | Block::Keep { blocks, .. }
             | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }
@@ -121,7 +128,8 @@ fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) 
             | Block::Matter { .. }
             | Block::Contents { .. }
             | Block::SceneBreak { .. }
-            | Block::Bibliography { .. } => {}
+            | Block::Bibliography { .. }
+            | Block::Index { .. } => {}
         }
     }
 }

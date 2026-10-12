@@ -57,13 +57,20 @@ fn render_with_images(
     footnotes: Vec<Footnote>,
     images: &[Image],
 ) -> Result<Vec<Page>, Vec<Diagnostic>> {
-    let config = config();
-    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    render_in(&config(), blocks, footnotes, images)
+}
+
+fn render_in(
+    config: &Config,
+    blocks: Vec<Block>,
+    footnotes: Vec<Footnote>,
+    images: &[Image],
+) -> Result<Vec<Page>, Vec<Diagnostic>> {
+    let fonts = Fonts::load(config, &BTreeMap::new()).expect("bundled fonts");
     let document = Document {
         blocks,
         footnotes,
-        images: Vec::new(),
-        citations: Vec::new(),
+        ..Document::default()
     };
     let cited = Cited::default();
     layout(
@@ -71,7 +78,7 @@ fn render_with_images(
         &cited,
         images,
         &HashMap::new(),
-        &config,
+        config,
         &fonts,
         &source(),
         crate::date::Date::from_unix(0),
@@ -841,6 +848,7 @@ fn figure(line: u64, image: usize, caption: Vec<Inline>) -> Block {
         image,
         caption,
         label: None,
+        placement: None,
     }
 }
 
@@ -1096,6 +1104,7 @@ fn table(line: u64, header: &[&str], rows: &[Vec<String>], caption: &str) -> Blo
             vec![text_inline(caption)]
         },
         label: None,
+        placement: None,
     }
 }
 
@@ -1353,6 +1362,7 @@ fn a_note_referenced_in_a_cell_goes_on_the_page_of_its_row() {
             rows,
             caption: Vec::new(),
             label: None,
+            placement: None,
         };
         let pages = render_with_notes(vec![block], vec![note(90, "Cell note.")]).unwrap();
         let reference = pages_with(&pages, &format!("R{noted} "));
@@ -1433,7 +1443,7 @@ fn repeated_table_layout_is_identical() {
 fn flow(markdown: &str) -> Vec<FlowLine> {
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
-    let document = crate::markdown::parse(markdown, 1, &source()).expect("document parses");
+    let document = crate::markdown::parse(markdown, 1, &source(), Lang::En).expect("document parses");
     let cited = Cited::default();
     let structure = Structure::new(&document, &config, cited.references());
     let notes = NoteStyles::new(&config);
@@ -1449,6 +1459,7 @@ fn flow(markdown: &str) -> Vec<FlowLine> {
         source: &source(),
         structure: &structure,
         notes: &notes,
+        title_tags: &crate::tags::Tree::default(),
         first: 0,
     };
     let assumed = vec!["1".to_owned(); structure.anchors.len()];
@@ -1522,7 +1533,7 @@ fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
     })
     .expect("configuration resolves");
     let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
-    let document = crate::markdown::parse("# One\n\nText.\n", 1, &source()).expect("document parses");
+    let document = crate::markdown::parse("# One\n\nText.\n", 1, &source(), Lang::En).expect("document parses");
     let output = layout(
         &document,
         &Cited::default(),
@@ -1560,4 +1571,70 @@ fn list_spacing_surrounds_the_list_and_items_keep_item_spacing() {
     assert!(config.styles.list.space_before.0 > 0.0);
     assert!(lines[1].space_before >= config.styles.list.space_before.0);
     assert_eq!(lines[2].space_before, config.lists.item_spacing.0);
+}
+
+/// The text of each line of a page by baseline, with the left and right edge of its runs.
+fn extents(page: &Page) -> Vec<(f64, String, i64, i64)> {
+    let mut lines: Vec<(f64, String, f64, f64)> = Vec::new();
+    for item in &page.items {
+        let Item::Text { x, y, run, .. } = item else { continue };
+        match lines.iter_mut().find(|line| line.0 == y.0) {
+            Some(line) => {
+                line.1.push_str(&run.text);
+                line.2 = line.2.min(x.0);
+                line.3 = line.3.max(x.0 + run.width.0);
+            }
+            None => lines.push((y.0, run.text.clone(), x.0, x.0 + run.width.0)),
+        }
+    }
+    let micro = |value: f64| (value * 1e6).round() as i64;
+    lines
+        .into_iter()
+        .map(|(y, text, left, right)| (y, text, micro(left), micro(right)))
+        .collect()
+}
+
+#[test]
+fn highlighting_colors_code_without_moving_it() {
+    let code = |language: Option<&str>| Block::Code {
+        at: Location { line: 1, column: 1 },
+        first_line: 2,
+        language: language.map(str::to_owned),
+        lines: vec![
+            "fn main() {".to_owned(),
+            "\tlet n = 42; // answer".to_owned(),
+            "}".to_owned(),
+        ],
+    };
+    let colors = |page: &Page| {
+        let mut colors: Vec<Color> = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Text { y, color, .. } if in_text_area(*y) => Some(*color),
+                _ => None,
+            })
+            .collect();
+        colors.dedup();
+        colors
+    };
+
+    let plain = render(vec![code(None)]).unwrap();
+    let colored = render(vec![code(Some("rust"))]).unwrap();
+    assert_eq!(extents(&plain[0]), extents(&colored[0]));
+    assert_eq!(colors(&plain[0]).len(), 1);
+    assert!(colors(&colored[0]).len() > 3, "{:?}", colors(&colored[0]));
+
+    let mut off = config();
+    off.highlight = None;
+    let unlit = render_in(&off, vec![code(Some("rust"))], Vec::new(), &[]).unwrap();
+    let unknown = render(vec![code(Some("klingon"))]).unwrap();
+    for page in [&unlit[0], &unknown[0]] {
+        assert_eq!(extents(page), extents(&plain[0]));
+        assert_eq!(
+            colors(page),
+            colors(&plain[0]),
+            "a block that is not highlighted is set plain"
+        );
+    }
 }

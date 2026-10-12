@@ -47,7 +47,7 @@ fn config() -> Config {
 fn render(body: &str) -> (Config, Vec<Page>) {
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
-    let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
+    let document = crate::markdown::parse(body, 1, &source(), Lang::En).expect("document parses");
     let pages = layout(
         &document,
         &Cited::default(),

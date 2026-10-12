@@ -5,6 +5,7 @@
 
 use crate::bibliography::syntax;
 use crate::config::template::Placeholder;
+use crate::config::theme::CalloutKind;
 
 /// A 1-based line and column in the Markdown file. Columns count characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,10 +19,32 @@ pub struct Document {
     pub blocks: Vec<Block>,
     /// Footnotes in the order of their references, which is also their numbering.
     pub footnotes: Vec<Footnote>,
+    /// Margin notes, footnotes whose definition starts with `{-}`, in the order of their references.
+    /// They have no number.
+    pub margin_notes: Vec<Footnote>,
     /// The distinct image files referenced, in order of first use.
     pub images: Vec<ImageFile>,
     /// The citations in source order. [`Inline::Citation`] refers to them by index.
     pub citations: Vec<Citation>,
+    /// The index marks in source order. [`Inline::IndexMark`] refers to them by index.
+    pub index_marks: Vec<IndexMark>,
+}
+
+/// An index mark, `{^entry!sub-entry}` or `[text]{^}`, with an optional `|see` or `|see also` reference.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexMark {
+    pub at: Location,
+    /// The entry and its sub-entries from the top, one to three terms.
+    pub terms: Vec<String>,
+    /// A cross-reference to another entry, which the mark adds instead of its page.
+    pub see: Option<See>,
+}
+
+/// A `|see` or `|see also` reference to the entry with these terms.
+#[derive(Debug, Clone, PartialEq)]
+pub struct See {
+    pub also: bool,
+    pub terms: Vec<String>,
 }
 
 /// A citation as written, such as `[@a, p. 3; @b]` or `@a`. Its text depends on every citation in the
@@ -91,10 +114,18 @@ pub enum Block {
         at: Location,
         blocks: Vec<Block>,
     },
-    /// A fenced or indented code block. Line `i` starts at source line `first_line + i`.
+    /// A GitHub alert quotation, `> [!NOTE]` and its siblings, set in a box with a label.
+    Callout {
+        at: Location,
+        kind: CalloutKind,
+        blocks: Vec<Block>,
+    },
+    /// A fenced or indented code block. Line `i` starts at source line `first_line + i`. The
+    /// language is the first word of a fence's info string.
     Code {
         at: Location,
         first_line: u64,
+        language: Option<String>,
         lines: Vec<String>,
     },
     /// An image alone in its paragraph: an index into [`Document::images`] and the caption from its
@@ -105,6 +136,8 @@ pub enum Block {
         caption: Vec<Inline>,
         /// A `fig:` label from `{#fig:name}` after the image. Only captioned images have one.
         label: Option<String>,
+        /// `placement=...` after the image; `None` for the theme's default.
+        placement: Option<Placement>,
     },
     /// A pipe table or a `::: table` list table. The cells of the header row and of every body row
     /// span all columns together.
@@ -117,6 +150,8 @@ pub enum Block {
         caption: Vec<Inline>,
         /// A `tbl:` label from `{#tbl:name}` at the end of the caption.
         label: Option<String>,
+        /// `placement=...` at the end of the caption or on `::: table`; `None` for the theme's default.
+        placement: Option<Placement>,
     },
     /// `::: keep`: content that stays on one page.
     Keep {
@@ -160,6 +195,10 @@ pub enum Block {
     Bibliography {
         at: Location,
     },
+    /// The index: `::: index`, or added at the end of a document with index marks without one.
+    Index {
+        at: Location,
+    },
 }
 
 impl Block {
@@ -170,6 +209,7 @@ impl Block {
             | Self::Heading { at, .. }
             | Self::List { at, .. }
             | Self::Quote { at, .. }
+            | Self::Callout { at, .. }
             | Self::Code { at, .. }
             | Self::Image { at, .. }
             | Self::Table { at, .. }
@@ -181,7 +221,8 @@ impl Block {
             | Self::Matter { at, .. }
             | Self::Contents { at }
             | Self::SceneBreak { at }
-            | Self::Bibliography { at } => *at,
+            | Self::Bibliography { at }
+            | Self::Index { at } => *at,
         }
     }
 }
@@ -192,6 +233,19 @@ pub enum Matter {
     Front,
     Main,
     Back,
+}
+
+/// Where a figure or table goes on its page. The parser sets `Here` where blocks cannot be placed, so
+/// the theme's default only applies where top and bottom are allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Placement {
+    /// Where it stands in the text.
+    Here,
+    /// At the top of the page its anchor falls on, or of a later one.
+    Top,
+    /// At the bottom of the page its anchor falls on, above the footnotes, or of a later one.
+    Bottom,
 }
 
 /// A table column: its alignment and how its width is chosen.
@@ -246,6 +300,8 @@ pub enum Inline {
     LineBreak,
     /// A footnote reference: an index into [`Document::footnotes`].
     FootnoteRef(usize),
+    /// A margin note reference: an index into [`Document::margin_notes`]. It shows no mark.
+    MarginNote(usize),
     /// A cross-reference to a labelled heading, figure, or table.
     Ref(Reference),
     /// A citation: an index into [`Document::citations`].
@@ -257,6 +313,10 @@ pub enum Inline {
         at: Location,
         style: InlineStyle,
     },
+    /// An index mark: an index into [`Document::index_marks`]. It shows nothing; layout places an anchor here.
+    IndexMark(usize),
+    /// An anchor that layout places at this position. Layout resolves index marks into anchors.
+    Anchor(usize),
 }
 
 /// A cross-reference such as `@fig:chart`, or `[@fig:chart, page]` for the page it is on.

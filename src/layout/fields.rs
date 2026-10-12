@@ -97,7 +97,7 @@ impl<'a> Fields<'a> {
             }
         };
         walk(&document.blocks, &mut visit);
-        for footnote in &document.footnotes {
+        for footnote in document.footnotes.iter().chain(&document.margin_notes) {
             walk(&footnote.blocks, &mut visit);
         }
         if errors.is_empty() { Ok(()) } else { Err(errors) }
@@ -120,6 +120,7 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&[Inline])) {
             }
             Block::List { items, .. } => items.iter().for_each(|item| walk(item, visit)),
             Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. }
             | Block::Keep { blocks, .. }
             | Block::Bottom { blocks, .. }
             | Block::Columns { blocks, .. }
@@ -129,7 +130,8 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&[Inline])) {
             | Block::Matter { .. }
             | Block::Contents { .. }
             | Block::SceneBreak { .. }
-            | Block::Bibliography { .. } => {}
+            | Block::Bibliography { .. }
+            | Block::Index { .. } => {}
         }
     }
 }

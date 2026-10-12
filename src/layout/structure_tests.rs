@@ -58,7 +58,7 @@ fn render_images(config: &Config, body: &str, images: &[Image]) -> Result<Output
 
 /// Lays out `body` with its citations formatted from the BibTeX text `bib`.
 fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]) -> Result<Output, Vec<Diagnostic>> {
-    let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
+    let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography =
         bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
     let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source())?;

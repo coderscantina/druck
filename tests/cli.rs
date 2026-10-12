@@ -872,3 +872,35 @@ fn embeds_the_cover_from_front_matter_and_checks_the_isbn() {
         run.stderr
     );
 }
+
+#[test]
+fn tags_every_pdf_and_rejects_an_undescribed_image_under_pdf_ua() {
+    let sandbox = image_sandbox("conformance");
+    let body = "---\ntitle: Standards\n---\n\n# Images\n\n![](images/pixel.png)\n";
+    let document = sandbox.write("doc.md", body);
+    let output = sandbox.root.join("doc.pdf");
+    // Without a standard an image needs no description.
+    let pdf = render(&sandbox, &[&document], &output);
+    let pdf = String::from_utf8_lossy(&pdf);
+    assert!(pdf.contains("/StructTreeRoot") && pdf.contains("/Marked true"));
+    assert!(!pdf.contains("pdfuaid"));
+    fs::remove_file(&output).unwrap();
+
+    let run = sandbox.run(&["render", &document, "--set", "conformance=pdf/ua-1"]);
+    assert_eq!(run.code, 1);
+    let expected = format!("{document}:7:1: PDF/UA-1 needs a description of this image");
+    assert!(run.stderr.contains(&expected), "{}", run.stderr);
+    assert!(!output.exists());
+
+    let described = sandbox.write("described.md", &body.replace("![]", "![A single pixel]"));
+    let output = sandbox.root.join("described.pdf");
+    let pdf = render(
+        &sandbox,
+        &[&described, "--set", "conformance=[pdf/a-2a, pdf/ua-1]"],
+        &output,
+    );
+    let pdf = String::from_utf8_lossy(&pdf);
+    assert!(pdf.contains("<pdfuaid:part>1</pdfuaid:part>"));
+    assert!(pdf.contains("<pdfaid:part>2</pdfaid:part><pdfaid:conformance>A</pdfaid:conformance>"));
+    assert!(pdf.contains("/DisplayDocTitle true"));
+}

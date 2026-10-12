@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use super::non_null;
 use super::template::Template;
 use super::values::{Color, FontName, LineHeight, Size, Spacing, Spec, TokenName, Tracking};
+use crate::document::Placement;
+use crate::highlight::Category;
 
 pub const THEME_VERSION: u64 = 1;
 
@@ -34,10 +36,14 @@ pub struct Theme {
     pub inline: InlineStyles,
     pub lists: Lists,
     pub tables: Tables,
+    pub callouts: Callouts,
     pub footnotes: Footnotes,
+    pub margin_notes: MarginNotes,
     pub captions: Captions,
+    pub placement: Placements,
     pub bibliography: Bibliography,
     pub toc: Toc,
+    pub index: Index,
     pub matter: Matters,
     pub chapters: Chapters,
     pub scene_break: SceneBreak,
@@ -46,6 +52,8 @@ pub struct Theme {
     pub pages: PageVariants,
     /// Text set large and turned behind the content of every page that has bands. `null` for none.
     pub watermark: Option<Watermark>,
+    /// Colors of code block tokens by category, or `null` to set code blocks in one color.
+    pub highlight: Option<BTreeMap<Category, Spec<Color>>>,
     pub labels: Labels,
 }
 
@@ -64,6 +72,61 @@ pub struct DocumentDefaults {
     pub citation_style: CitationStyle,
     /// Whether the document is a draft, which gives `{draft}` its value.
     pub draft: bool,
+    /// The standards the PDF must conform to.
+    pub conformance: Conformance,
+}
+
+/// A PDF standard that the output is checked against and declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum Standard {
+    #[serde(rename = "pdf/ua-1")]
+    Ua1,
+    #[serde(rename = "pdf/a-2b")]
+    A2b,
+    #[serde(rename = "pdf/a-2u")]
+    A2u,
+    #[serde(rename = "pdf/a-2a")]
+    A2a,
+}
+
+/// The standards a PDF conforms to: PDF/UA-1, one PDF/A level, both, or none. Written as one standard or a
+/// list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Conformance(Vec<Standard>);
+
+impl Conformance {
+    pub fn standards(&self) -> &[Standard] {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Conformance {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Written {
+            One(Standard),
+            List(Vec<Standard>),
+        }
+        let standards = match Written::deserialize(deserializer).map_err(|_| {
+            serde::de::Error::custom(
+                "expected pdf/ua-1, pdf/a-2b, pdf/a-2u, or pdf/a-2a, or a list of them, such as [pdf/a-2a, pdf/ua-1]",
+            )
+        })? {
+            Written::One(standard) => vec![standard],
+            Written::List(list) => list,
+        };
+        let mut unique = Vec::with_capacity(standards.len());
+        for standard in standards {
+            if !unique.contains(&standard) {
+                unique.push(standard);
+            }
+        }
+        if unique.iter().filter(|standard| **standard != Standard::Ua1).count() > 1 {
+            return Err(serde::de::Error::custom("a PDF conforms to one PDF/A level at most"));
+        }
+        Ok(Self(unique))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -482,6 +545,8 @@ pub struct Styles<B> {
     #[serde(rename = "abstract")]
     pub abstract_: B,
     pub quote: B,
+    pub callout: B,
+    pub callout_label: B,
     pub list: B,
     pub code_block: B,
     pub caption: B,
@@ -495,6 +560,9 @@ pub struct Styles<B> {
     pub footer: B,
     pub watermark: B,
     pub scene_break: B,
+    pub index_letter: B,
+    pub index_entry: B,
+    pub index_sub_entry: B,
 }
 
 impl<B> Styles<B> {
@@ -515,6 +583,8 @@ impl<B> Styles<B> {
             abstract_heading: f("abstract-heading", self.abstract_heading)?,
             abstract_: f("abstract", self.abstract_)?,
             quote: f("quote", self.quote)?,
+            callout: f("callout", self.callout)?,
+            callout_label: f("callout-label", self.callout_label)?,
             list: f("list", self.list)?,
             code_block: f("code-block", self.code_block)?,
             caption: f("caption", self.caption)?,
@@ -528,6 +598,9 @@ impl<B> Styles<B> {
             footer: f("footer", self.footer)?,
             watermark: f("watermark", self.watermark)?,
             scene_break: f("scene-break", self.scene_break)?,
+            index_letter: f("index-letter", self.index_letter)?,
+            index_entry: f("index-entry", self.index_entry)?,
+            index_sub_entry: f("index-sub-entry", self.index_sub_entry)?,
         })
     }
 
@@ -560,6 +633,8 @@ impl<B> Styles<B> {
             "abstract-heading" => &self.abstract_heading,
             "abstract" => &self.abstract_,
             "quote" => &self.quote,
+            "callout" => &self.callout,
+            "callout-label" => &self.callout_label,
             "list" => &self.list,
             "code-block" => &self.code_block,
             "caption" => &self.caption,
@@ -573,6 +648,9 @@ impl<B> Styles<B> {
             "footer" => &self.footer,
             "watermark" => &self.watermark,
             "scene-break" => &self.scene_break,
+            "index-letter" => &self.index_letter,
+            "index-entry" => &self.index_entry,
+            "index-sub-entry" => &self.index_sub_entry,
             _ => return None,
         })
     }
@@ -794,7 +872,7 @@ pub struct Tables {
     pub row_rule: Option<Rule>,
 }
 
-/// A horizontal rule across a table.
+/// A rule: a horizontal line across a table, or the bar at the left of a callout.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Rule {
@@ -811,6 +889,40 @@ pub enum RuleBelow {
     Row,
 }
 
+/// The kinds of callout, as GitHub alerts name them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CalloutKind {
+    Note,
+    Tip,
+    Important,
+    Warning,
+    Caution,
+}
+
+/// Callout boxes. `em` lengths refer to the `callout` style size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Callouts {
+    /// Space between the box edge and the text, on all sides.
+    pub padding: Spec<Spacing>,
+    pub note: CalloutLook,
+    pub tip: CalloutLook,
+    pub important: CalloutLook,
+    pub warning: CalloutLook,
+    pub caution: CalloutLook,
+}
+
+/// How one kind of callout looks apart from its text styles.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CalloutLook {
+    /// The box color, or `null` for none.
+    pub background: Option<Spec<Color>>,
+    /// A bar along the left edge of the box, or `null` for none.
+    pub rule: Option<Rule>,
+}
+
 /// Footnote area. `em` lengths refer to the footnote style size.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -821,6 +933,32 @@ pub struct Footnotes {
     pub separator_thickness: Spec<Spacing>,
     pub separator_color: Spec<Color>,
     pub spacing: Spec<Spacing>,
+}
+
+/// The note column beside the prose. `em` lengths refer to the size of the note style.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MarginNotes {
+    /// The width of the note column.
+    pub width: Spec<Spacing>,
+    /// The space between the outer edge of the prose and the note column.
+    pub gap: Spec<Spacing>,
+    /// The least space between two notes stacked in the column.
+    pub spacing: Spec<Spacing>,
+    /// The built-in or custom style of the notes.
+    pub style: String,
+    /// The alignment of note text, instead of the style's.
+    pub align: Align,
+    /// Whether numbered footnotes are set in the note column instead of at the foot of the page.
+    pub sidenotes: bool,
+}
+
+/// Where figures and tables go when the document does not say.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Placements {
+    pub figure: Placement,
+    pub table: Placement,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -848,6 +986,42 @@ pub struct Toc {
     /// deeper levels. Without any, every entry is in `toc-entry`.
     #[serde(default)]
     pub level_styles: Vec<String>,
+}
+
+/// Index layout. `em` lengths refer to the index entry style size.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Index {
+    /// 1 or 2. Inside a `columns` section the index takes the section's columns.
+    pub columns: IndexColumns,
+    /// Indent per level of sub-entries.
+    pub level_indent: Spec<Spacing>,
+    /// Indent of an entry's lines after its first, beyond its level.
+    pub hanging_indent: Spec<Spacing>,
+    /// Text between a term and its first page number, as in "Hyphenation, 3".
+    pub separator: String,
+}
+
+/// The number of columns of the index, 1 or 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct IndexColumns(u8);
+
+impl IndexColumns {
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for IndexColumns {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let columns = u8::deserialize(deserializer)?;
+        if !(1..=2).contains(&columns) {
+            return Err(serde::de::Error::custom(format!(
+                "the index has 1 or 2 columns, not {columns}"
+            )));
+        }
+        Ok(Self(columns))
+    }
 }
 
 /// The page numbers of the parts of a book, which `::: front-matter`, `::: main-matter`, and `::: back-matter`
@@ -1241,6 +1415,28 @@ pub struct LabelSet {
     pub continued: String,
     pub draft: String,
     pub chapter: String,
+    pub note: String,
+    pub tip: String,
+    pub important: String,
+    pub warning: String,
+    pub caution: String,
+    pub index: String,
+    pub see: String,
+    pub see_also: String,
+    pub symbols: String,
+}
+
+impl LabelSet {
+    /// The label a callout of `kind` starts with.
+    pub fn callout(&self, kind: CalloutKind) -> &str {
+        match kind {
+            CalloutKind::Note => &self.note,
+            CalloutKind::Tip => &self.tip,
+            CalloutKind::Important => &self.important,
+            CalloutKind::Warning => &self.warning,
+            CalloutKind::Caution => &self.caution,
+        }
+    }
 }
 
 impl fmt::Display for Lang {

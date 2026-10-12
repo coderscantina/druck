@@ -21,7 +21,7 @@ For everyone who kept a light burning. {.dedication}
 
 # Preface {-}
 
-This book began as a set of notes kept on the back of tide tables. The keeper in these pages never existed, but the light did, and so did the long winter in which nothing arrived by sea for nine weeks.
+This book began as a set of notes kept on the back of tide tables{^tide tables}. The keeper in these pages never existed, but the light did, and so did the long winter{^winter} in which nothing arrived by sea for nine weeks.
 
 I have kept the chapters short, as the evenings were short. Each can be read between the turn of the lamp and the first ship, which is how they were written.
 
@@ -33,31 +33,31 @@ I have kept the chapters short, as the evenings were short. Each can be read bet
 
 # The arrival {#sec:arrival}
 
-Elias came to the island in the last week of October, when the supply boat still ran twice a month and the gulls had not yet given up on the harbour. He carried one trunk, a box of books, and a letter from the board that described the light as "in good order", which turned out to be the most generous sentence he would read all winter.
+Elias{^Elias!arrival} came to the island in the last week of October, when the supply boat{^boat!supply} still ran twice a month and the gulls{^gulls} had not yet given up on the harbour. He carried one trunk, a box of books, and a letter from the board{^board} that described the light as "in good order", which turned out to be the most generous sentence he would read all winter.
 
-The previous keeper had left in a hurry. The kitchen still smelled of paraffin and burnt toast, and a calendar on the wall had been crossed off up to a Thursday and then abandoned. Elias did not take it down. It seemed impolite to the man who had stood there.
+The previous keeper{^keeper!previous} had left in a hurry. The kitchen still smelled of paraffin{^paraffin} and burnt toast, and a calendar{^calendar} on the wall had been crossed off up to a Thursday and then abandoned. Elias did not take it down. It seemed impolite to the man who had stood there.
 
-He spent the first evening learning the lamp. It turned on a bath of mercury, so smoothly that a child could have pushed it, and it threw its beam across eighteen miles of water that he could not see but could hear, breaking on the rocks below the tower in a rhythm he would come to know better than his own pulse.
+He spent the first evening learning the lamp{^lamp}. It turned on a bath of mercury{^mercury}, so smoothly that a child could have pushed it, and it threw its beam across eighteen miles of water that he could not see but could hear, breaking on the rocks below the tower in a rhythm he would come to know better than his own pulse.
 
 ***
 
-By the third week he had a routine. He woke before dawn, extinguished the lamp, cleaned the lens with a chamois and a little spirit, and trimmed the wicks of the spare lamps in the store room. In the afternoons he walked the length of the island, which took eleven minutes, and wrote down what he saw.
+By the third week he had a routine{^Elias!routine}. He woke before dawn, extinguished the lamp, cleaned the [lens]{^lamp!lens} with a chamois and a little spirit, and trimmed the wicks of the spare lamps in the store room. In the afternoons he walked the length of the island, which took eleven minutes, and wrote down what he saw.
 
-What he saw, mostly, was weather. He wrote it down anyway.
+What he saw, mostly, was weather{^weather}{^weather|see also storm}. He wrote it down anyway.
 
 # The long winter
 
-The boat did not come in December. A storm came instead, and stayed. For six days the sea and the sky were the same grey, and the beam went out into it like a hand reaching into a sack.
+The boat did not come in December{^boat!supply}. A storm{^storm} came instead, and stayed. For six days the sea and the sky were the same grey, and the beam went out into it like a hand reaching into a sack.
 
-Elias rationed the coffee first, then the paraffin for the kitchen stove, then the conversation he allowed himself with the gulls. The paraffin for the light he did not ration. That was the one thing on the island that was not his to decide.
+Elias rationed the coffee first, then the paraffin{^paraffin} for the kitchen stove, then the conversation he allowed himself with the gulls{^gulls}. The paraffin for the light he did not ration. That was the one thing on the island that was not his to decide.
 
 ***
 
-On the ninth day of the storm a ship answered the light. Two short blasts of a horn, far out, and then a long one. He did not know the signal, and later, looking it up in the book the board had left, he could not find it. He wrote it down with the weather.
+On the ninth day of the storm{^storm} a ship{^ship|see boat} answered the light. Two short blasts of a horn, far out, and then a long one. He did not know the [signal]{^}, and later, looking it up in the book the board{^board} had left, he could not find it. He wrote it down with the weather{^weather}.
 
 # The relief {.unlisted}
 
-The relief keeper arrived in March, a young woman named Ines who had grown up on a larger island to the south and thought this one was charming. Elias showed her the lamp, the mercury, the store room, and the calendar on the kitchen wall. She asked whether she should take it down.
+The relief keeper{^keeper!relief|see Ines} arrived in March, a young woman named Ines{^Ines} who had grown up on a larger island to the south and thought this one was charming. Elias showed her the lamp{^lamp}, the mercury{^mercury}, the store room, and the calendar{^calendar} on the kitchen wall. She asked whether she should take it down.
 
 "Leave it," he said. "It isn't finished."
 
@@ -67,4 +67,6 @@ The chapter on his arrival, @sec:arrival, starts on [@sec:arrival, page]. He did
 
 # About the author {-}
 
-Mara Ellison writes about islands, weather, and the people who choose to live in both. This is her first novel.
+Mara Ellison writes about islands, weather{^weather}, and the people who choose to live in both. This is her first novel.
+
+::: index

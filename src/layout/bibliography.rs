@@ -10,6 +10,7 @@
 use super::{Flow, Frame, Role, anchor_item, heading_style, pages, text_item, translate_line};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
+use crate::tags::Kind;
 
 impl<'a> Flow<'a> {
     /// Sets the bibliography section for the block at `at`. A document without citations has none.
@@ -25,7 +26,15 @@ impl<'a> Flow<'a> {
             style: InlineStyle::default(),
         }];
         let role = Role::Heading(Some(heading.anchor));
+        let scope = self.open(
+            Kind::Heading {
+                level: 1,
+                text: heading.title(),
+            },
+            true,
+        );
         self.text_block(at, &title, heading_style(config, 1), frame, 0.0, role);
+        self.close(scope);
 
         let style = &config.styles.bibliography;
         let face = self.fonts.face(&style.font, style.weight, style.style);
@@ -49,6 +58,8 @@ impl<'a> Flow<'a> {
             }
             let label = labels.next();
             self.space(style.space_before.0);
+            let paragraph = self.open(Kind::Paragraph, false);
+            let entry = self.open(Kind::BibEntry, true);
             match self.set(&reference.content, style, width, first_indent) {
                 Ok(lines) => {
                     let count = lines.len();
@@ -71,6 +82,8 @@ impl<'a> Flow<'a> {
                     self.errors.push(diagnostic);
                 }
             }
+            self.close(entry);
+            self.close(paragraph);
             self.space(style.space_after.0);
         }
         self.after_paragraph = false;

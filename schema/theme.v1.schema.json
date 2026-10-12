@@ -62,6 +62,20 @@
         "draft": {
           "type": "boolean",
           "description": "Whether the document is a draft, which gives {draft} its value."
+        },
+        "conformance": {
+          "description": "PDF standards the output is checked against and declares: PDF/UA-1, one PDF/A-2 level, or both. The EPUB ignores it.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/pdfStandard"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/pdfStandard"
+              }
+            }
+          ]
         }
       },
       "description": "Document defaults. Front matter and CLI options may override them."
@@ -295,6 +309,14 @@
           "description": "Block quotations.",
           "$ref": "#/$defs/blockStyle"
         },
+        "callout": {
+          "description": "Text in callouts. Its indent narrows the box on both sides.",
+          "$ref": "#/$defs/blockStyle"
+        },
+        "callout-label": {
+          "description": "The label that starts a callout.",
+          "$ref": "#/$defs/blockStyle"
+        },
         "list": {
           "description": "List items.",
           "$ref": "#/$defs/blockStyle"
@@ -345,6 +367,18 @@
         },
         "scene-break": {
           "description": "The text of a scene break, set as one line. Its line height and spacing also size a blank break.",
+          "$ref": "#/$defs/blockStyle"
+        },
+        "index-letter": {
+          "description": "The letter above each group of index entries.",
+          "$ref": "#/$defs/blockStyle"
+        },
+        "index-entry": {
+          "description": "Index entries.",
+          "$ref": "#/$defs/blockStyle"
+        },
+        "index-sub-entry": {
+          "description": "Index sub-entries, indented by index.level-indent per level.",
           "$ref": "#/$defs/blockStyle"
         }
       },
@@ -508,6 +542,37 @@
       },
       "description": "Table layout."
     },
+    "callouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "padding": {
+          "description": "Space between the box edge and the text, on all sides. em is relative to the callout style size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "note": {
+          "description": "Callouts written > [!NOTE].",
+          "$ref": "#/$defs/calloutLook"
+        },
+        "tip": {
+          "description": "Callouts written > [!TIP].",
+          "$ref": "#/$defs/calloutLook"
+        },
+        "important": {
+          "description": "Callouts written > [!IMPORTANT].",
+          "$ref": "#/$defs/calloutLook"
+        },
+        "warning": {
+          "description": "Callouts written > [!WARNING].",
+          "$ref": "#/$defs/calloutLook"
+        },
+        "caution": {
+          "description": "Callouts written > [!CAUTION].",
+          "$ref": "#/$defs/calloutLook"
+        }
+      },
+      "description": "Callout boxes."
+    },
     "footnotes": {
       "type": "object",
       "additionalProperties": false,
@@ -534,6 +599,55 @@
         }
       },
       "description": "Footnote area."
+    },
+    "margin-notes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "description": "Width of the note column. em is relative to the size of the note style.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "gap": {
+          "description": "Space between the outer edge of the prose and the note column. em is relative to the size of the note style.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "spacing": {
+          "description": "Least space between two notes stacked in the column. em is relative to the size of the note style.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "style": {
+          "type": "string",
+          "description": "Built-in or custom style of margin notes and sidenotes."
+        },
+        "align": {
+          "enum": [
+            "justify",
+            "left",
+            "center",
+            "right"
+          ],
+          "description": "Alignment of note text, instead of the style's. Narrow columns read better ragged."
+        },
+        "sidenotes": {
+          "type": "boolean",
+          "description": "Whether numbered footnotes are set in the note column instead of at the foot of the page."
+        }
+      },
+      "description": "Margin notes and sidenotes in a column beside the prose, on the outer side."
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "figure": {
+          "$ref": "#/$defs/placement"
+        },
+        "table": {
+          "$ref": "#/$defs/placement"
+        }
+      },
+      "description": "Where figures and tables go when the document gives no placement attribute."
     },
     "captions": {
       "type": "object",
@@ -583,6 +697,32 @@
         }
       },
       "description": "Table of contents layout."
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "enum": [
+            1,
+            2
+          ],
+          "description": "The columns of the index. Inside a columns section the index takes the section's columns."
+        },
+        "level-indent": {
+          "description": "Indent per level of sub-entries. em is relative to the index-entry style size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "hanging-indent": {
+          "description": "Indent of an entry's lines after its first, beyond its level. em is relative to the index-entry style size.",
+          "$ref": "#/$defs/spacingSpec"
+        },
+        "separator": {
+          "type": "string",
+          "description": "Text between a term and its first page number, as in \"Hyphenation, 3\"."
+        }
+      },
+      "description": "Index layout."
     },
     "matter": {
       "type": "object",
@@ -824,6 +964,64 @@
         }
       ]
     },
+    "highlight": {
+      "description": "Colors of code block tokens by category, or null to set code blocks in one color. Only color changes; the code font and layout stay the same. A category left out keeps the code block color.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "comment": {
+              "description": "Comments.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "keyword": {
+              "description": "Keywords and storage modifiers such as fn, let, if, and const.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "string": {
+              "description": "String and character literals, their quotes and escapes.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "number": {
+              "description": "Numeric literals.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "constant": {
+              "description": "Named constants such as true, null, and None.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "type": {
+              "description": "Type, class, and trait names, and primitive types.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "function": {
+              "description": "Names of functions and methods where they are defined or called.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "operator": {
+              "description": "Operators such as + and =>.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "punctuation": {
+              "description": "Brackets, commas, semicolons, and other delimiters.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "tag": {
+              "description": "Markup tags and the keys of YAML and TOML.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "attribute": {
+              "description": "Attribute names, CSS properties, and annotations.",
+              "$ref": "#/$defs/colorSpec"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "labels": {
       "type": "object",
       "additionalProperties": false,
@@ -841,6 +1039,14 @@
     }
   },
   "$defs": {
+    "placement": {
+      "enum": [
+        "here",
+        "top",
+        "bottom"
+      ],
+      "description": "Where the block stands in the text, or at the top or bottom of the page its anchor falls on or a later one."
+    },
     "numberFormat": {
       "enum": [
         "decimal",
@@ -958,6 +1164,15 @@
       "maximum": 6,
       "description": "A heading level from 1 to 6."
     },
+    "pdfStandard": {
+      "enum": [
+        "pdf/ua-1",
+        "pdf/a-2b",
+        "pdf/a-2u",
+        "pdf/a-2a"
+      ],
+      "description": "A PDF standard: PDF/UA-1 for accessibility, or PDF/A-2b, PDF/A-2u, or PDF/A-2a for archiving."
+    },
     "lineHeight": {
       "type": "number",
       "minimum": 0.8,
@@ -984,12 +1199,41 @@
       ],
       "description": "The style a slot is set in: a built-in slot style or the name of a custom style."
     },
+    "calloutLook": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "description": "Color of the box, or null for none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/colorSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule": {
+          "description": "A bar along the left edge of the box, or null for none. em is relative to the callout style size.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tableRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "How one kind of callout looks."
+    },
     "tableRule": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "thickness": {
-          "description": "Rule thickness. em is relative to the table cell style size.",
+          "description": "Rule thickness. em is relative to the table cell or callout style size.",
           "$ref": "#/$defs/spacingSpec"
         },
         "color": {
@@ -997,7 +1241,7 @@
           "$ref": "#/$defs/colorSpec"
         }
       },
-      "description": "A rule across a table."
+      "description": "A rule across a table, or along a callout."
     },
     "weight": {
       "anyOf": [
@@ -1634,6 +1878,42 @@
         "chapter": {
           "type": "string",
           "description": "Label before a chapter number above the heading, as in \"Chapter 2\"."
+        },
+        "note": {
+          "type": "string",
+          "description": "Label of a note callout. Empty for none."
+        },
+        "tip": {
+          "type": "string",
+          "description": "Label of a tip callout. Empty for none."
+        },
+        "important": {
+          "type": "string",
+          "description": "Label of an important callout. Empty for none."
+        },
+        "warning": {
+          "type": "string",
+          "description": "Label of a warning callout. Empty for none."
+        },
+        "caution": {
+          "type": "string",
+          "description": "Label of a caution callout. Empty for none."
+        },
+        "index": {
+          "type": "string",
+          "description": "Index heading."
+        },
+        "see": {
+          "type": "string",
+          "description": "Before the entry an index entry refers to, as in \"see Line breaking\"."
+        },
+        "see-also": {
+          "type": "string",
+          "description": "Before further entries an index entry refers to, as in \"see also Hyphenation\"."
+        },
+        "symbols": {
+          "type": "string",
+          "description": "Above the index entries that start with a digit or symbol."
         }
       },
       "description": "Generated text for one language."

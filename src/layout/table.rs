@@ -26,6 +26,7 @@ use crate::config::theme::{Align, RuleBelow};
 use crate::config::values::Pt;
 use crate::document::{Block, Cell, Column, ColumnAlign, ColumnWidth, Inline, Location, Row};
 use crate::page::{Item, Rect};
+use crate::tags::{self, Kind};
 
 /// Added to a column's width when its cells are set, so text measured to fit exactly is not
 /// broken by rounding.
@@ -177,20 +178,32 @@ impl<'a> Flow<'a> {
         }
         edges.push(x);
         let rules = &config.tables;
+        // The caption is read before the table, as it is set above it.
+        let caption_tag = self.tags.add(Kind::Caption, self.parent);
+        let table_tag = self.open(Kind::Table, false);
         let mut lines = Vec::with_capacity(rows.len());
         for (index, ((row, frames), prepared)) in rows.iter().zip(frames).zip(&prepared).enumerate() {
             let mut cells = Vec::with_capacity(row.cells.len());
+            let row_tag = self.open(Kind::TableRow, false);
             for (((column, cell), frame), paragraph) in placed(row).zip(frames).zip(prepared) {
                 let content = match cell.span {
                     1 => widths[column],
                     span => edges[column + span] - edges[column] - 2.0 * padding,
                 };
+                let kind = Kind::TableCell {
+                    header: index == 0,
+                    span: cell.span,
+                };
+                let cell_tag = self.open(kind, paragraph.is_some());
                 let lines = match paragraph {
                     Some((paragraph, indent)) => match paragraph.lines(content - 2.0 * indent + SLACK, 0.0) {
                         Ok(lines) => Some(
                             lines
                                 .into_iter()
-                                .map(|line| (0.0, translate_line(line, *indent)))
+                                .map(|mut line| {
+                                    line.items = self.tag(std::mem::take(&mut line.items));
+                                    (0.0, translate_line(line, *indent))
+                                })
                                 .collect(),
                         ),
                         Err(problem) => {
@@ -206,11 +219,17 @@ impl<'a> Flow<'a> {
                         self.cell(&cell.blocks, frame)
                     }
                 };
+                self.close(cell_tag);
                 match lines {
                     Some(lines) => cells.push((edges[column], lines)),
-                    None => return,
+                    None => {
+                        self.close(row_tag);
+                        self.close(table_tag);
+                        return;
+                    }
                 }
             }
+            self.close(row_tag);
             let below = match self.row_style(row).and_then(|(_, rule)| rule) {
                 Some(RuleBelow::None) => None,
                 Some(RuleBelow::Header) => rules.header_rule,
@@ -221,6 +240,7 @@ impl<'a> Flow<'a> {
             let above = if index == 0 { rules.top_rule } else { None };
             lines.push(row_line(cells, (left, x), padding, above, below));
         }
+        self.close(table_tag);
 
         if self.wide.is_some() {
             self.wide = Some(width - place);
@@ -230,10 +250,12 @@ impl<'a> Flow<'a> {
         self.space(style.space_after.0);
         let dx = left + style.indent.0;
         let mut above = 0.0;
+        let scope = self.enter(caption_tag, true);
         for line in caption {
             above += line.height;
             self.push(translate_line(line, dx), table.at, Break::Never);
         }
+        self.close(scope);
         if start < self.lines.len() {
             above += style.space_before.0;
             self.space(style.space_before.0);
@@ -241,7 +263,11 @@ impl<'a> Flow<'a> {
         let count = lines.len() - 1;
         let mut lines = lines.into_iter();
         let header = lines.next().expect("a table has a header row");
-        let repeated = header.clone();
+        // A header repeated on a later page or column is decoration; its text is read once.
+        let repeated = Line {
+            items: tags::untag(header.items.clone()),
+            ..header.clone()
+        };
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
         self.push(header, table.header.at, after);
         let first_row = self.lines.len();
@@ -495,6 +521,7 @@ fn row_line(
     let baseline = top + padding + cells[0].1.first().map_or(0.0, |line| line.1.baseline);
     let mut items = Vec::new();
     let mut notes = Vec::new();
+    let mut marks = Vec::new();
     for (x, lines) in cells {
         let mut y = top + padding;
         for (index, (space, line)) in lines.into_iter().enumerate() {
@@ -503,6 +530,7 @@ fn row_line(
             }
             items.extend(line.items.into_iter().map(|item| translate(item, x + padding, y)));
             notes.extend(line.notes);
+            marks.extend(line.marks.into_iter().map(|(note, baseline)| (note, y + baseline)));
             y += line.height;
         }
     }
@@ -527,6 +555,7 @@ fn row_line(
         baseline,
         items,
         notes,
+        marks,
         hyphenated: false,
     }
 }

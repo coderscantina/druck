@@ -7,13 +7,16 @@ mod date;
 mod diagnostic;
 mod document;
 mod epub;
+mod highlight;
 mod image;
+mod index;
 mod installed;
 mod layout;
 mod markdown;
 mod page;
 mod pdf;
 mod statistics;
+mod tags;
 mod text;
 mod theme_path;
 
@@ -101,7 +104,13 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 let json = serde_json::to_string_pretty(&config).expect("configuration serializes");
                 println!("{json}");
             } else {
-                typeset(&config, &document)?;
+                let (fonts, laid) = typeset(&config, &document)?;
+                // The PDF is written and dropped, so a standard the document must conform to is checked too.
+                let print = pdf::Print {
+                    bleed: Pt(0.0),
+                    crop_marks: false,
+                };
+                write_pdf(&config, &document, &fonts, &laid, print)?;
                 println!("{}: document is valid", shown(&document.path));
             }
             Ok(())
@@ -132,8 +141,7 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 bleed: bleed.unwrap_or(Pt(0.0)),
                 crop_marks,
             };
-            let pdf = pdf::write(&laid, &fonts, &config.metadata, config.document.lang, print)
-                .map_err(|e| vec![Diagnostic::new(None, e)])?;
+            let pdf = write_pdf(&config, &document, &fonts, &laid, print)?;
             let used: BTreeSet<_> = laid
                 .pages
                 .iter()
@@ -157,6 +165,24 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             Ok(())
         }
     }
+}
+
+/// The laid out document as a PDF, checked against the standards it must conform to.
+fn write_pdf(
+    config: &Config,
+    document: &DocumentFile,
+    fonts: &Fonts,
+    laid: &page::Output,
+    print: pdf::Print,
+) -> Result<Vec<u8>, Vec<Diagnostic>> {
+    let settings = pdf::Settings {
+        lang: config.document.lang,
+        print,
+        conformance: &config.document.conformance,
+        today: date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?,
+        source: &document.source,
+    };
+    pdf::write(laid, fonts, &config.metadata, &settings)
 }
 
 /// Reads a bleed as an absolute length, such as `3mm` or `0.125in`.
@@ -233,7 +259,7 @@ fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Dia
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
-    let content = markdown::parse(body, first_line, &document.source)?;
+    let content = markdown::parse(body, first_line, &document.source, config.document.lang)?;
     let bibliography = load_bibliography(config)?;
     let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");

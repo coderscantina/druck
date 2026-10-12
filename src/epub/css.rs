@@ -16,7 +16,7 @@ use std::fmt::Write;
 use super::fonts::FontFace;
 use crate::config::resolved::{Config, CustomStyle, Rule, SceneMark, Style};
 use crate::config::theme::{
-    Align, FigureSpacing, FigureStyle, Figures, FontStyle, RuleBelow, SlotStyle, TemplateStyle,
+    Align, CalloutKind, FigureSpacing, FigureStyle, Figures, FontStyle, RuleBelow, SlotStyle, TemplateStyle,
 };
 use crate::config::values::{Length, Pt};
 
@@ -59,6 +59,7 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
     sheet.rule("blockquote", sheet.block(&styles.quote));
     sheet.rule("blockquote p", vec![("margin", sheet.margins(&styles.quote))]);
     sheet.indent("blockquote p + p", &styles.quote);
+    sheet.callouts(config);
     sheet.lists(config);
     let mut code = sheet.block(&styles.code_block);
     code.push(("white-space", "pre-wrap".to_owned()));
@@ -94,6 +95,12 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
         ));
     }
     sheet.rule("code", code);
+    for (category, color) in config.highlight.iter().flatten() {
+        sheet.rule(
+            &format!("pre .hl-{}", category.name()),
+            vec![("color", color.to_string())],
+        );
+    }
     let underline = if inline.link_underline { "underline" } else { "none" };
     sheet.rule(
         "a",
@@ -106,6 +113,7 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
     sheet.tables(config);
     sheet.notes(config);
     sheet.bibliography(config);
+    sheet.index(config);
     sheet.contents(config);
     sheet.scene_break(config);
     sheet.title_page();
@@ -220,6 +228,55 @@ impl Sheet<'_> {
             declarations.extend(avoid_break_after());
         }
         declarations
+    }
+
+    /// Callouts: the text style and padding on the `aside`, the label above the text, and a background and
+    /// bar per kind. The first and last block sit flush with the padding.
+    fn callouts(&mut self, config: &Config) {
+        let style = &config.styles.callout;
+        let label = &config.styles.callout_label;
+        let callouts = &config.callouts;
+        let mut aside = self.text(style);
+        aside.push(("margin", self.margins(style)));
+        aside.push(("padding", em(callouts.padding, style.size)));
+        self.rule("aside.callout", aside);
+        self.rule(
+            "aside.callout p",
+            vec![(
+                "margin",
+                format!(
+                    "{} 0 {}",
+                    em(style.space_before, style.size),
+                    em(style.space_after, style.size)
+                ),
+            )],
+        );
+        self.indent("aside.callout p + p", style);
+        let mut label_rule = self.text(label);
+        label_rule.push(("margin", format!("0 0 {}", em(label.space_after, label.size))));
+        label_rule.push(("text-indent", "0".to_owned()));
+        label_rule.extend(avoid_break_after());
+        self.rule("aside.callout p.callout-label", label_rule);
+        self.rule(
+            "aside.callout p.callout-label + *",
+            vec![("margin-top", "0".to_owned())],
+        );
+        self.rule("aside.callout > :first-child", vec![("margin-top", "0".to_owned())]);
+        self.rule("aside.callout > :last-child", vec![("margin-bottom", "0".to_owned())]);
+        for kind in CALLOUT_KINDS {
+            let look = callouts.get(kind);
+            let mut declarations = Vec::new();
+            if let Some(background) = look.background {
+                declarations.push(("background-color", background.to_string()));
+            }
+            if let Some(rule) = look.rule {
+                declarations.push((
+                    "border-left",
+                    format!("{}pt solid {}", number(rule.thickness.0), rule.color),
+                ));
+            }
+            self.rule(&format!("aside.callout.{}", callout_class(kind)), declarations);
+        }
     }
 
     /// The first-line indent of a paragraph that follows another one in `style`.
@@ -454,6 +511,21 @@ impl Sheet<'_> {
             ],
         );
         self.rule("aside.footnote", self.text(style));
+        // Margin notes stand after the block that references them, indented and set apart.
+        let margin = &config.margin_notes;
+        let note = config.named_style(&margin.style);
+        let mut declarations: Declarations = self
+            .text(note)
+            .into_iter()
+            .map(|(property, value)| match property {
+                "text-align" => (property, align(margin.align).to_owned()),
+                _ => (property, value),
+            })
+            .collect();
+        let spacing = em(margin.spacing, note.size);
+        declarations.push(("margin", format!("{spacing} 0 {spacing} {}", em(margin.gap, note.size))));
+        self.rule("aside.margin-note", declarations);
+        self.rule("aside.margin-note p", vec![("margin", "0".to_owned())]);
         self.rule(
             "aside.footnote + aside.footnote",
             vec![("margin-top", em(notes.spacing, style.size))],
@@ -505,6 +577,44 @@ impl Sheet<'_> {
             .max(style.space_before.0)
             .max(style.space_after.0));
         self.rule("p.entry + p.entry", vec![("margin-top", em(between, style.size))]);
+    }
+
+    /// The index: letters in `index-letter`, entries in `index-entry` and `index-sub-entry` with a hanging
+    /// indent, and sub-entries indented by `index.level-indent`. It takes one column.
+    fn index(&mut self, config: &Config) {
+        let styles = &config.styles;
+        let index = &config.index;
+        self.rule("h2.index-letter", self.block(&styles.index_letter));
+        self.rule(
+            "ul.index",
+            vec![
+                ("list-style", "none".to_owned()),
+                ("margin", "0".to_owned()),
+                ("padding", "0".to_owned()),
+            ],
+        );
+        // A sub-entry list sits inside its entry's hanging indent, so it moves back by the difference.
+        let entry = &styles.index_entry;
+        let shift = Pt(index.level_indent.0 - index.hanging_indent.0);
+        self.rule(
+            "ul.index ul",
+            vec![
+                ("list-style", "none".to_owned()),
+                ("margin", format!("0 0 0 {}", em(shift, entry.size))),
+                ("padding", "0".to_owned()),
+                ("text-indent", "0".to_owned()),
+            ],
+        );
+        for (selector, style) in [
+            ("li.index-entry", entry),
+            ("li.index-sub-entry", &styles.index_sub_entry),
+        ] {
+            let hang = em(index.hanging_indent, style.size);
+            let mut declarations = self.block(style);
+            declarations.push(("padding-left", hang.clone()));
+            declarations.push(("text-indent", format!("-{hang}")));
+            self.rule(selector, declarations);
+        }
     }
 
     /// The contents page: the `toc-heading` style and one entry per heading, indented by level.
@@ -609,6 +719,25 @@ fn avoid_break_after() -> Declarations {
 
 fn image_width(width: Pt, size: Pt) -> Declarations {
     vec![("width", em(width, size)), ("max-width", "100%".to_owned())]
+}
+
+const CALLOUT_KINDS: [CalloutKind; 5] = [
+    CalloutKind::Note,
+    CalloutKind::Tip,
+    CalloutKind::Important,
+    CalloutKind::Warning,
+    CalloutKind::Caution,
+];
+
+/// The class that marks a callout of `kind`.
+pub fn callout_class(kind: CalloutKind) -> &'static str {
+    match kind {
+        CalloutKind::Note => "note",
+        CalloutKind::Tip => "tip",
+        CalloutKind::Important => "important",
+        CalloutKind::Warning => "warning",
+        CalloutKind::Caution => "caution",
+    }
 }
 
 fn border(side: &'static str, rule: Option<Rule>) -> Declarations {

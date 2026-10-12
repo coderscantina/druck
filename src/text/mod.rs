@@ -157,6 +157,11 @@ impl Fonts {
         })
     }
 
+    /// The file a face is read from, as shown in diagnostics.
+    pub fn file(&self, face: FaceId) -> &str {
+        &self.faces[face.0].file
+    }
+
     /// Vertical metrics of a face at `size`.
     pub fn metrics(&self, face: FaceId, size: Pt) -> Metrics {
         let buzz = &self.faces[face.0].buzz;

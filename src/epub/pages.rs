@@ -28,7 +28,7 @@ pub fn xhtml(lang: &str, title: &str, kind: &str, body: &str) -> String {
 /// The cover page around the cover image at `path`.
 pub fn cover(path: &str, title: &str) -> String {
     format!(
-        "<section class=\"cover\" epub:type=\"cover\"><img src=\"{}\" alt=\"{}\"/></section>",
+        "<section class=\"cover\" epub:type=\"cover\"><img role=\"doc-cover\" src=\"{}\" alt=\"{}\"/></section>",
         xml::attribute(path),
         xml::attribute(title)
     )
@@ -100,7 +100,7 @@ pub fn navigation(
 ) -> String {
     let depth = config.document.toc_depth.get();
     let mut body = format!(
-        "<nav epub:type=\"toc\" id=\"toc\"><h1>{}</h1><ol>",
+        "<nav epub:type=\"toc\" role=\"doc-toc\" id=\"toc\"><h1>{}</h1><ol>",
         xml::text(&config.labels.contents)
     );
     let empty = body.len();

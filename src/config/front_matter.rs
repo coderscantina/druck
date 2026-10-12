@@ -12,7 +12,7 @@ use serde_json::{Map, Value, json};
 
 use super::non_null;
 use super::template::is_meta_key;
-use super::theme::{CitationStyle, FontFamily, HeadingDepth, Lang, PageSize};
+use super::theme::{CitationStyle, Conformance, FontFamily, HeadingDepth, Lang, PageSize};
 use super::values::{FontName, LineHeight, Size, Spacing, Spec};
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -60,6 +60,8 @@ pub struct FrontMatter {
     pub citation_style: Option<CitationStyle>,
     #[serde(default, deserialize_with = "non_null")]
     pub draft: Option<bool>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub conformance: Option<Conformance>,
 
     #[serde(default, deserialize_with = "non_null")]
     pub page_size: Option<PageSize>,
@@ -260,6 +262,7 @@ impl FrontMatter {
             ("toc-depth", self.toc_depth.as_ref().map(json)),
             ("citation-style", self.citation_style.as_ref().map(json)),
             ("draft", self.draft.map(Value::Bool)),
+            ("conformance", self.conformance.as_ref().map(json)),
         ];
         for (key, value) in document {
             if let Some(value) = value {

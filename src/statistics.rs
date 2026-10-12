@@ -79,7 +79,7 @@ impl Statistics {
             lang,
         };
         counter.blocks(&document.blocks);
-        for footnote in &document.footnotes {
+        for footnote in document.footnotes.iter().chain(&document.margin_notes) {
             counter.blocks(&footnote.blocks);
         }
         counter.statistics
@@ -108,6 +108,7 @@ impl Counter {
                 Block::Heading { content, .. } => self.text(content, false),
                 Block::List { items, .. } => items.iter().for_each(|item| self.blocks(item)),
                 Block::Quote { blocks, .. }
+                | Block::Callout { blocks, .. }
                 | Block::Keep { blocks, .. }
                 | Block::Bottom { blocks, .. }
                 | Block::Columns { blocks, .. }
@@ -130,7 +131,8 @@ impl Counter {
                 | Block::Matter { .. }
                 | Block::Contents { .. }
                 | Block::SceneBreak { .. }
-                | Block::Bibliography { .. } => {}
+                | Block::Bibliography { .. }
+                | Block::Index { .. } => {}
             }
         }
     }
@@ -174,7 +176,13 @@ fn written(content: &[Inline]) -> String {
         match inline {
             Inline::Text { text, .. } => raw.push_str(text),
             Inline::LineBreak => raw.push(' '),
-            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => {}
+            Inline::FootnoteRef(_)
+            | Inline::MarginNote(_)
+            | Inline::Ref(_)
+            | Inline::Citation { .. }
+            | Inline::Field { .. }
+            | Inline::IndexMark(_)
+            | Inline::Anchor(_) => {}
         }
     }
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -350,16 +358,19 @@ mod tests {
                 rows: vec![row("Druck")],
                 caption: vec![text("A caption.")],
                 label: None,
+                placement: None,
             },
             Block::Image {
                 at: AT,
                 image: 0,
                 caption: Vec::new(),
                 label: None,
+                placement: None,
             },
             Block::Code {
                 at: AT,
                 first_line: 1,
+                language: None,
                 lines: vec!["let ignored = true;".to_owned()],
             },
         ];

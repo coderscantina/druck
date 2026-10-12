@@ -21,17 +21,25 @@
 //!
 //! A table's rows are lines like any other. Where a page or column starts at one of its rows, the
 //! table's header row is set again above it, and its height counts toward that page or column.
+//!
+//! A figure or table placed at the top or bottom is not in the flow. A page may set the placed blocks
+//! whose anchor lies before its end, in document order, and leaves the rest of its height to the text.
+//! Blocks still waiting at a forced break or the end get pages of their own before it.
+//!
+//! Margin notes and sidenotes sit beside the line that references them, in a column outside the
+//! prose. A page's notes must fit the text height together, since they may move up as far as needed.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use super::callout::CalloutBox;
 use super::{Break, FlowLine, Line, translate};
 use crate::config::resolved::{Config, PageGeometry};
 use crate::config::source::Source;
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::Location;
-use crate::page::{Item, Page, Rect};
+use crate::page::{Aside, Item, NoteKind, Page, Position, Rect};
 
 /// Space between blocks may grow by this share of its natural height.
 const STRETCH: f64 = 0.5;
@@ -57,6 +65,12 @@ pub(super) const INTRODUCTION: f64 = 500.0;
 const SPLIT_NOTE: f64 = 2000.0;
 /// Cost of a page that holds only the continuation of footnotes.
 const NOTE_PAGE: f64 = 10_000.0;
+/// Cost of each page a placed block waits after the page its anchor falls on.
+const WAIT: f64 = 10_000.0;
+/// Cost of a page that holds only placed blocks amid the text, so that is a last resort for blocks
+/// that cannot share a page with text. Before a forced break or the end such pages cost nothing more
+/// than the waiting.
+const FLOAT_PAGE: f64 = 100_000.0;
 /// Cost of a column region one body line taller than its most even split. Grows with the square,
 /// so a region gets one line uneven rather than strand a line, but not two.
 const UNEVEN: f64 = 3000.0;
@@ -81,6 +95,19 @@ pub(super) fn line_break(index: usize, count: usize) -> Break {
     }
 }
 
+/// Keeps a callout's text lines from stranding one line: a page does not end after the first line or
+/// before the last, a column does at a cost. A callout of fewer than four lines stays whole.
+pub(super) fn guard_ends(lines: &mut [FlowLine]) {
+    let Some(second_last) = lines.len().checked_sub(2) else {
+        return;
+    };
+    for (index, cost) in [(0, ORPHAN), (second_last, WIDOW)] {
+        if let Break::Allowed(base) = lines[index].after {
+            lines[index].after = Break::Avoid(base + cost);
+        }
+    }
+}
+
 /// A table in the flow, whose header row repeats where a page or column starts inside it.
 #[derive(Debug)]
 pub(super) struct Table {
@@ -91,6 +118,49 @@ pub(super) struct Table {
     /// A copy of the header row.
     pub header: Line,
     pub at: Location,
+}
+
+/// A figure or table set at the top or bottom of a page, apart from the flow.
+#[derive(Debug)]
+pub(super) struct Float {
+    pub lines: Vec<FlowLine>,
+    /// The height of the lines with the space between them.
+    pub height: f64,
+    /// The number of body lines before it.
+    pub anchor: usize,
+    /// Whether a forced break comes right before it, so it belongs after the break.
+    pub after_break: bool,
+    /// At the top of its page, else at the bottom.
+    pub top: bool,
+    pub at: Location,
+    /// "figure" or "table", for messages.
+    pub what: &'static str,
+}
+
+impl Float {
+    /// Orders blocks by where they stand: a block after a forced break comes after one before it.
+    fn key(&self) -> usize {
+        2 * self.anchor + usize::from(self.after_break)
+    }
+}
+
+/// A margin note or sidenote set in the note column.
+#[derive(Debug)]
+pub(super) struct Note {
+    pub lines: Vec<FlowLine>,
+    pub height: f64,
+    /// The first baseline below the note's top.
+    pub baseline: f64,
+    pub at: Location,
+    pub kind: NoteKind,
+}
+
+/// The notes in the note column in reading order, with the body line that references each and the
+/// baseline it is referenced on, below the line's top.
+#[derive(Debug, Default)]
+pub(super) struct Margin {
+    pub notes: Vec<Note>,
+    pub references: Vec<(usize, f64)>,
 }
 
 /// Everything that goes on the pages.
@@ -110,6 +180,9 @@ pub(super) struct Content {
     pub notes: Vec<Vec<FlowLine>>,
     /// The continuation marker of each footnote.
     pub continued: Vec<Vec<FlowLine>>,
+    /// Figures and tables placed at the top or bottom of a page, in document order.
+    pub floats: Vec<Float>,
+    pub margin: Margin,
 }
 
 /// The body pages.
@@ -117,8 +190,10 @@ pub(super) struct Composed {
     pub pages: Vec<Page>,
     /// The physical indices of blank pages among them.
     pub blanks: Vec<usize>,
-    /// The first body line of each page, `None` for a blank page.
+    /// The first body line of each page, `None` for a blank page or one of placed blocks only.
     pub starts: Vec<Option<usize>>,
+    /// The margin notes and sidenotes on the pages.
+    pub asides: Vec<Aside>,
 }
 
 /// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
@@ -139,6 +214,8 @@ pub(super) fn compose(
         tables,
         notes,
         continued,
+        mut floats,
+        margin,
     } = content;
     let footnotes = &config.footnotes;
     let overhead = footnotes.gap.0 + footnotes.separator_thickness.0;
@@ -148,7 +225,7 @@ pub(super) fn compose(
     for table in &tables {
         headers[table.rows.clone()].fill(Some(&table.header));
     }
-    let composer = Composer::new(
+    let mut composer = Composer::new(
         &body,
         &columns,
         &headers,
@@ -156,6 +233,8 @@ pub(super) fn compose(
         config.page.text_height().0,
         body_line,
     );
+    composer.place(&floats, config.styles.caption.space_after.0);
+    composer.annotate(&margin, config.margin_notes.spacing.0);
     composer.check(&keeps, &bottoms, &tables, source)?;
     let plans = composer.search().ok_or_else(|| {
         vec![Diagnostic::new(
@@ -163,11 +242,13 @@ pub(super) fn compose(
             "no page breaks satisfy the layout constraints",
         )]
     })?;
+    drop(composer);
     Ok(render(
         &plans,
         &mut body,
         &headers,
         notes,
+        (&mut floats, margin),
         (first, &rectos),
         &bottoms,
         config,
@@ -184,6 +265,8 @@ struct Plan {
     stretch: f64,
     /// The footnote lines on the page, as a range of the footnote stream.
     notes: Range<usize>,
+    /// The placed blocks on the page, tops before bottoms.
+    floats: Range<usize>,
 }
 
 #[derive(Debug)]
@@ -313,8 +396,20 @@ impl Notes {
 struct State {
     at: usize,
     placed: usize,
+    /// The placed blocks set so far.
+    floats: usize,
     cost: f64,
     previous: Option<usize>,
+    stretch: f64,
+}
+
+/// A page that can follow a state: where it ends, the footnote lines and placed blocks set by then,
+/// the total cost, and the stretch of its spaces.
+struct Step {
+    at: usize,
+    placed: usize,
+    floats: usize,
+    cost: f64,
     stretch: f64,
 }
 
@@ -334,6 +429,20 @@ struct Composer<'a> {
     height: f64,
     /// A body line's height, the unit for measuring short pages.
     line: f64,
+    /// The placed blocks, empty without any.
+    floats: &'a [Float],
+    /// The height of the placed blocks before each one and at the end, each with the space below or above it.
+    float_top: Vec<f64>,
+    /// The number of bottom blocks followed by a top block before each placed block.
+    switches: Vec<usize>,
+    float_spacing: f64,
+    /// The number of margin notes referenced before each body line and at the end, empty without any.
+    note_first: Vec<usize>,
+    /// The height of the margin notes before each one and at the end, each with the spacing below it.
+    note_top: Vec<f64>,
+    note_spacing: f64,
+    /// The margin notes, for messages.
+    margin: Option<&'a Margin>,
 }
 
 impl<'a> Composer<'a> {
@@ -371,7 +480,74 @@ impl<'a> Composer<'a> {
             notes,
             height,
             line,
+            floats: &[],
+            float_top: vec![0.0],
+            switches: vec![0],
+            float_spacing: 0.0,
+            note_first: Vec::new(),
+            note_top: vec![0.0],
+            note_spacing: 0.0,
+            margin: None,
         }
+    }
+
+    /// Adds the placed blocks, `spacing` apart from the text and each other.
+    fn place(&mut self, floats: &'a [Float], spacing: f64) {
+        self.floats = floats;
+        self.float_spacing = spacing;
+        for (index, float) in floats.iter().enumerate() {
+            let top = self.float_top[index];
+            self.float_top.push(top + float.height + spacing);
+            let switch = !float.top && floats.get(index + 1).is_some_and(|next| next.top);
+            let count = self.switches[index];
+            self.switches.push(count + usize::from(switch));
+        }
+    }
+
+    /// Adds the margin notes, `spacing` apart in their column.
+    fn annotate(&mut self, margin: &'a Margin, spacing: f64) {
+        if margin.notes.is_empty() {
+            return;
+        }
+        self.margin = Some(margin);
+        self.note_spacing = spacing;
+        self.note_first = vec![0; self.body.len() + 1];
+        for &(line, _) in &margin.references {
+            self.note_first[line + 1] += 1;
+        }
+        for index in 0..self.body.len() {
+            self.note_first[index + 1] += self.note_first[index];
+        }
+        for note in &margin.notes {
+            let top = self.note_top[self.note_top.len() - 1];
+            self.note_top.push(top + note.height + spacing);
+        }
+    }
+
+    /// The height of the margin notes referenced on lines `start..end`, stacked `note_spacing` apart.
+    fn note_height(&self, start: usize, end: usize) -> f64 {
+        let Some((&first, &last)) = self.note_first.get(start).zip(self.note_first.get(end)) else {
+            return 0.0;
+        };
+        if last == first {
+            return 0.0;
+        }
+        self.note_top[last] - self.note_top[first] - self.note_spacing
+    }
+
+    /// The number of placed blocks a page ending at `end` may have set: those anchored before it.
+    fn eligible(&self, end: usize) -> usize {
+        self.floats.partition_point(|float| float.key() <= 2 * end)
+    }
+
+    /// The height placed blocks `from..to` take from a page, with their spacing.
+    fn float_area(&self, from: usize, to: usize) -> f64 {
+        self.float_top[to] - self.float_top[from]
+    }
+
+    /// Whether placed blocks `from..to` can share a page: tops first, then bottoms.
+    fn in_order(&self, from: usize, to: usize) -> bool {
+        to <= from + 1 || self.switches[to - 1] == self.switches[from]
     }
 
     /// The height of the header row set above line `index` when a page or column starts there.
@@ -435,8 +611,43 @@ impl<'a> Composer<'a> {
                 );
                 error(at, message);
             }
+            let notes = self.note_height(start, index + 1);
+            if notes > self.height
+                && let Some(margin) = self.margin
+            {
+                let first = self.note_first[start];
+                let others = self.note_first[index + 1] - first - 1;
+                let note = &margin.notes[first];
+                let what = match note.kind {
+                    NoteKind::Margin(_) => "margin note",
+                    NoteKind::Side(_) => "sidenote",
+                };
+                let message = if others == 0 {
+                    format!(
+                        "this {what} is {notes:.1}pt high, more than the {:.1}pt text area",
+                        self.height
+                    )
+                } else {
+                    format!(
+                        "this {what} and the {others} referenced with it on lines that stay together need {notes:.1}pt, \
+                         more than the {:.1}pt text area",
+                        self.height
+                    )
+                };
+                error(note.at, message);
+            }
             start = index + 1;
             natural = 0.0;
+        }
+        for float in self.floats {
+            if float.height > self.height {
+                let message = format!(
+                    "this {} placed at the top or bottom is {:.1}pt high, more than the {:.1}pt text area, so it \
+                     cannot fit on a page",
+                    float.what, float.height, self.height
+                );
+                error(float.at, message);
+            }
         }
         for line in 0..self.notes.lines.len() {
             let total = self.notes.area(line, line + 1);
@@ -458,37 +669,40 @@ impl<'a> Composer<'a> {
         let mut states = vec![State {
             at: 0,
             placed: 0,
+            floats: 0,
             cost: 0.0,
             previous: None,
             stretch: 0.0,
         }];
-        // For each candidate break, the best state per number of footnote lines placed.
-        let mut reached: Vec<BTreeMap<usize, usize>> = (0..=count).map(|_| BTreeMap::new()).collect();
-        reached[0].insert(0, 0);
+        // For each candidate break, the best state per number of footnote lines and placed blocks set.
+        let mut reached: Vec<BTreeMap<(usize, usize), usize>> = (0..=count).map(|_| BTreeMap::new()).collect();
+        reached[0].insert((0, 0), 0);
         for at in 0..=count {
-            let mut next = 0;
-            while let Some((placed, index)) = reached[at].range(next..).next().map(|(&p, &i)| (p, i)) {
-                next = placed + 1;
-                for (to, placed_to, cost, stretch) in self.pages(&states[index]) {
+            let mut next = (0, 0);
+            while let Some((key, index)) = reached[at].range(next..).next().map(|(&k, &i)| (k, i)) {
+                next = (key.0, key.1 + 1);
+                for step in self.pages(&states[index]) {
                     let state = State {
-                        at: to,
-                        placed: placed_to,
-                        cost,
+                        at: step.at,
+                        placed: step.placed,
+                        floats: step.floats,
+                        cost: step.cost,
                         previous: Some(index),
-                        stretch,
+                        stretch: step.stretch,
                     };
-                    match reached[to].get(&placed_to) {
-                        Some(&existing) if states[existing].cost <= cost => {}
+                    let key = (step.placed, step.floats);
+                    match reached[step.at].get(&key) {
+                        Some(&existing) if states[existing].cost <= step.cost => {}
                         Some(&existing) => states[existing] = state,
                         None => {
-                            reached[to].insert(placed_to, states.len());
+                            reached[step.at].insert(key, states.len());
                             states.push(state);
                         }
                     }
                 }
             }
         }
-        let end = *reached[count].get(&self.notes.lines.len())?;
+        let end = *reached[count].get(&(self.notes.lines.len(), self.floats.len()))?;
         let mut plans = Vec::new();
         let mut index = end;
         while let Some(previous) = states[index].previous {
@@ -498,6 +712,7 @@ impl<'a> Composer<'a> {
                 regions: self.regions(from.at, to.at),
                 stretch: to.stretch,
                 notes: from.placed..to.placed,
+                floats: from.floats..to.floats,
             });
             index = previous;
         }
@@ -505,9 +720,9 @@ impl<'a> Composer<'a> {
         Some(plans)
     }
 
-    /// The pages that can follow `state`, as (end line, footnote lines placed, total cost, stretch).
-    fn pages(&self, state: &State) -> Vec<(usize, usize, f64, f64)> {
-        let (start, from) = (state.at, state.placed);
+    /// The pages that can follow `state`.
+    fn pages(&self, state: &State) -> Vec<Step> {
+        let (start, from, done) = (state.at, state.placed, state.floats);
         let mut pages = Vec::new();
         let pending = self.notes.start[self.through[start]];
         if from < pending
@@ -515,7 +730,36 @@ impl<'a> Composer<'a> {
             && placed > from
         {
             let split = self.notes.split(from, placed, pending);
-            pages.push((start, placed, state.cost + NOTE_PAGE + split, 0.0));
+            pages.push(Step {
+                at: start,
+                placed,
+                floats: done,
+                cost: state.cost + NOTE_PAGE + split,
+                stretch: 0.0,
+            });
+        }
+        // Placed blocks anchored before here may fill a page of their own, stacked from the top.
+        let waiting = self.eligible(start);
+        if done < waiting {
+            let forced = start == self.body.len() || start > 0 && self.body[start - 1].after == Break::Forced;
+            let page = if forced { 0.0 } else { FLOAT_PAGE };
+            for to in done + 1..=waiting {
+                if self.float_area(done, to) - self.float_spacing > self.height {
+                    break;
+                }
+                let cost = state.cost + page + WAIT * (waiting - to) as f64;
+                pages.push(Step {
+                    at: start,
+                    placed: from,
+                    floats: to,
+                    cost,
+                    stretch: 0.0,
+                });
+            }
+            // A forced break and the end are not passed while blocks anchored before them wait.
+            if forced {
+                return pages;
+            }
         }
 
         // Natural height, stretch bound, and column break cost of the regions finished so far. A page
@@ -525,9 +769,13 @@ impl<'a> Composer<'a> {
             _ => 0.0,
         };
         let (mut natural, mut stretch, mut cost) = (header, 0.0, 0.0);
-        for (index, line) in self.body.iter().enumerate().skip(start) {
+        'lines: for (index, line) in self.body.iter().enumerate().skip(start) {
             let end = index + 1;
             let last = end == self.body.len();
+            // Notes beside the text may move up as far as needed, so they fit if their heights do.
+            if self.note_height(start, end) > self.height {
+                break;
+            }
             let referenced = self.through[end];
             let min = if referenced > self.through[start] {
                 self.notes.start[referenced - 1] + 1
@@ -584,23 +832,41 @@ impl<'a> Composer<'a> {
                 Break::Allowed(cost) => cost,
             };
             let max = self.notes.start[referenced];
-            let Some(fitted) = self.notes.fit(from, min, max, self.height - page) else {
-                break;
-            };
-            // A continued note may also stop a line earlier, so it strands no line.
-            let earlier = (fitted < max && fitted > min).then(|| fitted - 1);
-            for placed in std::iter::once(fitted).chain(earlier) {
-                let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
-                let (fill, ratio) = if last || line.after == Break::Forced {
-                    (0.0, 0.0)
-                } else {
-                    let used = short.min(page_stretch);
-                    let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
-                    let lines = (short - used + deficit) / self.line;
-                    (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
+            // The page may also set placed blocks anchored before its end, which take from its height.
+            let eligible = self.eligible(end);
+            for floats in done..=eligible.max(done) {
+                if !self.in_order(done, floats) {
+                    break;
+                }
+                let page = page + self.float_area(done, floats);
+                let Some(fitted) = self.notes.fit(from, min, max, self.height - page) else {
+                    if floats == done {
+                        break 'lines;
+                    }
+                    break;
                 };
-                let split = self.notes.split(from, placed, max);
-                pages.push((end, placed, state.cost + fill + penalty + split + page_cost, ratio));
+                let wait = WAIT * eligible.saturating_sub(floats) as f64;
+                // A continued note may also stop a line earlier, so it strands no line.
+                let earlier = (fitted < max && fitted > min).then(|| fitted - 1);
+                for placed in std::iter::once(fitted).chain(earlier) {
+                    let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
+                    let (fill, ratio) = if last || line.after == Break::Forced {
+                        (0.0, 0.0)
+                    } else {
+                        let used = short.min(page_stretch);
+                        let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
+                        let lines = (short - used + deficit) / self.line;
+                        (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
+                    };
+                    let split = self.notes.split(from, placed, max);
+                    pages.push(Step {
+                        at: end,
+                        placed,
+                        floats,
+                        cost: state.cost + fill + penalty + split + page_cost + wait,
+                        stretch: ratio,
+                    });
+                }
             }
             if line.after == Break::Forced {
                 break;
@@ -712,13 +978,19 @@ impl Composer<'_> {
     }
 }
 
-/// Positions the planned pages. Body lines are moved out of `body`. `headers` holds the header row to
-/// repeat above each body line where a page or column starts.
+/// Positions the planned pages. Body lines are moved out of `body`, and the lines of placed blocks
+/// out of `floats`. `headers` holds the header row to repeat above each body line where a page or
+/// column starts.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the parts of the content and where the pages start"
+)]
 fn render(
     plans: &[Plan],
     body: &mut [FlowLine],
     headers: &[Option<&Line>],
     mut notes: Notes,
+    (floats, mut margin): (&mut [Float], Margin),
     (first, rectos): (usize, &[usize]),
     bottoms: &[usize],
     config: &Config,
@@ -726,17 +998,23 @@ fn render(
     let geometry = &config.page;
     let footnotes = &config.footnotes;
     let height = geometry.text_height().0;
+    let spacing = config.styles.caption.space_after.0;
     let second_column = column_width(geometry) + geometry.column_gap.0;
     let mut pages = Vec::with_capacity(plans.len().max(1));
     let mut blanks = Vec::new();
     let mut starts = Vec::with_capacity(plans.len());
+    let mut asides = Vec::with_capacity(margin.notes.len());
+    // Where each body line's top lands on its page, for the notes beside it.
+    let mut tops = vec![0.0; if margin.notes.is_empty() { 0 } else { body.len() }];
+    let mut referenced = margin.references.iter().enumerate().peekable();
     for plan in plans {
-        if rectos.binary_search(&plan.lines.start).is_ok() && !(first + pages.len()).is_multiple_of(2) {
+        let only_floats = plan.lines.is_empty() && !plan.floats.is_empty();
+        if !only_floats && rectos.binary_search(&plan.lines.start).is_ok() && !(first + pages.len()).is_multiple_of(2) {
             blanks.push(first + pages.len());
             pages.push(super::blank_page(config));
             starts.push(None);
         }
-        starts.push(Some(plan.lines.start));
+        starts.push((!only_floats).then_some(plan.lines.start));
         let index = first + pages.len();
         let left = geometry.left_margin(index).0;
         let shift = geometry.prose_shift(index);
@@ -751,7 +1029,48 @@ fn render(
         } else {
             notes.area(plan.notes.start, plan.notes.end)
         };
+        // Top blocks go above the text, bottom blocks below it, above the footnotes. A page of placed
+        // blocks only stacks them all from the top.
         let mut y = top;
+        let mut below = 0.0;
+        for float in &mut floats[plan.floats.clone()] {
+            if float.top || only_floats {
+                let lines = 0..float.lines.len();
+                y = stack(
+                    &mut items,
+                    &mut float.lines,
+                    &[],
+                    lines,
+                    (left, shift),
+                    y,
+                    0.0,
+                    0,
+                    &mut [],
+                );
+                y += spacing;
+            } else {
+                below += spacing + float.height;
+            }
+        }
+        let floor = top + height - notes_height - below;
+        let mut bottom = floor;
+        for float in floats[plan.floats.clone()]
+            .iter_mut()
+            .filter(|float| !float.top && !only_floats)
+        {
+            let lines = 0..float.lines.len();
+            bottom = stack(
+                &mut items,
+                &mut float.lines,
+                &[],
+                lines,
+                (left, shift),
+                bottom + spacing,
+                0.0,
+                0,
+                &mut [],
+            );
+        }
         for region in &plan.regions {
             let first = match region {
                 Region::Full(lines) => lines.start,
@@ -766,7 +1085,17 @@ fn render(
                     // A bottom group ends its page, so it ends the page's last region.
                     let split = bottoms.iter().copied().find(|start| lines.contains(start));
                     let above = lines.start..split.unwrap_or(lines.end);
-                    y = stack(&mut items, body, headers, above, x, y, plan.stretch, plan.lines.start);
+                    y = stack(
+                        &mut items,
+                        body,
+                        headers,
+                        above,
+                        x,
+                        y,
+                        plan.stretch,
+                        plan.lines.start,
+                        &mut tops,
+                    );
                     if let Some(split) = split {
                         let group = split..lines.end;
                         let natural: f64 = group
@@ -776,7 +1105,6 @@ fn render(
                                 space + body[index].line.height
                             })
                             .sum();
-                        let floor = top + height - notes_height;
                         y = stack(
                             &mut items,
                             body,
@@ -786,6 +1114,7 @@ fn render(
                             floor - natural,
                             0.0,
                             plan.lines.start,
+                            &mut tops,
                         );
                     }
                 }
@@ -801,7 +1130,17 @@ fn render(
                             0.0
                         };
                         let x = (left + index as f64 * second_column, shift);
-                        stack(&mut items, body, headers, lines, x, y, ratio, plan.lines.start);
+                        stack(
+                            &mut items,
+                            body,
+                            headers,
+                            lines,
+                            x,
+                            y,
+                            ratio,
+                            plan.lines.start,
+                            &mut tops,
+                        );
                     }
                     y += height;
                 }
@@ -841,6 +1180,48 @@ fn render(
                 color: footnotes.separator_color,
             });
         }
+
+        // The notes beside this page's lines, each wanting its first baseline on its reference's.
+        let mut wanted = Vec::new();
+        while let Some((note, &(line, offset))) = referenced.next_if(|(_, (line, _))| plan.lines.contains(line)) {
+            wanted.push((note, tops[line] + offset));
+        }
+        let column = geometry.note_column(index, &config.margin_notes);
+        for (note, top, baseline) in stack_notes(
+            &wanted,
+            &margin.notes,
+            (top, top + height),
+            config.margin_notes.spacing.0,
+        ) {
+            let placed = &mut margin.notes[note];
+            let lines = 0..placed.lines.len();
+            stack(
+                &mut items,
+                &mut placed.lines,
+                &[],
+                lines,
+                (column, 0.0),
+                top,
+                0.0,
+                0,
+                &mut [],
+            );
+            asides.push(Aside {
+                page: index,
+                rect: Rect {
+                    x: Pt(column),
+                    y: Pt(top),
+                    width: config.margin_notes.width,
+                    height: Pt(placed.height),
+                },
+                note: placed.kind,
+                reference: Position {
+                    page: index,
+                    x: Pt(left + shift),
+                    y: Pt(baseline),
+                },
+            });
+        }
         pages.push(Page {
             width: geometry.width,
             height: geometry.height,
@@ -851,13 +1232,42 @@ fn render(
         pages.push(super::blank_page(config));
         starts.push(None);
     }
-    Composed { pages, blanks, starts }
+    Composed {
+        pages,
+        blanks,
+        starts,
+        asides,
+    }
+}
+
+/// The tops of the notes of a page from where each `wanted` its first baseline, in reading order, as
+/// (note, top, wanted baseline), top to bottom. Notes that would overlap stack downward `spacing`
+/// apart; if the last runs past the bottom of `area`, they move up from there as far as needed.
+fn stack_notes(wanted: &[(usize, f64)], notes: &[Note], area: (f64, f64), spacing: f64) -> Vec<(usize, f64, f64)> {
+    let mut order: Vec<(usize, f64, f64)> = wanted
+        .iter()
+        .map(|&(note, baseline)| (note, baseline - notes[note].baseline, baseline))
+        .collect();
+    // Stable, so notes wanted at the same height keep their reading order.
+    order.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut floor = area.0;
+    for (note, top, _) in &mut order {
+        *top = top.max(floor);
+        floor = *top + notes[*note].height + spacing;
+    }
+    let mut ceiling = area.1;
+    for (note, top, _) in order.iter_mut().rev() {
+        *top = top.min(ceiling - notes[*note].height);
+        ceiling = *top - spacing;
+    }
+    order
 }
 
 /// Places body lines from `y` down, after the repeated header row if the first one has one, dropping
 /// the space above the first line and stretching the others by `ratio` of their bound. `x` is the left
 /// edge and how far prose lines move right from it. A line shown only at a page top is empty unless it is
-/// the page's first line, `top`. Returns the bottom of the last line.
+/// the page's first line, `top`. Records where each line's top lands in `tops`, if it has room for it.
+/// Returns the bottom of the last line.
 #[allow(clippy::too_many_arguments, reason = "the region and where its page starts")]
 fn stack(
     items: &mut Vec<Item>,
@@ -868,6 +1278,7 @@ fn stack(
     mut y: f64,
     ratio: f64,
     top: usize,
+    tops: &mut [f64],
 ) -> f64 {
     let left = |line: &FlowLine| x + line.wide.map_or(shift, |room| shift.min(room));
     if let Some(Some(header)) = headers.get(lines.start).filter(|_| !lines.is_empty()) {
@@ -875,17 +1286,33 @@ fn stack(
         items.extend(header.items.iter().cloned().map(|item| translate(item, x, y)));
         y += header.height;
     }
+    // The callout box around the lines being placed: where its items go, its top, its first line's box, and
+    // the left edge of its lines.
+    let mut open = None;
     for index in lines.clone() {
         let line = &mut body[index];
         if index > lines.start {
             y += line.space_before * (1.0 + STRETCH * ratio);
         }
         let x = left(line);
+        if let (Some(callout), None) = (line.callout, &open) {
+            open = Some((items.len(), y, callout, x));
+        }
+        if let Some(slot) = tops.get_mut(index) {
+            *slot = y;
+        }
         let placed = std::mem::take(&mut line.line.items);
         if !line.top_only || index == top {
             items.extend(placed.into_iter().map(|item| translate(item, x, y)));
         }
         y += line.line.height;
+        if let (Some(callout), Some((position, start, first, x))) = (line.callout, open)
+            && (callout.last || index + 1 == lines.end)
+        {
+            let behind = CalloutBox::items(&first, &callout, x, start, y);
+            items.splice(position..position, behind);
+            open = None;
+        }
     }
     y
 }
@@ -905,6 +1332,7 @@ mod tests {
                 baseline: 8.0,
                 items: Vec::new(),
                 notes,
+                marks: Vec::new(),
                 hyphenated: false,
             },
             space_before: 0.0,
@@ -912,6 +1340,7 @@ mod tests {
             at: Location { line: 1, column: 1 },
             wide: None,
             top_only: false,
+            callout: None,
         }
     }
 

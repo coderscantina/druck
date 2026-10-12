@@ -1,0 +1,20 @@
+{
+  "$schema": "../../schema/theme.v1.schema.json",
+  "version": 1,
+  "page": {
+    "margins": {
+      "inner": "22mm",
+      "outer": "16mm"
+    },
+    "text-width": "112mm",
+    "wide": []
+  },
+  "margin-notes": {
+    "width": "46mm",
+    "gap": "6mm",
+    "sidenotes": true
+  },
+  "placement": {
+    "figure": "top"
+  }
+}

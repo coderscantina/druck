@@ -8,12 +8,16 @@
 //!
 //! The bibliography's heading is an unnumbered level 1 heading with the `references` label, so it is in
 //! the table of contents, the outline, and running headers like any other. Each entry has an anchor.
+//!
+//! The index's heading is one too, with the `index` label. Each index mark has an anchor, and the heading it
+//! falls under, which a footnote's marks take from the footnote's reference.
 
 use std::collections::HashMap;
 
 use crate::bibliography::Reference;
 use crate::config::resolved::{Config, CustomStyle};
 use crate::document::{Block, Document, Inline, Location, Matter};
+use crate::index::Index;
 
 /// Numbers, anchors, and labels of a document.
 pub(crate) struct Structure {
@@ -29,6 +33,12 @@ pub(crate) struct Structure {
     pub entries: Vec<usize>,
     /// Whether `::: toc` places the table of contents.
     pub contents: bool,
+    /// The anchor of each of [`Document::index_marks`].
+    pub marks: Vec<usize>,
+    /// The heading each index mark follows, as an index into `headings`.
+    pub mark_headings: Vec<Option<usize>>,
+    /// The index, if the document has marks.
+    pub index: Option<Index>,
     /// The labels that page references point to.
     paged: Vec<String>,
     /// The anchor and reference text of each label.
@@ -73,6 +83,9 @@ impl Structure {
             anchors: Vec::new(),
             entries: Vec::new(),
             contents: false,
+            marks: Vec::new(),
+            mark_headings: vec![None; document.index_marks.len()],
+            index: Index::new(document),
             paged: Vec::new(),
             labels: HashMap::new(),
         };
@@ -82,12 +95,39 @@ impl Structure {
             references,
             counters: [0; 6],
             matter: None,
+            heading: None,
+            notes: vec![None; document.footnotes.len()],
+            margin_notes: vec![None; document.margin_notes.len()],
         };
         walk.blocks(&document.blocks);
-        for footnote in &document.footnotes {
+        for (note, footnote) in document.footnotes.iter().enumerate() {
+            walk.heading = walk.notes[note];
             walk.references(&footnote.blocks);
         }
+        for (note, margin_note) in document.margin_notes.iter().enumerate() {
+            walk.heading = walk.margin_notes[note];
+            walk.references(&margin_note.blocks);
+        }
+        for mark in &document.index_marks {
+            let anchor = walk.anchor(mark.at, format!("the index mark \"{}\"", mark.terms.join("!")));
+            walk.structure.marks.push(anchor);
+        }
         structure
+    }
+
+    /// The anchors of the index marks that show a page in the index.
+    pub fn indexed(&self) -> Vec<usize> {
+        fn add(entries: &[crate::index::Entry], marks: &[usize], anchors: &mut Vec<usize>) {
+            for entry in entries {
+                anchors.extend(entry.marks.iter().map(|&mark| marks[mark]));
+                add(&entry.sub_entries, marks, anchors);
+            }
+        }
+        let mut anchors = Vec::new();
+        for group in self.index.iter().flat_map(|index| &index.groups) {
+            add(&group.entries, &self.marks, &mut anchors);
+        }
+        anchors
     }
 
     /// The anchors whose page numbers the document shows: headings in the table of contents and the
@@ -101,7 +141,7 @@ impl Structure {
             .filter(|heading| self.has_contents(config) && heading.listed && heading.level <= document.toc_depth.get())
             .map(|heading| heading.anchor);
         let references = self.paged();
-        let mut anchors: Vec<usize> = contents.chain(references).collect();
+        let mut anchors: Vec<usize> = contents.chain(references).chain(self.indexed()).collect();
         anchors.sort_unstable();
         anchors.dedup();
         anchors
@@ -133,6 +173,12 @@ struct Walk<'a> {
     counters: [usize; 6],
     /// The part of the book the blocks are in.
     matter: Option<Matter>,
+    /// The index of the last heading so far.
+    heading: Option<usize>,
+    /// The heading before each footnote's reference.
+    notes: Vec<Option<usize>>,
+    /// The heading before each margin note's reference.
+    margin_notes: Vec<Option<usize>>,
 }
 
 impl Walk<'_> {
@@ -149,10 +195,12 @@ impl Walk<'_> {
 
     fn inlines(&mut self, content: &[Inline]) {
         for inline in content {
-            if let Inline::Ref(reference) = inline
-                && reference.page
-            {
-                self.structure.paged.push(reference.label.clone());
+            match inline {
+                Inline::Ref(reference) if reference.page => self.structure.paged.push(reference.label.clone()),
+                Inline::IndexMark(mark) => self.structure.mark_headings[*mark] = self.heading,
+                Inline::FootnoteRef(note) => self.notes[*note] = self.heading,
+                Inline::MarginNote(note) => self.margin_notes[*note] = self.heading,
+                _ => {}
             }
         }
     }
@@ -219,6 +267,7 @@ impl Walk<'_> {
                         None => text.clone(),
                     };
                     self.label(label.as_ref(), anchor, reference);
+                    self.heading = Some(self.structure.headings.len());
                     self.structure.headings.push(Heading {
                         at: *at,
                         level,
@@ -262,6 +311,7 @@ impl Walk<'_> {
                 }
                 Block::List { items, .. } => items.iter().for_each(|item| self.blocks(item)),
                 Block::Quote { blocks, .. }
+                | Block::Callout { blocks, .. }
                 | Block::Keep { blocks, .. }
                 | Block::Bottom { blocks, .. }
                 | Block::Columns { blocks, .. }
@@ -286,6 +336,22 @@ impl Walk<'_> {
                         self.structure.entries.push(anchor);
                     }
                 }
+                Block::Index { at } => {
+                    // Without marks there is no index, also where `::: index` asks for one.
+                    if self.structure.index.is_none() {
+                        continue;
+                    }
+                    let text = labels.index.clone();
+                    let anchor = self.anchor(*at, format!("the heading \"{text}\""));
+                    self.structure.headings.push(Heading {
+                        at: *at,
+                        level: 1,
+                        number: None,
+                        text,
+                        anchor,
+                        listed: true,
+                    });
+                }
                 Block::Matter { matter, .. } => self.matter = Some(*matter),
                 Block::Contents { .. } => self.structure.contents = true,
                 Block::Code { .. } | Block::PageBreak { .. } | Block::SceneBreak { .. } => {}
@@ -301,7 +367,13 @@ pub(crate) fn plain(content: &[Inline]) -> String {
         match inline {
             Inline::Text { text: piece, .. } => text.push_str(piece),
             Inline::LineBreak => text.push(' '),
-            Inline::FootnoteRef(_) | Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => {}
+            Inline::FootnoteRef(_)
+            | Inline::MarginNote(_)
+            | Inline::Ref(_)
+            | Inline::Citation { .. }
+            | Inline::Field { .. }
+            | Inline::IndexMark(_)
+            | Inline::Anchor(_) => {}
         }
     }
     text

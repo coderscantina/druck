@@ -14,6 +14,7 @@ use super::{Flow, Frame, Role, pages, text_item, translate_line};
 use crate::config::values::Pt;
 use crate::document::{Inline, InlineStyle, Link};
 use crate::page::{Item, Rect};
+use crate::tags::{Kind, Mark};
 use crate::text::{Glyph, ShapedRun};
 
 /// Space between an entry's text, its dots, and its page number, in ems of the entry style.
@@ -29,6 +30,7 @@ impl<'a> Flow<'a> {
             text: config.labels.contents.clone(),
             style: InlineStyle::default(),
         };
+        let scope = self.open(Kind::Paragraph, true);
         self.text_block(
             FRONT_MATTER,
             &[label],
@@ -37,11 +39,18 @@ impl<'a> Flow<'a> {
             0.0,
             Role::Heading(None),
         );
+        self.close(scope);
         let depth = config.document.toc_depth.get();
         let structure = self.structure;
+        let contents = self.open(Kind::Contents, false);
         for heading in (structure.headings.iter()).filter(|heading| heading.listed && heading.level <= depth) {
+            let entry = self.open(Kind::ContentsEntry, false);
+            let link = self.open(Kind::Link, true);
             self.entry(heading, frame);
+            self.close(link);
+            self.close(entry);
         }
+        self.close(contents);
         self.after_paragraph = false;
     }
 
@@ -103,7 +112,8 @@ impl<'a> Flow<'a> {
                     let dot = fonts.shape(".", face, style.size, lang);
                     let (from, to) = (end + GAP * em, width - column - GAP * em);
                     if let Some((x, run)) = leader(&dot, DOT_STEP * em, from, to) {
-                        line.items.push(text_item(x, line.baseline, run, style.color));
+                        let dots = text_item(x, line.baseline, run, style.color);
+                        line.items.extend([Item::Begin(Mark::Artifact), dots, Item::End]);
                     }
                 }
                 let x = width - number.width.0;

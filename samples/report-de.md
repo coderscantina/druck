@@ -133,9 +133,15 @@ Eine Marke benennt eine Überschrift, eine Abbildung oder eine Tabelle. Sie begi
 
 Ein Seitenverweis ist Text, und seine Breite kann einen Zeilenumbruch verschieben, einen Seitenumbruch und damit die Seite, auf die er verweist. Das Inhaltsverzeichnis hat dasselbe Problem: Seine Länge bestimmt, wo der Haupttext beginnt. Druck setzt den Bericht, liest die Seiten aller Überschriften, Abbildungen und Tabellen und setzt ihn mit diesen Zahlen erneut, bis sie sich nicht mehr ändern. Die meisten Dokumente brauchen zwei Durchläufe. Ein Dokument, dessen Zahlen immer weiterwandern, wird gemeldet und nicht mit falschen Zahlen geschrieben.
 
+> [!NOTE]
+> Ein Seitenverweis kann die Seite verschieben, auf die er zeigt. Druck setzt den Bericht erneut, bis alle Zahlen übereinstimmen, die gedruckte Seite im PDF stimmt also.
+
 ## Überschriften ohne Nummer
 
 Eine Überschrift unterhalb der Nummerierungstiefe hat keine Nummer, und ein Verweis darauf zeigt ihren Text. Das Standardthema nummeriert drei Ebenen, die Überschrift der vierten Ebene unten hat also keine, und ein Verweis darauf liest sich: @sec:ruhig.
+
+> [!TIP]
+> Geben Sie einer Überschrift auch ohne Nummer eine Marke. Der Verweis zeigt dann ihren Text und folgt ihr, wenn Sie sie umbenennen.
 
 #### Eine ruhige Überschrift {#sec:ruhig}
 

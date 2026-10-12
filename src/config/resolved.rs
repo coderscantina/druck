@@ -12,11 +12,12 @@ use super::front_matter::Metadata;
 use super::source::Resource;
 use super::template::Template;
 use super::theme::{
-    Align, Anchor, BreakBefore, DocumentDefaults, Face, Figures, FontStyle, LabelSet, Matters, NumberFormat,
-    NumberPosition, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
+    Align, Anchor, BreakBefore, CalloutKind, DocumentDefaults, Face, Figures, FontStyle, LabelSet, Matters,
+    NumberFormat, NumberPosition, Placements, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
 use crate::diagnostic::Diagnostic;
+use crate::highlight::Category;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -43,10 +44,14 @@ pub struct Config {
     pub inline: InlineStyles,
     pub lists: Lists,
     pub tables: Tables,
+    pub callouts: Callouts,
     pub footnotes: Footnotes,
+    pub margin_notes: MarginNotes,
     pub caption_separator: String,
+    pub placement: Placements,
     pub bibliography: Bibliography,
     pub toc: Toc,
+    pub index: Index,
     pub matter: Matters,
     pub chapters: Chapters,
     pub scene_break: SceneBreak,
@@ -54,6 +59,8 @@ pub struct Config {
     pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,
     pub watermark: Option<Watermark>,
+    /// Token colors of code blocks; a category left out keeps the code block color.
+    pub highlight: Option<BTreeMap<Category, Color>>,
     pub labels: LabelSet,
     /// Problems that do not stop the run.
     #[serde(skip)]
@@ -144,6 +151,22 @@ impl PageGeometry {
         } else {
             self.text_width().0 - self.prose_width.0
         }
+    }
+
+    /// The left edge of the margin note column on the page at `index`: `gap` beyond the outer edge of
+    /// the prose, which is on the right unless margins mirror on this page.
+    pub fn note_column(&self, index: usize, notes: &MarginNotes) -> f64 {
+        let left = self.left_margin(index).0;
+        if index.is_multiple_of(2) || !self.mirror {
+            left + self.prose_width.0 + notes.gap.0
+        } else {
+            left + self.prose_shift(index) - notes.gap.0 - notes.width.0
+        }
+    }
+
+    /// The room between the outer edge of the prose and the outer edge of the page.
+    pub fn outer_room(&self) -> f64 {
+        self.margin_outer.0 + self.text_width().0 - self.prose_width.0
     }
 }
 
@@ -324,6 +347,36 @@ pub struct Tables {
     pub row_rule: Option<Rule>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Callouts {
+    pub padding: Pt,
+    pub note: CalloutLook,
+    pub tip: CalloutLook,
+    pub important: CalloutLook,
+    pub warning: CalloutLook,
+    pub caution: CalloutLook,
+}
+
+impl Callouts {
+    pub fn get(&self, kind: CalloutKind) -> &CalloutLook {
+        match kind {
+            CalloutKind::Note => &self.note,
+            CalloutKind::Tip => &self.tip,
+            CalloutKind::Important => &self.important,
+            CalloutKind::Warning => &self.warning,
+            CalloutKind::Caution => &self.caution,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CalloutLook {
+    pub background: Option<Color>,
+    pub rule: Option<Rule>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Rule {
@@ -341,6 +394,19 @@ pub struct Footnotes {
     pub spacing: Pt,
 }
 
+/// The note column beside the prose, see [`PageGeometry::note_column`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MarginNotes {
+    pub width: Pt,
+    pub gap: Pt,
+    pub spacing: Pt,
+    /// See [`Config::named_style`].
+    pub style: String,
+    pub align: Align,
+    pub sidenotes: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Bibliography {
@@ -355,6 +421,15 @@ pub struct Toc {
     pub leader: bool,
     /// The entry style per heading level, the last repeating for deeper levels; empty for `toc-entry` throughout.
     pub level_styles: Vec<Style>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Index {
+    pub columns: u8,
+    pub level_indent: Pt,
+    pub hanging_indent: Pt,
+    pub separator: String,
 }
 
 /// How level 1 headings open chapters.

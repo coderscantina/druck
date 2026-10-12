@@ -1,11 +1,11 @@
 //! The body as XHTML content documents.
 //!
-//! The body is split into files where a level 1 heading, the bibliography, a part of a book, or a page break
-//! starts, and where `::: toc` places the contents page. Each file is front, body, or back matter. Headings,
+//! The body is split into files where a level 1 heading, the bibliography, the index, a part of a book, or a
+//! page break starts, and where `::: toc` places the contents page. Each file is front, body, or back matter. Headings,
 //! figures, and tables carry the numbers of [`Structure`], and cross-references and citations link to their
 //! targets in whichever file those are. A page reference has no page in a reflowable book, so it shows the
 //! target's reference text, as a plain cross-reference does. Footnotes are EPUB notes at the end of the
-//! file that references them.
+//! file that references them. Index marks are empty elements with an id, which the [index] links to.
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -14,11 +14,14 @@ use super::{css, xml};
 use crate::citations::Cited;
 use crate::config::resolved::{Config, SceneMark};
 use crate::config::source::Resource;
-use crate::config::theme::NumberPosition;
+use crate::config::theme::{CalloutKind, NumberPosition};
 use crate::document::{Block, Cell, Class, Column, ColumnAlign, Document, Inline, InlineStyle, Link, Matter, Row};
+use crate::highlight::{self, Span};
 use crate::layout::fields::Fields;
 use crate::layout::structure::{Numbered, Structure, plain};
 use crate::layout::{NO_DROP_CAP, lead_in};
+
+mod index;
 
 /// What rendering the body needs besides the document.
 pub struct Context<'a> {
@@ -98,6 +101,25 @@ struct Section<'d> {
     blocks: Vec<&'d Block>,
 }
 
+/// A code line as XHTML, with a `hl-<category>` span around each colored stretch.
+fn colored(line: &str, spans: &[Span]) -> String {
+    let mut html = String::new();
+    let mut at = 0;
+    for (range, category) in spans {
+        html.push_str(&xml::text(&line[at..range.start]));
+        write!(
+            html,
+            "<span class=\"hl-{}\">{}</span>",
+            category.name(),
+            xml::text(&line[range.clone()])
+        )
+        .expect("writing to a string succeeds");
+        at = range.end;
+    }
+    html.push_str(&xml::text(&line[at..]));
+    html
+}
+
 /// Splits the top-level blocks into files.
 fn split<'d>(cx: &Context<'d>) -> Vec<Piece<'d>> {
     let mut pieces = Vec::new();
@@ -132,7 +154,9 @@ fn split<'d>(cx: &Context<'d>) -> Vec<Piece<'d>> {
             }
             // Without citations there is no bibliography.
             Block::Bibliography { .. } if cx.cited.section.is_none() => {}
-            Block::Heading { level: 1, .. } | Block::Bibliography { .. } => {
+            // Without index marks there is no index.
+            Block::Index { .. } if cx.structure.index.is_none() => {}
+            Block::Heading { level: 1, .. } | Block::Bibliography { .. } | Block::Index { .. } => {
                 flush(&mut pieces, &mut current);
                 current.blocks.push(block);
             }
@@ -168,6 +192,7 @@ fn render(cx: &Context, pieces: &[Piece], placed: &[Option<usize>]) -> (Vec<File
         in_notes: false,
         opening: false,
         notes: Vec::new(),
+        margin_notes: Vec::new(),
     };
     let mut files = Vec::new();
     for piece in pieces {
@@ -181,12 +206,14 @@ fn render(cx: &Context, pieces: &[Piece], placed: &[Option<usize>]) -> (Vec<File
         };
         let wrapper = match section.blocks.first() {
             Some(Block::Bibliography { .. }) => Some("bibliography"),
+            Some(Block::Index { .. }) => Some("index"),
             Some(Block::Heading { level: 1, .. }) if matter == "bodymatter" => Some("chapter"),
             _ => None,
         };
         writer.opening = false;
         if let Some(kind) = wrapper {
-            write!(writer.out, "<section epub:type=\"{kind}\">").expect("writing to a string succeeds");
+            write!(writer.out, "<section epub:type=\"{kind}\" role=\"doc-{kind}\">")
+                .expect("writing to a string succeeds");
         }
         for block in &section.blocks {
             writer.block(block);
@@ -224,6 +251,8 @@ struct Writer<'a> {
     opening: bool,
     /// The footnotes the current file references, in order.
     notes: Vec<usize>,
+    /// The margin notes referenced in the block being written, which follow it.
+    margin_notes: Vec<usize>,
 }
 
 impl Writer<'_> {
@@ -235,6 +264,23 @@ impl Writer<'_> {
         for block in blocks {
             self.block(block);
         }
+    }
+
+    /// An `aside` with the kind as a class, and the label as its first paragraph.
+    fn callout(&mut self, kind: CalloutKind, blocks: &[Block]) {
+        let name = css::callout_class(kind);
+        let semantics = match kind {
+            CalloutKind::Tip => "tip",
+            CalloutKind::Warning | CalloutKind::Caution => "warning",
+            CalloutKind::Note | CalloutKind::Important => "notice",
+        };
+        self.push(&format!("<aside class=\"callout {name}\" epub:type=\"{semantics}\">"));
+        let label = self.cx.config.labels.callout(kind);
+        if !label.is_empty() {
+            self.push(&format!("<p class=\"callout-label\">{}</p>", xml::text(label)));
+        }
+        self.blocks(blocks);
+        self.push("</aside>");
     }
 
     fn block(&mut self, block: &Block) {
@@ -274,11 +320,21 @@ impl Writer<'_> {
                 self.blocks(blocks);
                 self.push("</blockquote>");
             }
-            Block::Code { lines, .. } => {
-                let code: Vec<String> = lines
-                    .iter()
-                    .map(|line| xml::text(&line.replace('\t', "    ")))
-                    .collect();
+            Block::Callout { kind, blocks, .. } => self.callout(*kind, blocks),
+            Block::Code { language, lines, .. } => {
+                let lines: Vec<String> = lines.iter().map(|line| line.replace('\t', "    ")).collect();
+                let spans = language
+                    .as_deref()
+                    .filter(|_| self.cx.config.highlight.is_some())
+                    .and_then(|language| highlight::highlight(language, &lines));
+                let code: Vec<String> = match &spans {
+                    Some(spans) => lines
+                        .iter()
+                        .zip(spans)
+                        .map(|(line, spans)| colored(line, spans))
+                        .collect(),
+                    None => lines.iter().map(|line| xml::text(line)).collect(),
+                };
                 self.push(&format!("<pre><code>{}</code></pre>", code.join("\n")));
             }
             Block::Image { image, caption, .. } => self.image(*image, caption),
@@ -297,7 +353,21 @@ impl Writer<'_> {
             Block::PageBreak { .. } => self.push("<div class=\"page-break\"></div>"),
             Block::SceneBreak { .. } => self.scene_break(),
             Block::Bibliography { .. } => self.bibliography(),
+            Block::Index { .. } => self.index(),
             Block::Matter { .. } | Block::Contents { .. } => {}
+        }
+        self.margin_notes();
+    }
+
+    /// The margin notes referenced since the last block, as asides after it. They have no mark to link from.
+    fn margin_notes(&mut self) {
+        let cx = self.cx;
+        for note in std::mem::take(&mut self.margin_notes) {
+            self.push("<aside class=\"margin-note\">");
+            let in_notes = std::mem::replace(&mut self.in_notes, true);
+            self.blocks(&cx.document.margin_notes[note].blocks);
+            self.in_notes = in_notes;
+            self.push("</aside>");
         }
     }
 
@@ -308,7 +378,10 @@ impl Writer<'_> {
                 Block::Paragraph {
                     content, class: None, ..
                 },
-            ] => self.inlines(content),
+            ] => {
+                self.inlines(content);
+                self.margin_notes();
+            }
             blocks => self.blocks(blocks),
         }
     }
@@ -484,6 +557,9 @@ impl Writer<'_> {
                 .or_else(|| row_class.clone());
             let classes: Vec<&str> = style.as_deref().into_iter().chain(align).collect();
             self.push(&format!("<{tag}"));
+            if tag == "th" {
+                self.push(" scope=\"col\"");
+            }
             self.class_attribute(Some(&classes.join(" ")));
             if *span > 1 {
                 self.push(&format!(" colspan=\"{span}\""));
@@ -541,9 +617,10 @@ impl Writer<'_> {
             next += 1;
             let number = note + 1;
             self.push(&format!(
-                "<aside class=\"footnote\" epub:type=\"footnote\" id=\"fn-{number}\">"
+                "<aside class=\"footnote\" epub:type=\"footnote\" role=\"doc-footnote\" id=\"fn-{number}\">"
             ));
-            let marker = format!("<a class=\"note-number\" href=\"#fnref-{number}\">{number}</a> ");
+            let marker =
+                format!("<a class=\"note-number\" role=\"doc-backlink\" href=\"#fnref-{number}\">{number}</a> ");
             let blocks = &self.cx.document.footnotes[note].blocks;
             match blocks.split_first() {
                 Some((Block::Paragraph { content, class, .. }, rest)) => {
@@ -577,7 +654,7 @@ impl Writer<'_> {
     }
 
     /// Inline content with its formatting, links, and note references. Cross-references, citations, and
-    /// placeholders show their text.
+    /// placeholders show their text, and index marks are empty elements with their anchor's id.
     fn inlines(&mut self, content: &[Inline]) {
         let cx = self.cx;
         let mut runs: Vec<Run> = Vec::with_capacity(content.len());
@@ -590,6 +667,7 @@ impl Writer<'_> {
                 Inline::Text { text: piece, style } => text(&mut runs, piece, style.clone()),
                 Inline::LineBreak => runs.push(Run::LineBreak),
                 Inline::FootnoteRef(note) => runs.push(Run::Note(*note)),
+                Inline::MarginNote(note) => self.margin_notes.push(*note),
                 Inline::Ref(reference) => {
                     let (anchor, shown) = cx.structure.reference(&reference.label);
                     let style = InlineStyle {
@@ -611,6 +689,8 @@ impl Writer<'_> {
                     let value = cx.fields.text(placeholder).expect("fields are checked before writing");
                     text(&mut runs, &value, style.clone());
                 }
+                Inline::IndexMark(mark) => runs.push(Run::Anchor(cx.structure.marks[*mark])),
+                Inline::Anchor(anchor) => runs.push(Run::Anchor(*anchor)),
             }
         }
 
@@ -635,6 +715,10 @@ impl Writer<'_> {
                 Run::Note(note) => {
                     self.close_link(&mut open);
                     self.note_reference(note);
+                }
+                Run::Anchor(anchor) => {
+                    let id = self.define(anchor);
+                    self.push(&format!("<span id=\"{id}\"></span>"));
                 }
             }
         }
@@ -668,7 +752,8 @@ impl Writer<'_> {
         let number = note + 1;
         self.notes.push(note);
         self.push(&format!(
-            "<a class=\"noteref\" epub:type=\"noteref\" id=\"fnref-{number}\" href=\"#fn-{number}\">{number}</a>"
+            "<a class=\"noteref\" epub:type=\"noteref\" role=\"doc-noteref\" id=\"fnref-{number}\" \
+             href=\"#fn-{number}\">{number}</a>"
         ));
     }
 }
@@ -678,4 +763,5 @@ enum Run {
     Text(String, InlineStyle),
     LineBreak,
     Note(usize),
+    Anchor(usize),
 }

@@ -10,20 +10,35 @@
 //!
 //! Before layout, [`structure`] numbers headings, figures, and tables and gives each an anchor. The
 //! body may start with a [title block](titles) and a [table of contents](toc), and a separate title
-//! page may precede it. A document that cites has a [bibliography] section. Front, main, and back
+//! page may precede it. A document that cites has a [bibliography] section, and one with index marks an
+//! [index]. Front, main, and back
 //! matter start new pages and set how pages are [numbered](numbering). Page numbers shown in the
-//! text, in the table of contents and in page references, are only known after layout, so layout
+//! text, in the table of contents, page references, and the index, are only known after layout, so layout
 //! repeats until they agree with the pages it produced. Headers and footers are drawn on the final
 //! pages; see [`bands`].
 //!
 //! A level 1 heading opens a chapter as the theme's `chapters` section sets: on a new page, sunk
 //! below the top of the text area, with its number on a line above it and an ornament below it. The
 //! chapter's first paragraph may start with a drop capital and a lead-in in small capitals.
+//!
+//! A figure or table placed at the top or bottom of a page leaves the flow; the composer sets it. Margin
+//! notes, and footnotes when the theme sets sidenotes, are set at the width of the note column; see
+//! [`margin`].
 
 mod bands;
 mod bibliography;
+mod callout;
+#[cfg(test)]
+mod callout_tests;
 mod classes;
 pub(crate) mod fields;
+mod highlighted;
+mod index;
+#[cfg(test)]
+mod index_tests;
+mod margin;
+#[cfg(test)]
+mod margin_tests;
 mod notes;
 mod numbering;
 mod pages;
@@ -36,6 +51,8 @@ mod style_tests;
 mod table;
 #[cfg(test)]
 mod table_tests;
+#[cfg(test)]
+mod tag_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod titles;
@@ -57,9 +74,11 @@ use crate::config::theme::{Align, BreakBefore, FontStyle, NumberPosition, Weight
 use crate::config::values::{Color, Pt};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location, Matter};
+use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location, Matter, Placement};
+use crate::highlight;
 use crate::image::Image;
 use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
+use crate::tags::{self, Id, Kind, Mark, Tree};
 use crate::text::{Fonts, ShapedRun};
 
 pub use self::titles::images as theme_images;
@@ -92,10 +111,20 @@ pub fn layout(
 ) -> Result<Output, Vec<Diagnostic>> {
     let fields = Fields::new(document, config, today);
     check(document, config, &fields, source)?;
+    margin::check(document, config, source)?;
     let structure = Structure::new(document, config, cited.references());
     let notes = NoteStyles::new(config);
+    // The title page is set once; every pass continues its elements.
+    let mut title_tags = Tree::default();
     let title_page = if config.document.title_page {
-        Some(titles::page(config, &fields, fonts, theme_images, source)?)
+        Some(titles::page(
+            config,
+            &fields,
+            fonts,
+            theme_images,
+            source,
+            &mut title_tags,
+        )?)
     } else {
         None
     };
@@ -117,22 +146,33 @@ pub fn layout(
         source,
         structure: &structure,
         notes: &notes,
+        title_tags: &title_tags,
         first: usize::from(title_page.is_some()) + usize::from(blank.is_some()),
     };
     let shown = structure.shown_pages(config);
-    let (Laid { body, numbering }, anchors) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
-    let unnumbered: Vec<Diagnostic> = structure
-        .paged()
-        .filter(|&anchor| numbering.page(anchors[anchor].page).is_none())
-        .map(|anchor| {
-            let (at, what) = &structure.anchors[anchor];
-            let message = format!("{what} is on a page without a number, so a page reference to it shows nothing");
-            Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)
-        })
+    let (
+        Laid {
+            mut body,
+            numbering,
+            tags,
+        },
+        anchors,
+    ) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
+    let no_number = |anchor: &usize| numbering.page(anchors[*anchor].page).is_none();
+    let error = |anchor: usize, shows: &str| {
+        let (at, what) = &structure.anchors[anchor];
+        let message = format!("{what} is on a page without a number, so {shows} shows nothing");
+        Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)
+    };
+    let mut unnumbered: Vec<Diagnostic> = (structure.paged().filter(no_number))
+        .map(|anchor| error(anchor, "a page reference to it"))
         .collect();
+    let indexed = structure.indexed().into_iter().filter(no_number);
+    unnumbered.extend(indexed.map(|anchor| error(anchor, "its page in the index")));
     if !unnumbered.is_empty() {
         return Err(unnumbered);
     }
+    let asides = std::mem::take(&mut body.asides);
     let mut blanks = body.blanks;
     if blank.is_some() {
         blanks.insert(0, 1);
@@ -164,6 +204,8 @@ pub fn layout(
         outline,
         heading_title,
         page_numbers: numbering.labels(),
+        tags,
+        asides,
     })
 }
 
@@ -231,6 +273,8 @@ struct Pass<'a> {
     source: &'a Source,
     structure: &'a Structure,
     notes: &'a NoteStyles,
+    /// The elements of the title page, which the body's follow.
+    title_tags: &'a Tree,
     /// The physical index of the first body page: 1 after a title page.
     first: usize,
 }
@@ -239,7 +283,7 @@ impl Pass<'_> {
     /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages with the
     /// numbers of all pages, where each anchor is in the whole document, and the number each page shows.
     fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Vec<Diagnostic>> {
-        let (content, matters) = self.content(assumed)?;
+        let (content, matters, tags) = self.content(assumed)?;
         let body = pages::compose(content, self.first, self.config, self.source)?;
         let mut positions = vec![None; self.structure.anchors.len()];
         for (index, page) in body.pages.iter().enumerate() {
@@ -267,12 +311,12 @@ impl Pass<'_> {
             .collect();
         let numbering = Numbering::new(self.first + body.pages.len(), &starts, self.config);
         let numbers = numbering.texts();
-        Ok((Laid { body, numbering }, positions, numbers))
+        Ok((Laid { body, numbering, tags }, positions, numbers))
     }
 
     /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
-    /// the anchors. Also returns the line each part of the book starts at.
-    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts), Vec<Diagnostic>> {
+    /// the anchors. Also returns the line each part of the book starts at and the document's elements.
+    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts, Tree), Vec<Diagnostic>> {
         let config = self.config;
         let mut flow = Flow {
             config,
@@ -290,6 +334,7 @@ impl Pass<'_> {
             tables: 0,
             in_notes: false,
             table_lines: Vec::new(),
+            floats: Vec::new(),
             lines: Vec::new(),
             space: 0.0,
             after_paragraph: false,
@@ -301,6 +346,9 @@ impl Pass<'_> {
             matters: Vec::new(),
             in_keep: false,
             opening: false,
+            tags: self.title_tags.clone(),
+            parent: None,
+            leaf: None,
             errors: Vec::new(),
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
@@ -320,18 +368,29 @@ impl Pass<'_> {
         flow.blocks(&self.document.blocks, frame);
         let rectos = std::mem::take(&mut flow.rectos);
         let matters = std::mem::take(&mut flow.matters);
-        let body = std::mem::take(&mut flow.lines);
+        let mut body = std::mem::take(&mut flow.lines);
         let keeps = std::mem::take(&mut flow.keeps);
         let bottoms = std::mem::take(&mut flow.bottoms);
         let columns = std::mem::take(&mut flow.columns);
         let tables = std::mem::take(&mut flow.table_lines);
+        let floats = std::mem::take(&mut flow.floats);
         flow.in_notes = true;
         let mut notes = Vec::with_capacity(self.document.footnotes.len());
         let mut continued = Vec::with_capacity(self.document.footnotes.len());
-        for (index, footnote) in self.document.footnotes.iter().enumerate() {
-            notes.push(flow.note(index, footnote));
-            continued.push(flow.continued(index, footnote.at));
-        }
+        let margin = if config.margin_notes.sidenotes {
+            // The footnotes go to the note column, so no line references the bottom area.
+            for line in &mut body {
+                line.line.notes.clear();
+            }
+            flow.margin(&body, &self.document.footnotes, &self.document.margin_notes)
+        } else {
+            for (index, footnote) in self.document.footnotes.iter().enumerate() {
+                let frame = Frame::prose(&config.styles.footnote, &config.page);
+                notes.push(flow.note(index, footnote, frame));
+                continued.push(flow.continued(index, footnote.at));
+            }
+            flow.margin(&body, &[], &self.document.margin_notes)
+        };
         if !flow.errors.is_empty() {
             return Err(flow.errors);
         }
@@ -344,8 +403,10 @@ impl Pass<'_> {
             tables,
             notes,
             continued,
+            floats,
+            margin,
         };
-        Ok((content, matters))
+        Ok((content, matters, flow.tags))
     }
 }
 
@@ -353,6 +414,7 @@ impl Pass<'_> {
 struct Laid {
     body: pages::Composed,
     numbering: Numbering,
+    tags: Tree,
 }
 
 /// The line each part of a book starts at, in order.
@@ -375,8 +437,20 @@ struct Line {
     items: Vec<Item>,
     /// The footnotes referenced on this line.
     notes: Vec<usize>,
+    /// The footnotes and margin notes referenced on this line in reading order, each with the baseline
+    /// it is referenced on, below the line's top.
+    marks: Vec<(NoteRef, f64)>,
     /// Whether the line ends inside a word, at a hyphenation point or after an explicit hyphen.
     hyphenated: bool,
+}
+
+/// A note referenced on a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteRef {
+    /// An index into [`Document::footnotes`].
+    Footnote(usize),
+    /// An index into [`Document::margin_notes`].
+    Margin(usize),
 }
 
 /// Whether a page may end after a line, and at what cost.
@@ -420,6 +494,8 @@ struct FlowLine {
     wide: Option<f64>,
     /// Whether the line is only drawn where it starts a page, as the mark of a blank scene break.
     top_only: bool,
+    /// The callout box the line is part of.
+    callout: Option<callout::CalloutBox>,
 }
 
 /// How a text block takes part in page breaking.
@@ -479,6 +555,8 @@ struct Flow<'a> {
     in_notes: bool,
     /// The tables set so far, whose headers repeat on continuation pages and columns.
     table_lines: Vec<pages::Table>,
+    /// The figures and tables placed at the top or bottom of a page, in document order.
+    floats: Vec<pages::Float>,
     lines: Vec<FlowLine>,
     /// Space requested before the next line. Adjacent spaces collapse to the larger one.
     space: f64,
@@ -500,7 +578,19 @@ struct Flow<'a> {
     in_keep: bool,
     /// Whether a chapter heading waits for its first paragraph, which may get a drop capital and a lead-in.
     opening: bool,
+    /// The document's elements so far.
+    tags: Tree,
+    /// The element that elements opened now belong to, `None` for the document.
+    parent: Option<Id>,
+    /// The element whose content lines pushed now are, `None` for decoration.
+    leaf: Option<Id>,
     errors: Vec<Diagnostic>,
+}
+
+/// The elements a [`Flow::close`] returns to.
+struct Scope {
+    parent: Option<Id>,
+    leaf: Option<Id>,
 }
 
 impl<'a> Flow<'a> {
@@ -512,8 +602,17 @@ impl<'a> Flow<'a> {
         std::mem::take(&mut self.lines)
     }
 
-    /// The lines of footnote `index`, starting with its raised number.
-    fn note(&mut self, index: usize, footnote: &Footnote) -> Vec<FlowLine> {
+    /// The lines of footnote `index` in `frame`, starting with its raised number, in the note element that
+    /// follows its reference.
+    fn note(&mut self, index: usize, footnote: &Footnote, frame: Frame<'a>) -> Vec<FlowLine> {
+        let note = self.tags.note(index).unwrap_or_else(|| self.tags.add(Kind::Note, None));
+        let scope = self.enter(note, false);
+        let lines = self.note_lines(index, footnote, frame);
+        self.close(scope);
+        lines
+    }
+
+    fn note_lines(&mut self, index: usize, footnote: &Footnote, frame: Frame<'a>) -> Vec<FlowLine> {
         let mut blocks = footnote.blocks.clone();
         let marker = Inline::FootnoteRef(index);
         match blocks.first_mut() {
@@ -533,7 +632,7 @@ impl<'a> Flow<'a> {
                 },
             ),
         }
-        self.unmarked(&blocks)
+        self.unmarked(&blocks, frame)
     }
 
     /// The marker above the continued part of footnote `index`: its number and the `continued` label.
@@ -546,22 +645,30 @@ impl<'a> Flow<'a> {
             },
         };
         let content = vec![Inline::FootnoteRef(index), label];
-        self.unmarked(&[Block::Paragraph {
-            at,
-            content,
-            class: None,
-        }])
+        let frame = Frame::prose(&self.config.styles.footnote, &self.config.page);
+        let mut lines = self.unmarked(
+            &[Block::Paragraph {
+                at,
+                content,
+                class: None,
+            }],
+            frame,
+        );
+        // The marker repeats the note's number for the reader of the page only.
+        for line in &mut lines {
+            line.line.items = tags::untag(std::mem::take(&mut line.line.items));
+        }
+        lines
     }
 
-    /// Lays out footnote content at the prose width. Its own markers do not count as references.
-    fn unmarked(&mut self, blocks: &[Block]) -> Vec<FlowLine> {
-        let frame = Frame {
-            widen: 0.0,
-            ..Frame::prose(&self.config.styles.footnote, &self.config.page)
-        };
+    /// Lays out note content in `frame`, where wide blocks do not widen. Its own markers do not count as
+    /// references.
+    fn unmarked(&mut self, blocks: &[Block], frame: Frame<'a>) -> Vec<FlowLine> {
+        let frame = Frame { widen: 0.0, ..frame };
         let mut lines = self.run(blocks, frame);
         for line in &mut lines {
             line.line.notes.clear();
+            line.line.marks.clear();
         }
         lines
     }
@@ -594,6 +701,12 @@ impl<'a> Flow<'a> {
                 line.after = line.after.costlier(pages::INTRODUCTION);
             }
             previous = Some(block);
+            // A placed block leaves the flow, which continues as if it were not there.
+            if let Some(top) = self.placed(block) {
+                self.float(block, top, frame);
+                self.wide = None;
+                continue;
+            }
             // Only the first paragraph after a chapter heading opens the chapter.
             let opening = std::mem::take(&mut self.opening);
             match block {
@@ -605,6 +718,7 @@ impl<'a> Flow<'a> {
                     } else {
                         0.0
                     };
+                    let scope = self.open(Kind::Paragraph, true);
                     match class {
                         // A styled paragraph, such as an epigraph, leaves the opening to the next one.
                         Some(class) if class.name != NO_DROP_CAP && opening => {
@@ -614,6 +728,7 @@ impl<'a> Flow<'a> {
                         None if opening => self.opening_paragraph(*at, content, &style, frame),
                         _ => self.text_block(*at, content, &style, frame, indent, Role::Text),
                     }
+                    self.close(scope);
                 }
                 Block::Heading {
                     at,
@@ -638,6 +753,14 @@ impl<'a> Flow<'a> {
                     let heading = &self.structure.headings[self.headings];
                     self.headings += 1;
                     let anchor = Some(heading.anchor);
+                    let level = *level;
+                    let scope = self.open(
+                        Kind::Heading {
+                            level,
+                            text: heading.title(),
+                        },
+                        true,
+                    );
                     let chapters = &self.config.chapters;
                     match (&heading.number, style.number_gap) {
                         (Some(number), _) if chapter && chapters.number_position == NumberPosition::Above => {
@@ -673,6 +796,7 @@ impl<'a> Flow<'a> {
                             None => self.heading(*at, content, None, &style, frame, anchor),
                         },
                     }
+                    self.close(scope);
                     if chapter {
                         self.ornament(*at, &style, frame);
                         self.opening = chapters.drop_cap > 0 || chapters.lead_in > 0;
@@ -684,7 +808,8 @@ impl<'a> Flow<'a> {
                     items,
                     class,
                 } => self.list(*at, *start, items, class.as_ref(), frame),
-                Block::Quote { blocks, .. } => {
+                Block::Callout { at, kind, blocks } if !self.in_notes => self.callout(*at, *kind, blocks, frame),
+                Block::Quote { blocks, .. } | Block::Callout { blocks, .. } => {
                     let style = if self.in_notes {
                         &self.notes.quote
                     } else {
@@ -700,16 +825,22 @@ impl<'a> Flow<'a> {
                         ..frame
                     };
                     self.after_paragraph = false;
+                    let scope = self.open(Kind::Quote, false);
                     self.blocks(blocks, inner);
+                    self.close(scope);
                     self.space(style.space_after.0);
                 }
-                Block::Code { first_line, lines, .. } => self.code(*first_line, lines, frame),
-                Block::Image { at, image, caption, .. } => {
-                    let images = self.images;
-                    let figure = self.structure.figures[self.figures];
-                    self.figures += 1;
-                    self.image(*at, &images[*image], caption, figure, frame);
+                Block::Code {
+                    first_line,
+                    language,
+                    lines,
+                    ..
+                } => {
+                    let scope = self.open(Kind::Code, true);
+                    self.code(*first_line, language.as_deref(), lines, frame);
+                    self.close(scope);
                 }
+                Block::Image { .. } | Block::Table { .. } => self.figure_or_table(block, frame),
                 Block::Keep { at, blocks } => {
                     self.opening = opening;
                     self.keep(*at, blocks, frame);
@@ -737,33 +868,96 @@ impl<'a> Flow<'a> {
                 }
                 Block::Contents { .. } => self.contents(frame),
                 Block::SceneBreak { at } => self.scene_break(*at, frame),
-                Block::Table {
-                    at,
-                    columns,
-                    header,
-                    rows,
-                    caption,
-                    ..
-                } => {
-                    let number = self.structure.tables[self.tables];
-                    self.tables += 1;
-                    let block = table::TableBlock {
-                        at: *at,
-                        columns,
-                        header,
-                        rows,
-                        caption,
-                        number,
-                    };
-                    self.table(block, frame);
-                }
                 Block::Columns { blocks, .. } => self.columns(blocks, frame),
                 Block::Bibliography { at } => self.bibliography(*at, frame),
+                Block::Index { at } => self.index(*at, frame),
                 Block::FullWidth { .. } => unreachable!("the parser allows full-width only directly inside columns"),
             }
             self.after_paragraph = matches!(block, Block::Paragraph { .. });
             self.wide = None;
         }
+    }
+
+    /// Sets an image with its caption or a table.
+    fn figure_or_table(&mut self, block: &Block, frame: Frame<'a>) {
+        match block {
+            Block::Image { at, image, caption, .. } => {
+                let images = self.images;
+                let figure = self.structure.figures[self.figures];
+                self.figures += 1;
+                self.image(*at, &images[*image], caption, figure, frame);
+            }
+            Block::Table {
+                at,
+                columns,
+                header,
+                rows,
+                caption,
+                ..
+            } => {
+                let number = self.structure.tables[self.tables];
+                self.tables += 1;
+                let block = table::TableBlock {
+                    at: *at,
+                    columns,
+                    header,
+                    rows,
+                    caption,
+                    number,
+                };
+                self.table(block, frame);
+            }
+            _ => unreachable!("only figures and tables are set here"),
+        }
+    }
+
+    /// Whether `block` is a figure or table placed at the top of a page, or at the bottom, by its own
+    /// attribute or the theme's default. `None` for a block set where it stands.
+    fn placed(&self, block: &Block) -> Option<bool> {
+        let placement = match block {
+            Block::Image { placement, .. } => placement.unwrap_or(self.config.placement.figure),
+            Block::Table { placement, .. } => placement.unwrap_or(self.config.placement.table),
+            _ => return None,
+        };
+        match placement {
+            _ if self.in_notes => None,
+            Placement::Here => None,
+            Placement::Top => Some(true),
+            Placement::Bottom => Some(false),
+        }
+    }
+
+    /// Sets a placed figure or table apart from the flow, for the composer to put at the top of a page or
+    /// at the bottom. The flow around it continues as if it were not there.
+    fn float(&mut self, block: &Block, top: bool, frame: Frame<'a>) {
+        let lines = std::mem::take(&mut self.lines);
+        let (space, after_paragraph, tables) = (self.space, self.after_paragraph, self.table_lines.len());
+        self.space = 0.0;
+        self.figure_or_table(block, frame);
+        let mut placed = std::mem::replace(&mut self.lines, lines);
+        // Its header never repeats, since the block stays on one page.
+        self.table_lines.truncate(tables);
+        (self.space, self.after_paragraph) = (space, after_paragraph);
+        let Some(first) = placed.first_mut() else {
+            return;
+        };
+        first.space_before = 0.0;
+        let height = placed.iter().skip(1).map(|line| line.space_before).sum::<f64>()
+            + placed.iter().map(|line| line.line.height).sum::<f64>();
+        let what = if matches!(block, Block::Table { .. }) {
+            "table"
+        } else {
+            "figure"
+        };
+        self.floats.push(pages::Float {
+            lines: placed,
+            height,
+            anchor: self.lines.len(),
+            after_break: self.lines.last().is_some_and(|line| line.after == Break::Forced),
+            top,
+            at: block.at(),
+            what,
+        });
     }
 
     /// Sets `blocks` as a group that stays on one page and returns its lines.
@@ -808,6 +1002,7 @@ impl<'a> Flow<'a> {
                 baseline: 0.0,
                 items: Vec::new(),
                 notes: Vec::new(),
+                marks: Vec::new(),
                 hyphenated: false,
             };
             self.push(sink, at, Break::Never);
@@ -841,6 +1036,7 @@ impl<'a> Flow<'a> {
                 image: image.clone(),
             }],
             notes: Vec::new(),
+            marks: Vec::new(),
             hyphenated: false,
         };
         self.push(line, at, Break::Never);
@@ -896,6 +1092,7 @@ impl<'a> Flow<'a> {
                         image: image.clone(),
                     }],
                     notes: Vec::new(),
+                    marks: Vec::new(),
                     hyphenated: false,
                 }]
             }
@@ -949,7 +1146,11 @@ impl<'a> Flow<'a> {
             }
         };
         let baseline = lines[..span - 1].iter().map(|line| line.height).sum::<f64>() + lines[span - 1].baseline;
-        lines[0].items.push(text_item(0.0, baseline, run, style.color));
+        // First in the line and joined to the text after it, so the letter is read as the start of its word.
+        let initial = text_item(0.0, baseline, run, style.color);
+        lines[0]
+            .items
+            .splice(0..0, [Item::Begin(Mark::Joined), initial, Item::End]);
         let first = self.lines.len();
         self.space(style.space_before.0);
         self.place(at, lines, style, frame, Role::Text);
@@ -1045,7 +1246,7 @@ impl<'a> Flow<'a> {
         self.text_block(at, content, style, text, 0.0, Role::Heading(anchor));
         if let Some(line) = self.lines.get_mut(first) {
             let y = line.line.baseline;
-            line.line.items.push(text_item(x, y, run, style.color));
+            tags::prepend(&mut line.line.items, text_item(x, y, run, style.color));
         }
     }
 
@@ -1117,13 +1318,15 @@ impl<'a> Flow<'a> {
     }
 
     /// Replaces cross-references, citations, and placeholders with their text, cross-references and
-    /// citations linked to their anchor. A page reference shows the page this pass assumes. Each work in
-    /// a citation links to its bibliography entry.
+    /// citations linked to their anchor, and index marks with their anchors. A page reference shows the
+    /// page this pass assumes. Each work in a citation links to its bibliography entry.
     fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
-        if !content
-            .iter()
-            .any(|inline| matches!(inline, Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. }))
-        {
+        if !content.iter().any(|inline| {
+            matches!(
+                inline,
+                Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } | Inline::IndexMark(_)
+            )
+        }) {
             return Cow::Borrowed(content);
         }
         let mut resolved = Vec::with_capacity(content.len());
@@ -1156,6 +1359,7 @@ impl<'a> Flow<'a> {
                     text: self.fields.text(placeholder).expect("fields are checked before layout"),
                     style: style.clone(),
                 }),
+                Inline::IndexMark(mark) => resolved.push(Inline::Anchor(self.structure.marks[*mark])),
                 inline => resolved.push(inline.clone()),
             }
         }
@@ -1189,6 +1393,12 @@ impl<'a> Flow<'a> {
         };
         let face = (self.fonts).face(&marker_style.font, marker_style.weight, marker_style.style);
         let outermost = frame.list_depth == 0;
+        let list = self.open(
+            Kind::List {
+                ordered: start.is_some(),
+            },
+            false,
+        );
         if outermost {
             self.space(style.space_before.0);
         }
@@ -1214,15 +1424,23 @@ impl<'a> Flow<'a> {
             let x = inner.left - 0.5 * style.size.0 - run.width.0;
             let first = self.lines.len();
             self.after_paragraph = false;
+            let list_item = self.open(Kind::ListItem, false);
+            let label = self.tags.add(Kind::Label, self.parent);
+            let body = self.open(Kind::ListBody, false);
             self.blocks(item, inner);
             if first == self.lines.len() {
                 let line = self.empty_line(style);
                 self.push(line, at, Break::Allowed(0.0));
             }
+            self.close(body);
+            self.close(list_item);
             let line = &mut self.lines[first].line;
             let y = line.baseline;
-            line.items.push(text_item(x, y, run, marker_style.color));
+            let marker = text_item(x, y, run, marker_style.color);
+            line.items
+                .extend([Item::Begin(Mark::Element(label)), marker, Item::End]);
         }
+        self.close(list);
         if style.keep_with_next && self.lines.len() > start_line {
             self.keep_last();
         }
@@ -1245,6 +1463,12 @@ impl<'a> Flow<'a> {
         let mut start = self.change_layout();
         for block in blocks {
             match block {
+                // Placed blocks leave the flow, so a full-width block of only those keeps the columns whole.
+                Block::FullWidth { blocks, .. }
+                    if !blocks.is_empty() && blocks.iter().all(|block| self.placed(block).is_some()) =>
+                {
+                    self.blocks(blocks, frame);
+                }
                 Block::FullWidth { blocks, .. } => {
                     self.end_run(start);
                     self.blocks(blocks, frame);
@@ -1283,6 +1507,8 @@ impl<'a> Flow<'a> {
     ) {
         let style = &self.config.styles.caption;
         let width = self.width(frame);
+        // The description is both the caption and the alternative text.
+        let alt = caption;
         let caption = match figure {
             None => Vec::new(),
             Some(figure) => {
@@ -1330,13 +1556,18 @@ impl<'a> Flow<'a> {
             baseline: size.1,
             items,
             notes: Vec::new(),
+            marks: Vec::new(),
             hyphenated: false,
         };
         let count = caption.len();
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
+        let alt = structure::plain(alt).trim().to_owned();
+        let scope = self.open(Kind::Figure { alt, at }, true);
         self.push(line, at, after);
+        self.close(scope);
         self.space(style.space_before.0);
         let dx = frame.left + style.indent.0;
+        let scope = self.open(Kind::Caption, true);
         for (index, line) in caption.into_iter().enumerate() {
             let after = if index + 1 == count {
                 Break::Allowed(0.0)
@@ -1345,6 +1576,7 @@ impl<'a> Flow<'a> {
             };
             self.push(translate_line(line, dx), at, after);
         }
+        self.close(scope);
         self.space(style.space_after.0);
     }
 
@@ -1401,7 +1633,7 @@ impl<'a> Flow<'a> {
     }
 
     /// Code lines are set as they are. A line wider than the available width is an error.
-    fn code(&mut self, first_line: u64, lines: &[String], frame: Frame<'a>) {
+    fn code(&mut self, first_line: u64, language: Option<&str>, lines: &[String], frame: Frame<'a>) {
         let style = if self.in_notes {
             &self.notes.code_block
         } else {
@@ -1411,17 +1643,21 @@ impl<'a> Flow<'a> {
         let width = self.width(frame) - 2.0 * style.indent.0;
         let x = frame.left + style.indent.0;
         self.space(style.space_before.0);
+        let lines: Vec<String> = lines.iter().map(|text| text.replace('\t', "    ")).collect();
+        let palette = self.config.highlight.as_ref();
+        let spans = language
+            .zip(palette)
+            .and_then(|(language, _)| highlight::highlight(language, &lines));
         for (index, text) in lines.iter().enumerate() {
             let line_at = Location {
                 line: first_line + index as u64,
                 column: 1,
             };
             let mut line = self.empty_line(style);
-            let text = text.replace('\t', "    ");
             if !text.trim().is_empty() {
                 let run = self
                     .fonts
-                    .shape_figures(&text, face, style.size, self.config.document.lang, style.figures);
+                    .shape_figures(text, face, style.size, self.config.document.lang, style.figures);
                 if let Some(problem) = paragraph::missing_glyph(&run) {
                     self.errors.push(self.error(line_at, problem.to_string()));
                 }
@@ -1433,7 +1669,14 @@ impl<'a> Flow<'a> {
                     );
                     self.errors.push(self.error(line_at, message));
                 }
-                line.items.push(text_item(x, line.baseline, run, style.color));
+                match (&spans, palette) {
+                    (Some(spans), Some(palette)) => {
+                        for (dx, run, color) in highlighted::split(run, &spans[index], palette, style.color) {
+                            line.items.push(text_item(x + dx.0, line.baseline, run, color));
+                        }
+                    }
+                    _ => line.items.push(text_item(x, line.baseline, run, style.color)),
+                }
             }
             self.push(line, line_at, pages::line_break(index, lines.len()));
         }
@@ -1449,17 +1692,27 @@ impl<'a> Flow<'a> {
             baseline: paragraph::baseline(height, &metrics),
             items: Vec::new(),
             notes: Vec::new(),
+            marks: Vec::new(),
             hyphenated: false,
         }
     }
 
-    /// Adds a line to the flow. A page or column ending after a hyphenated line costs more.
-    fn push(&mut self, line: Line, at: Location, after: Break) {
+    /// Adds a line to the flow, as content of the current element. A page or column ending after a
+    /// hyphenated line costs more.
+    fn push(&mut self, mut line: Line, at: Location, after: Break) {
         let after = if line.hyphenated {
             after.costlier(pages::HYPHENATED)
         } else {
             after
         };
+        line.items = self.tag(std::mem::take(&mut line.items));
+        if let Some(element) = self.leaf.filter(|_| !self.in_notes) {
+            for &(note, _) in &line.marks {
+                if let NoteRef::Margin(index) = note {
+                    self.tags.add_margin_note(index, element, &mut line.items);
+                }
+            }
+        }
         self.lines.push(FlowLine {
             line,
             space_before: std::mem::take(&mut self.space),
@@ -1467,7 +1720,35 @@ impl<'a> Flow<'a> {
             at,
             wide: self.wide,
             top_only: false,
+            callout: None,
         });
+    }
+
+    /// Opens an element of `kind` in the current one. Until [`Flow::close`], elements opened belong to it,
+    /// and lines pushed are its content if it is a `leaf`, else decoration.
+    fn open(&mut self, kind: Kind, leaf: bool) -> Scope {
+        let id = self.tags.add(kind, self.parent);
+        self.enter(id, leaf)
+    }
+
+    /// Makes `id` the current element, as [`Flow::open`] does.
+    fn enter(&mut self, id: Id, leaf: bool) -> Scope {
+        let scope = Scope {
+            parent: self.parent.replace(id),
+            leaf: self.leaf,
+        };
+        self.leaf = leaf.then_some(id);
+        scope
+    }
+
+    fn close(&mut self, scope: Scope) {
+        self.parent = scope.parent;
+        self.leaf = scope.leaf;
+    }
+
+    /// Marks `items` as content of the current leaf element. A footnote's own number is plain content.
+    fn tag(&mut self, items: Vec<Item>) -> Vec<Item> {
+        self.tags.tag(self.leaf, items, !self.in_notes)
     }
 
     /// Requests vertical space before the next line. Adjacent spaces collapse to the larger one.
@@ -1664,6 +1945,8 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
             x: Pt(x.0 + dx),
             y: Pt(y.0 + dy),
         },
+        Item::Begin(mark) => Item::Begin(mark),
+        Item::End => Item::End,
     }
 }
 

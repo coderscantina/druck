@@ -31,6 +31,7 @@ use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
 use crate::image::Image;
 use crate::page::{Item, Page, Rect};
+use crate::tags::{Kind, Tree};
 use crate::text::Fonts;
 
 /// Where title content is reported: the front matter at the top of the document.
@@ -125,13 +126,15 @@ pub(super) fn block<'a>(config: &'a Config, fields: &Fields) -> Option<&'a [Titl
     shown.then_some(slots.as_slice())
 }
 
-/// The title page: each `title-page` group placed at its anchor on the margin frame.
+/// The title page: each `title-page` group placed at its anchor on the margin frame. Its slots are added to
+/// `tags`.
 pub(super) fn page(
     config: &Config,
     fields: &Fields,
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
     source: &Source,
+    tags: &mut Tree,
 ) -> Result<Page, Vec<Diagnostic>> {
     let geometry = &config.page;
     let error = |message: String| vec![Diagnostic::new(Some(source.clone()), message)];
@@ -146,6 +149,7 @@ pub(super) fn page(
             fonts,
             theme_images,
             group.width.0,
+            tags,
         )
         .map_err(error)?;
         let height: f64 = lines.iter().map(|(space, line)| space + line.height).sum();
@@ -199,6 +203,7 @@ impl<'a> Flow<'a> {
             self.fonts,
             self.theme_images,
             width,
+            &mut self.tags,
         ) {
             Ok(lines) => {
                 let count = lines.len();
@@ -219,7 +224,9 @@ impl<'a> Flow<'a> {
 }
 
 /// The lines of the slots that have values, each with the space above it. Lines are set across `width`,
-/// aligned by `align` if given, else by their style.
+/// aligned by `align` if given, else by their style. Each text slot is an element of `tags`, and so is the
+/// label of an abstract; images are decoration.
+#[allow(clippy::too_many_arguments, reason = "the slots with what setting them needs")]
 fn slots(
     slots: &[TitleSlot],
     align: Option<Align>,
@@ -228,8 +235,18 @@ fn slots(
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
     width: f64,
+    tags: &mut Tree,
 ) -> Result<Vec<(f64, Line)>, String> {
     let mut lines = Vec::new();
+    let mut tagged = |kind: Kind, set: Vec<Line>| -> Vec<Line> {
+        let element = Some(tags.add(kind, None));
+        set.into_iter()
+            .map(|mut line| {
+                line.items = tags.tag(element, std::mem::take(&mut line.items), false);
+                line
+            })
+            .collect()
+    };
     for slot in slots {
         let style = aligned(config.slot_style(&slot.style), align);
         let start = lines.len();
@@ -242,14 +259,16 @@ fn slots(
                 for line in &filled {
                     set.extend(text_lines(line, &style, config, fonts, width)?);
                 }
+                let kind = match slot.style {
+                    SlotStyle::Template(TemplateStyle::Title) => Kind::Title,
+                    _ => Kind::Paragraph,
+                };
                 if slot.style == SlotStyle::Template(TemplateStyle::Abstract) {
                     let heading = aligned(&config.styles.abstract_heading, align);
                     let label = &config.labels.abstract_;
-                    lines.extend(
-                        text_lines(label, &heading, config, fonts, width)?
-                            .into_iter()
-                            .map(|l| (0.0, l)),
-                    );
+                    let label = tagged(Kind::Paragraph, text_lines(label, &heading, config, fonts, width)?);
+                    lines.extend(label.into_iter().map(|l| (0.0, l)));
+                    let set = tagged(kind, set);
                     let gap = heading.space_after.0;
                     lines.extend(
                         set.into_iter()
@@ -257,7 +276,7 @@ fn slots(
                             .map(|(index, line)| (if index == 0 { gap } else { 0.0 }, line)),
                     );
                 } else {
-                    lines.extend(set.into_iter().map(|l| (0.0, l)));
+                    lines.extend(tagged(kind, set).into_iter().map(|l| (0.0, l)));
                 }
             }
             SlotContent::Image {
@@ -329,6 +348,7 @@ fn image_line(image: &Image, width: Pt, align: Align, frame_width: f64) -> Line 
             image: image.clone(),
         }],
         notes: Vec::new(),
+        marks: Vec::new(),
         hyphenated: false,
     }
 }

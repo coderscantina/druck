@@ -22,6 +22,8 @@ pub struct Metadata<'a> {
     pub date: Option<Date>,
     pub description: Option<String>,
     pub modified: Date,
+    /// EPUB Accessibility properties with their values, in order.
+    pub accessibility: Vec<(&'static str, String)>,
 }
 
 /// A file of the EPUB, relative to the package document.
@@ -101,6 +103,12 @@ pub fn document(metadata: &Metadata, items: &[Item], spine: &[&str]) -> String {
             day(metadata.modified)
         ),
     );
+    for (property, value) in &metadata.accessibility {
+        line(
+            &mut opf,
+            format!("<meta property=\"{property}\">{}</meta>", xml::text(value)),
+        );
+    }
     if let Some(cover) = items.iter().find(|item| item.properties == Some("cover-image")) {
         // For readers that only know EPUB 2.
         line(&mut opf, format!("<meta name=\"cover\" content=\"{}\"/>", cover.id));

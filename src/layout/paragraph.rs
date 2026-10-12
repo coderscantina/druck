@@ -12,12 +12,13 @@ pub(super) mod protrusion;
 use std::collections::HashMap;
 
 use self::breaking::{Hang, Item as Element, Measure};
-use super::{Line, inline_face, text_item};
+use super::{Line, NoteRef, anchor_item, inline_face, text_item};
 use crate::config::resolved::{InlineStyles, Style};
 use crate::config::theme::{Align, Figures, FontStyle, Lang, Weight};
 use crate::config::values::{Color, Pt};
 use crate::document::{Inline, Link};
 use crate::page::{Item, Rect};
+use crate::tags;
 use crate::text::{FaceId, Fonts, Metrics, ShapedRun};
 
 /// Interword spaces may stretch by half and shrink by a third of their natural width.
@@ -41,12 +42,16 @@ struct Fragment {
     rise: f64,
     /// The footnote this fragment marks.
     note: Option<usize>,
+    /// The margin notes referenced right after this fragment.
+    margin: Vec<usize>,
     /// Letter spacing in em, which reshaping keeps.
     tracking: f64,
     /// The figures of the style, which reshaping keeps.
     figures: Figures,
     /// The code span this fragment belongs to, by its index in the content, and its box color.
     background: Option<(usize, Color)>,
+    /// Anchors placed where the fragment starts, from index marks next to it.
+    anchors: Vec<usize>,
 }
 
 /// Where a fragment may break inside a word.
@@ -265,7 +270,19 @@ impl Prepared<'_> {
             .enumerate()
             .map(|(index, mark)| {
                 let runs = line_runs(&self.words, start, mark, fonts, lang);
-                let notes = runs.iter().filter_map(|(_, fragment, _)| fragment.note).collect();
+                let notes = runs.iter().filter_map(|(_, fragment, ..)| fragment.note).collect();
+                // A fragment broken at the end of the line ends on the next one, with its margin notes.
+                let broken = (mark.at.offset > 0).then(|| &self.words[mark.at.word].fragments[mark.at.fragment]);
+                let marks = runs
+                    .iter()
+                    .flat_map(|(_, fragment, ..)| {
+                        let ends = !broken.is_some_and(|broken| std::ptr::eq(broken, *fragment));
+                        let margin = fragment.margin.iter().filter(move |_| ends);
+                        let notes = fragment.note.map(NoteRef::Footnote).into_iter();
+                        notes.chain(margin.map(|&index| NoteRef::Margin(index)))
+                    })
+                    .map(|note| (note, baseline))
+                    .collect();
                 start = mark.at;
                 let line_indent = if index < count { indent } else { 0.0 };
                 let items = position(
@@ -283,6 +300,7 @@ impl Prepared<'_> {
                     baseline,
                     items,
                     notes,
+                    marks,
                     // Only breaks inside a word have an offset into its fragment.
                     hyphenated: mark.at.offset > 0,
                 }
@@ -552,15 +570,16 @@ fn leading_at(word: &Word, fragment: usize, offset: usize) -> f64 {
     }
 }
 
-/// The shaped runs of one line, each with its fragment and whether a space comes before it.
-/// Fragments cut by a break are reshaped; the hyphen of a hyphenated line joins its fragment.
+/// The shaped runs of one line, each with its fragment, whether a space comes before it, and whether it
+/// starts the fragment. Fragments cut by a break are reshaped; the hyphen of a hyphenated line joins its
+/// fragment.
 fn line_runs<'a>(
     words: &'a [Word],
     start: Cursor,
     end: Mark,
     fonts: &Fonts,
     lang: Lang,
-) -> Vec<(ShapedRun, &'a Fragment, Option<usize>)> {
+) -> Vec<(ShapedRun, &'a Fragment, Option<usize>, bool)> {
     let last_word = if end.at.fragment == 0 && end.at.offset == 0 {
         end.at.word
     } else {
@@ -607,7 +626,7 @@ fn line_runs<'a>(
                 )
             };
             let space = (first && index > start.word).then_some(index);
-            runs.push((run, fragment, space));
+            runs.push((run, fragment, space, low == 0));
             first = false;
         }
     }
@@ -617,7 +636,7 @@ fn line_runs<'a>(
 /// Positions the runs of one line of `available` width, starting at `indent`.
 #[allow(clippy::too_many_arguments)]
 fn position(
-    runs: Vec<(ShapedRun, &Fragment, Option<usize>)>,
+    runs: Vec<(ShapedRun, &Fragment, Option<usize>, bool)>,
     spaces: &[f64],
     align: Align,
     available: f64,
@@ -628,7 +647,7 @@ fn position(
 ) -> Vec<Item> {
     let space_total: f64 = runs
         .iter()
-        .filter_map(|(.., space)| space.map(|word| spaces[word]))
+        .filter_map(|(_, _, space, _)| space.map(|word| spaces[word]))
         .sum();
     let natural = space_total + runs.iter().map(|(run, ..)| run.width.0).sum::<f64>();
     // Justified lines hang punctuation into the margins; every line ends at its last glyph, not
@@ -653,12 +672,26 @@ fn position(
     let mut items = Vec::new();
     let mut open_link: Option<usize> = None;
     let mut open_code: Option<(usize, usize)> = None;
+    // The link whose text is marked, for tagging.
+    let mut marked_link: Option<&Link> = None;
     let mut x = indent + start;
-    for (run, fragment, space) in runs {
+    for (run, fragment, space, starts) in runs {
         if let Some(word) = space {
             x += spaces[word] * (1.0 + adjust);
         }
+        if starts {
+            items.extend(fragment.anchors.iter().map(|&id| anchor_item(id, x)));
+        }
         let width = run.width.0;
+        if marked_link != fragment.link.as_ref() {
+            if marked_link.is_some() {
+                items.push(Item::End);
+            }
+            marked_link = fragment.link.as_ref();
+            if let Some(link) = marked_link {
+                items.push(Item::Begin(tags::Mark::Link(link.clone())));
+            }
+        }
         match (fragment.background, open_code) {
             (Some((span, _)), Some((open, item))) if span == open => {
                 if let Item::Rect { rect, .. } = &mut items[item] {
@@ -716,8 +749,15 @@ fn position(
         } else {
             open_link = None;
         }
-        items.push(text_item(x, baseline - fragment.rise, run, fragment.color));
+        let text = text_item(x, baseline - fragment.rise, run, fragment.color);
+        match fragment.note {
+            Some(note) => items.extend([Item::Begin(tags::Mark::Note(note)), text, Item::End]),
+            None => items.push(text),
+        }
         x += width;
+    }
+    if marked_link.is_some() {
+        items.push(Item::End);
     }
     items
 }
@@ -777,6 +817,10 @@ fn tokens(
             tokens.push(Token::Word(std::mem::take(word)));
         }
     };
+    // Anchors between words wait for the next fragment; one right after a word goes with that word.
+    let mut anchors = Vec::new();
+    // Margin notes referenced before any text, which go with the first fragment.
+    let mut leading = Vec::new();
     for (span, piece) in content.iter().enumerate() {
         let (text, text_style) = match piece {
             Inline::LineBreak => {
@@ -784,9 +828,32 @@ fn tokens(
                 tokens.push(Token::LineBreak);
                 continue;
             }
+            // A margin note has no mark: it belongs to the fragment before it.
+            Inline::MarginNote(index) => {
+                let before = word.fragments.last_mut().or_else(|| {
+                    tokens.iter_mut().rev().find_map(|token| match token {
+                        Token::Word(word) => word.fragments.last_mut(),
+                        _ => None,
+                    })
+                });
+                match before {
+                    Some(fragment) => fragment.margin.push(*index),
+                    None => leading.push(*index),
+                }
+                continue;
+            }
             Inline::Text { text, style } => (text, style),
-            Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } => {
-                unreachable!("layout resolves cross-references, citations, and placeholders before setting text")
+            Inline::Anchor(id) => {
+                match word.fragments.last_mut() {
+                    Some(fragment) => fragment.anchors.push(*id),
+                    None => anchors.push(*id),
+                }
+                continue;
+            }
+            Inline::Ref(_) | Inline::Citation { .. } | Inline::Field { .. } | Inline::IndexMark(_) => {
+                unreachable!(
+                    "layout resolves cross-references, citations, placeholders, and index marks before setting text"
+                )
             }
             Inline::FootnoteRef(index) => {
                 let (weight, font_style) = inline_face(style, false, false);
@@ -804,9 +871,11 @@ fn tokens(
                     breaks: Breaks::Never,
                     rise: inline.footnote_marker_raise.to_pt(style.size).0,
                     note: Some(*index),
+                    margin: Vec::new(),
                     tracking: 0.0,
                     figures: Figures::default(),
                     background: None,
+                    anchors: std::mem::take(&mut anchors),
                 });
                 continue;
             }
@@ -878,9 +947,11 @@ fn tokens(
                         breaks: Breaks::Never,
                         rise: 0.0,
                         note: None,
+                        margin: Vec::new(),
                         tracking,
                         figures,
                         background: None,
+                        anchors: std::mem::take(&mut anchors),
                     });
                 }
                 continue;
@@ -914,15 +985,38 @@ fn tokens(
                 breaks,
                 rise: 0.0,
                 note: None,
+                margin: Vec::new(),
                 tracking,
                 figures,
                 background: inline
                     .code_background
                     .filter(|_| text_style.code)
                     .map(|color| (span, color)),
+                anchors: std::mem::take(&mut anchors),
             });
         }
     }
     finish(&mut word, &mut tokens);
+    // Anchors after the last word go with it. The parser rejects marks in content without text.
+    if !anchors.is_empty() {
+        let last = tokens.iter_mut().rev().find_map(|token| match token {
+            Token::Word(word) => word.fragments.last_mut(),
+            _ => None,
+        });
+        if let Some(fragment) = last {
+            fragment.anchors.append(&mut anchors);
+        }
+    }
+    if !leading.is_empty() {
+        let first = tokens.iter_mut().find_map(|token| match token {
+            Token::Word(word) => word.fragments.first_mut(),
+            _ => None,
+        });
+        let Some(first) = first else {
+            return Err("a margin note needs text to stand beside".to_owned());
+        };
+        leading.append(&mut first.margin);
+        first.margin = leading;
+    }
     Ok(tokens)
 }

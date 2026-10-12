@@ -5,6 +5,7 @@
 //! only named. The container is a [zip] written in a fixed order with fixed timestamps, so the same input
 //! gives the same bytes.
 
+mod accessibility;
 mod content;
 mod css;
 mod fonts;
@@ -224,6 +225,7 @@ pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
             date,
             description,
             modified: book.modified,
+            accessibility: accessibility::metadata(document, config, cover.is_some()),
         },
         &items,
         &spine.iter().map(String::as_str).collect::<Vec<_>>(),

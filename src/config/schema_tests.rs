@@ -92,6 +92,16 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             false,
         ),
         (
+            "one-column index",
+            json!({"version": 1, "index": {"columns": 1, "separator": " "}}),
+            true,
+        ),
+        (
+            "three-column index",
+            json!({"version": 1, "index": {"columns": 3}}),
+            false,
+        ),
+        (
             "slot group",
             json!({"version": 1, "pages": {"body": {"footer": [{"anchor": "top-right", "offset": {"x": "1em"},
                 "width": "4cm", "align": "right", "slots": [{"text": "{page}|{pages}", "space-before": "2pt"}]}]}}}),
@@ -136,6 +146,27 @@ fn schema_and_layer_check_agree_on_partial_themes() {
         (
             "unknown field",
             json!({"version": 1, "styles": {"body": {"colour": "#000000"}}}),
+            false,
+        ),
+        (
+            "highlight colors by token and value",
+            json!({"version": 1, "highlight": {"comment": "$colors.muted", "string": "#2d6a4f"}}),
+            true,
+        ),
+        ("highlight off", json!({"version": 1, "highlight": null}), true),
+        (
+            "unknown highlight category",
+            json!({"version": 1, "highlight": {"keywords": "#000000"}}),
+            false,
+        ),
+        (
+            "bad highlight color",
+            json!({"version": 1, "highlight": {"comment": "gray"}}),
+            false,
+        ),
+        (
+            "null highlight color",
+            json!({"version": 1, "highlight": {"comment": null}}),
             false,
         ),
         ("wrong version", json!({"version": 2}), false),

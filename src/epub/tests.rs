@@ -6,6 +6,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::content::{self, Content, Context, Item};
+use super::css;
 use super::pages;
 use crate::bibliography::Bibliography;
 use crate::citations::{self, Cited};
@@ -45,7 +46,7 @@ pub(super) fn config(yaml: &str, theme: Value) -> Config {
 
 /// The body files of `body`, with citations from the BibTeX text `bib`.
 fn write(config: &Config, body: &str, bib: Option<&str>) -> (Content, Structure) {
-    let document = crate::markdown::parse(body, 1, &source()).expect("document parses");
+    let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography = bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography"));
     let cited: Cited = citations::resolve(&document, bibliography.as_ref(), config, &source()).expect("citations");
     let fields = Fields::new(&document, config, Date::from_unix(0));
@@ -91,7 +92,9 @@ fn splits_files_at_chapters_parts_page_breaks_and_the_contents() {
     assert_eq!(content.order, order.collect::<Vec<_>>());
     let bodies = bodies(&content);
     assert!(
-        bodies[3].starts_with("<section epub:type=\"chapter\"><h1 id=\"a1\" class=\"chapter\">1 One</h1>"),
+        bodies[3].starts_with(
+            "<section epub:type=\"chapter\" role=\"doc-chapter\"><h1 id=\"a1\" class=\"chapter\">1 One</h1>"
+        ),
         "{}",
         bodies[3]
     );
@@ -118,7 +121,7 @@ fn places_footnotes_as_notes_at_the_end_of_the_file_of_their_first_reference() {
     let bodies = bodies(&content);
     assert!(
         bodies[0].contains(
-            "A note.<a class=\"noteref\" epub:type=\"noteref\" id=\"fnref-1\" href=\"#fn-1\">1</a> More.</p>"
+            "A note.<a class=\"noteref\" epub:type=\"noteref\" role=\"doc-noteref\" id=\"fnref-1\" href=\"#fn-1\">1</a> More.</p>"
         ),
         "{}",
         bodies[0]
@@ -126,17 +129,37 @@ fn places_footnotes_as_notes_at_the_end_of_the_file_of_their_first_reference() {
     assert!(
         bodies[0].ends_with(
             "<section class=\"footnotes\" epub:type=\"footnotes\"><aside class=\"footnote\" epub:type=\"footnote\" \
-         id=\"fn-1\"><p><a class=\"note-number\" href=\"#fnref-1\">1</a> First.</p></aside></section>"
+         role=\"doc-footnote\" id=\"fn-1\"><p><a class=\"note-number\" role=\"doc-backlink\" href=\"#fnref-1\">1</a> First.</p></aside></section>"
         ),
         "{}",
         bodies[0]
     );
     assert!(
-        bodies[1].contains("id=\"fn-2\"><p><a class=\"note-number\" href=\"#fnref-2\">2</a> Second <em>note</em>.</p>"),
+        bodies[1].contains("id=\"fn-2\"><p><a class=\"note-number\" role=\"doc-backlink\" href=\"#fnref-2\">2</a> Second <em>note</em>.</p>"),
         "{}",
         bodies[1]
     );
     assert!(!bodies[1].contains("id=\"fn-1\""), "{}", bodies[1]);
+}
+
+#[test]
+fn margin_notes_follow_the_block_that_references_them_and_sidenotes_stay_footnotes() {
+    let body = "Aside here.[^m] Note here.[^n]\n\n- Item.[^i]\n\n[^m]: {-} In the margin.\n\n[^n]: At the foot.\n\n\
+        [^i]: {-} Beside an item.\n";
+    let theme = json!({"version": 1, "margin-notes": {"sidenotes": true}});
+    let (content, _) = write(&config("", theme), body, None);
+    let body = bodies(&content)[0];
+    assert!(
+        body.starts_with(
+            "<p>Aside here. Note here.<a class=\"noteref\" epub:type=\"noteref\" role=\"doc-noteref\" id=\"fnref-1\" href=\"#fn-1\">1</a></p>\
+             <aside class=\"margin-note\"><p>In the margin.</p></aside>\
+             <ul><li>Item.<aside class=\"margin-note\"><p>Beside an item.</p></aside></li></ul>"
+        ),
+        "{body}"
+    );
+    assert!(body.contains(
+        "id=\"fn-1\"><p><a class=\"note-number\" role=\"doc-backlink\" href=\"#fnref-1\">1</a> At the foot.</p>"
+    ));
 }
 
 #[test]
@@ -170,7 +193,8 @@ fn links_citations_to_bibliography_entries_in_their_own_file() {
         bodies[0]
     );
     assert!(
-        bodies[1].starts_with("<section epub:type=\"bibliography\"><h1 id=\"a1\">References</h1>"),
+        bodies[1]
+            .starts_with("<section epub:type=\"bibliography\" role=\"doc-bibliography\"><h1 id=\"a1\">References</h1>"),
         "{}",
         bodies[1]
     );
@@ -184,12 +208,29 @@ fn links_citations_to_bibliography_entries_in_their_own_file() {
 
 #[test]
 fn escapes_text_and_link_targets() {
-    let body = "Fish & \\<chips\\> \"now\" at [shop](https://example.com/?a=1&b=\"2\").\n";
+    let body = "Fish & \\<chips\\> \\\"now\\\" at [shop](https://example.com/?a=1&b=\"2\").\n";
     let (content, _) = write(&config("", json!({"version": 1})), body, None);
     assert_eq!(
         bodies(&content)[0],
         "<p>Fish &amp; &lt;chips&gt; \"now\" at <a href=\"https://example.com/?a=1&amp;b=&quot;2&quot;\">shop</a>.</p>"
     );
+}
+
+#[test]
+fn colors_code_by_token_class_and_leaves_other_blocks_plain() {
+    let body = "```json\n{\"a\": true}\n```\n\n```klingon\nnuqneH <b>\n```\n\n```\nplain\n```\n";
+    let on = config("", json!({"version": 1}));
+    let (content, _) = write(&on, body, None);
+    let html = bodies(&content)[0];
+    assert!(html.contains("<span class=\"hl-constant\">true</span>"), "{html}");
+    assert!(html.contains("<pre><code>nuqneH &lt;b&gt;</code></pre>"), "{html}");
+    assert!(html.contains("<pre><code>plain</code></pre>"), "{html}");
+    assert!(css::rules(&on).0.contains("pre .hl-constant { color: #8a4b08; }"));
+
+    let off = config("", json!({"version": 1, "highlight": null}));
+    let (content, _) = write(&off, body, None);
+    assert!(!bodies(&content)[0].contains("hl-"));
+    assert!(!css::rules(&off).0.contains("hl-"));
 }
 
 #[test]
@@ -204,7 +245,7 @@ fn opens_chapters_with_the_number_above_an_ornament_free_heading_and_a_lead_in()
     let (content, _) = write(&config("", theme), body, None);
     assert_eq!(
         bodies(&content)[0],
-        "<section epub:type=\"chapter\"><h1 id=\"a0\" class=\"chapter\"><span class=\"chapter-number s-heading-1\">\
+        "<section epub:type=\"chapter\" role=\"doc-chapter\"><h1 id=\"a0\" class=\"chapter\"><span class=\"chapter-number s-heading-1\">\
          Chapter I</span> The arrival</h1><p class=\"s-epigraph\">A quiet line.</p><p class=\"opening\"><span \
          class=\"lead-in\">Elias came</span> to the island late.</p><p>Then more.</p></section>"
     );
@@ -221,8 +262,8 @@ fn writes_tables_with_captions_spans_alignment_and_row_styles() {
     let (content, _) = write(&config("", theme), body, None);
     assert_eq!(
         bodies(&content)[0],
-        "<table id=\"a0\"><caption>Table 1: Costs</caption><thead><tr><th class=\"align-left\">Item</th><th \
-         class=\"align-right\">Cost</th></tr></thead><tbody><tr><td class=\"align-left\">Tea</td><td \
+        "<table id=\"a0\"><caption>Table 1: Costs</caption><thead><tr><th scope=\"col\" class=\"align-left\">Item</th><th \
+         scope=\"col\" class=\"align-right\">Cost</th></tr></thead><tbody><tr><td class=\"align-left\">Tea</td><td \
          class=\"align-right\">3</td></tr><tr class=\"s-total\"><td class=\"s-total align-left\" \
          colspan=\"2\">Sum</td></tr></tbody></table>"
     );
@@ -236,7 +277,7 @@ fn lists_the_listed_headings_up_to_the_contents_depth_in_the_navigation() {
     let navigation = pages::navigation(&config, &structure, &content.anchors, &[], ("text-001.xhtml", "Book"));
     assert_eq!(
         navigation,
-        "<nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"text-001.xhtml#a0\">1 One</a><ol><li>\
+        "<nav epub:type=\"toc\" role=\"doc-toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"text-001.xhtml#a0\">1 One</a><ol><li>\
          <a href=\"text-001.xhtml#a1\">1.1 Sub</a></li></ol></li><li><a href=\"text-003.xhtml#a4\">3 Two</a></li></ol></nav>"
     );
 }
@@ -249,6 +290,72 @@ fn links_the_first_document_in_the_navigation_of_a_book_without_headings() {
     let navigation = pages::navigation(&config, &structure, &content.anchors, &[], ("text-001.xhtml", "A & B"));
     assert_eq!(
         navigation,
-        "<nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"text-001.xhtml\">A &amp; B</a></li></ol></nav>"
+        "<nav epub:type=\"toc\" role=\"doc-toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"text-001.xhtml\">A &amp; B</a></li></ol></nav>"
     );
+}
+
+#[test]
+fn sets_a_callout_as_an_aside_with_its_label_and_a_class_per_kind() {
+    let theme = json!({"version": 1, "callouts": {"tip": {"background": "#eeeeee", "rule": null}}});
+    let config = config("lang: de", theme);
+    let (content, _) = write(&config, "> [!TIP]\n> Mit `Code` & mehr.\n\n> Plain.\n", None);
+    assert_eq!(
+        bodies(&content)[0],
+        "<aside class=\"callout tip\" epub:type=\"tip\"><p class=\"callout-label\">Tipp</p><p>Mit <code>Code</code> &amp; mehr.</p></aside>\
+     <blockquote><p>Plain.</p></blockquote>"
+    );
+    let (css, _) = super::css::rules(&config);
+    assert!(
+        css.contains("aside.callout.tip { background-color: #eeeeee; }"),
+        "{css}"
+    );
+    assert!(css.contains("aside.callout.caution { background-color: #f1f1f1; border-left: 4pt solid"));
+}
+
+#[test]
+fn the_index_links_each_entry_to_its_marks_by_their_headings() {
+    let body = "# One\n\nAlpha{^alpha} and [beta]{^}.\n\n## Two\n\nAlpha{^alpha} again{^alpha}.[^n]\n\n\
+                [^n]: Beta{^beta!sub} note.\n\n# Three\n\nGamma{^gamma|see alpha}.\n";
+    let (content, _) = write(&config("", json!({"version": 1})), body, None);
+    let bodies = bodies(&content);
+    assert_eq!(bodies.len(), 3, "{bodies:?}");
+    assert!(
+        bodies[0].contains("<p>Alpha<span id=\"a4\"></span> and <span id=\"a5\"></span>beta.</p>"),
+        "{}",
+        bodies[0]
+    );
+    let entry = |term: &str, rest: &str| {
+        format!(
+            "<li class=\"index-entry\" epub:type=\"index-entry\"><span epub:type=\"index-term\">{term}</span>{rest}"
+        )
+    };
+    let locator = |href: &str, text: &str| format!("<a epub:type=\"index-locator\" href=\"{href}\">{text}</a>");
+    let expected = [
+        "<section epub:type=\"index\" role=\"doc-index\"><h1 id=\"a3\">Index</h1>".to_owned(),
+        "<div epub:type=\"index-group\"><h2 class=\"index-letter\">A</h2>".to_owned(),
+        entry(
+            "alpha",
+            &format!(
+                ", {}, {}</li>",
+                locator("text-001.xhtml#a4", "1 One"),
+                locator("text-001.xhtml#a6", "1.1 Two")
+            ),
+        ),
+        entry(
+            "beta",
+            &format!(
+                ", {}<ul class=\"index\" epub:type=\"index-entry-list\"><li class=\"index-sub-entry\" \
+                 epub:type=\"index-entry\"><span epub:type=\"index-term\">sub</span>, {}</li></ul></li>",
+                locator("text-001.xhtml#a5", "1 One"),
+                locator("text-001.xhtml#a8", "1.1 Two")
+            ),
+        ),
+        entry(
+            "gamma",
+            ", <em>see</em> <span epub:type=\"index-xref-preferred\">alpha</span></li>",
+        ),
+    ];
+    for part in expected {
+        assert!(bodies[2].contains(&part), "{part}\n{}", bodies[2]);
+    }
 }
