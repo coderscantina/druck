@@ -442,6 +442,19 @@ struct Line {
     marks: Vec<(NoteRef, f64)>,
     /// Whether the line ends inside a word, at a hyphenation point or after an explicit hyphen.
     hyphenated: bool,
+    /// The paragraph rule the line breaks, since no better break was found.
+    flaw: Option<Flaw>,
+}
+
+/// A paragraph rule a line breaks, reported as a warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flaw {
+    /// Its spaces stretch beyond the tolerance of the first breaking pass.
+    Loose,
+    /// It ends more hyphenated lines in a row than `typesetting.hyphens-in-a-row` allows.
+    Hyphens,
+    /// It is the last line of a paragraph and shorter than the minimum.
+    ShortLast,
 }
 
 /// A note referenced on a line.
@@ -1004,6 +1017,7 @@ impl<'a> Flow<'a> {
                 notes: Vec::new(),
                 marks: Vec::new(),
                 hyphenated: false,
+                flaw: None,
             };
             self.push(sink, at, Break::Never);
         }
@@ -1038,6 +1052,7 @@ impl<'a> Flow<'a> {
             notes: Vec::new(),
             marks: Vec::new(),
             hyphenated: false,
+            flaw: None,
         };
         self.push(line, at, Break::Never);
         self.space(style.space_after.0);
@@ -1094,6 +1109,7 @@ impl<'a> Flow<'a> {
                     notes: Vec::new(),
                     marks: Vec::new(),
                     hyphenated: false,
+                    flaw: None,
                 }]
             }
         };
@@ -1558,6 +1574,7 @@ impl<'a> Flow<'a> {
             notes: Vec::new(),
             marks: Vec::new(),
             hyphenated: false,
+            flaw: None,
         };
         let count = caption.len();
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
@@ -1694,6 +1711,7 @@ impl<'a> Flow<'a> {
             notes: Vec::new(),
             marks: Vec::new(),
             hyphenated: false,
+            flaw: None,
         }
     }
 

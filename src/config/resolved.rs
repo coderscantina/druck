@@ -13,7 +13,7 @@ use super::source::Resource;
 use super::template::Template;
 use super::theme::{
     Align, Anchor, BreakBefore, CalloutKind, DocumentDefaults, Face, Figures, FontStyle, LabelSet, Matters,
-    NumberFormat, NumberPosition, Placements, RuleBelow, SlotStyle, Styles, Weight, WideBlock,
+    NumberFormat, NumberPosition, Placements, RuleBelow, SlotStyle, Styles, Typesetting, Weight, WideBlock,
 };
 use super::values::{Color, Length, Pt};
 use crate::diagnostic::Diagnostic;
@@ -55,6 +55,7 @@ pub struct Config {
     pub matter: Matters,
     pub chapters: Chapters,
     pub scene_break: SceneBreak,
+    pub typesetting: Typesetting,
     pub title_block: TitleBlock,
     pub title_page: Vec<Group<TitleSlot>>,
     pub pages: PageVariants,

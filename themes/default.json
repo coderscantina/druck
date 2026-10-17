@@ -874,6 +874,13 @@
     "drop-cap": 0,
     "lead-in": 0
   },
+  "typesetting": {
+    "heading-lines": 3,
+    "hyphens-in-a-row": 2,
+    "chapter-last-lines": 5,
+    "hyphen-fragments": null,
+    "no-break-spaces": true
+  },
   "scene-break": {
     "text": "* * *",
     "image": null,

@@ -557,5 +557,6 @@ fn row_line(
         notes,
         marks,
         hyphenated: false,
+        flaw: None,
     }
 }

@@ -47,6 +47,7 @@ pub struct Theme {
     pub matter: Matters,
     pub chapters: Chapters,
     pub scene_break: SceneBreak,
+    pub typesetting: Typesetting,
     pub title_block: TitleBlock,
     pub title_page: TitleLayout,
     pub pages: PageVariants,
@@ -1154,6 +1155,45 @@ impl<'de> Deserialize<'de> for DropCapLines {
             )));
         }
         Ok(Self(lines))
+    }
+}
+
+/// The rules page and line breaking follow beyond the built-in ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Typesetting {
+    /// The lines a heading at the foot of a page wants below it. Fewer cost; fewer than 2 never happen.
+    pub heading_lines: Bounded<2, 10>,
+    /// The most hyphenated lines in a row.
+    pub hyphens_in_a_row: Bounded<1, 10>,
+    /// The fewest lines the last page of a chapter wants.
+    pub chapter_last_lines: Bounded<1, 30>,
+    /// The fewest letters before and after a hyphenation point, or `null` for the language's own.
+    pub hyphen_fragments: Option<[Bounded<1, 8>; 2]>,
+    /// Whether spaces inside abbreviations, between numbers and units, and after "S." and "Nr." are
+    /// made non-breaking.
+    pub no_break_spaces: bool,
+}
+
+/// An integer from `MIN` to `MAX`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Bounded<const MIN: u8, const MAX: u8>(u8);
+
+impl<const MIN: u8, const MAX: u8> Bounded<MIN, MAX> {
+    pub fn get(self) -> usize {
+        usize::from(self.0)
+    }
+}
+
+impl<'de, const MIN: u8, const MAX: u8> Deserialize<'de> for Bounded<MIN, MAX> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = u8::deserialize(deserializer)?;
+        if !(MIN..=MAX).contains(&value) {
+            return Err(serde::de::Error::custom(format!(
+                "expected an integer from {MIN} to {MAX}, not {value}"
+            )));
+        }
+        Ok(Self(value))
     }
 }
 

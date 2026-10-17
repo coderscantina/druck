@@ -1334,6 +1334,7 @@ mod tests {
                 notes,
                 marks: Vec::new(),
                 hyphenated: false,
+                flaw: None,
             },
             space_before: 0.0,
             after,

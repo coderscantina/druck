@@ -350,5 +350,6 @@ fn image_line(image: &Image, width: Pt, align: Align, frame_width: f64) -> Line 
         notes: Vec::new(),
         marks: Vec::new(),
         hyphenated: false,
+        flaw: None,
     }
 }

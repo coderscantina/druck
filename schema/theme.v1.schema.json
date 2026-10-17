@@ -866,6 +866,53 @@
       },
       "description": "The mark that *** and --- set between scenes."
     },
+    "typesetting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "heading-lines": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10,
+          "description": "Lines a heading at the foot of a page wants below it. Each line fewer costs about as much as a page one line short. Two is the hard minimum."
+        },
+        "hyphens-in-a-row": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "The most hyphenated lines in a row."
+        },
+        "chapter-last-lines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "description": "The fewest lines the last page of a chapter wants, before a page break or the end."
+        },
+        "hyphen-fragments": {
+          "description": "The fewest letters before and after a hyphenation point, as [before, after], or null for the language's own: 2 and 3 in English, 3 and 3 in German.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "no-break-spaces": {
+          "type": "boolean",
+          "description": "Whether spaces inside abbreviations such as \"z. B.\", between a number and its unit, and after \"S.\", \"Nr.\", \"p.\", and \"§\" are made non-breaking."
+        }
+      },
+      "description": "Rules for page and line breaking."
+    },
     "title-block": {
       "description": "Title block at the start of the body, set when the document has metadata for it.",
       "$ref": "#/$defs/titleBlock"

@@ -1231,6 +1231,7 @@ impl<'a> Resolver<'a> {
             matter: theme.matter,
             chapters: chapters?,
             scene_break: scene_break?,
+            typesetting: theme.typesetting,
             title_block: resolved::TitleBlock {
                 slots: title_block?,
                 space_after: title_block_space?,

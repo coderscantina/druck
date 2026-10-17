@@ -303,6 +303,7 @@ impl Prepared<'_> {
                     marks,
                     // Only breaks inside a word have an offset into its fragment.
                     hyphenated: mark.at.offset > 0,
+                    flaw: None,
                 }
             })
             .collect())

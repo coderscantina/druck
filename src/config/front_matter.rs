@@ -62,6 +62,8 @@ pub struct FrontMatter {
     pub draft: Option<bool>,
     #[serde(default, deserialize_with = "non_null")]
     pub conformance: Option<Conformance>,
+    #[serde(default, deserialize_with = "non_null")]
+    pub no_break_spaces: Option<bool>,
 
     #[serde(default, deserialize_with = "non_null")]
     pub page_size: Option<PageSize>,
@@ -270,6 +272,9 @@ impl FrontMatter {
             }
         }
 
+        if let Some(on) = self.no_break_spaces {
+            set(&["typesetting", "no-break-spaces"], Value::Bool(on));
+        }
         if let Some(size) = &self.page_size {
             set(&["page", "size"], json(size));
         }
