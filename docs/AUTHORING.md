@@ -96,6 +96,7 @@ Each setting writes one property of the resolved theme.
 | `citation-style` | `author-date`, `numeric` | `document.citation-style` |
 | `draft` | `true`, `false` | `document.draft` |
 | `conformance` | `pdf/ua-1`, `pdf/a-2b`, `pdf/a-2u`, `pdf/a-2a`, or a list of them | `document.conformance` |
+| `no-break-spaces` | `true`, `false` | `typesetting.no-break-spaces` |
 | `page-size` | `a4`, `a5`, `b5`, `letter`, `legal`, or `{width, height}` | `page.size` |
 | `margins` | one length, or `{top, bottom, inner, outer}` | `page.margins.*` |
 | `column-gap` | length | `page.column-gap` |
@@ -120,7 +121,7 @@ druck render <doc.md> [-o PATH] [--bleed LENGTH] [--crop-marks]
 
 `check` does everything `render` does except write the PDF, so it reports the same problems, including a word wider than its line, an oversized table row or keep group, a layout that does not settle, and what a [standard](#accessibility-and-archiving) the PDF must conform to rejects. `--print-config` prints the resolved configuration as JSON instead and does not lay out.
 
-`render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any diagnostic is reported, no PDF is written. An output path ending in `.epub` writes an [EPUB](#epub) instead.
+`render` also writes the PDF. `-o PATH` is relative to the working directory; without it the PDF goes next to the document with a `.pdf` extension. If any error is reported, no PDF is written. Broken [typesetting rules](#typesetting-warnings) are warnings: `render` prints how many there are, and `check` lists them. An output path ending in `.epub` writes an [EPUB](#epub) instead.
 
 For a print shop, `--bleed 3mm` adds a bleed around every page and `--crop-marks` draws crop marks at its corners, outside the bleed. The page size of the theme stays the trim size: the PDF gets a larger media box with a trim box and a bleed box, so the document lays out the same with and without them. Use `--bleed` alone where a printer wants no marks, as print-on-demand services usually do. Nothing in a document reaches into the bleed yet, so it stays empty. The bleed takes an absolute length (`pt`, `mm`, `cm`, `in`).
 
@@ -194,6 +195,30 @@ A character the selected font has no glyph for is an error, as is a word wider t
 Page breaks are chosen for the whole document. A heading always stays on the page of the text that follows it, with at least two lines of a paragraph after it. A paragraph's first or last line is never left alone at the bottom or top of a page, and neither is a table's first or last row unless two rows are too tall to share a page. A page avoids ending after a hyphenated line or after a sentence ending in a colon that introduces a list or code block. A continued footnote avoids leaving a single line on either page. The space between blocks may grow a little so that page bottoms line up; a page that cannot be filled that way runs short. The last page and a page before an explicit page break may be as short as needed.
 
 Content that must stay on one page but is taller than the text area is an error naming its line: a keep group, or a heading with the start of its text. Nothing is clipped or dropped.
+
+Beyond these rules, page and line breaking weigh a few more, which a theme tunes in [`typesetting`](THEMES.md#typesetting):
+
+- A one-line paragraph avoids standing alone at the top or bottom of a page.
+- A heading at the foot of a page wants three lines below it.
+- The last page of a chapter wants five lines.
+- In a `duplex` document, a right-hand page ends at the height of the left-hand page it faces.
+- A paragraph avoids a last line shorter than twice its first-line indent or three ems, and more than two hyphenated lines in a row.
+- Hyphenation leaves at least 2 letters before and 3 after a break in English, 3 and 3 in German.
+
+### Typesetting warnings
+
+Where a rule could only be kept at a higher cost, it is broken and reported as a warning. The PDF is still written. `render` prints the number of warnings, and `check` lists each with its page and, where one block is concerned, its source line:
+
+```
+warning: book.md:580:1: this one-line paragraph stands alone at the top of page 47
+warning: book.md: page 30 ends 2.3 lines short of the bottom
+```
+
+They name one-line paragraphs alone at a page edge, headings with fewer lines below them than wanted, chapters ending on a page of few lines, pages more than a line short, facing pages more than half a line apart, loose lines in justified text, more hyphenated lines in a row than allowed, and short last lines. Rewording a sentence usually fixes them.
+
+### No-break spaces
+
+In German and English, a space never breaks inside abbreviations of single letters such as "z. B.", "d. h.", or "e. g.", between a number and a unit or sign such as "5 kg", "20 %", or "€ 5", or after "S.", "Nr.", "No.", "p.", "pp.", "§", "Abs.", "Art.", "Kap.", "Bd.", "Abb.", "Tab.", "Fig.", or "Vol." before a number. Code, links, and spaces next to formatting change are left alone. `no-break-spaces: false` in the front matter or the theme turns this off.
 
 A theme may set prose narrower than the text area and let tables, figures, and code blocks use the whole width, see [margins and text width](THEMES.md#margins-and-text-width). Widths named below for text then mean the prose width.
 

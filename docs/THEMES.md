@@ -83,6 +83,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `matter` | Page numbers of the front, main, and back matter of a book. |
 | `chapters` | How level 1 headings open chapters: page breaks, sink, number, ornament, drop capital, and lead-in. |
 | `scene-break` | The mark of a thematic break. |
+| `typesetting` | Rules for page and line breaking: lines under a heading, hyphens in a row, a chapter's last page, hyphen fragments, and no-break spaces. |
 | `title-block` | Title slots at the start of the body, and the space below them. |
 | `title-page` | Slot groups for a separate title page. |
 | `pages` | Header and footer slot groups per page variant. |
@@ -645,6 +646,20 @@ A drop capital is the paragraph's first letter, with any punctuation before it, 
 | `blank` | `true` makes the break an empty line as high as the mark, which shows the mark only where a break starts a page. Default `false`. |
 
 The `scene-break` style's spacing goes around the mark. The default centers it at body size with block spacing.
+
+## Typesetting
+
+`typesetting` tunes the rules that page and line breaking follow. The built-in rules need no setting: a page avoids starting or ending with a one-line paragraph, and in a `duplex` document a right-hand page ends at the height of the left-hand page it faces. Each rule is a cost weighed against the others, so one may still be broken where keeping it would cost more, such as a page that would run several lines short. `druck check` lists the rules broken, see [typesetting warnings](AUTHORING.md#typesetting-warnings).
+
+| Field | Values |
+| --- | --- |
+| `heading-lines` | The lines a heading at the foot of a page wants below it, 2 to 10. Each line fewer costs as much as a page one line short. Fewer than 2 never happen. Default `3`. |
+| `hyphens-in-a-row` | The most hyphenated lines in a row, 1 to 10. A paragraph breaks it only if no other breaking exists. Default `2`. |
+| `chapter-last-lines` | The fewest lines the last page of a chapter wants, before a page break or the end, 1 to 30. A chapter of one page is exempt. Default `5`. |
+| `hyphen-fragments` | `[before, after]`, the fewest letters before and after a hyphenation point, each 1 to 8, for every language. `null` uses the language's own: 2 and 3 in English, 3 and 3 in German. Default `null`. |
+| `no-break-spaces` | `true` joins abbreviations such as "z. B.", a number and its unit, and "S.", "Nr.", "p.", or "§" and their number with no-break spaces, see [no-break spaces](AUTHORING.md#no-break-spaces). Default `true`. |
+
+German at 3 letters leaves fewer short fragments such as "ab-hängt" but strains the spacing of a narrow column more. Where `druck check` reports many loose lines, `"hyphen-fragments": [2, 2]` is what LaTeX uses for German.
 
 ## EPUB
 
