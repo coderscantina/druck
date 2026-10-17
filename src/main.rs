@@ -15,6 +15,7 @@ mod layout;
 mod markdown;
 mod page;
 mod pdf;
+mod spacing;
 mod statistics;
 mod tags;
 mod text;
@@ -267,7 +268,13 @@ fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Dia
     let split = front_matter::split(&document.text).ok().flatten();
     let body = split.map_or(document.text.as_str(), |split| split.body);
     let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
-    let content = markdown::parse(body, first_line, &document.source, config.document.lang)?;
+    let content = markdown::parse_with(
+        body,
+        first_line,
+        &document.source,
+        config.document.lang,
+        config.typesetting.no_break_spaces,
+    )?;
     let bibliography = load_bibliography(config)?;
     let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");

@@ -45,13 +45,27 @@ use crate::document::{
     InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See,
 };
 use crate::highlight;
+use crate::spacing;
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
 /// Tables become [`Block::Table`], with a `: Caption` paragraph after the table as its caption.
 /// Every construct that cannot be rendered yet is reported with its location. The result is
 /// either the complete document or every such diagnostic, never a document with content dropped.
+#[cfg(test)]
 pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result<Document, Vec<Diagnostic>> {
+    parse_with(body, first_line, source, lang, false)
+}
+
+/// Like [`parse`], and joins abbreviations, units, and page references with no-break spaces in text
+/// when `no_break_spaces` is set, see [`crate::spacing`].
+pub fn parse_with(
+    body: &str,
+    first_line: u64,
+    source: &Source,
+    lang: Lang,
+    no_break_spaces: bool,
+) -> Result<Document, Vec<Diagnostic>> {
     // Strikethrough and task lists are enabled only so they can be recognised and reported. GFM adds
     // only the alert kinds of block quotations.
     let options = Options::ENABLE_TABLES
@@ -73,6 +87,7 @@ pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result
 
     let directives = directives.into_iter().map(|line| (line.start, &body[line])).collect();
     let mut builder = Builder::new(&text, first_line, source, lang, directives);
+    builder.no_break_spaces = no_break_spaces;
     for (event, range) in Parser::new_ext(&text, options).into_offset_iter() {
         builder.event(event, range);
     }
@@ -271,6 +286,8 @@ struct Builder<'a> {
     pending_class: Option<Class>,
     quotes: Quotes,
     /// The tables, by location, whose placement an attribute has set.
+    /// Whether text gets no-break spaces, see [`crate::spacing`].
+    no_break_spaces: bool,
     placed_tables: HashSet<(u64, u64)>,
 }
 
@@ -312,6 +329,7 @@ impl<'a> Builder<'a> {
             consumed: 0,
             pending_class: None,
             quotes: Quotes::new(lang),
+            no_break_spaces: false,
             placed_tables: HashSet::new(),
         }
     }
@@ -1196,10 +1214,15 @@ impl<'a> Builder<'a> {
 
     fn push_text(&mut self, offset: usize, text: &str, code: bool) {
         let style = self.style(code);
+        let text = if self.no_break_spaces && !code {
+            spacing::join(text)
+        } else {
+            text.into()
+        };
         self.push_inline(
             offset,
             Inline::Text {
-                text: text.to_owned(),
+                text: text.into_owned(),
                 style,
             },
         );
@@ -2836,6 +2859,36 @@ mod tests {
                 other => panic!("unexpected {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn joins_with_no_break_spaces_only_in_text_and_only_when_enabled() {
+        let body = "Siehe z. B. auf S. 12 und `z. B. 5 min` unter [Link](https://x.org/a) in 5 min.\n";
+        let text_of = |on: bool| {
+            let Block::Paragraph { content, .. } = parse_with(body, 1, &source(), Lang::De, on)
+                .expect("parses")
+                .blocks
+                .remove(0)
+            else {
+                panic!("expected a paragraph");
+            };
+            content
+                .iter()
+                .map(|inline| match inline {
+                    Inline::Text { text, style } if style.code => format!("`{text}`"),
+                    Inline::Text { text, .. } => text.clone(),
+                    other => panic!("unexpected {other:?}"),
+                })
+                .collect::<String>()
+        };
+        assert_eq!(
+            text_of(false),
+            "Siehe z. B. auf S. 12 und `z. B. 5 min` unter Link in 5 min."
+        );
+        assert_eq!(
+            text_of(true),
+            "Siehe z.\u{a0}B. auf S.\u{a0}12 und `z. B. 5 min` unter Link in 5\u{a0}min."
+        );
     }
 
     #[test]
