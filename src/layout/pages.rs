@@ -30,10 +30,10 @@
 //! prose. A page's notes must fit the text height together, since they may move up as far as needed.
 
 use std::collections::BTreeMap;
-use std::ops::Range;
+use std::ops::{Bound, Range};
 
 use super::callout::CalloutBox;
-use super::{Break, FlowLine, Line, translate};
+use super::{Break, Flaw, FlowLine, Line, translate};
 use crate::config::resolved::{Config, PageGeometry};
 use crate::config::source::Source;
 use crate::config::values::Pt;
@@ -65,6 +65,12 @@ pub(super) const INTRODUCTION: f64 = 500.0;
 const SPLIT_NOTE: f64 = 2000.0;
 /// Cost of a page that holds only the continuation of footnotes.
 const NOTE_PAGE: f64 = 10_000.0;
+/// Cost of a page break that leaves a one-line paragraph alone at the top or bottom of a page, as much
+/// as a page four lines short.
+pub(super) const ONE_LINER: f64 = 16.0 * SHORT;
+/// Cost of each line a heading at the foot of a page has fewer below it than `typesetting.heading-lines`,
+/// as much as a page one line short.
+pub(super) const HEADING_LINE: f64 = SHORT;
 /// Cost of each page a placed block waits after the page its anchor falls on.
 const WAIT: f64 = 10_000.0;
 /// Cost of a page that holds only placed blocks amid the text, so that is a last resort for blocks
@@ -74,6 +80,49 @@ const FLOAT_PAGE: f64 = 100_000.0;
 /// Cost of a column region one body line taller than its most even split. Grows with the square,
 /// so a region gets one line uneven rather than strand a line, but not two.
 const UNEVEN: f64 = 3000.0;
+
+/// A page rule that a page break after a line breaks, at the cost added to the line's break.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Rule {
+    /// The next line is a one-line paragraph, which would start the next page alone.
+    OneLinerAtTop,
+    /// The line is a one-line paragraph, which would end the page alone.
+    OneLinerAtBottom,
+    /// The line is this many lines below a heading.
+    HeadingLines(usize),
+}
+
+/// The rules the planned page at physical index `page` breaks: its own, the break after it, and those of
+/// its lines.
+fn page_issues(plan: &Plan, body: &[FlowLine], page: usize) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    let mut issue = |page, at, kind| issues.push(Issue { page, at, kind });
+    let flaws = plan.flaws;
+    // A page one line short is the cost of keeping the other rules, and is not reported.
+    if flaws.short > 1.0 {
+        issue(page, None, IssueKind::Short(flaws.short));
+    }
+    if flaws.uneven > 0.5 {
+        issue(page, None, IssueKind::Uneven(flaws.uneven));
+    }
+    if let Some(lines) = flaws.chapter {
+        issue(page, None, IssueKind::ChapterEnd(lines));
+    }
+    let Range { start, end } = plan.lines;
+    let broken = end > start && end < body.len() && matches!(body[end - 1].after, Break::Allowed(_));
+    if let Some(rule) = body[start..end].last().and_then(|line| line.rule).filter(|_| broken) {
+        match rule {
+            Rule::OneLinerAtTop => issue(page + 1, Some(body[end].at), IssueKind::Break(rule)),
+            _ => issue(page, Some(body[end - 1].at), IssueKind::Break(rule)),
+        }
+    }
+    for line in &body[start..end] {
+        if let Some(flaw) = line.line.flaw {
+            issue(page, Some(line.at), IssueKind::Line(flaw));
+        }
+    }
+    issues
+}
 
 /// The width of each of two columns in the prose width.
 pub(super) fn column_width(page: &PageGeometry) -> f64 {
@@ -194,6 +243,43 @@ pub(super) struct Composed {
     pub starts: Vec<Option<usize>>,
     /// The margin notes and sidenotes on the pages.
     pub asides: Vec<Aside>,
+    /// The rules the pages break, in page order.
+    pub issues: Vec<Issue>,
+}
+
+/// A rule a page breaks, since no better layout was found.
+#[derive(Debug)]
+pub(super) struct Issue {
+    /// The physical index of the page.
+    pub page: usize,
+    /// The source of the content concerned, if one block is.
+    pub at: Option<Location>,
+    pub kind: IssueKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum IssueKind {
+    /// The page ends this many lines short of the bottom after its spaces stretched.
+    Short(f64),
+    /// The page ends this many lines higher or lower than the page facing it.
+    Uneven(f64),
+    /// The page is the last of a chapter and holds this many lines, fewer than wanted.
+    ChapterEnd(usize),
+    /// The page break after the page's last line breaks this rule.
+    Break(Rule),
+    /// A line on the page breaks this paragraph rule.
+    Line(Flaw),
+}
+
+/// The page rules a planned page breaks.
+#[derive(Debug, Clone, Copy, Default)]
+struct PageFlaws {
+    /// Lines short of the bottom after stretching, 0 for a page that may be short.
+    short: f64,
+    /// Lines of difference to the facing page.
+    uneven: f64,
+    /// The lines on the last page of a chapter, if fewer than wanted.
+    chapter: Option<usize>,
 }
 
 /// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
@@ -233,6 +319,11 @@ pub(super) fn compose(
         config.page.text_height().0,
         body_line,
     );
+    composer.paginate(
+        config.document.duplex.then_some(first),
+        &rectos,
+        config.typesetting.chapter_last_lines.get(),
+    );
     composer.place(&floats, config.styles.caption.space_after.0);
     composer.annotate(&margin, config.margin_notes.spacing.0);
     composer.check(&keeps, &bottoms, &tables, source)?;
@@ -267,6 +358,7 @@ struct Plan {
     notes: Range<usize>,
     /// The placed blocks on the page, tops before bottoms.
     floats: Range<usize>,
+    flaws: PageFlaws,
 }
 
 #[derive(Debug)]
@@ -401,7 +493,17 @@ struct State {
     cost: f64,
     previous: Option<usize>,
     stretch: f64,
+    /// Whether the next page is a left-hand page, in duplex only.
+    verso: bool,
+    /// How many lines short a left-hand page ends that faces the next page, in duplex only.
+    facing: Option<f64>,
+    /// The rules the page before this state breaks.
+    flaws: PageFlaws,
 }
+
+/// The states of one candidate break: footnote lines set, placed blocks set, whether the next page is a
+/// left-hand one, and the facing page's shortfall in half lines, or -1 for none.
+type Key = (usize, usize, bool, i64);
 
 /// A page that can follow a state: where it ends, the footnote lines and placed blocks set by then,
 /// the total cost, and the stretch of its spaces.
@@ -411,6 +513,16 @@ struct Step {
     floats: usize,
     cost: f64,
     stretch: f64,
+    verso: bool,
+    facing: Option<f64>,
+    flaws: PageFlaws,
+}
+
+impl Step {
+    fn key(&self) -> Key {
+        let facing = self.facing.map_or(-1, |lines| (2.0 * lines).round() as i64);
+        (self.placed, self.floats, self.verso, facing)
+    }
 }
 
 struct Composer<'a> {
@@ -443,6 +555,12 @@ struct Composer<'a> {
     note_spacing: f64,
     /// The margin notes, for messages.
     margin: Option<&'a Margin>,
+    /// The physical index of the first page in a duplex document, whose facing pages should end level.
+    duplex: Option<usize>,
+    /// The body lines that start an odd page.
+    rectos: &'a [usize],
+    /// The fewest lines the last page of a chapter wants.
+    chapter_lines: usize,
 }
 
 impl<'a> Composer<'a> {
@@ -488,7 +606,24 @@ impl<'a> Composer<'a> {
             note_top: vec![0.0],
             note_spacing: 0.0,
             margin: None,
+            duplex: None,
+            rectos: &[],
+            chapter_lines: 1,
         }
+    }
+
+    /// Sets the page parity rules: with `duplex`, the physical index of the first page, facing pages should
+    /// end level; `rectos` start odd pages; a chapter's last page wants `chapter_lines` lines.
+    fn paginate(&mut self, duplex: Option<usize>, rectos: &'a [usize], chapter_lines: usize) {
+        self.duplex = duplex;
+        self.rectos = rectos;
+        self.chapter_lines = chapter_lines;
+    }
+
+    /// Whether a page after `state` that starts at line `start` is a left-hand page. A blank page goes
+    /// before one that would start a recto line on the left.
+    fn is_verso(&self, state: &State, start: usize, only_floats: bool) -> bool {
+        state.verso && (only_floats || self.rectos.binary_search(&start).is_err())
     }
 
     /// Adds the placed blocks, `spacing` apart from the text and each other.
@@ -666,6 +801,7 @@ impl<'a> Composer<'a> {
     /// Finds the cheapest sequence of pages, or `None` if constraints leave no way through.
     fn search(&self) -> Option<Vec<Plan>> {
         let count = self.body.len();
+        let verso = self.duplex.is_some_and(|first| first % 2 == 1);
         let mut states = vec![State {
             at: 0,
             placed: 0,
@@ -673,15 +809,24 @@ impl<'a> Composer<'a> {
             cost: 0.0,
             previous: None,
             stretch: 0.0,
+            verso,
+            facing: None,
+            flaws: PageFlaws::default(),
         }];
-        // For each candidate break, the best state per number of footnote lines and placed blocks set.
-        let mut reached: Vec<BTreeMap<(usize, usize), usize>> = (0..=count).map(|_| BTreeMap::new()).collect();
-        reached[0].insert((0, 0), 0);
+        // For each candidate break, the best state per key.
+        let mut reached: Vec<BTreeMap<Key, usize>> = (0..=count).map(|_| BTreeMap::new()).collect();
+        reached[0].insert((0, 0, verso, -1), 0);
         for at in 0..=count {
-            let mut next = (0, 0);
-            while let Some((key, index)) = reached[at].range(next..).next().map(|(&k, &i)| (k, i)) {
-                next = (key.0, key.1 + 1);
+            // Pages that end where they start add states with more notes or blocks set, so later keys.
+            let mut next = Bound::Unbounded;
+            while let Some((key, index)) = reached[at]
+                .range((next, Bound::Unbounded))
+                .next()
+                .map(|(&k, &i)| (k, i))
+            {
+                next = Bound::Excluded(key);
                 for step in self.pages(&states[index]) {
+                    let key = step.key();
                     let state = State {
                         at: step.at,
                         placed: step.placed,
@@ -689,8 +834,10 @@ impl<'a> Composer<'a> {
                         cost: step.cost,
                         previous: Some(index),
                         stretch: step.stretch,
+                        verso: step.verso,
+                        facing: step.facing,
+                        flaws: step.flaws,
                     };
-                    let key = (step.placed, step.floats);
                     match reached[step.at].get(&key) {
                         Some(&existing) if states[existing].cost <= step.cost => {}
                         Some(&existing) => states[existing] = state,
@@ -702,7 +849,11 @@ impl<'a> Composer<'a> {
                 }
             }
         }
-        let end = *reached[count].get(&(self.notes.lines.len(), self.floats.len()))?;
+        let (notes, floats) = (self.notes.lines.len(), self.floats.len());
+        let end = reached[count]
+            .range((notes, floats, false, i64::MIN)..=(notes, floats, true, i64::MAX))
+            .map(|(_, &index)| index)
+            .min_by(|&a, &b| states[a].cost.total_cmp(&states[b].cost))?;
         let mut plans = Vec::new();
         let mut index = end;
         while let Some(previous) = states[index].previous {
@@ -713,6 +864,7 @@ impl<'a> Composer<'a> {
                 stretch: to.stretch,
                 notes: from.placed..to.placed,
                 floats: from.floats..to.floats,
+                flaws: to.flaws,
             });
             index = previous;
         }
@@ -736,6 +888,9 @@ impl<'a> Composer<'a> {
                 floats: done,
                 cost: state.cost + NOTE_PAGE + split,
                 stretch: 0.0,
+                verso: self.next_verso(self.is_verso(state, start, false)),
+                facing: None,
+                flaws: PageFlaws::default(),
             });
         }
         // Placed blocks anchored before here may fill a page of their own, stacked from the top.
@@ -754,6 +909,9 @@ impl<'a> Composer<'a> {
                     floats: to,
                     cost,
                     stretch: 0.0,
+                    verso: self.next_verso(self.is_verso(state, start, true)),
+                    facing: None,
+                    flaws: PageFlaws::default(),
                 });
             }
             // A forced break and the end are not passed while blocks anchored before them wait.
@@ -769,6 +927,9 @@ impl<'a> Composer<'a> {
             _ => 0.0,
         };
         let (mut natural, mut stretch, mut cost) = (header, 0.0, 0.0);
+        let verso = self.is_verso(state, start, false);
+        // The first page of a chapter may be its last too.
+        let continues = start > 0 && self.body[start - 1].after != Break::Forced;
         'lines: for (index, line) in self.body.iter().enumerate().skip(start) {
             let end = index + 1;
             let last = end == self.body.len();
@@ -850,21 +1011,26 @@ impl<'a> Composer<'a> {
                 let earlier = (fitted < max && fitted > min).then(|| fitted - 1);
                 for placed in std::iter::once(fitted).chain(earlier) {
                     let short = (self.height - page - self.notes.area(from, placed)).max(0.0);
-                    let (fill, ratio) = if last || line.after == Break::Forced {
-                        (0.0, 0.0)
+                    let free = last || line.after == Break::Forced;
+                    let (fill, ratio, lines) = if free {
+                        (0.0, 0.0, 0.0)
                     } else {
                         let used = short.min(page_stretch);
                         let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
                         let lines = (short - used + deficit) / self.line;
-                        (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio)
+                        (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio, lines)
                     };
+                    let (rules, flaws) = self.page_rules(state, (start, end), (lines, free), continues, verso);
                     let split = self.notes.split(from, placed, max);
                     pages.push(Step {
                         at: end,
                         placed,
                         floats,
-                        cost: state.cost + fill + penalty + split + page_cost + wait,
+                        cost: state.cost + fill + rules + penalty + split + page_cost + wait,
                         stretch: ratio,
+                        verso: self.next_verso(verso),
+                        facing: (self.duplex.is_some() && verso && !free).then_some(lines),
+                        flaws,
                     });
                 }
             }
@@ -877,6 +1043,42 @@ impl<'a> Composer<'a> {
 }
 
 impl Composer<'_> {
+    /// Whether the page after a page on the left, or on the right, is a left-hand one. Always false outside
+    /// duplex, where no page faces another.
+    fn next_verso(&self, verso: bool) -> bool {
+        self.duplex.is_some() && !verso
+    }
+
+    /// The cost and flaws of the rules for a page of body lines `lines`: a chapter's last page holding too
+    /// few lines, and a right-hand page ending at another height than the left-hand page it faces. The page
+    /// ends `short` lines short, or is `free` to be short; `continues` tells whether it continues a chapter.
+    fn page_rules(
+        &self,
+        state: &State,
+        lines: (usize, usize),
+        (short, free): (f64, bool),
+        continues: bool,
+        verso: bool,
+    ) -> (f64, PageFlaws) {
+        let mut flaws = PageFlaws {
+            short,
+            ..PageFlaws::default()
+        };
+        let mut cost = 0.0;
+        let count = lines.1 - lines.0;
+        if free && continues && count < self.chapter_lines {
+            let missing = (self.chapter_lines - count) as f64;
+            cost += SHORT * missing * missing;
+            flaws.chapter = Some(count);
+        }
+        if let Some(left) = state.facing.filter(|_| !verso && !free) {
+            let uneven = (short - left).abs();
+            cost += SHORT * uneven * uneven;
+            flaws.uneven = uneven;
+        }
+        (cost, flaws)
+    }
+
     /// The regions of a page holding body lines `start..end`.
     fn regions(&self, start: usize, end: usize) -> Vec<Region> {
         let mut regions = Vec::new();
@@ -1007,6 +1209,7 @@ fn render(
     // Where each body line's top lands on its page, for the notes beside it.
     let mut tops = vec![0.0; if margin.notes.is_empty() { 0 } else { body.len() }];
     let mut referenced = margin.references.iter().enumerate().peekable();
+    let mut issues = Vec::new();
     for plan in plans {
         let only_floats = plan.lines.is_empty() && !plan.floats.is_empty();
         if !only_floats && rectos.binary_search(&plan.lines.start).is_ok() && !(first + pages.len()).is_multiple_of(2) {
@@ -1016,6 +1219,7 @@ fn render(
         }
         starts.push((!only_floats).then_some(plan.lines.start));
         let index = first + pages.len();
+        issues.extend(page_issues(plan, body, index));
         let left = geometry.left_margin(index).0;
         let shift = geometry.prose_shift(index);
         let top = geometry.margin_top.0;
@@ -1237,6 +1441,7 @@ fn render(
         blanks,
         starts,
         asides,
+        issues,
     }
 }
 
@@ -1342,6 +1547,7 @@ mod tests {
             wide: None,
             top_only: false,
             callout: None,
+            rule: None,
         }
     }
 
@@ -1386,6 +1592,37 @@ mod tests {
         body.extend(paragraph(5));
 
         assert_eq!(body_pages(&body), vec![0..8, 8..14]);
+    }
+
+    /// The body lines of each page with the page rules: `duplex` is the physical index of the first page,
+    /// and a chapter's last page wants `chapter` lines.
+    fn ruled_pages(body: &[FlowLine], duplex: Option<usize>, chapter: usize) -> Vec<Range<usize>> {
+        let notes = Notes::new(Vec::new(), Vec::new(), 0.0, 0.0);
+        let headers = vec![None; body.len()];
+        let mut composer = Composer::new(body, &[], &headers, &notes, PAGE, 10.0);
+        composer.paginate(duplex, &[], chapter);
+        let plans = composer.search().expect("breaks exist");
+        plans.into_iter().map(|plan| plan.lines).collect()
+    }
+
+    #[test]
+    fn a_chapter_does_not_end_on_a_page_of_one_line() {
+        let body = loose(11, &[]);
+        assert_eq!(body_pages(&body), vec![0..10, 10..11]);
+        // Each line the last page lacks costs like a line short on the page before, squared.
+        assert_eq!(ruled_pages(&body, None, 5), vec![0..8, 8..11]);
+    }
+
+    #[test]
+    fn a_right_hand_page_ends_near_the_height_of_the_left_hand_page_it_faces() {
+        // The left-hand page ends two lines short before a group of four that stays together.
+        let mut body = loose(32, &[]);
+        for flow_line in &mut body[8..11] {
+            flow_line.after = Break::Never;
+        }
+        assert_eq!(body_pages(&body)[..2], [0..8, 8..18]);
+        // The facing page then ends a line short too, which costs less than two lines of difference.
+        assert_eq!(ruled_pages(&body, Some(1), 1)[..2], [0..8, 8..17]);
     }
 
     #[test]

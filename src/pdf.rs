@@ -863,6 +863,7 @@ mod tests {
             page_numbers: Vec::new(),
             tags: Tree::default(),
             asides: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -905,6 +906,7 @@ mod tests {
             page_numbers: Vec::new(),
             tags: Tree::default(),
             asides: Vec::new(),
+            warnings: Vec::new(),
         };
         let bytes = write_plain(&output, &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
         let pdf = String::from_utf8_lossy(&bytes);

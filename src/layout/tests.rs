@@ -469,6 +469,44 @@ fn sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker() {
 }
 
 #[test]
+fn reports_the_rules_a_page_breaks_as_warnings_naming_the_page() {
+    let config = config();
+    let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
+    let mut blocks: Vec<_> = (0..8).map(|i| paragraph(i + 1, PROSE)).collect();
+    blocks.push(Block::Keep {
+        at: Location { line: 20, column: 1 },
+        blocks: (0..10).map(|i| paragraph(i + 21, PROSE)).collect(),
+    });
+    let document = Document {
+        blocks,
+        ..Document::default()
+    };
+    let cited = Cited::default();
+    let today = crate::date::Date::from_unix(0);
+    let output = layout(
+        &document,
+        &cited,
+        &[],
+        &HashMap::new(),
+        &config,
+        &fonts,
+        &source(),
+        today,
+    )
+    .expect("laid out");
+
+    // The keep group does not fit below the eight paragraphs, so the first page ends short.
+    let warning = &output.warnings[0];
+    assert!(warning.warning);
+    assert!(warning.message.starts_with("page 1 ends "), "{}", warning.message);
+    assert!(
+        warning.message.ends_with(" lines short of the bottom"),
+        "{}",
+        warning.message
+    );
+}
+
+#[test]
 fn reports_a_keep_group_taller_than_the_page_at_its_directive() {
     let keep = Block::Keep {
         at: Location { line: 5, column: 1 },
@@ -1472,7 +1510,7 @@ fn breaks_of(lines: &[FlowLine], line: u64) -> Vec<Break> {
 }
 
 #[test]
-fn a_heading_keeps_two_lines_of_its_paragraph_and_pages_strand_no_line() {
+fn a_heading_keeps_two_lines_of_its_paragraph_wants_a_third_and_pages_strand_no_line() {
     let lines = flow(&format!("# Title\n\n{PROSE} {PROSE}\n\n{PROSE} {PROSE}\n"));
     let (kept, plain) = (breaks_of(&lines, 3), breaks_of(&lines, 5));
 
@@ -1480,7 +1518,19 @@ fn a_heading_keeps_two_lines_of_its_paragraph_and_pages_strand_no_line() {
     assert_eq!(kept[0], Break::Never);
     assert!(matches!(plain[0], Break::Avoid(_)), "{plain:?}");
     assert!(matches!(plain[plain.len() - 2], Break::Avoid(_)), "{plain:?}");
-    assert_eq!(kept[1..], plain[1..]);
+    // The default theme wants three lines below a heading, so a page ending after two costs one line.
+    assert_eq!(kept[1], plain[1].costlier(pages::HEADING_LINE));
+    assert_eq!(kept[2..], plain[2..]);
+}
+
+#[test]
+fn a_page_break_next_to_a_one_line_paragraph_costs_much() {
+    let lines = flow(&format!("{PROSE}\n\nShort.\n\n{PROSE}\n\n- item\n\n- item\n"));
+
+    assert_eq!(breaks_of(&lines, 1).last(), Some(&Break::Allowed(pages::ONE_LINER)));
+    assert_eq!(breaks_of(&lines, 3), [Break::Allowed(pages::ONE_LINER)]);
+    assert_eq!(breaks_of(&lines, 5).last(), Some(&Break::Allowed(0.0)));
+    assert!(breaks_of(&lines, 7).iter().all(|after| *after == Break::Allowed(0.0)));
 }
 
 #[test]
@@ -1506,12 +1556,15 @@ fn a_page_end_after_a_hyphenated_line_costs_more() {
 
 #[test]
 fn a_page_end_after_a_colon_before_a_list_or_code_costs_a_little() {
-    let lines = flow("Steps:\n\n- one\n\nSteps.\n\n- two\n\nCode:\n\n```\nx\n```\n\nText:\n\nMore.\n");
+    let lines = flow(&format!(
+        "{PROSE} Steps:\n\n- one\n\n{PROSE} Steps.\n\n- two\n\n{PROSE} Code:\n\n```\nx\n```\n\n{PROSE} Text:\n\n{PROSE}\n"
+    ));
+    let last = |line| breaks_of(&lines, line).last().copied();
 
-    assert_eq!(breaks_of(&lines, 1), [Break::Allowed(pages::INTRODUCTION)]);
-    assert_eq!(breaks_of(&lines, 5), [Break::Allowed(0.0)]);
-    assert_eq!(breaks_of(&lines, 9), [Break::Allowed(pages::INTRODUCTION)]);
-    assert_eq!(breaks_of(&lines, 15), [Break::Allowed(0.0)]);
+    assert_eq!(last(1), Some(Break::Allowed(pages::INTRODUCTION)));
+    assert_eq!(last(5), Some(Break::Allowed(0.0)));
+    assert_eq!(last(9), Some(Break::Allowed(pages::INTRODUCTION)));
+    assert_eq!(last(15), Some(Break::Allowed(0.0)));
 }
 
 #[test]

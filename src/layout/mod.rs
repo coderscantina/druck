@@ -66,6 +66,7 @@ use std::ops::Range;
 use self::fields::Fields;
 use self::notes::NoteStyles;
 use self::numbering::Numbering;
+use self::pages::IssueKind;
 use self::structure::Structure;
 use crate::citations::Cited;
 use crate::config::resolved::{Config, CustomStyle, PageGeometry, SceneMark, Style};
@@ -173,6 +174,11 @@ pub fn layout(
         return Err(unnumbered);
     }
     let asides = std::mem::take(&mut body.asides);
+    let warnings = body
+        .issues
+        .iter()
+        .map(|issue| warning(issue, &numbering, config, source))
+        .collect();
     let mut blanks = body.blanks;
     if blank.is_some() {
         blanks.insert(0, 1);
@@ -206,7 +212,55 @@ pub fn layout(
         page_numbers: numbering.labels(),
         tags,
         asides,
+        warnings,
     })
+}
+
+/// A rule the layout breaks as a warning at its source, naming the page as it is numbered.
+fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source: &Source) -> Diagnostic {
+    let page = match numbering.page(issue.page) {
+        Some(number) => format!("page {number}"),
+        None => format!("unnumbered page {}", issue.page + 1),
+    };
+    let rules = &config.typesetting;
+    let lines = |count: usize| {
+        if count == 1 {
+            "1 line".to_owned()
+        } else {
+            format!("{count} lines")
+        }
+    };
+    let message = match issue.kind {
+        IssueKind::Short(short) => format!("{page} ends {short:.1} lines short of the bottom"),
+        IssueKind::Uneven(uneven) => format!("{page} ends {uneven:.1} lines off the height of the page facing it"),
+        IssueKind::ChapterEnd(count) => format!(
+            "{page} ends a chapter with {}, fewer than the {} wanted",
+            lines(count),
+            rules.chapter_last_lines.get()
+        ),
+        IssueKind::Break(pages::Rule::OneLinerAtTop) => {
+            format!("this one-line paragraph stands alone at the top of {page}")
+        }
+        IssueKind::Break(pages::Rule::OneLinerAtBottom) => {
+            format!("this one-line paragraph stands alone at the bottom of {page}")
+        }
+        IssueKind::Break(pages::Rule::HeadingLines(count)) => format!(
+            "a heading at the foot of {page} has {} of this text below it, fewer than the {} wanted",
+            lines(count),
+            rules.heading_lines.get()
+        ),
+        IssueKind::Line(Flaw::Loose) => format!("a line of this paragraph on {page} has its spaces stretched loose"),
+        IssueKind::Line(Flaw::Hyphens) => format!(
+            "this paragraph has more than {} hyphenated lines in a row on {page}",
+            rules.hyphens_in_a_row.get()
+        ),
+        IssueKind::Line(Flaw::ShortLast) => format!("this paragraph ends in a short last line on {page}"),
+    };
+    let warning = Diagnostic::warning(Some(source.clone()), message);
+    match issue.at {
+        Some(at) => warning.at(at.line, at.column),
+        None => warning,
+    }
 }
 
 /// Checks what does not depend on pages: required title slots, custom styles, and placeholders. Layout and
@@ -346,6 +400,7 @@ impl Pass<'_> {
             matters: Vec::new(),
             in_keep: false,
             opening: false,
+            under_heading: None,
             tags: self.title_tags.clone(),
             parent: None,
             leaf: None,
@@ -509,6 +564,8 @@ struct FlowLine {
     top_only: bool,
     /// The callout box the line is part of.
     callout: Option<callout::CalloutBox>,
+    /// The page rule a page break after the line breaks, for warnings.
+    rule: Option<pages::Rule>,
 }
 
 /// How a text block takes part in page breaking.
@@ -591,6 +648,8 @@ struct Flow<'a> {
     in_keep: bool,
     /// Whether a chapter heading waits for its first paragraph, which may get a drop capital and a lead-in.
     opening: bool,
+    /// The text lines set since the last heading, while fewer than `typesetting.heading-lines`.
+    under_heading: Option<usize>,
     /// The document's elements so far.
     tags: Tree,
     /// The element that elements opened now belong to, `None` for the document.
@@ -732,6 +791,7 @@ impl<'a> Flow<'a> {
                         0.0
                     };
                     let scope = self.open(Kind::Paragraph, true);
+                    let first = self.lines.len();
                     match class {
                         // A styled paragraph, such as an epigraph, leaves the opening to the next one.
                         Some(class) if class.name != NO_DROP_CAP && opening => {
@@ -740,6 +800,9 @@ impl<'a> Flow<'a> {
                         }
                         None if opening => self.opening_paragraph(*at, content, &style, frame),
                         _ => self.text_block(*at, content, &style, frame, indent, Role::Text),
+                    }
+                    if self.lines.len() == first + 1 && frame.list_depth == 0 && !self.in_notes {
+                        self.guard_one_liner(first);
                     }
                     self.close(scope);
                 }
@@ -1305,9 +1368,48 @@ impl<'a> Flow<'a> {
                 Role::Text => pages::line_break(index, count),
             };
             self.push(translate_line(line, dx), at, after);
+            if matches!(role, Role::Text) && !self.in_notes {
+                self.count_under_heading();
+            }
         }
         if style.keep_with_next && count > 0 {
             self.keep_last();
+        }
+        if matches!(role, Role::Heading(_)) && !self.in_notes {
+            self.under_heading = Some(0);
+        }
+    }
+
+    /// Counts the text line just set under the last heading. A page ending after it leaves the heading with
+    /// fewer lines below it than `typesetting.heading-lines`, at a cost per missing line.
+    fn count_under_heading(&mut self) {
+        let Some(lines) = self.under_heading.map(|lines| lines + 1) else {
+            return;
+        };
+        let wanted = self.config.typesetting.heading_lines.get();
+        self.under_heading = (lines + 1 < wanted).then_some(lines);
+        let line = self.lines.last_mut().expect("a line was just set");
+        if lines < wanted && line.after.ends_page() && line.after != Break::Forced {
+            line.after = line.after.costlier((wanted - lines) as f64 * pages::HEADING_LINE);
+            line.rule.get_or_insert(pages::Rule::HeadingLines(lines));
+        }
+    }
+
+    /// Makes page breaks before and after the one-line paragraph at line `index` costly, so it does not
+    /// stand alone at the top or bottom of a page.
+    fn guard_one_liner(&mut self, index: usize) {
+        let rules = [
+            (index.checked_sub(1), pages::Rule::OneLinerAtTop),
+            (Some(index), pages::Rule::OneLinerAtBottom),
+        ];
+        for (line, rule) in rules {
+            if let Some(line) = line.map(|line| &mut self.lines[line])
+                && line.after.ends_page()
+                && line.after != Break::Forced
+            {
+                line.after = line.after.costlier(pages::ONE_LINER);
+                line.rule = Some(rule);
+            }
         }
     }
 
@@ -1739,6 +1841,7 @@ impl<'a> Flow<'a> {
             wide: self.wide,
             top_only: false,
             callout: None,
+            rule: None,
         });
     }
 

@@ -4,6 +4,7 @@
 
 use crate::config::theme::NumberFormat;
 use crate::config::values::{Color, Pt};
+use crate::diagnostic::Diagnostic;
 use crate::document::Link;
 use crate::image::Image;
 use crate::tags::{Mark, Tree};
@@ -28,6 +29,8 @@ pub struct Output {
     /// the page inside `rect`. The PDF finds notes through their tags, so only tests read this.
     #[cfg_attr(not(test), expect(dead_code, reason = "a layout result that tests inspect"))]
     pub asides: Vec<Aside>,
+    /// The typesetting rules the layout breaks, since no better layout was found.
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// A note set in the margin beside the line that references it.

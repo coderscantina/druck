@@ -111,6 +111,9 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                     crop_marks: false,
                 };
                 write_pdf(&config, &document, &fonts, &laid, print)?;
+                for warning in &laid.warnings {
+                    eprintln!("{warning}");
+                }
                 println!("{}: document is valid", shown(&document.path));
             }
             Ok(())
@@ -153,6 +156,11 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
                 .collect();
             for warning in used.into_iter().filter_map(|face| fonts.embedding_warning(face)) {
                 eprintln!("warning: {warning}");
+            }
+            match laid.warnings.len() {
+                0 => {}
+                1 => eprintln!("warning: 1 typesetting rule is broken, `druck check` names it"),
+                count => eprintln!("warning: {count} typesetting rules are broken, `druck check` lists them"),
             }
             std::fs::write(&output, pdf)
                 .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(&output)))])?;
