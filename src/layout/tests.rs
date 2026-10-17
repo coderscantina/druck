@@ -367,7 +367,7 @@ fn inline_code_sits_on_one_padded_box_per_line() {
         &config.styles.body,
         &config.inline,
         &fonts,
-        Lang::En,
+        paragraph::Rules::of(&config),
         300.0,
         0.0,
     )
@@ -836,7 +836,11 @@ fn text(text: &str, style: InlineStyle) -> Inline {
 fn set(content: &[Inline], style: &Style, lang: Lang, width: f64) -> Vec<Vec<(f64, ShapedRun)>> {
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
-    let lines = paragraph::lines(content, style, &config.inline, &fonts, lang, width, 0.0).unwrap();
+    let rules = paragraph::Rules {
+        lang,
+        ..paragraph::Rules::of(&config)
+    };
+    let lines = paragraph::lines(content, style, &config.inline, &fonts, rules, width, 0.0).unwrap();
     lines
         .into_iter()
         .map(|line| {

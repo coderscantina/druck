@@ -102,8 +102,8 @@ impl<'a> Flow<'a> {
                 let measured = match (style, cell.blocks.as_slice()) {
                     (Some(style), [Block::Paragraph { at, content, .. }]) => {
                         let content = self.resolve(content);
-                        let lang = config.document.lang;
-                        match paragraph::prepare(&content, style, &config.inline, self.fonts, lang) {
+                        let rules = paragraph::Rules::of(config);
+                        match paragraph::prepare(&content, style, &config.inline, self.fonts, rules) {
                             Ok(paragraph) => {
                                 let measure = widths(&paragraph, 2.0 * style.indent.0, *at);
                                 kept.push(Some((paragraph, style.indent.0)));
@@ -350,8 +350,8 @@ impl<'a> Flow<'a> {
                 Block::Paragraph { at, content, class } => {
                     let style = self.paragraph_style(class.as_ref(), frame);
                     let content = self.resolve(content);
-                    let lang = self.config.document.lang;
-                    let prepared = paragraph::prepare(&content, &style, &self.config.inline, self.fonts, lang);
+                    let rules = paragraph::Rules::of(self.config);
+                    let prepared = paragraph::prepare(&content, &style, &self.config.inline, self.fonts, rules);
                     let prepared = match prepared {
                         Ok(prepared) => prepared,
                         Err(problem) => {

@@ -11,9 +11,9 @@ pub(super) mod protrusion;
 
 use std::collections::HashMap;
 
-use self::breaking::{Hang, Item as Element, Measure};
-use super::{Line, NoteRef, anchor_item, inline_face, text_item};
-use crate::config::resolved::{InlineStyles, Style};
+use self::breaking::{Defect, Hang, Item as Element, Measure};
+use super::{Flaw, Line, NoteRef, anchor_item, inline_face, text_item};
+use crate::config::resolved::{Config, InlineStyles, Style};
 use crate::config::theme::{Align, Figures, FontStyle, Lang, Weight};
 use crate::config::values::{Color, Pt};
 use crate::document::{Inline, Link};
@@ -107,6 +107,32 @@ impl Cursor {
     }
 }
 
+/// The language and line breaking limits a paragraph is set by.
+#[derive(Debug, Clone, Copy)]
+pub struct Rules {
+    pub lang: Lang,
+    /// The fewest letters before and after a hyphenation point.
+    pub fragments: (usize, usize),
+    /// The most hyphenated lines in a row.
+    pub hyphens: usize,
+}
+
+impl Rules {
+    /// The document language with the theme's `typesetting` limits.
+    pub fn of(config: &Config) -> Self {
+        let typesetting = &config.typesetting;
+        let custom = typesetting
+            .hyphen_fragments
+            .map(|[left, right]| (left.get(), right.get()));
+        let lang = config.document.lang;
+        Self {
+            lang,
+            fragments: hyphenation::fragments(lang, custom),
+            hyphens: typesetting.hyphens_in_a_row.get(),
+        }
+    }
+}
+
 /// Where a line ends: before `at`, with an added hyphen or at a hard break or the paragraph end.
 #[derive(Debug, Clone, Copy)]
 struct Mark {
@@ -122,11 +148,11 @@ pub fn lines(
     style: &Style,
     inline: &InlineStyles,
     fonts: &Fonts,
-    lang: Lang,
+    rules: Rules,
     width: f64,
     first_indent: f64,
 ) -> Result<Vec<Line>, String> {
-    prepare(content, style, inline, fonts, lang)?.lines(width, first_indent)
+    prepare(content, style, inline, fonts, rules)?.lines(width, first_indent)
 }
 
 /// Shapes inline content once, so it can be measured and then broken at a chosen width. Fails for a
@@ -136,12 +162,12 @@ pub fn prepare<'a>(
     style: &'a Style,
     inline: &'a InlineStyles,
     fonts: &'a Fonts,
-    lang: Lang,
+    rules: Rules,
 ) -> Result<Prepared<'a>, String> {
-    let tokens = tokens(content, style, inline, fonts, lang)?;
+    let tokens = tokens(content, style, inline, fonts, rules.lang)?;
     let mut builder = Builder {
         fonts,
-        lang,
+        rules,
         hyphenate: style.hyphenate,
         justify: style.align == Align::Justify,
         hyphens: HashMap::new(),
@@ -162,7 +188,7 @@ pub fn prepare<'a>(
         style,
         inline,
         fonts,
-        lang,
+        rules,
         words,
         spaces,
         pieces,
@@ -175,7 +201,7 @@ pub struct Prepared<'a> {
     style: &'a Style,
     inline: &'a InlineStyles,
     fonts: &'a Fonts,
-    lang: Lang,
+    rules: Rules,
     words: Vec<Word>,
     /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
     spaces: Vec<f64>,
@@ -232,7 +258,7 @@ impl Prepared<'_> {
     /// Breaks the content into positioned lines of `width`, the first `count` indented by `indent`, as
     /// beside a drop capital. Fails for a word wider than its line even after hyphenation.
     pub fn lines_beside(&self, width: f64, indent: f64, count: usize) -> Result<Vec<Line>, String> {
-        let (style, fonts, lang) = (self.style, self.fonts, self.lang);
+        let (style, fonts, lang) = (self.style, self.fonts, self.rules.lang);
         let justify = style.align == Align::Justify;
         let measure = Measure {
             first: width - indent,
@@ -243,6 +269,8 @@ impl Prepared<'_> {
                 Some(word) if justify => protrusion::leading(&word.fragments[0].run, 0),
                 _ => 0.0,
             },
+            hyphens: self.rules.hyphens,
+            last: (2.0 * style.first_line_indent.0).max(3.0 * style.size.0),
         };
         let Some(marks) = breaking::breaks(&self.items, &measure) else {
             let (index, excess) = self
@@ -268,7 +296,7 @@ impl Prepared<'_> {
         Ok(marks
             .into_iter()
             .enumerate()
-            .map(|(index, mark)| {
+            .map(|(index, breaking::Chosen { at: mark, defect })| {
                 let runs = line_runs(&self.words, start, mark, fonts, lang);
                 let notes = runs.iter().filter_map(|(_, fragment, ..)| fragment.note).collect();
                 // A fragment broken at the end of the line ends on the next one, with its margin notes.
@@ -303,7 +331,11 @@ impl Prepared<'_> {
                     marks,
                     // Only breaks inside a word have an offset into its fragment.
                     hyphenated: mark.at.offset > 0,
-                    flaw: None,
+                    flaw: defect.map(|defect| match defect {
+                        Defect::Loose => Flaw::Loose,
+                        Defect::Hyphens => Flaw::Hyphens,
+                        Defect::ShortLast => Flaw::ShortLast,
+                    }),
                 }
             })
             .collect())
@@ -313,7 +345,7 @@ impl Prepared<'_> {
 /// Turns words and spaces into breaking items, with hyphenation points and margin hangs.
 struct Builder<'a> {
     fonts: &'a Fonts,
-    lang: Lang,
+    rules: Rules,
     hyphenate: bool,
     justify: bool,
     /// Width and right hang of a hyphen per face, size, and tracking; `None` if the face has no hyphen.
@@ -455,7 +487,7 @@ impl Builder<'_> {
             .collect();
         if self.hyphenate {
             points.extend(
-                hyphenation::points(&text, self.lang)
+                hyphenation::points(&text, self.rules.lang, self.rules.fragments)
                     .into_iter()
                     .map(|p| (p, Cut::Hyphen)),
             );
@@ -502,7 +534,7 @@ impl Builder<'_> {
         if let Some(&known) = self.hyphens.get(&key) {
             return known;
         }
-        let run = self.fonts.shape_tracked("-", face, size, self.lang, tracking);
+        let run = self.fonts.shape_tracked("-", face, size, self.rules.lang, tracking);
         let hyphen = missing_glyph(&run).is_none().then(|| (run.width.0, self.end(&run, 1)));
         self.hyphens.insert(key, hyphen);
         hyphen

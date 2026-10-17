@@ -1211,8 +1211,14 @@ impl<'a> Flow<'a> {
         let indent = run.width.0 + DROP_CAP_GAP * style.size.0;
         let width = self.width(frame) - 2.0 * style.indent.0;
         let resolved = self.resolve(&rest);
-        let lines = paragraph::prepare(&resolved, style, &self.config.inline, fonts, lang)
-            .and_then(|prepared| prepared.lines_beside(width, indent, span));
+        let lines = paragraph::prepare(
+            &resolved,
+            style,
+            &self.config.inline,
+            fonts,
+            paragraph::Rules::of(self.config),
+        )
+        .and_then(|prepared| prepared.lines_beside(width, indent, span));
         let mut lines = match lines {
             Ok(lines) if lines.len() >= span => lines,
             Ok(_) => {
@@ -1423,13 +1429,12 @@ impl<'a> Flow<'a> {
     /// Breaks inline content into lines of `width` in `style`, with cross-references and citations resolved.
     fn set(&self, content: &[Inline], style: &Style, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
         let content = self.resolve(content);
-        let lang = self.config.document.lang;
         paragraph::lines(
             &content,
             style,
             &self.config.inline,
             self.fonts,
-            lang,
+            paragraph::Rules::of(self.config),
             width,
             first_indent,
         )
@@ -1719,9 +1724,9 @@ impl<'a> Flow<'a> {
         let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
         let mut width = width - 2.0 * style.indent.0;
         if widen {
-            let lang = self.config.document.lang;
             let resolved = self.resolve(&content);
-            match paragraph::prepare(&resolved, style, &self.config.inline, self.fonts, lang) {
+            let rules = paragraph::Rules::of(self.config);
+            match paragraph::prepare(&resolved, style, &self.config.inline, self.fonts, rules) {
                 Ok(prepared) => width = width.max(prepared.minimum().0 + 1e-6),
                 Err(problem) => {
                     self.errors.push(self.error(at, problem));

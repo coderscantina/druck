@@ -306,13 +306,13 @@ fn aligned(style: &Style, align: Option<Align>) -> Cow<'_, Style> {
 
 /// Plain text in the slot's style. Each paragraph after the first gets the style's first-line indent.
 fn text_lines(text: &str, style: &Style, config: &Config, fonts: &Fonts, width: f64) -> Result<Vec<Line>, String> {
-    let lang = config.document.lang;
+    let rules = paragraph::Rules::of(config);
     let measure = width - 2.0 * style.indent.0;
     let mut lines = Vec::new();
     for (index, paragraph) in text.split("\n\n").filter(|p| !p.trim().is_empty()).enumerate() {
         let content = plain(&paragraph.replace('\n', " "));
         let indent = if index == 0 { 0.0 } else { style.first_line_indent.0 };
-        let set = paragraph::lines(&content, style, &config.inline, fonts, lang, measure, indent)?;
+        let set = paragraph::lines(&content, style, &config.inline, fonts, rules, measure, indent)?;
         lines.extend(set.into_iter().map(|line| translate_line(line, style.indent.0)));
     }
     Ok(lines)
