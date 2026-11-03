@@ -1,5 +1,11 @@
 //! The optional agent panel. A status strip until the panel is designed.
 
+// The protocol modules are proven by `examples/agent_probe.rs` and tests until the panel uses them.
+#[allow(dead_code)]
+mod cli;
+#[allow(dead_code)]
+mod session;
+
 use gpui::prelude::*;
 use gpui::{Context, Window, div};
 
