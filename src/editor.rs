@@ -22,6 +22,7 @@ pub mod resolved_config {
     pub use crate::config::front_matter::FrontMatter;
     pub use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
     pub use crate::config::resolved::{Config, FontFiles};
+    pub use crate::config::source::InputSource;
     pub use crate::config::theme::{Face, FontStyle, Lang, Weight};
     pub use crate::config::values::Color;
 

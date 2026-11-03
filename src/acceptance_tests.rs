@@ -72,15 +72,16 @@ fn render(variant: &Variant) -> Rendered {
         today: Date::from_unix(0),
     };
     let renderer = Renderer::new();
+    let cancel = crate::cancel::Cancel::default();
     let configured = renderer
-        .job(&resolver, &input)
+        .job(&resolver, &input, &cancel)
         .configure()
         .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name));
     let layout = configured
         .layout(&LayoutOptions::default())
         .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name));
     let pdf = layout
-        .pdf(&PdfOptions::default())
+        .pdf(&PdfOptions::default(), &cancel)
         .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name))
         .bytes;
     Rendered {

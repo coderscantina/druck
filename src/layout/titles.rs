@@ -24,7 +24,7 @@ use super::fields::Fields;
 use super::paragraph;
 use super::{Break, Flow, Frame, Line, translate_line};
 use crate::config::resolved::{Config, Group, SceneMark, SlotContent, Style, TitleSlot};
-use crate::config::source::{Resource, Source};
+use crate::config::source::{InputSource, Resource};
 use crate::config::theme::{Align, SlotStyle, TemplateStyle, Vertical};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
@@ -38,7 +38,7 @@ use crate::text::Fonts;
 pub(super) const FRONT_MATTER: Location = Location { line: 1, column: 1 };
 
 /// Reports required slots of the title layout in use whose placeholders have no value.
-pub(super) fn check(config: &Config, fields: &Fields, source: &Source) -> Result<(), Vec<Diagnostic>> {
+pub(super) fn check(config: &Config, fields: &Fields, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
     let errors: Vec<_> = active(config, fields)
         .into_iter()
         .flat_map(|(prefix, slots)| {
@@ -133,7 +133,7 @@ pub(super) fn page(
     fields: &Fields,
     fonts: &Fonts,
     theme_images: &HashMap<Resource, Image>,
-    source: &Source,
+    source: &InputSource,
     tags: &mut Tree,
 ) -> Result<Page, Vec<Diagnostic>> {
     let geometry = &config.page;

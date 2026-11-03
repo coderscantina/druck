@@ -12,10 +12,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use self::face::FaceCache;
+use crate::cancel::{Cancel, CheckPoint};
 use crate::config::resolved::{Config, FontFiles};
+use crate::config::source::Resource;
 use crate::config::theme::{Face, FigureSpacing, FigureStyle, Figures, FontStyle, Lang, Weight};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
+use crate::renderer::Failure;
 use crate::resource::{Bytes, Files};
 
 /// What a painter needs to draw a face's glyphs: its font file, the face in it, and the variation
@@ -37,6 +40,7 @@ struct Named {
     face: Arc<face::Face>,
     /// The face's file in this job, as in diagnostics. The same bytes may sit under another name in another job.
     file: String,
+    resource: Resource,
 }
 
 /// The features every run sets, in the order of a plan key's values.
@@ -69,8 +73,9 @@ impl FontSet {
         files: &Files,
         cache: &FaceCache,
         job: u64,
-    ) -> Result<Self, Vec<Diagnostic>> {
-        let mut fonts = Self::from_files(config.fonts.iter().chain(installed), files, cache, job)?;
+        cancel: &Cancel,
+    ) -> Result<Self, Failure> {
+        let mut fonts = Self::from_files(config.fonts.iter().chain(installed), files, cache, job, cancel)?;
         for (family, excluded) in &config.excluded_fonts {
             fonts
                 .families
@@ -92,7 +97,11 @@ impl FontSet {
                 }
             }
         }
-        if errors.is_empty() { Ok(fonts) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(fonts)
+        } else {
+            Err(errors.into())
+        }
     }
 
     pub(crate) fn from_files<'a>(
@@ -100,7 +109,8 @@ impl FontSet {
         files: &Files,
         cache: &FaceCache,
         job: u64,
-    ) -> Result<Self, Vec<Diagnostic>> {
+        cancel: &Cancel,
+    ) -> Result<Self, Failure> {
         let mut fonts = Self {
             faces: Vec::new(),
             families: BTreeMap::new(),
@@ -136,11 +146,17 @@ impl FontSet {
                     Ok(())
                 });
                 if let Err(message) = result {
-                    errors.push(Diagnostic::new(None, message).property(Some(format!("fonts.{name}.{face}"))));
+                    let property = Some(format!("fonts.{name}.{face}"));
+                    errors.push(
+                        Diagnostic::new(None, message)
+                            .property(property)
+                            .resource(&file.resource),
+                    );
                 }
             }
             let mut loaded = Vec::with_capacity(instances.len());
             for (face, (data, file)) in instances {
+                cancel.check(CheckPoint::Face)?;
                 match cache.face(&data, file, face, job) {
                     Ok(built) => {
                         fonts.faces.push(Named {
@@ -149,18 +165,27 @@ impl FontSet {
                                 0 => file.resource.to_string(),
                                 index => format!("face {index} of {}", file.resource),
                             },
+                            resource: file.resource.clone(),
                         });
                         loaded.push((face, FaceId(fonts.faces.len() - 1)));
                     }
                     Err(message) => {
-                        let property = format!("fonts.{name}.{face}");
-                        errors.push(Diagnostic::new(None, message).property(Some(property)));
+                        let property = Some(format!("fonts.{name}.{face}"));
+                        errors.push(
+                            Diagnostic::new(None, message)
+                                .property(property)
+                                .resource(&file.resource),
+                        );
                     }
                 }
             }
             fonts.families.insert(name.clone(), loaded);
         }
-        if errors.is_empty() { Ok(fonts) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(fonts)
+        } else {
+            Err(errors.into())
+        }
     }
 
     /// These faces as the shaper reads them, for one job on one thread.
@@ -191,15 +216,21 @@ impl FontSet {
     }
 
     /// A warning for a face whose font restricts embedding, naming its file.
-    pub fn embedding_warning(&self, face: FaceId) -> Option<String> {
+    pub fn embedding_warning(&self, face: FaceId) -> Option<Diagnostic> {
         let named = &self.faces[face.0];
         named.face.restricted().then(|| {
-            format!(
+            let message = format!(
                 "{} restricts embedding in its license (OS/2 fsType); it is embedded anyway, so check that \
                  its license allows this",
                 named.file
-            )
+            );
+            Diagnostic::warning(None, message).resource(&named.resource)
         })
+    }
+
+    /// The resource a face is read from.
+    pub(crate) fn resource(&self, face: FaceId) -> &Resource {
+        &self.faces[face.0].resource
     }
 
     /// The file a face is read from, as shown in diagnostics.
@@ -240,6 +271,11 @@ impl Fonts<'_> {
     /// See [`FontSet::file`].
     pub fn file(&self, face: FaceId) -> &str {
         self.set.file(face)
+    }
+
+    /// See [`FontSet::resource`].
+    pub(crate) fn resource(&self, face: FaceId) -> &Resource {
+        self.set.resource(face)
     }
 
     /// See [`FontSet::pdf_font`].
@@ -428,7 +464,8 @@ impl Fonts<'static> {
     /// Faces for a test that needs no renderer, read from files. The set lives as long as the test process.
     pub(crate) fn load(config: &Config, installed: &BTreeMap<String, FontFiles>) -> Result<Self, Vec<Diagnostic>> {
         let files = files_of(config.fonts.values().chain(installed.values()));
-        let set = FontSet::load(config, installed, &files, &FaceCache::default(), 0)?;
+        let set = FontSet::load(config, installed, &files, &FaceCache::default(), 0, &Cancel::default())
+            .map_err(Failure::into_errors)?;
         Ok(Box::leak(Box::new(set)).fonts())
     }
 
@@ -438,7 +475,8 @@ impl Fonts<'static> {
     ) -> Result<Self, Vec<Diagnostic>> {
         let families: Vec<_> = families.into_iter().collect();
         let files = files_of(families.iter().map(|(_, files)| *files));
-        let set = FontSet::from_files(families, &files, &FaceCache::default(), 0)?;
+        let set = FontSet::from_files(families, &files, &FaceCache::default(), 0, &Cancel::default())
+            .map_err(Failure::into_errors)?;
         Ok(Box::leak(Box::new(set)).fonts())
     }
 }

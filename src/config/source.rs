@@ -2,16 +2,11 @@
 
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use serde::Serialize;
 
-static DISPLAY_BASE: OnceLock<PathBuf> = OnceLock::new();
-
-/// Shows paths inside `dir` relative to it from now on, as the CLI does for the working directory.
-pub fn show_relative_to(dir: PathBuf) {
-    DISPLAY_BASE.set(dir).ok();
-}
+use crate::diagnostic::path_from;
 
 /// Resolves `.` and `..` components without touching the filesystem, so symlinks stay as written.
 pub fn normalize(path: &Path) -> PathBuf {
@@ -27,16 +22,6 @@ pub fn normalize(path: &Path) -> PathBuf {
         }
     }
     normalized
-}
-
-/// A path for messages: relative to the directory given to [`show_relative_to`] when inside it.
-pub fn shown(path: &Path) -> String {
-    let inside = DISPLAY_BASE.get().and_then(|base| path.strip_prefix(base).ok());
-    match inside {
-        Some(relative) if relative.as_os_str().is_empty() => ".".to_owned(),
-        Some(relative) => relative.display().to_string(),
-        None => path.display().to_string(),
-    }
 }
 
 /// Where a project's chapters sit in their joined text, to name the real file and line of a joined line.
@@ -73,17 +58,26 @@ impl ChapterMap {
 
     /// The chapter file and line behind a joined line. The blank lines that join two chapters, and any line
     /// past the end, count as the last line of the chapter before them.
-    fn locate(&self, line: u64) -> Option<(&Path, u64)> {
+    pub(crate) fn locate(&self, line: u64) -> Option<(&Path, u64)> {
         let index = self.chapters.partition_point(|chapter| chapter.first_line <= line);
         let chapter = &self.chapters[index.checked_sub(1)?];
         let local = (line - chapter.first_line + 1).min(chapter.lines.max(1));
         Some((&chapter.path, local))
     }
+
+    pub(crate) fn manifest(&self) -> &Path {
+        &self.manifest
+    }
+
+    pub(crate) fn paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.chapters.iter().map(|chapter| &chapter.path)
+    }
 }
 
-/// Where a configuration layer came from. Paths are absolute.
+/// Where an input came from, which decides the origin of the paths in it. Paths are absolute. A diagnostic reports
+/// it as the public [`crate::diagnostic::Source`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Source {
+pub enum InputSource {
     Bundled,
     Theme(PathBuf),
     Document(PathBuf),
@@ -91,12 +85,12 @@ pub enum Source {
     Chapters(Arc<ChapterMap>),
     /// A BibTeX file. It supplies no resources; its origin is its directory, like the document's.
     Bibliography(PathBuf),
-    Cli {
+    Overrides {
         working_dir: PathBuf,
     },
 }
 
-impl Source {
+impl InputSource {
     /// The real file and line of a line in this input, when it differs from the input and line given.
     pub fn chapter_line(&self, line: u64) -> Option<(Self, u64)> {
         let Self::Chapters(map) = self else {
@@ -109,7 +103,8 @@ impl Source {
     /// A line of this input as a message names it, such as `line 3` or `line 3 of manuscript/one.md`.
     pub fn line_name(&self, line: u64) -> String {
         match self.chapter_line(line) {
-            Some((chapter, line)) => format!("line {line} of {chapter}"),
+            Some((InputSource::Document(chapter), line)) => format!("line {line} of {}", chapter.display()),
+            Some(_) => unreachable!("a chapter is a document"),
             None => format!("line {line}"),
         }
     }
@@ -122,18 +117,7 @@ impl Source {
             Self::Theme(path) => Origin::Theme(parent(path)),
             Self::Document(path) | Self::Bibliography(path) => Origin::Document(parent(path)),
             Self::Chapters(map) => Origin::Document(parent(&map.manifest)),
-            Self::Cli { working_dir } => Origin::WorkingDir(working_dir.clone()),
-        }
-    }
-}
-
-impl fmt::Display for Source {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Bundled => f.write_str("bundled default theme"),
-            Self::Theme(path) | Self::Document(path) | Self::Bibliography(path) => f.write_str(&shown(path)),
-            Self::Chapters(map) => f.write_str(&shown(&map.manifest)),
-            Self::Cli { .. } => f.write_str("command-line override"),
+            Self::Overrides { working_dir } => Origin::WorkingDir(working_dir.clone()),
         }
     }
 }
@@ -176,15 +160,27 @@ impl Resource {
     }
 }
 
+impl Resource {
+    /// The resource as a terminal shows it: its folder relative to `base` when inside it.
+    pub fn display_from(&self, base: &Path) -> String {
+        self.describe(|dir| path_from(dir, base))
+    }
+
+    fn describe(&self, dir_name: impl Fn(&Path) -> String) -> String {
+        let path = &self.path;
+        match &self.origin {
+            Origin::Bundled => format!("bundled resource \"{path}\""),
+            Origin::Theme(dir) => format!("\"{path}\" relative to the theme in {}", dir_name(dir)),
+            Origin::Document(dir) => format!("\"{path}\" relative to the document in {}", dir_name(dir)),
+            Origin::WorkingDir(dir) => format!("\"{path}\" relative to the working directory {}", dir_name(dir)),
+            Origin::Installed => format!("installed font \"{path}\""),
+        }
+    }
+}
+
 impl fmt::Display for Resource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.origin {
-            Origin::Bundled => write!(f, "bundled resource \"{}\"", self.path),
-            Origin::Theme(dir) => write!(f, "\"{}\" relative to the theme in {}", self.path, shown(dir)),
-            Origin::Document(dir) => write!(f, "\"{}\" relative to the document in {}", self.path, shown(dir)),
-            Origin::WorkingDir(dir) => write!(f, "\"{}\" relative to the working directory {}", self.path, shown(dir)),
-            Origin::Installed => write!(f, "installed font \"{}\"", self.path),
-        }
+        f.write_str(&self.describe(|dir| dir.display().to_string()))
     }
 }
 
@@ -198,14 +194,14 @@ mod tests {
         map.push("/book/one.md".into(), 1, 3);
         map.push("/book/empty.md".into(), 5, 0);
         map.push("/book/two.md".into(), 6, 2);
-        let source = Source::Chapters(Arc::new(map));
+        let source = InputSource::Chapters(Arc::new(map));
         let at = |line| source.chapter_line(line).expect("mapped");
-        let chapter = |path: &str| Source::Document(path.into());
+        let chapter = |path: &str| InputSource::Document(path.into());
         assert_eq!(at(3), (chapter("/book/one.md"), 3));
         assert_eq!(at(4), (chapter("/book/one.md"), 3));
         assert_eq!(at(5), (chapter("/book/empty.md"), 1));
         assert_eq!(at(6), (chapter("/book/two.md"), 1));
         assert_eq!(at(99), (chapter("/book/two.md"), 2));
-        assert_eq!(Source::Document("/d.md".into()).chapter_line(3), None);
+        assert_eq!(InputSource::Document("/d.md".into()).chapter_line(3), None);
     }
 }

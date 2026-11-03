@@ -16,8 +16,8 @@ const PROSE: &str = "The design of a page begins with its proportions. A text bl
     eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the \
     text into fragments and forces frequent hyphenation.";
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 /// The configuration of a document with front matter `yaml` and the partial `theme`.
@@ -25,7 +25,7 @@ fn config(yaml: &str, theme: Value) -> Config {
     let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: SettingsInput {
@@ -33,7 +33,7 @@ fn config(yaml: &str, theme: Value) -> Config {
             settings,
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: "/fake".into(),
             },
             settings: FrontMatter::default(),
@@ -61,9 +61,10 @@ fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]
     let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography =
         bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
-    let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source())?;
+    let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source(), &Cancel::default())
+        .map_err(Failure::into_errors)?;
     let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
-    layout(
+    uncancelled(
         &document,
         &cited,
         images,
@@ -203,7 +204,7 @@ fn a_required_title_slot_without_a_value_is_an_error() {
         error[0].message,
         "this required slot needs {title}; set title in the front matter"
     );
-    assert_eq!(error[0].source, Some(source()));
+    assert_eq!(error[0].source, Some(source().into()));
 
     // The title block is set only when the document has metadata for it.
     assert!(check_titles(&config("author: Ada", theme())).is_err());
@@ -284,7 +285,10 @@ fn body_placeholders_show_statistics_and_metadata_that_do_not_count_themselves()
     assert!(texts.contains(&"Read in 1 minute.".to_owned()), "{texts:?}");
 
     let errors = render_images(&config, "By {subtitle}.\n\nA {draft}.", &[]).unwrap_err();
-    let errors: Vec<_> = errors.iter().map(|e| (e.location, e.message.as_str())).collect();
+    let errors: Vec<_> = errors
+        .iter()
+        .map(|e| (e.location.map(|at| (at.line, at.column)), e.message.as_str()))
+        .collect();
     assert_eq!(
         errors,
         [
@@ -451,12 +455,12 @@ fn settling_repeats_layout_until_shown_pages_agree_and_reports_pages_that_keep_m
     let run = |shown: &[usize], next: fn(usize) -> usize| {
         let mut passes = 0;
         let numbers: Vec<String> = (1..=5).map(|page: usize| page.to_string()).collect();
-        let result = settle(&anchors, shown, &source(), |assumed| {
+        let result = settle(&anchors, shown, &source(), &Cancel::default(), |assumed| {
             passes += 1;
             let page = next(assumed[0].parse().expect("a number"));
             Ok(((), vec![position(page)], numbers.clone()))
         });
-        (passes, result.map(|_| ()))
+        (passes, result.map(|_| ()).map_err(Failure::into_errors))
     };
 
     assert_eq!(run(&[0], |_| 3), (2, Ok(())), "a guess, then a pass that confirms it");
@@ -464,7 +468,7 @@ fn settling_repeats_layout_until_shown_pages_agree_and_reports_pages_that_keep_m
     let (passes, result) = run(&[0], |page| if page == 2 { 3 } else { 2 });
     assert_eq!(passes, PASSES);
     let errors = result.unwrap_err();
-    assert_eq!(errors[0].location, Some((7, 1)));
+    assert_eq!(errors[0].location, Some((7, 1).into()));
     assert!(
         errors[0]
             .message
@@ -675,8 +679,11 @@ fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the
         "com.dc-acrobat-sdk-docs.pdfstandards.",
     );
     let errors = render_cited(&config, &body(&citations), Some(&unbreakable), &[]).unwrap_err();
-    assert_eq!(errors[0].source, Some(Source::Bibliography("/fake/refs.bib".into())));
-    assert_eq!(errors[0].location, Some((90, 1)));
+    assert_eq!(
+        errors[0].source,
+        Some(crate::diagnostic::Source::Bibliography("/fake/refs.bib".into()))
+    );
+    assert_eq!(errors[0].location, Some((90, 1).into()));
     assert!(
         errors[0].message.starts_with("entry `pdfspec`: \"https://"),
         "{}",
@@ -1008,7 +1015,7 @@ fn a_page_reference_to_a_page_without_a_number_is_an_error() {
     );
 
     let errors = result.expect_err("an error");
-    assert_eq!(errors[0].location, Some((1, 1)));
+    assert_eq!(errors[0].location, Some((1, 1).into()));
     assert!(
         errors[0].message.contains("on a page without a number"),
         "{}",

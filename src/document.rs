@@ -7,7 +7,7 @@ use crate::bibliography::syntax;
 use crate::config::template::Placeholder;
 use crate::config::theme::CalloutKind;
 
-/// A 1-based line and column in the Markdown file. Columns count characters.
+/// A 1-based line and column in a source file. Columns count characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Location {
     pub line: u64,

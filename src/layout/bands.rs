@@ -120,7 +120,7 @@ pub(super) fn draw(
                 baseline,
             };
             if let Err(error) = band.draw(groups, &mut page.items, &value, config, fonts) {
-                errors.push(error);
+                errors.push(*error);
             }
         }
     }
@@ -226,8 +226,9 @@ impl BandLines<'_> {
         value: &dyn Fn(&Placeholder) -> Option<Value>,
         config: &Config,
         fonts: &Fonts,
-    ) -> Result<(), Diagnostic> {
-        let error = |property: String, message: String| Diagnostic::new(None, message).property(Some(property));
+    ) -> Result<(), Box<Diagnostic>> {
+        let error =
+            |property: String, message: String| Box::new(Diagnostic::new(None, message).property(Some(property)));
         let frame = config.page.text_width().0;
         // Line boxes of all groups on the page, to find overlaps.
         let mut boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
@@ -272,8 +273,9 @@ impl BandLines<'_> {
         value: &dyn Fn(&Placeholder) -> Option<Value>,
         config: &Config,
         fonts: &Fonts,
-    ) -> Result<Vec<BandLine>, Diagnostic> {
-        let error = |property: String, message: String| Diagnostic::new(None, message).property(Some(property));
+    ) -> Result<Vec<BandLine>, Box<Diagnostic>> {
+        let error =
+            |property: String, message: String| Box::new(Diagnostic::new(None, message).property(Some(property)));
         let width = group.width.0;
         let mut lines: Vec<BandLine> = Vec::new();
         for (index, slot) in group.slots.iter().enumerate() {

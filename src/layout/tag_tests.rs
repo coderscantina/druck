@@ -8,15 +8,15 @@ use super::*;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 fn render(yaml: &str, body: &str) -> Output {
     let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
     let config = resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: json!({"version": 1}),
         }),
         document: SettingsInput {
@@ -24,7 +24,7 @@ fn render(yaml: &str, body: &str) -> Output {
             settings,
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: "/fake".into(),
             },
             settings: FrontMatter::default(),
@@ -35,7 +35,7 @@ fn render(yaml: &str, body: &str) -> Output {
     let cited = Cited::default();
     let fonts = Fonts::load(&config, &Default::default()).expect("bundled fonts");
     let date = crate::date::Date::from_unix(0);
-    layout(
+    uncancelled(
         &document,
         &cited,
         &[],

@@ -10,8 +10,8 @@ use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::theme::Lang;
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 fn config() -> Config {
@@ -33,11 +33,11 @@ fn config() -> Config {
     };
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: settings(source()),
-        overrides: settings(Source::Cli {
+        overrides: settings(InputSource::Overrides {
             working_dir: "/fake".into(),
         }),
     })
@@ -48,7 +48,7 @@ fn render(body: &str) -> (Config, Vec<Page>) {
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
     let document = crate::markdown::parse(body, 1, &source(), Lang::En).expect("document parses");
-    let pages = layout(
+    let pages = uncancelled(
         &document,
         &Cited::default(),
         &[],

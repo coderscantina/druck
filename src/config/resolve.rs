@@ -12,7 +12,7 @@ use super::front_matter::FrontMatter;
 use super::layer::{PropertyError, check_theme_layer, default_theme_value, deserialize_theme};
 use super::merge::Merged;
 use super::resolved::{self, Config, CustomStyle, FaceFile, FontFiles, PageGeometry, SlotContent, Style};
-use super::source::{Resource, Source};
+use super::source::{InputSource, Resource};
 use super::template::{Placeholder, Template};
 use super::theme::{
     self, BlockStyle, Face, FontFile, FontStyle, PageSize, PaperSize, SlotStyle, Theme, TitleSlot, Weight,
@@ -21,12 +21,12 @@ use super::values::{Color, FontName, Length, Pt, Size, Spacing, Spec, TokenKind,
 use crate::diagnostic::Diagnostic;
 
 pub struct ThemeInput {
-    pub source: Source,
+    pub source: InputSource,
     pub value: Value,
 }
 
 pub struct SettingsInput {
-    pub source: Source,
+    pub source: InputSource,
     pub settings: FrontMatter,
 }
 
@@ -43,7 +43,7 @@ pub fn resolve(inputs: Inputs) -> Result<Config, Vec<Diagnostic>> {
         document,
         overrides,
     } = inputs;
-    let mut sources = vec![Source::Bundled];
+    let mut sources = vec![InputSource::Bundled];
     let mut merged = Merged::new(default_theme_value(), 0);
 
     if let Some(theme) = theme {
@@ -72,7 +72,7 @@ pub fn resolve(inputs: Inputs) -> Result<Config, Vec<Diagnostic>> {
     }
 }
 
-fn property_diagnostic(source: Option<Source>, error: PropertyError) -> Diagnostic {
+fn property_diagnostic(source: Option<InputSource>, error: PropertyError) -> Diagnostic {
     Diagnostic::new(source, error.message).property(error.property)
 }
 
@@ -93,7 +93,7 @@ struct Tokens {
 struct Resolver<'a> {
     theme: &'a Theme,
     merged: &'a Merged,
-    sources: &'a [Source],
+    sources: &'a [InputSource],
     tokens: Tokens,
     errors: RefCell<Vec<Diagnostic>>,
     /// Families not defined in `fonts`, with the faces requested and the first property requesting each.
@@ -104,7 +104,7 @@ struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    fn new(theme: &'a Theme, merged: &'a Merged, sources: &'a [Source]) -> Self {
+    fn new(theme: &'a Theme, merged: &'a Merged, sources: &'a [InputSource]) -> Self {
         let mut resolver = Self {
             theme,
             merged,
@@ -1306,15 +1306,15 @@ mod tests {
     fn inputs(theme: Value) -> Inputs {
         Inputs {
             theme: Some(ThemeInput {
-                source: Source::Theme("/fake/themes/t.json".into()),
+                source: InputSource::Theme("/fake/themes/t.json".into()),
                 value: theme,
             }),
             document: SettingsInput {
-                source: Source::Document("/fake/doc.md".into()),
+                source: InputSource::Document("/fake/doc.md".into()),
                 settings: FrontMatter::default(),
             },
             overrides: SettingsInput {
-                source: Source::Cli {
+                source: InputSource::Overrides {
                     working_dir: "/fake".into(),
                 },
                 settings: FrontMatter::default(),
@@ -1327,7 +1327,10 @@ mod tests {
         let errors = resolve(inputs(theme)).expect_err("theme is rejected");
         assert_eq!(errors.len(), 1, "{errors:?}");
         let error = &errors[0];
-        assert_eq!(error.source, Some(Source::Theme("/fake/themes/t.json".into())));
+        assert_eq!(
+            error.source,
+            Some(crate::diagnostic::Source::Theme("/fake/themes/t.json".into()))
+        );
         (error.property.clone().expect("property named"), error.message.clone())
     }
 

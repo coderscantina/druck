@@ -33,7 +33,7 @@ pub struct FontFace {
 pub struct Embedded {
     pub faces: Vec<FontFace>,
     pub files: Vec<Asset>,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// The faces and files of `families`, as `config` defines them. A file shared by faces is embedded once.
@@ -43,9 +43,12 @@ pub fn embed(config: &Config, families: &BTreeSet<String>, files: &Files) -> Res
     let mut errors = Vec::new();
     for family in families {
         let Some(family_files) = config.fonts.get(family) else {
-            embedded.warnings.push(format!(
-                "font family \"{family}\" has no font files in the theme, so the EPUB names it without embedding \
-                 it; readers that lack it show a fallback font"
+            embedded.warnings.push(Diagnostic::warning(
+                None,
+                format!(
+                    "font family \"{family}\" has no font files in the theme, so the EPUB names it without embedding \
+                     it; readers that lack it show a fallback font"
+                ),
             ));
             continue;
         };
@@ -54,28 +57,42 @@ pub fn embed(config: &Config, families: &BTreeSet<String>, files: &Files) -> Res
             let data = match files.get(&file.resource) {
                 Ok(data) => data,
                 Err(message) => {
-                    errors.push(Diagnostic::new(None, message).property(property()));
+                    errors.push(
+                        Diagnostic::new(None, message)
+                            .property(property())
+                            .resource(&file.resource),
+                    );
                     continue;
                 }
             };
             let Some(kind) = Kind::of(&data).filter(|_| file.index == 0) else {
-                embedded.warnings.push(format!(
+                let message = format!(
                     "{} is not embedded in the EPUB: readers load only single-face OpenType, TrueType, and WOFF files",
                     file.resource
-                ));
+                );
+                embedded
+                    .warnings
+                    .push(Diagnostic::warning(None, message).resource(&file.resource));
                 continue;
             };
             let Some(parsed) = rustybuzz::Face::from_slice(&data, 0) else {
                 let message = format!("{} is not a parsable OpenType or TrueType font", file.resource);
-                errors.push(Diagnostic::new(None, message).property(property()));
+                errors.push(
+                    Diagnostic::new(None, message)
+                        .property(property())
+                        .resource(&file.resource),
+                );
                 continue;
             };
             if restricts_embedding(&parsed) {
-                embedded.warnings.push(format!(
+                let message = format!(
                     "{} restricts embedding in its license (OS/2 fsType); it is embedded anyway, so check that its \
                      license allows this",
                     file.resource
-                ));
+                );
+                embedded
+                    .warnings
+                    .push(Diagnostic::warning(None, message).resource(&file.resource));
             }
             let weight = match weight_range(&parsed).filter(|_| file.variable) {
                 Some((min, max)) => format!("{min} {max}"),
@@ -196,7 +213,11 @@ mod tests {
         assert_eq!(embedded.files.len(), 2);
         assert_eq!(embedded.files[0].media_type, "font/otf");
         assert_eq!(embedded.warnings.len(), 1);
-        assert!(embedded.warnings[0].contains("\"Avenir Next\" has no font files"));
+        assert!(
+            embedded.warnings[0]
+                .message
+                .contains("\"Avenir Next\" has no font files")
+        );
     }
 
     #[test]
@@ -217,7 +238,9 @@ mod tests {
             ("Variable", Face::REGULAR, variable_file(false)),
             ("Collected", Face::REGULAR, in_collection),
         ]);
-        let Ok(files) = crate::pipeline::read_resources(&FileResolver::new(), &config) else {
+        let Ok(files) =
+            crate::pipeline::read_resources(&FileResolver::new(), &config, &crate::cancel::Cancel::default())
+        else {
             panic!("the files are there")
         };
         let embedded = embed(&config, &families(&["Collected", "Variable"]), &files).unwrap();
@@ -226,6 +249,10 @@ mod tests {
         assert_eq!(embedded.faces.len(), 1);
         assert_eq!(embedded.faces[0].family, "Variable");
         assert_eq!(embedded.faces[0].weight, "100 900");
-        assert!(embedded.warnings[0].contains("set.ttc"), "{:?}", embedded.warnings);
+        assert!(
+            embedded.warnings[0].message.contains("set.ttc"),
+            "{:?}",
+            embedded.warnings
+        );
     }
 }

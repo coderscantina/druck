@@ -8,7 +8,7 @@
 use super::pages::{Margin, Note};
 use super::{FlowLine, Frame, NoteRef};
 use crate::config::resolved::Config;
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Document, Footnote};
 use crate::page::NoteKind;
@@ -16,7 +16,7 @@ use crate::tags::Kind;
 
 /// Reports a note column that runs off the page, or one inside the margin frame where wide blocks would
 /// run under it. Only documents with notes in the margin are checked.
-pub(super) fn check(document: &Document, config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
+pub(super) fn check(document: &Document, config: &Config, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
     let notes = &config.margin_notes;
     let sidenotes = notes.sidenotes && !document.footnotes.is_empty();
     if document.margin_notes.is_empty() && !sidenotes {

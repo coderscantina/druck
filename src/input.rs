@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::SettingsInput;
-use crate::config::source::{Origin, Source};
+use crate::config::source::{InputSource, Origin};
 use crate::diagnostic::Diagnostic;
 use crate::pipeline;
 use crate::renderer::PdfOptions;
@@ -39,7 +39,7 @@ impl DocumentText {
         let origin = Origin::Document(path.parent().unwrap_or(path).to_owned());
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
         let name = name.unwrap_or_default();
-        let source = Source::Document(path.to_owned());
+        let source = InputSource::Document(path.to_owned());
         let text = pipeline::read_text(resolver, &origin, &name, &source)?;
         Ok(Self::Single { text, origin, name })
     }
@@ -121,8 +121,8 @@ impl Overrides {
     }
 }
 
-fn source(working_dir: &Path) -> Source {
-    Source::Cli {
+fn source(working_dir: &Path) -> InputSource {
+    InputSource::Overrides {
         working_dir: working_dir.to_owned(),
     }
 }

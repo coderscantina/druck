@@ -14,8 +14,8 @@ const PROSE: &str = "The design of a page begins with its proportions. A text bl
     eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the \
     text into fragments and forces frequent hyphenation.";
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 pub(super) fn config() -> Config {
@@ -26,7 +26,7 @@ pub(super) fn config() -> Config {
     resolve(Inputs {
         theme: None,
         document: settings(source()),
-        overrides: settings(Source::Cli {
+        overrides: settings(InputSource::Overrides {
             working_dir: "/fake".into(),
         }),
     })
@@ -73,7 +73,7 @@ fn render_in(
         ..Document::default()
     };
     let cited = Cited::default();
-    layout(
+    uncancelled(
         &document,
         &cited,
         images,
@@ -198,7 +198,7 @@ fn reports_a_word_wider_than_the_line_at_its_paragraph() {
     let errors = render(vec![paragraph(4, &"x".repeat(400))]).unwrap_err();
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((4, 1)));
+    assert_eq!(errors[0].location, Some((4, 1).into()));
     assert!(
         errors[0].message.contains("wider than the line"),
         "{}",
@@ -483,7 +483,7 @@ fn reports_the_rules_a_page_breaks_as_warnings_naming_the_page() {
     };
     let cited = Cited::default();
     let today = crate::date::Date::from_unix(0);
-    let output = layout(
+    let output = uncancelled(
         &document,
         &cited,
         &[],
@@ -497,7 +497,7 @@ fn reports_the_rules_a_page_breaks_as_warnings_naming_the_page() {
 
     // The keep group does not fit below the eight paragraphs, so the first page ends short.
     let warning = &output.warnings[0];
-    assert!(warning.warning);
+    assert!(warning.is_warning());
     assert!(warning.message.starts_with("page 1 ends "), "{}", warning.message);
     assert!(
         warning.message.ends_with(" lines short of the bottom"),
@@ -515,7 +515,7 @@ fn reports_a_keep_group_taller_than_the_page_at_its_directive() {
     let errors = render(vec![paragraph(1, "Intro."), keep]).unwrap_err();
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((5, 1)));
+    assert_eq!(errors[0].location, Some((5, 1).into()));
     assert!(
         errors[0].message.starts_with("this keep group is"),
         "{}",
@@ -797,7 +797,7 @@ fn reports_a_keep_group_taller_than_a_column_at_its_directive() {
 
     let errors = render(vec![columns(1, vec![keep()])]).unwrap_err();
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((3, 1)));
+    assert_eq!(errors[0].location, Some((3, 1).into()));
     assert!(
         errors[0].message.starts_with("this keep group is"),
         "{}",
@@ -1094,7 +1094,7 @@ fn reports_an_image_whose_caption_leaves_no_room() {
     let errors = render_with_images(vec![figure(7, 0, caption)], Vec::new(), &[svg(10.0, 10.0)]).unwrap_err();
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((7, 1)));
+    assert_eq!(errors[0].location, Some((7, 1).into()));
     assert!(
         errors[0].message.starts_with("this image has no room"),
         "{}",
@@ -1226,7 +1226,7 @@ fn reports_a_word_too_wide_for_the_narrowest_columns_at_its_cell() {
     let errors = render(vec![table(4, &["A", "B", "C"], &rows, "")]).unwrap_err();
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((6, 3)));
+    assert_eq!(errors[0].location, Some((6, 3).into()));
     assert!(
         errors[0].message.contains("with every column at its narrowest"),
         "{}",
@@ -1420,7 +1420,7 @@ fn reports_a_row_taller_than_the_page_with_its_header() {
     let errors = render(vec![table(3, &["A", "B"], &rows, "")]).unwrap_err();
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((7, 1)));
+    assert_eq!(errors[0].location, Some((7, 1).into()));
     assert!(
         errors[0]
             .message
@@ -1502,10 +1502,11 @@ fn flow(markdown: &str) -> Vec<FlowLine> {
         structure: &structure,
         notes: &notes,
         title_tags: &crate::tags::Tree::default(),
+        cancel: &Cancel::default(),
         first: 0,
     };
     let assumed = vec!["1".to_owned(); structure.anchors.len()];
-    pass.content(&assumed).expect("content is set").0.body
+    pass.content(&assumed).unwrap_or_else(|f| panic!("{f:?}")).0.body
 }
 
 /// The rules after the lines of the block that starts on source line `line`.
@@ -1582,7 +1583,7 @@ fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
             settings,
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: "/fake".into(),
             },
             settings: FrontMatter::default(),
@@ -1591,7 +1592,7 @@ fn duplex_starts_the_contents_and_the_body_on_odd_pages_after_blank_pages() {
     .expect("configuration resolves");
     let fonts = Fonts::load(&config, &BTreeMap::new()).expect("bundled fonts");
     let document = crate::markdown::parse("# One\n\nText.\n", 1, &source(), Lang::En).expect("document parses");
-    let output = layout(
+    let output = uncancelled(
         &document,
         &Cited::default(),
         &[],

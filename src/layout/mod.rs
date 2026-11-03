@@ -70,9 +70,10 @@ use self::notes::NoteStyles;
 use self::numbering::Numbering;
 use self::pages::IssueKind;
 use self::structure::Structure;
+use crate::cancel::{Cancel, CheckPoint};
 use crate::citations::Cited;
 use crate::config::resolved::{Config, CustomStyle, PageGeometry, SceneMark, Style};
-use crate::config::source::{Resource, Source};
+use crate::config::source::{InputSource, Resource};
 use crate::config::theme::{Align, BreakBefore, FontStyle, NumberPosition, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::date::Date;
@@ -81,6 +82,7 @@ use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Lin
 use crate::highlight;
 use crate::image::Image;
 use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
+use crate::renderer::Failure;
 use crate::tags::{self, Id, Kind, Mark, Tree};
 use crate::text::{Fonts, ShapedRun};
 
@@ -109,9 +111,10 @@ pub fn layout(
     theme_images: &HashMap<Resource, Image>,
     config: &Config,
     fonts: &Fonts,
-    source: &Source,
+    source: &InputSource,
     today: Date,
-) -> Result<Output, Vec<Diagnostic>> {
+    cancel: &Cancel,
+) -> Result<Output, Failure> {
     let fields = Fields::new(document, config, today);
     check(document, config, &fields, source)?;
     margin::check(document, config, source)?;
@@ -150,6 +153,7 @@ pub fn layout(
         structure: &structure,
         notes: &notes,
         title_tags: &title_tags,
+        cancel,
         first: usize::from(title_page.is_some()) + usize::from(blank.is_some()),
     };
     let shown = structure.shown_pages(config);
@@ -160,7 +164,7 @@ pub fn layout(
             tags,
         },
         anchors,
-    ) = settle(&structure.anchors, &shown, source, |assumed| pass.run(assumed))?;
+    ) = settle(&structure.anchors, &shown, source, cancel, |assumed| pass.run(assumed))?;
     let no_number = |anchor: &usize| numbering.page(anchors[*anchor].page).is_none();
     let error = |anchor: usize, shows: &str| {
         let (at, what) = &structure.anchors[anchor];
@@ -173,7 +177,7 @@ pub fn layout(
     let indexed = structure.indexed().into_iter().filter(no_number);
     unnumbered.extend(indexed.map(|anchor| error(anchor, "its page in the index")));
     if !unnumbered.is_empty() {
-        return Err(unnumbered);
+        return Err(unnumbered.into());
     }
     let asides = std::mem::take(&mut body.asides);
     let warnings = body
@@ -218,8 +222,39 @@ pub fn layout(
     })
 }
 
+/// [`layout`] for a test, where nothing cancels.
+#[cfg(test)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the inputs of layout, each prepared separately"
+)]
+pub(crate) fn uncancelled(
+    document: &Document,
+    cited: &Cited,
+    images: &[Image],
+    theme_images: &HashMap<Resource, Image>,
+    config: &Config,
+    fonts: &Fonts,
+    source: &InputSource,
+    today: Date,
+) -> Result<Output, Vec<Diagnostic>> {
+    let cancel = Cancel::default();
+    layout(
+        document,
+        cited,
+        images,
+        theme_images,
+        config,
+        fonts,
+        source,
+        today,
+        &cancel,
+    )
+    .map_err(Failure::into_errors)
+}
+
 /// A rule the layout breaks as a warning at its source, naming the page as it is numbered.
-fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source: &Source) -> Diagnostic {
+fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source: &InputSource) -> Diagnostic {
     let page = match numbering.page(issue.page) {
         Some(number) => format!("page {number}"),
         None => format!("unnumbered page {}", issue.page + 1),
@@ -271,7 +306,7 @@ pub(crate) fn check(
     document: &Document,
     config: &Config,
     fields: &Fields,
-    source: &Source,
+    source: &InputSource,
 ) -> Result<(), Vec<Diagnostic>> {
     titles::check(config, fields, source)?;
     classes::check(document, config, source)?;
@@ -285,12 +320,14 @@ pub(crate) fn check(
 fn settle<T>(
     anchors: &[(Location, String)],
     shown: &[usize],
-    source: &Source,
-    mut pass: impl FnMut(&[String]) -> Result<(T, Vec<Position>, Vec<String>), Vec<Diagnostic>>,
-) -> Result<(T, Vec<Position>), Vec<Diagnostic>> {
+    source: &InputSource,
+    cancel: &Cancel,
+    mut pass: impl FnMut(&[String]) -> Result<(T, Vec<Position>, Vec<String>), Failure>,
+) -> Result<(T, Vec<Position>), Failure> {
     let mut assumed = vec!["1".to_owned(); anchors.len()];
     let mut count = 0;
     loop {
+        cancel.check(CheckPoint::Pass)?;
         let (laid, positions, numbers) = pass(&assumed)?;
         count += 1;
         let number = |anchor: usize| &numbers[positions[anchor].page];
@@ -306,9 +343,7 @@ fn settle<T>(
                 assumed[anchor],
                 number(anchor)
             );
-            return Err(vec![
-                Diagnostic::new(Some(source.clone()), message).at(at.line, at.column),
-            ]);
+            return Err(vec![Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)].into());
         }
         assumed = positions
             .iter()
@@ -326,11 +361,12 @@ struct Pass<'a> {
     config: &'a Config,
     fields: &'a Fields<'a>,
     fonts: &'a Fonts<'a>,
-    source: &'a Source,
+    source: &'a InputSource,
     structure: &'a Structure,
     notes: &'a NoteStyles,
     /// The elements of the title page, which the body's follow.
     title_tags: &'a Tree,
+    cancel: &'a Cancel,
     /// The physical index of the first body page: 1 after a title page.
     first: usize,
 }
@@ -338,9 +374,9 @@ struct Pass<'a> {
 impl Pass<'_> {
     /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages with the
     /// numbers of all pages, where each anchor is in the whole document, and the number each page shows.
-    fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Vec<Diagnostic>> {
+    fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Failure> {
         let (content, matters, tags) = self.content(assumed)?;
-        let body = pages::compose(content, self.first, self.config, self.source)?;
+        let body = pages::compose(content, self.first, self.config, self.source, self.cancel)?;
         let mut positions = vec![None; self.structure.anchors.len()];
         for (index, page) in body.pages.iter().enumerate() {
             for item in &page.items {
@@ -372,7 +408,7 @@ impl Pass<'_> {
 
     /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
     /// the anchors. Also returns the line each part of the book starts at and the document's elements.
-    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts, Tree), Vec<Diagnostic>> {
+    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts, Tree), Failure> {
         let config = self.config;
         let mut flow = Flow {
             config,
@@ -407,6 +443,7 @@ impl Pass<'_> {
             parent: None,
             leaf: None,
             errors: Vec::new(),
+            cancel: self.cancel,
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
         if !config.document.title_page
@@ -448,8 +485,12 @@ impl Pass<'_> {
             }
             flow.margin(&body, &[], &self.document.margin_notes)
         };
+        // A cancelled flow left out blocks, so what follows from its lines means nothing.
+        if self.cancel.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
         if !flow.errors.is_empty() {
-            return Err(flow.errors);
+            return Err(flow.errors.into());
         }
         let content = pages::Content {
             body,
@@ -611,7 +652,7 @@ struct Flow<'a> {
     config: &'a Config,
     fields: &'a Fields<'a>,
     fonts: &'a Fonts<'a>,
-    source: &'a Source,
+    source: &'a InputSource,
     cited: &'a Cited,
     images: &'a [Image],
     theme_images: &'a HashMap<Resource, Image>,
@@ -659,6 +700,7 @@ struct Flow<'a> {
     /// The element whose content lines pushed now are, `None` for decoration.
     leaf: Option<Id>,
     errors: Vec<Diagnostic>,
+    cancel: &'a Cancel,
 }
 
 /// The elements a [`Flow::close`] returns to.
@@ -750,6 +792,9 @@ impl<'a> Flow<'a> {
     fn blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
         let mut previous: Option<&Block> = None;
         for block in blocks {
+            if self.cancel.stopped(CheckPoint::Block) {
+                return;
+            }
             let kind = match block {
                 Block::Table { .. } => Some(WideBlock::Table),
                 Block::Image { .. } => Some(WideBlock::Figure),

@@ -321,6 +321,7 @@ impl OutlinePen for Pen {
 mod tests {
     use std::path::Path as FilePath;
 
+    use druck::cancel::Cancel;
     use druck::editor::resolved_config::{FontStyle, Lang, Weight};
     use druck::output::Pt;
 
@@ -330,7 +331,7 @@ mod tests {
     fn sample_layout() -> super::super::job::Layout {
         let path = FilePath::new(env!("CARGO_MANIFEST_DIR")).join("../samples/report.md");
         let text = std::fs::read_to_string(&path).expect("sample");
-        let Ok(layout) = Typesetter::new(&path, None).run(text) else {
+        let Ok(layout) = Typesetter::new(&path, None).run(text, &Cancel::default()) else {
             panic!("typesets")
         };
         layout
@@ -475,7 +476,8 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp folder");
         let theme_path = dir.join("variable.json");
         std::fs::write(&theme_path, theme).expect("theme");
-        let typeset = Typesetter::new(&dir.join("doc.md"), Some(theme_path)).run("Body\n".to_owned());
+        let typeset =
+            Typesetter::new(&dir.join("doc.md"), Some(theme_path)).run("Body\n".to_owned(), &Cancel::default());
         std::fs::remove_dir_all(&dir).expect("temp folder");
         let Ok(layout) = typeset else {
             panic!("the theme is valid and the font loads")

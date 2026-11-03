@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use super::{css, xml};
+use crate::cancel::{Cancel, CheckPoint};
 use crate::citations::Cited;
 use crate::config::resolved::{Config, SceneMark};
 use crate::config::source::Resource;
@@ -20,6 +21,7 @@ use crate::highlight::{self, Span};
 use crate::layout::fields::Fields;
 use crate::layout::structure::{Numbered, Structure, plain};
 use crate::layout::{NO_DROP_CAP, lead_in};
+use crate::renderer::Failure;
 
 mod index;
 
@@ -34,6 +36,7 @@ pub struct Context<'a> {
     pub images: &'a [Picture],
     /// The EPUB path of each theme image the body shows.
     pub theme_images: &'a HashMap<Resource, String>,
+    pub cancel: &'a Cancel,
 }
 
 /// A document image in the EPUB.
@@ -73,10 +76,10 @@ pub fn file_name(index: usize) -> String {
 
 /// The body as files. Rendering runs twice: the first pass finds the file of every anchor, which the
 /// second links to.
-pub fn write(cx: &Context) -> Content {
+pub fn write(cx: &Context) -> Result<Content, Failure> {
     let pieces = split(cx);
-    let (_, placed) = render(cx, &pieces, &vec![None; cx.structure.anchors.len()]);
-    let (files, anchors) = render(cx, &pieces, &placed);
+    let (_, placed) = render(cx, &pieces, &vec![None; cx.structure.anchors.len()])?;
+    let (files, anchors) = render(cx, &pieces, &placed)?;
     let mut index = 0;
     let order = pieces
         .iter()
@@ -88,7 +91,7 @@ pub fn write(cx: &Context) -> Content {
             Piece::Contents => Item::Contents,
         })
         .collect();
-    Content { files, order, anchors }
+    Ok(Content { files, order, anchors })
 }
 
 enum Piece<'d> {
@@ -173,7 +176,11 @@ fn split<'d>(cx: &Context<'d>) -> Vec<Piece<'d>> {
 
 /// Renders the sections with links to the anchors in `placed` files, and returns the files and where
 /// each anchor is.
-fn render(cx: &Context, pieces: &[Piece], placed: &[Option<usize>]) -> (Vec<File>, Vec<Option<usize>>) {
+fn render(
+    cx: &Context,
+    pieces: &[Piece],
+    placed: &[Option<usize>],
+) -> Result<(Vec<File>, Vec<Option<usize>>), Failure> {
     let parts = cx
         .document
         .blocks
@@ -199,6 +206,7 @@ fn render(cx: &Context, pieces: &[Piece], placed: &[Option<usize>]) -> (Vec<File
         let Piece::Section(section) = piece else {
             continue;
         };
+        cx.cancel.check(CheckPoint::Chapter)?;
         let matter = match (parts, section.matter) {
             (false, _) | (true, Some(Matter::Main)) => "bodymatter",
             (true, None | Some(Matter::Front)) => "frontmatter",
@@ -229,7 +237,7 @@ fn render(cx: &Context, pieces: &[Piece], placed: &[Option<usize>]) -> (Vec<File
         });
         writer.file += 1;
     }
-    (files, writer.defined)
+    Ok((files, writer.defined))
 }
 
 struct Writer<'a> {

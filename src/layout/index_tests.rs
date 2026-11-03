@@ -9,15 +9,15 @@ use super::*;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 fn config(yaml: &str, theme: Value) -> Config {
     let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: SettingsInput {
@@ -25,7 +25,7 @@ fn config(yaml: &str, theme: Value) -> Config {
             settings,
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: "/fake".into(),
             },
             settings: FrontMatter::default(),
@@ -43,7 +43,7 @@ fn try_render(config: &Config, body: &str) -> Result<Output, Vec<Diagnostic>> {
     let document = crate::markdown::parse(body, 1, &source(), config.document.lang).expect("document parses");
     let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
     let date = crate::date::Date::from_unix(0);
-    layout(
+    uncancelled(
         &document,
         &Cited::default(),
         &[],
@@ -172,7 +172,7 @@ fn index_pages_in_front_matter_show_their_roman_numbers_and_unnumbered_pages_are
 
     let errors = try_render(&config, &format!("Before{{^early}}.\n\n{body}")).unwrap_err();
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].location, Some((1, 7)));
+    assert_eq!(errors[0].location, Some((1, 7).into()));
     assert_eq!(
         errors[0].message,
         "the index mark \"early\" is on a page without a number, so its page in the index shows nothing"

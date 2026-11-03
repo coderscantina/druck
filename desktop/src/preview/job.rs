@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
 use druck::editor::engine::{self, FontSet};
 use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
@@ -14,11 +15,14 @@ use druck::{Failure, LayoutOptions, Renderer};
 
 use super::raster::{Painter, family_name, fingerprint};
 
-/// Runs one layout at a time. A request made meanwhile waits, replacing any request already waiting, and
-/// makes the running layout's result obsolete. A running layout cannot be stopped.
+/// A request to start: its number, the job, and the token that stops it.
+pub type Started<T> = (u64, T, Cancel);
+
+/// Runs one layout at a time. A request made meanwhile cancels the running layout and waits for it to stop, within a
+/// block of text, replacing any request already waiting.
 pub struct Scheduler<T> {
     latest: u64,
-    running: bool,
+    running: Option<Cancel>,
     waiting: Option<(u64, T)>,
 }
 
@@ -26,24 +30,30 @@ impl<T> Scheduler<T> {
     pub fn new() -> Self {
         Self {
             latest: 0,
-            running: false,
+            running: None,
             waiting: None,
         }
     }
 
-    /// Registers a request, returning it with its number if it should start now.
-    pub fn request(&mut self, job: T) -> Option<(u64, T)> {
+    /// Registers a request, returning it if it should start now.
+    pub fn request(&mut self, job: T) -> Option<Started<T>> {
         self.latest += 1;
-        if self.running {
+        if let Some(running) = &self.running {
+            running.cancel();
             self.waiting = Some((self.latest, job));
             return None;
         }
-        self.running = true;
-        Some((self.latest, job))
+        Some(self.start((self.latest, job)))
+    }
+
+    fn start(&mut self, (number, job): (u64, T)) -> Started<T> {
+        let cancel = Cancel::default();
+        self.running = Some(cancel.clone());
+        (number, job, cancel)
     }
 
     pub fn is_running(&self) -> bool {
-        self.running
+        self.running.is_some()
     }
 
     /// The number of the newest request.
@@ -52,9 +62,9 @@ impl<T> Scheduler<T> {
     }
 
     /// Ends the running layout, returning whether its result counts and the request to start next.
-    pub fn finished(&mut self, number: u64) -> (bool, Option<(u64, T)>) {
-        let next = self.waiting.take();
-        self.running = next.is_some();
+    pub fn finished(&mut self, number: u64) -> (bool, Option<Started<T>>) {
+        self.running = None;
+        let next = self.waiting.take().map(|waiting| self.start(waiting));
         (number == self.latest, next)
     }
 }
@@ -152,24 +162,24 @@ impl Typesetter {
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
     /// of stack, and a debug build needs about as much for deserializing a theme alone. The schema's nesting
     /// is fixed, so one size covers any input.
-    pub fn run(&mut self, text: String) -> Result<Layout, Vec<Diagnostic>> {
+    pub fn run(&mut self, text: String, cancel: &Cancel) -> Result<Layout, Failure> {
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("druck-layout".into())
                 .stack_size(LAYOUT_STACK)
-                .spawn_scoped(scope, || self.typeset(text))
+                .spawn_scoped(scope, || self.typeset(text, cancel))
                 .expect("the system starts a thread")
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
         })
     }
 
-    fn typeset(&mut self, text: String) -> Result<Layout, Vec<Diagnostic>> {
+    fn typeset(&mut self, text: String, cancel: &Cancel) -> Result<Layout, Failure> {
         let start = Instant::now();
         let input = self.input(text)?;
-        let configured = self.renderer.job(&self.resolver, &input).configure().map_err(errors)?;
+        let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
         let configured_at = Instant::now();
-        let layout = configured.layout(&LayoutOptions::default()).map_err(errors)?;
+        let layout = configured.layout(&LayoutOptions::default())?;
         let typeset = Instant::now();
         let config = resolved_config::of(&configured);
         let warnings = config.warnings.iter().chain(layout.warnings()).cloned().collect();
@@ -214,7 +224,7 @@ impl Typesetter {
             },
             theme,
             overrides: Overrides::default(),
-            today: today.map_err(|message| vec![Diagnostic::new(None, message)])?,
+            today: today.map_err(|message| vec![Diagnostic::error(message)])?,
         })
     }
 }
@@ -228,13 +238,6 @@ fn same_fonts(painter: &mut Option<Arc<Painter>>, fonts: FontSet) -> Arc<Painter
     }
 }
 
-fn errors(failure: Failure) -> Vec<Diagnostic> {
-    match failure {
-        Failure::Errors(errors) => errors,
-        Failure::Cancelled => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,13 +245,16 @@ mod tests {
     #[test]
     fn a_newer_request_supersedes_the_running_one() {
         let mut scheduler = Scheduler::new();
-        let (first, _) = scheduler.request("a").expect("idle, so it starts");
+        let (first, _, cancel) = scheduler.request("a").expect("idle, so it starts");
+        assert!(!cancel.is_cancelled());
         assert!(scheduler.request("b").is_none());
+        assert!(cancel.is_cancelled(), "the running layout is stopped");
         assert!(scheduler.request("c").is_none(), "replaces the waiting request");
         let (publish, next) = scheduler.finished(first);
         assert!(!publish);
-        let (second, job) = next.expect("the latest request starts");
+        let (second, job, cancel) = next.expect("the latest request starts");
         assert_eq!(job, "c");
+        assert!(!cancel.is_cancelled(), "a new layout has a token of its own");
         assert!(scheduler.finished(second).0);
         assert!(scheduler.request("d").is_some(), "idle again");
     }
@@ -261,10 +267,10 @@ mod tests {
     fn repeated_runs_reuse_the_painter_and_fonts() {
         let mut typesetter = Typesetter::new(&sample("report.md"), None);
         let text = std::fs::read_to_string(sample("report.md")).expect("sample");
-        let Ok(first) = typesetter.run(text.clone()) else {
+        let Ok(first) = typesetter.run(text.clone(), &Cancel::default()) else {
             panic!("typesets")
         };
-        let Ok(second) = typesetter.run(text + "\n\nOne more paragraph.\n") else {
+        let Ok(second) = typesetter.run(text + "\n\nOne more paragraph.\n", &Cancel::default()) else {
             panic!("typesets")
         };
         assert!(Arc::ptr_eq(&first.painter, &second.painter));
@@ -289,7 +295,7 @@ mod tests {
         .expect("theme");
         let mut typesetter = Typesetter::new(&dir.join("document.md"), Some(theme));
         let run = |typesetter: &mut Typesetter| {
-            let Ok(layout) = typesetter.run("Body text.\n".to_owned()) else {
+            let Ok(layout) = typesetter.run("Body text.\n".to_owned(), &Cancel::default()) else {
                 panic!("typesets")
             };
             layout
@@ -315,7 +321,7 @@ mod tests {
         )
         .expect("theme");
         let document = dir.join("document.md");
-        let Ok(layout) = Typesetter::new(&document, Some(theme)).run(text) else {
+        let Ok(layout) = Typesetter::new(&document, Some(theme)).run(text, &Cancel::default()) else {
             panic!("typesets")
         };
         std::fs::remove_dir_all(&dir).expect("temporary folder");
@@ -329,7 +335,10 @@ mod tests {
         let text = std::fs::read_to_string(sample("report.md")).expect("sample");
         let layout = std::thread::Builder::new()
             .stack_size(256 * 1024)
-            .spawn(move || Typesetter::new(&sample("report.md"), None).run(text).is_ok())
+            .spawn(move || {
+                let cancel = Cancel::default();
+                Typesetter::new(&sample("report.md"), None).run(text, &cancel).is_ok()
+            })
             .expect("thread")
             .join()
             .expect("no stack overflow");
@@ -337,10 +346,21 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_run_publishes_nothing_and_the_next_one_works() {
+        let mut typesetter = Typesetter::new(&sample("report.md"), None);
+        let text = std::fs::read_to_string(sample("report.md")).expect("sample");
+        let cancelled = Cancel::default();
+        cancelled.cancel();
+        let result = typesetter.run(text.clone(), &cancelled);
+        assert!(matches!(result, Err(Failure::Cancelled)));
+        assert!(typesetter.run(text, &Cancel::default()).is_ok());
+    }
+
+    #[test]
     fn invalid_text_reports_diagnostics() {
         let mut typesetter = Typesetter::new(&sample("report.md"), None);
-        let result = typesetter.run("---\ntitle: [unclosed\n---\n\nBody\n".to_owned());
-        let Err(diagnostics) = result else {
+        let result = typesetter.run("---\ntitle: [unclosed\n---\n\nBody\n".to_owned(), &Cancel::default());
+        let Err(Failure::Errors(diagnostics)) = result else {
             panic!("front matter is invalid")
         };
         assert!(!diagnostics.is_empty());

@@ -199,7 +199,7 @@ impl Gate {
         }
         report("last key to painted pages, nothing running at the key", quiet);
 
-        // The worst case: the last key lands just after a layout started, which cannot be stopped.
+        // The last key lands just after a layout started, whose request then cancels that layout.
         let mut busy = Vec::new();
         for _ in 0..PAUSE_SAMPLES {
             self.letter(cx);

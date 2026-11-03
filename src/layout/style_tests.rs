@@ -10,8 +10,8 @@ use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::theme::Lang;
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 fn config() -> Config {
@@ -30,11 +30,11 @@ fn config() -> Config {
     };
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: settings(source()),
-        overrides: settings(Source::Cli {
+        overrides: settings(InputSource::Overrides {
             working_dir: "/fake".into(),
         }),
     })
@@ -44,7 +44,7 @@ fn config() -> Config {
 fn render(config: &Config, fonts: &Fonts, body: &str) -> Result<Vec<Page>, Vec<Diagnostic>> {
     let document = crate::markdown::parse(body, 1, &source(), Lang::En).expect("document parses");
     let cited = Cited::default();
-    layout(
+    uncancelled(
         &document,
         &cited,
         &[],
@@ -186,7 +186,10 @@ fn reports_unknown_styles_and_styles_for_another_kind_of_block_at_the_attribute(
     let config = config();
     let fonts = Fonts::load(&config, &BTreeMap::new()).unwrap();
     let errors = render(&config, &fonts, "Text {.nope}\n\n# Head {.checks}\n").unwrap_err();
-    let found: Vec<_> = errors.iter().map(|e| (e.location, e.message.as_str())).collect();
+    let found: Vec<_> = errors
+        .iter()
+        .map(|e| (e.location.map(|at| (at.line, at.column)), e.message.as_str()))
+        .collect();
     assert_eq!(
         found,
         [

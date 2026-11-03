@@ -5,7 +5,7 @@
 
 use crate::config::front_matter::MetaValue;
 use crate::config::resolved::Config;
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::config::template::{Placeholder, Value};
 use crate::config::theme::Lang;
 use crate::date::Date;
@@ -78,7 +78,7 @@ impl<'a> Fields<'a> {
     }
 
     /// Reports each placeholder in the body and footnotes without a value, at the placeholder.
-    pub fn check(&self, document: &Document, source: &Source) -> Result<(), Vec<Diagnostic>> {
+    pub fn check(&self, document: &Document, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
         let mut visit = |content: &[Inline]| {
             for inline in content {

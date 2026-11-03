@@ -4,8 +4,7 @@
 use std::fmt;
 use std::path::Path;
 
-use druck::diagnostic::Source;
-use druck::editor::resolved_config::{FrontMatter, Inputs, SettingsInput, ThemeInput, resolve};
+use druck::editor::resolved_config::{FrontMatter, InputSource, Inputs, SettingsInput, ThemeInput, resolve};
 use serde_json::Value;
 
 /// One reason a theme is not valid, with the dotted property it concerns when the engine names one.
@@ -37,15 +36,15 @@ impl fmt::Display for Problem {
 pub fn check(path: &Path, theme: &Value) -> Vec<Problem> {
     let inputs = Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme(path.to_owned()),
+            source: InputSource::Theme(path.to_owned()),
             value: theme.clone(),
         }),
         document: SettingsInput {
-            source: Source::Document(path.to_owned()),
+            source: InputSource::Document(path.to_owned()),
             settings: FrontMatter::default(),
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: path.parent().unwrap_or(path).to_owned(),
             },
             settings: FrontMatter::default(),
@@ -63,7 +62,7 @@ pub fn check(path: &Path, theme: &Value) -> Vec<Problem> {
             .collect(),
         Err(diagnostics) => diagnostics
             .into_iter()
-            .filter(|diagnostic| !diagnostic.warning)
+            .filter(|diagnostic| !diagnostic.is_warning())
             .map(|diagnostic| Problem {
                 property: diagnostic.property,
                 message: diagnostic.message,

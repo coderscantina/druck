@@ -45,7 +45,7 @@ use std::ops::Range;
 use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::bibliography::syntax::{self, Segment};
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::config::template::Placeholder;
 use crate::config::theme::{CalloutKind, Lang};
 use crate::diagnostic::Diagnostic;
@@ -65,7 +65,7 @@ pub mod marks;
 /// Every construct that cannot be rendered yet is reported with its location. The result is
 /// either the complete document or every such diagnostic, never a document with content dropped.
 #[cfg(test)]
-pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result<Document, Vec<Diagnostic>> {
+pub fn parse(body: &str, first_line: u64, source: &InputSource, lang: Lang) -> Result<Document, Vec<Diagnostic>> {
     parse_with(body, first_line, source, lang, false)
 }
 
@@ -74,7 +74,7 @@ pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result
 pub fn parse_with(
     original: &str,
     first_line: u64,
-    source: &Source,
+    source: &InputSource,
     lang: Lang,
     no_break_spaces: bool,
 ) -> Result<Document, Vec<Diagnostic>> {
@@ -259,7 +259,7 @@ struct Builder<'a> {
     /// The text as written, which locations refer to, and where its comments were cut from `body`.
     original: &'a str,
     cuts: comments::Cuts,
-    source: &'a Source,
+    source: &'a InputSource,
     first_line: u64,
     /// Byte offset of each line start in `original`.
     line_starts: Vec<usize>,
@@ -325,7 +325,7 @@ impl<'a> Builder<'a> {
         original: &'a str,
         cuts: comments::Cuts,
         first_line: u64,
-        source: &'a Source,
+        source: &'a InputSource,
         lang: Lang,
         directives: Vec<(usize, &'a str)>,
     ) -> Self {
@@ -2883,8 +2883,8 @@ fn fence_name(fence: Fence) -> &'static str {
 mod tests {
     use super::*;
 
-    fn source() -> Source {
-        Source::Document("/doc.md".into())
+    fn source() -> InputSource {
+        InputSource::Document("/doc.md".into())
     }
 
     fn blocks(body: &str) -> Vec<Block> {
@@ -2893,7 +2893,10 @@ mod tests {
 
     fn diagnostics(body: &str, first_line: u64) -> Vec<(Option<(u64, u64)>, String)> {
         let errors = parse(body, first_line, &source(), Lang::En).expect_err("reports");
-        errors.into_iter().map(|d| (d.location, d.message)).collect()
+        errors
+            .into_iter()
+            .map(|d| (d.location.map(|at| (at.line, at.column)), d.message))
+            .collect()
     }
 
     fn text(text: &str, style: InlineStyle) -> Inline {

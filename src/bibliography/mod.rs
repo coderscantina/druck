@@ -25,9 +25,9 @@ pub mod syntax;
 mod words;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
 
 pub use cite::{Citations, Part, Reference};
@@ -39,7 +39,7 @@ use entry::Kind;
 /// The entries of one `.bib` file, in file order, with unique keys.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bibliography {
-    source: Source,
+    path: PathBuf,
     entries: Vec<Entry>,
     index: BTreeMap<String, usize>,
 }
@@ -50,7 +50,7 @@ impl Bibliography {
     pub fn parse(text: &str, path: &Path) -> Result<Self, Vec<Diagnostic>> {
         let (raw_entries, mut problems) = bibtex::read(text);
         let mut bibliography = Self {
-            source: Source::Bibliography(path.to_path_buf()),
+            path: path.to_path_buf(),
             entries: Vec::new(),
             index: BTreeMap::new(),
         };
@@ -76,7 +76,7 @@ impl Bibliography {
             return Ok(bibliography);
         }
         problems.sort_by_key(|problem| problem.at);
-        let source = &bibliography.source;
+        let source = bibliography.source();
         Err(problems
             .into_iter()
             .map(|problem| Diagnostic::new(Some(source.clone()), problem.message).at(problem.at.0, problem.at.1))
@@ -84,8 +84,12 @@ impl Bibliography {
     }
 
     /// The `.bib` file, for diagnostics.
-    pub fn source(&self) -> &Source {
-        &self.source
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn source(&self) -> InputSource {
+        InputSource::Bibliography(self.path.clone())
     }
 
     pub fn entries(&self) -> &[Entry] {

@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-use crate::config::source::Source;
 use crate::config::theme::{CitationStyle, Lang};
 use crate::document::Inline;
 
@@ -82,11 +81,11 @@ fn reports_unsupported_types_duplicates_and_syntax_with_the_path_and_location() 
     assert_eq!(diagnostics.len(), 2);
     assert_eq!(
         diagnostics[0].source,
-        Some(Source::Bibliography("/docs/refs.bib".into()))
+        Some(crate::diagnostic::Source::Bibliography("/docs/refs.bib".into()))
     );
-    assert_eq!(diagnostics[0].location, Some((1, 1)));
+    assert_eq!(diagnostics[0].location, Some((1, 1).into()));
     assert!(diagnostics[0].message.contains("unsupported type `@inbook`"));
-    assert_eq!(diagnostics[1].location, Some((3, 3)));
+    assert_eq!(diagnostics[1].location, Some((3, 3).into()));
     assert!(diagnostics[1].message.contains("defined twice"));
     assert_eq!(
         diagnostics[0].to_string(),
@@ -98,9 +97,9 @@ fn reports_unsupported_types_duplicates_and_syntax_with_the_path_and_location() 
 fn reports_missing_required_fields_per_entry_in_file_order() {
     let text = "@book{b, title = {T}, year = 2020}\n@article{a, author = {A}, title = {T}, journal = {J}}";
     let diagnostics = Bibliography::parse(text, Path::new("refs.bib")).unwrap_err();
-    assert_eq!(diagnostics[0].location, Some((1, 1)));
+    assert_eq!(diagnostics[0].location, Some((1, 1).into()));
     assert!(diagnostics[0].message.contains("`author or editor`, `publisher`"));
-    assert_eq!(diagnostics[1].location, Some((2, 1)));
+    assert_eq!(diagnostics[1].location, Some((2, 1).into()));
     assert!(diagnostics[1].message.contains("`year`"));
 }
 

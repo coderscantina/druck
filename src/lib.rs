@@ -50,4 +50,8 @@ pub mod editor;
 #[cfg(test)]
 mod acceptance_tests;
 #[cfg(test)]
+mod cancel_tests;
+#[cfg(test)]
+mod diagnostic_tests;
+#[cfg(test)]
 mod renderer_tests;

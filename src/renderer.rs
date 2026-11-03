@@ -2,15 +2,17 @@
 //!
 //! A [`Renderer`] keeps what is expensive to prepare, by content hash, and can run jobs from several threads at
 //! once. A job keeps its own state: [`Job`] and [`Configured`] are `Send` but not `Sync`, and borrow the renderer,
-//! resolver, and input. A [`Layout`] owns what it needs and outlives them all.
+//! resolver, input, and token. A [`crate::cancel::Cancel`] stops a job from any thread. A [`Layout`] owns what it
+//! needs and outlives them all.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::cancel::Cancel;
 use crate::config::resolved::Config;
-use crate::config::source::{Origin, Source};
+use crate::config::source::{InputSource, Origin};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::image::ImageCache;
@@ -37,10 +39,16 @@ impl Renderer {
     }
 
     /// The simple path: Markdown and configuration in, PDF bytes and every warning out.
-    pub fn render(&self, resolver: &dyn Resolver, input: &Input, options: &PdfOptions) -> Result<Rendered, Failure> {
-        let configured = self.job(resolver, input).configure()?;
+    pub fn render(
+        &self,
+        resolver: &dyn Resolver,
+        input: &Input,
+        options: &PdfOptions,
+        cancel: &Cancel,
+    ) -> Result<Rendered, Failure> {
+        let configured = self.job(resolver, input, cancel).configure()?;
         let layout = configured.layout(&LayoutOptions::default())?;
-        let mut rendered = layout.pdf(options)?;
+        let mut rendered = layout.pdf(options, cancel)?;
         let mut warnings = configured.warnings().to_vec();
         warnings.extend_from_slice(layout.warnings());
         warnings.append(&mut rendered.warnings);
@@ -48,23 +56,34 @@ impl Renderer {
         Ok(rendered)
     }
 
-    /// The explicit path, one stage at a time. A job is one document on one thread.
-    pub fn job<'r>(&'r self, resolver: &'r dyn Resolver, input: &'r Input) -> Job<'r> {
+    /// The explicit path, one stage at a time. A job is one document on one thread, and `cancel` stops all its
+    /// stages. [`Layout::pdf`] takes its own token, since a layout outlives its job.
+    pub fn job<'r>(&'r self, resolver: &'r dyn Resolver, input: &'r Input, cancel: &'r Cancel) -> Job<'r> {
         Job {
             renderer: self,
             resolver,
             input,
+            cancel,
             one_thread: PhantomData,
         }
     }
 
     /// Numbers a new job and forgets what neither of the two jobs before it used.
     fn begin(&self) -> u64 {
-        let number = self.jobs.fetch_add(1, Ordering::Relaxed) + 1;
+        let number = self.jobs.load(Ordering::Relaxed) + 1;
         let oldest = number.saturating_sub(2);
         self.faces.sweep(oldest);
         self.images.sweep(oldest);
         number
+    }
+
+    /// Counts a job that ran its course. A cancelled one does not age what the caches hold, so a burst of them
+    /// costs no decoded image.
+    fn count<T>(&self, result: Result<T, Failure>) -> Result<T, Failure> {
+        if !matches!(result, Err(Failure::Cancelled)) {
+            self.jobs.fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 }
 
@@ -73,6 +92,7 @@ pub struct Job<'r> {
     renderer: &'r Renderer,
     resolver: &'r dyn Resolver,
     input: &'r Input,
+    cancel: &'r Cancel,
     one_thread: PhantomData<Cell<()>>,
 }
 
@@ -83,23 +103,25 @@ impl<'r> Job<'r> {
             renderer,
             resolver,
             input,
+            cancel,
             ..
         } = self;
         let (config, document) = match &input.text {
             DocumentText::Single { text, origin, name } => {
                 let Origin::Document(dir) = origin else {
                     let message = "a document's origin must be a document folder";
-                    return Err(vec![Diagnostic::new(Some(Source::Document(name.into())), message)].into());
+                    return Err(vec![Diagnostic::new(Some(InputSource::Document(name.into())), message)].into());
                 };
                 pipeline::configure(resolver, input, dir, name, text)?
             }
             DocumentText::Project(project) => project.configure(resolver, input)?,
         };
-        let files = pipeline::read_resources(resolver, &config)?;
+        let files = pipeline::read_resources(resolver, &config, cancel)?;
         Ok(Configured {
             job: JobContext {
                 renderer,
                 resolver,
+                cancel,
                 number: renderer.begin(),
                 files,
             },
@@ -138,7 +160,8 @@ impl Configured<'_> {
 
     /// Lays out the document, reporting everything a render reports before writing.
     pub fn layout(&self, _options: &LayoutOptions) -> Result<Layout, Failure> {
-        let (fonts, laid) = pipeline::typeset(&self.job, &self.config, &self.document, self.today)?;
+        let typeset = pipeline::typeset(&self.job, &self.config, &self.document, self.today);
+        let (fonts, laid) = self.job.renderer.count(typeset)?;
         Ok(Layout {
             config: self.config.clone(),
             document: self.document.clone(),
@@ -150,6 +173,10 @@ impl Configured<'_> {
 
     /// Writes an EPUB, which needs no layout. `parts` is the number of content documents.
     pub fn epub(&self, options: &EpubOptions) -> Result<Rendered, Failure> {
+        self.job.renderer.count(self.write_epub(options))
+    }
+
+    fn write_epub(&self, options: &EpubOptions) -> Result<Rendered, Failure> {
         let (config, document) = (&*self.config, &*self.document);
         let prepared = pipeline::prepare(&self.job, config, document)?;
         let iso = config.metadata.date.as_deref().and_then(|text| Date::iso(text.trim()));
@@ -163,14 +190,11 @@ impl Configured<'_> {
             today: self.today,
             modified: options.modified.or(iso).unwrap_or(self.today),
             fallback_title: document.name().unwrap_or("Untitled"),
+            cancel: self.job.cancel,
         })?;
         Ok(Rendered {
             bytes: written.bytes,
-            warnings: written
-                .warnings
-                .into_iter()
-                .map(|warning| Diagnostic::warning(None, warning))
-                .collect(),
+            warnings: written.warnings,
             parts: written.documents,
         })
     }
@@ -223,6 +247,17 @@ pub enum Failure {
 impl From<Vec<Diagnostic>> for Failure {
     fn from(errors: Vec<Diagnostic>) -> Self {
         Self::Errors(errors)
+    }
+}
+
+#[cfg(test)]
+impl Failure {
+    /// The errors of a job that nobody cancels.
+    pub(crate) fn into_errors(self) -> Vec<Diagnostic> {
+        match self {
+            Self::Errors(errors) => errors,
+            Self::Cancelled => panic!("nothing cancels this job"),
+        }
     }
 }
 

@@ -13,13 +13,13 @@ use crate::citations::{self, Cited};
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::Config;
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::date::Date;
 use crate::layout::fields::Fields;
 use crate::layout::structure::Structure;
 
-fn source() -> Source {
-    Source::Document("/fake/book.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/book.md".into())
 }
 
 /// The configuration of a document with front matter `yaml` and the partial `theme`.
@@ -27,7 +27,7 @@ pub(super) fn config(yaml: &str, theme: Value) -> Config {
     let settings: FrontMatter = serde_saphyr::from_str(yaml).expect("front matter");
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: SettingsInput {
@@ -35,7 +35,7 @@ pub(super) fn config(yaml: &str, theme: Value) -> Config {
             settings,
         },
         overrides: SettingsInput {
-            source: Source::Cli {
+            source: InputSource::Overrides {
                 working_dir: "/fake".into(),
             },
             settings: FrontMatter::default(),
@@ -46,9 +46,11 @@ pub(super) fn config(yaml: &str, theme: Value) -> Config {
 
 /// The body files of `body`, with citations from the BibTeX text `bib`.
 fn write(config: &Config, body: &str, bib: Option<&str>) -> (Content, Structure) {
+    let cancel = crate::cancel::Cancel::default();
     let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography = bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography"));
-    let cited: Cited = citations::resolve(&document, bibliography.as_ref(), config, &source()).expect("citations");
+    let cited: Cited = citations::resolve(&document, bibliography.as_ref(), config, &source(), &cancel)
+        .unwrap_or_else(|failure| panic!("{failure:?}"));
     let fields = Fields::new(&document, config, Date::from_unix(0));
     let structure = Structure::new(&document, config, cited.references());
     let content = content::write(&Context {
@@ -59,7 +61,9 @@ fn write(config: &Config, body: &str, bib: Option<&str>) -> (Content, Structure)
         fields: &fields,
         images: &[],
         theme_images: &HashMap::new(),
-    });
+        cancel: &cancel,
+    })
+    .unwrap_or_else(|failure| panic!("{failure:?}"));
     (content, structure)
 }
 

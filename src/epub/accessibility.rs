@@ -176,11 +176,11 @@ mod tests {
 
     use super::super::tests::config;
     use super::*;
-    use crate::config::source::Source;
+    use crate::config::source::InputSource;
 
     fn properties(theme: Value, body: &str) -> Vec<(&'static str, String)> {
         let document =
-            crate::markdown::parse(body, 1, &Source::Document("/fake/book.md".into()), Lang::En).expect("parses");
+            crate::markdown::parse(body, 1, &InputSource::Document("/fake/book.md".into()), Lang::En).expect("parses");
         metadata(&document, &config("", theme), false)
     }
 

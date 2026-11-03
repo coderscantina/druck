@@ -1,14 +1,14 @@
 //! Checks the custom styles that `{.name}` attributes apply, before layout relies on them.
 
 use crate::config::resolved::{BlockKind, Config};
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Class, Document};
 
 /// Reports, at the attribute, each style name the theme does not define and each style applied to a
 /// kind of block it is not for. A style's kind follows its built-in base: headings, lists, or paragraphs.
 /// `{.no-drop-cap}` on a paragraph is no theme style; it turns off a chapter's drop capital and lead-in.
-pub(super) fn check(document: &Document, config: &Config, source: &Source) -> Result<(), Vec<Diagnostic>> {
+pub(super) fn check(document: &Document, config: &Config, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
     let mut errors = Vec::new();
     let mut visit = |class: &Class, kind: BlockKind| {
         let message = match config.custom_styles.get(&class.name) {

@@ -11,8 +11,8 @@ use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 const BACKGROUND: Color = Color([0xf1, 0xf1, 0xf1]);
 const BAR: Color = Color([0x8c, 0x8c, 0x8c]);
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 fn config() -> Config {
@@ -22,11 +22,11 @@ fn config() -> Config {
     };
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: json!({"version": 1, "pages": {"body": {"header": null, "footer": null}}}),
         }),
         document: settings(source()),
-        overrides: settings(Source::Cli {
+        overrides: settings(InputSource::Overrides {
             working_dir: "/fake".into(),
         }),
     })
@@ -36,7 +36,7 @@ fn config() -> Config {
 fn render(config: &Config, body: &str) -> Vec<Page> {
     let fonts = Fonts::load(config, &BTreeMap::new()).unwrap();
     let document = crate::markdown::parse(body, 1, &source(), config.document.lang).expect("document parses");
-    layout(
+    uncancelled(
         &document,
         &Cited::default(),
         &[],

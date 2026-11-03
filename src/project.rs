@@ -10,7 +10,7 @@ use serde_saphyr::Spanned;
 
 use crate::config::front_matter::{self, Export, FrontMatter};
 use crate::config::resolved::Config;
-use crate::config::source::{ChapterMap, Origin, Source, normalize};
+use crate::config::source::{ChapterMap, InputSource, Origin, normalize};
 use crate::diagnostic::Diagnostic;
 use crate::input::{DocumentText, ExportSettings, Input};
 use crate::pipeline::{self, DocumentFile};
@@ -30,7 +30,7 @@ pub struct Project {
     warnings: Vec<Diagnostic>,
     manifest: PathBuf,
     settings: FrontMatter,
-    source: Source,
+    source: InputSource,
     text: String,
 }
 
@@ -38,7 +38,7 @@ impl Project {
     /// Reads the manifest in `dir`, which is absolute, and joins the chapters it lists.
     pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Vec<Diagnostic>> {
         let manifest = dir.join(MANIFEST);
-        let source = Source::Document(manifest.clone());
+        let source = InputSource::Document(manifest.clone());
         let origin = Origin::Document(dir.to_owned());
         let text = match resolver.read(&origin, MANIFEST) {
             Ok(data) => pipeline::text(&data)
@@ -63,7 +63,7 @@ impl Project {
             .filter(|path| !listed.contains(path))
             .map(|path| {
                 Diagnostic::warning(
-                    Some(Source::Document(path)),
+                    Some(InputSource::Document(path)),
                     format!("excluded from the book: not listed under chapters in {MANIFEST}"),
                 )
             })
@@ -74,7 +74,7 @@ impl Project {
             warnings,
             manifest,
             settings,
-            source: Source::Chapters(Arc::new(map)),
+            source: InputSource::Chapters(Arc::new(map)),
             text,
         })
     }
@@ -98,7 +98,7 @@ impl Project {
             print_conflict: None,
         };
         if let Some(name) = name {
-            let manifest = Source::Document(self.manifest.clone());
+            let manifest = InputSource::Document(self.manifest.clone());
             let Some(export) = self.exports.get(name) else {
                 let message = format!("no export named \"{name}\"");
                 return Err(vec![Diagnostic::new(Some(manifest), message)]);
@@ -125,7 +125,7 @@ impl Project {
         resolver: &dyn Resolver,
         input: &Input,
     ) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
-        let manifest_source = Source::Document(self.manifest.clone());
+        let manifest_source = InputSource::Document(self.manifest.clone());
         let config = pipeline::resolve_settings(resolver, input, self.settings.clone(), &manifest_source)?;
         let document = DocumentFile {
             path: self.manifest.clone(),
@@ -156,7 +156,7 @@ fn at(diagnostic: Diagnostic, location: &serde_saphyr::Location) -> Diagnostic {
     diagnostic.at(location.line(), location.column())
 }
 
-fn check_exports(exports: &BTreeMap<String, Spanned<Export>>, source: &Source) -> Result<(), Vec<Diagnostic>> {
+fn check_exports(exports: &BTreeMap<String, Spanned<Export>>, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
     let errors: Vec<_> = exports
         .iter()
         .filter(|(name, _)| !crate::theme_path::is_name(name))
@@ -179,7 +179,7 @@ fn read_chapters(
     resolver: &dyn Resolver,
     chapters: &[Spanned<String>],
     dir: &Path,
-    source: &Source,
+    source: &InputSource,
 ) -> Result<Vec<ReadChapter>, Vec<Diagnostic>> {
     if chapters.is_empty() {
         return Err(vec![Diagnostic::new(
@@ -217,7 +217,7 @@ fn join(chapters: &[ReadChapter], manifest: PathBuf) -> Result<(ChapterMap, Stri
     let mut next_line = 1;
     let mut errors = Vec::new();
     for ReadChapter { path, data } in chapters {
-        let source = Source::Document(path.clone());
+        let source = InputSource::Document(path.clone());
         let read = (data.as_ref().map_err(ToString::to_string)).and_then(|data| pipeline::text(data));
         let text = match read {
             Ok(text) => text,

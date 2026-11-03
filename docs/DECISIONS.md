@@ -1113,6 +1113,36 @@ Where the design was wrong or contradicts itself:
 
 Temporary until later steps: `editor::engine::into_parts`, the PDF writer's per-run shaping of a space, `show_relative_to`, and `shown`.
 
+## 2026-11-04: Phase 2 step 3, choices beyond the design
+
+Diagnostics and cancellation follow [the design](PHASE_2_API.md). These go beyond it or differ from it.
+
+- **The engine's input type is `InputSource`, and the public `diagnostic::Source` is another enum.** Rust has no private enum variants, and `Source::Chapters` must not be public. `InputSource` keeps the chapter map and the overrides' working directory, which decide origins. A `Diagnostic` built from it holds the public source and privately the chapter map, so `at` still turns a joined line into the real file. The `editor` feature re-exports `InputSource` for the theme validator.
+- **`Diagnostic` has a public `resource: Option<Resource>`.** The contract asks for resource identifiers with their origins, and the design's struct had nowhere to put them. Every read, decode, and embed failure sets it.
+- **`Diagnostic::message` holds absolute paths, and `display_from` shortens the ones it knows about.** Those are the resource's whole phrase, the project's chapter paths, and one named file (the bibliography in a missing-key message). A path shortened only by textual prefix would also change a sibling folder such as `/work/book two` for base `/work/book`. A message that repeats a known path in user text gets it shortened on a terminal too, and the field stays exact.
+- **`Diagnostic::new` and `warning` are crate-private; `Diagnostic::error(message)` and `diagnostic::path_from` are public.** The CLI and the app report their own failures and print their own paths with them.
+- **`Location` is the parser's `document::Location`, re-exported.** Two identical structs would need converting.
+- **`Layout::pdf` takes a `&Cancel`.** The design has `pdf(&self, options)` and also a check per page. A layout outlives its job by design, so it cannot hold the job's borrowed token, and an export started later should not stop because the layout's old job was superseded. `Renderer::render` passes its one token to both.
+- **Check points beyond the design:** each resource read in `configure`, each citation, each section of both EPUB rendering passes, and each document added to the EPUB. Citations and EPUB sections are short on the corpus, but the loops grow with the document and a check costs one relaxed load. No check sits inside `markdown::parse`, `Bibliography::parse`, or `citations.finish`.
+- **`Flow::blocks` returns early when cancelled rather than returning a `Result`.** Blocks recurse through about ten callers that push errors into `Flow::errors` and carry on, so this keeps their shape. A caller may see fewer lines than it set, which an empty cell or note already means. `Pass::content` looks at the token before anything reads those lines. A test stops a document of nested blocks at every block, and all samples were swept this way once.
+- **The token is checked again after `Document::finish`.** Finishing cannot be stopped and takes about 6 ms of the corpus's 104 ms export, so a cancel during it returns `Cancelled` instead of bytes.
+- **The renderer counts a job when it ends, not when it starts, and not if it was cancelled.** Otherwise two cancelled jobs in a row would age the caches and the next layout would decode and build everything again. A job that only configures is no longer counted, which is the same for what it holds, since it uses no faces.
+- **`CheckPoint` is an argument of `check` only so tests can name a place.** In a test build a `Cancel` can hold a probe that cancels at the nth visit of one check point and counts visits, which shows where a job stopped. Other builds have no probe and ignore the argument.
+- **`bands::Band::draw` returns `Box<Diagnostic>`** for its one error, since the larger struct trips `clippy::result_large_err`.
+
+This supersedes the [spike's](#2026-11-03-desktop-spike-results) "the running layout finishes before the newest text starts". The desktop's `Scheduler` cancels the running layout when a request arrives and starts the waiting request when that layout returns, so layouts still never overlap and the typesetter's lock stays uncontended. The 150 ms pause stays.
+
+Measured on the corpus in release builds. Cancel to `Cancelled` during layout: median 1.3 ms, maximum 19.4 ms, over 88 cancels spread across a layout. The maximum falls before the first block, in parsing and citations, and 50 ms into a layout the maximum is 1.1 ms. Book layout: median 267.6 ms against 268.8 ms before, 80 samples each, so the check points do not show. `DRUCK_GATE`, last key just after a layout started to painted pages: median 467 ms against 612 ms for the base build, two runs of 30 samples each.
+
+Already done before this step: the design says `pipeline::load` prints, but steps 1 and 2 had moved all printing to `main.rs`. This step removed the last process-wide state, `show_relative_to` and `shown`.
+
+Temporary until later steps: `editor::engine::into_parts` and the PDF writer's per-run shaping of a space.
+
+Where the design was wrong or contradicts itself:
+
+- `Layout::pdf(&self, options)` in sections 2 and 5 against section 8's check per page, as above.
+- Section 7 lists `pipeline::load` and `Job::open_project` as printing in the engine. Neither does any more.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

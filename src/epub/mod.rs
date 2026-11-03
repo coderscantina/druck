@@ -21,9 +21,10 @@ use std::path::Path;
 
 use self::content::{Context, Item, Picture, file_name};
 use self::pages::Landmark;
+use crate::cancel::{Cancel, CheckPoint};
 use crate::citations::Cited;
 use crate::config::resolved::Config;
-use crate::config::source::{Origin, Resource, Source};
+use crate::config::source::{InputSource, Origin, Resource};
 use crate::config::theme::{Lang, WideBlock};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
@@ -31,6 +32,7 @@ use crate::document::{Block, Document};
 use crate::image::Image;
 use crate::layout::fields::Fields;
 use crate::layout::structure::{Structure, plain};
+use crate::renderer::Failure;
 use crate::resource::{Bytes, Files};
 
 /// What an EPUB is made from.
@@ -38,7 +40,7 @@ pub struct Book<'a> {
     pub document: &'a Document,
     pub cited: &'a Cited,
     pub config: &'a Config,
-    pub source: &'a Source,
+    pub source: &'a InputSource,
     /// The decoded [`Document::images`].
     pub images: &'a [Image],
     /// The fonts and images the configuration names, as read.
@@ -49,6 +51,7 @@ pub struct Book<'a> {
     pub modified: Date,
     /// The title for a document without a front matter title or level 1 heading, such as its file name.
     pub fallback_title: &'a str,
+    pub cancel: &'a Cancel,
 }
 
 /// An EPUB file and the warnings about what it leaves out.
@@ -56,7 +59,7 @@ pub struct Written {
     pub bytes: Vec<u8>,
     /// The content documents in the reading order.
     pub documents: usize,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// A file in the EPUB, relative to the package document.
@@ -68,7 +71,7 @@ pub struct Asset {
 
 /// Writes `book` as an EPUB. The content is checked as layout checks it; images and fonts are embedded as
 /// they were read.
-pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
+pub fn write(book: &Book) -> Result<Written, Failure> {
     let Book { document, config, .. } = *book;
     let fields = Fields::new(document, config, book.today);
     crate::layout::check(document, config, &fields, book.source)?;
@@ -109,7 +112,8 @@ pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
         fields: &fields,
         images: &pictures,
         theme_images: &theme_images,
-    });
+        cancel: book.cancel,
+    })?;
     let title_page = pages::title_page(config, &fields, &theme_images);
 
     let mut documents = Vec::new();
@@ -241,6 +245,7 @@ pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
     zip.add("EPUB/nav.xhtml", navigation.as_bytes(), true).map_err(fail)?;
     zip.add("EPUB/style.css", stylesheet.as_bytes(), true).map_err(fail)?;
     for (name, text) in &documents {
+        book.cancel.check(CheckPoint::Chapter)?;
         zip.add(&format!("EPUB/{name}"), text.as_bytes(), true).map_err(fail)?;
     }
     for asset in cover.iter().chain(&assets) {
@@ -317,7 +322,11 @@ fn cover(config: &Config, files: &Files) -> Result<Option<Asset>, Vec<Diagnostic
         .unwrap_or_default();
     Image::decode(data.clone(), extension).map_err(|message| {
         let message = format!("image {resource}: {message}");
-        vec![Diagnostic::new(None, message).property(Some("cover".to_owned()))]
+        vec![
+            Diagnostic::new(None, message)
+                .property(Some("cover".to_owned()))
+                .resource(resource),
+        ]
     })?;
     let (media_type, extension) = image_type(&data);
     Ok(Some(Asset {
@@ -330,11 +339,19 @@ fn cover(config: &Config, files: &Files) -> Result<Option<Asset>, Vec<Diagnostic
 fn read(files: &Files, resource: &Resource, property: &str) -> Result<Bytes, Vec<Diagnostic>> {
     if resource.origin == Origin::Bundled {
         let message = format!("{resource} is not bundled");
-        return Err(vec![Diagnostic::new(None, message).property(Some(property.to_owned()))]);
+        return Err(vec![
+            Diagnostic::new(None, message)
+                .property(Some(property.to_owned()))
+                .resource(resource),
+        ]);
     }
-    files
-        .get(resource)
-        .map_err(|message| vec![Diagnostic::new(None, message).property(Some(property.to_owned()))])
+    files.get(resource).map_err(|message| {
+        vec![
+            Diagnostic::new(None, message)
+                .property(Some(property.to_owned()))
+                .resource(resource),
+        ]
+    })
 }
 
 /// The media type and extension of an image that [`Image::decode`] accepted.

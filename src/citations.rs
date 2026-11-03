@@ -4,10 +4,12 @@
 //! Numeric labels and the order of author-date suffixes follow it.
 
 use crate::bibliography::{Bibliography, Citations, Part, Reference};
+use crate::cancel::{Cancel, CheckPoint};
 use crate::config::resolved::Config;
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Document, Inline, Location};
+use crate::renderer::Failure;
 
 /// The formatted citations of a document and the works they cite.
 #[derive(Debug, Default)]
@@ -22,7 +24,7 @@ pub struct Cited {
 /// The cited works in bibliography order, with their `.bib` file for diagnostics.
 #[derive(Debug)]
 pub struct Section {
-    pub source: Source,
+    pub source: InputSource,
     pub references: Vec<Reference>,
 }
 
@@ -38,15 +40,16 @@ pub fn resolve(
     document: &Document,
     bibliography: Option<&Bibliography>,
     config: &Config,
-    source: &Source,
-) -> Result<Cited, Vec<Diagnostic>> {
+    source: &InputSource,
+    cancel: &Cancel,
+) -> Result<Cited, Failure> {
     let Some(first) = document.citations.first() else {
         return Ok(Cited::default());
     };
     let error = |at: Location, message: String| Diagnostic::new(Some(source.clone()), message).at(at.line, at.column);
     let Some(bibliography) = bibliography else {
         let message = "a citation needs a bibliography; set `bibliography` to a BibTeX file in the front matter";
-        return Err(vec![error(first.at, message.to_owned())]);
+        return Err(vec![error(first.at, message.to_owned())].into());
     };
 
     let mut order = Vec::with_capacity(document.citations.len());
@@ -55,18 +58,20 @@ pub fn resolve(
     let mut ids = vec![None; document.citations.len()];
     let mut errors = Vec::new();
     for index in order {
+        cancel.check(CheckPoint::Citation)?;
         let citation = &document.citations[index];
         match citations.add(&citation.syntax) {
             Ok(id) => ids[index] = Some(id),
             Err(missing) => errors.extend(missing.into_iter().map(|missing| {
-                let message = format!("no entry in {} has the key `{}`", bibliography.source(), missing.key);
-                error(citation.keys[missing.item], message)
+                let file = bibliography.path();
+                let message = format!("no entry in {} has the key `{}`", file.display(), missing.key);
+                error(citation.keys[missing.item], message).naming(file)
             })),
         }
     }
     if !errors.is_empty() {
         errors.sort_by_key(|diagnostic| diagnostic.position);
-        return Err(errors);
+        return Err(errors.into());
     }
 
     let rendered = citations.finish(config.document.citation_style, config.document.lang);
@@ -81,7 +86,7 @@ pub fn resolve(
     Ok(Cited {
         citations: parts,
         section: Some(Section {
-            source: bibliography.source().clone(),
+            source: bibliography.source(),
             references: rendered.into_references(),
         }),
     })

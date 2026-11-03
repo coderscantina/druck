@@ -34,15 +34,18 @@ use std::ops::{Bound, Range};
 
 use super::callout::CalloutBox;
 use super::{Break, Flaw, FlowLine, Line, translate};
+use crate::cancel::{Cancel, CheckPoint};
 use crate::config::resolved::{Config, PageGeometry};
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::Location;
 use crate::page::{Aside, Item, NoteKind, Page, Position, Rect};
+use crate::renderer::Failure;
 
 /// Space between blocks may grow by this share of its natural height.
 const STRETCH: f64 = 0.5;
+
 /// Cost of a page whose content ends one body line short of the bottom after stretching. Grows
 /// with the square of the shortfall.
 const SHORT: f64 = 1000.0;
@@ -282,6 +285,9 @@ struct PageFlaws {
     chapter: Option<usize>,
 }
 
+/// How many lines the page break search handles between looks at the cancel token.
+const CANCEL_LINES: usize = 64;
+
 /// Chooses page breaks and positions the content on pages. `first` is the physical index of the first
 /// page, which decides parity: odd pages, counted from 1, have the inner margin on the left. Blank pages
 /// are inserted so that the `rectos` lines start odd pages.
@@ -289,8 +295,9 @@ pub(super) fn compose(
     content: Content,
     first: usize,
     config: &Config,
-    source: &Source,
-) -> Result<Composed, Vec<Diagnostic>> {
+    source: &InputSource,
+    cancel: &Cancel,
+) -> Result<Composed, Failure> {
     let Content {
         mut body,
         rectos,
@@ -327,7 +334,7 @@ pub(super) fn compose(
     composer.place(&floats, config.styles.caption.space_after.0);
     composer.annotate(&margin, config.margin_notes.spacing.0);
     composer.check(&keeps, &bottoms, &tables, source)?;
-    let plans = composer.search().ok_or_else(|| {
+    let plans = composer.search(cancel)?.ok_or_else(|| {
         vec![Diagnostic::new(
             Some(source.clone()),
             "no page breaks satisfy the layout constraints",
@@ -697,7 +704,7 @@ impl<'a> Composer<'a> {
         keeps: &[(Range<usize>, Location)],
         bottoms: &[usize],
         tables: &[Table],
-        source: &Source,
+        source: &InputSource,
     ) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
         let mut error = |at: Location, message: String| {
@@ -799,7 +806,7 @@ impl<'a> Composer<'a> {
     }
 
     /// Finds the cheapest sequence of pages, or `None` if constraints leave no way through.
-    fn search(&self) -> Option<Vec<Plan>> {
+    fn search(&self, cancel: &Cancel) -> Result<Option<Vec<Plan>>, Failure> {
         let count = self.body.len();
         let verso = self.duplex.is_some_and(|first| first % 2 == 1);
         let mut states = vec![State {
@@ -817,6 +824,9 @@ impl<'a> Composer<'a> {
         let mut reached: Vec<BTreeMap<Key, usize>> = (0..=count).map(|_| BTreeMap::new()).collect();
         reached[0].insert((0, 0, verso, -1), 0);
         for at in 0..=count {
+            if at % CANCEL_LINES == 0 {
+                cancel.check(CheckPoint::Pagination)?;
+            }
             // Pages that end where they start add states with more notes or blocks set, so later keys.
             let mut next = Bound::Unbounded;
             while let Some((key, index)) = reached[at]
@@ -853,7 +863,10 @@ impl<'a> Composer<'a> {
         let end = reached[count]
             .range((notes, floats, false, i64::MIN)..=(notes, floats, true, i64::MAX))
             .map(|(_, &index)| index)
-            .min_by(|&a, &b| states[a].cost.total_cmp(&states[b].cost))?;
+            .min_by(|&a, &b| states[a].cost.total_cmp(&states[b].cost));
+        let Some(end) = end else {
+            return Ok(None);
+        };
         let mut plans = Vec::new();
         let mut index = end;
         while let Some(previous) = states[index].previous {
@@ -869,7 +882,7 @@ impl<'a> Composer<'a> {
             index = previous;
         }
         plans.reverse();
-        Some(plans)
+        Ok(Some(plans))
     }
 
     /// The pages that can follow `state`.
@@ -1574,7 +1587,8 @@ mod tests {
         let continued = (0..body.len()).map(|_| loose(1, &[])).collect();
         let notes = Notes::new(notes, continued, 5.0, 0.0);
         let plans = Composer::new(body, &[], &vec![None; body.len()], &notes, PAGE, 10.0)
-            .search()
+            .search(&Cancel::default())
+            .unwrap_or_else(|f| panic!("{f:?}"))
             .expect("breaks exist");
         plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect()
     }
@@ -1601,7 +1615,10 @@ mod tests {
         let headers = vec![None; body.len()];
         let mut composer = Composer::new(body, &[], &headers, &notes, PAGE, 10.0);
         composer.paginate(duplex, &[], chapter);
-        let plans = composer.search().expect("breaks exist");
+        let plans = composer
+            .search(&Cancel::default())
+            .unwrap_or_else(|f| panic!("{f:?}"))
+            .expect("breaks exist");
         plans.into_iter().map(|plan| plan.lines).collect()
     }
 
@@ -1651,7 +1668,8 @@ mod tests {
         let body = loose(14, &[(8, 0)]);
         let notes = Notes::new(vec![paragraph(4)], vec![loose(1, &[])], 0.0, 0.0);
         let plans = Composer::new(&body, &[], &vec![None; body.len()], &notes, PAGE, 10.0)
-            .search()
+            .search(&Cancel::default())
+            .unwrap_or_else(|f| panic!("{f:?}"))
             .expect("breaks exist");
         let pages: Vec<_> = plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect();
         assert_eq!(pages, vec![(0..8, 0..0), (8..14, 0..4)]);

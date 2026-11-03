@@ -33,8 +33,9 @@ use krilla::text::{GlyphId, KrillaGlyph};
 use krilla::{Document, SerializeSettings};
 use krilla_svg::{SurfaceExt, SvgSettings};
 
+use crate::cancel::{Cancel, CheckPoint};
 use crate::config::front_matter::Metadata;
-use crate::config::source::Source;
+use crate::config::source::InputSource;
 use crate::config::theme::{Conformance, Lang, NumberFormat, Standard};
 use crate::config::values::{Color, Pt};
 use crate::date::Date;
@@ -42,6 +43,7 @@ use crate::diagnostic::Diagnostic;
 use crate::document::Link;
 use crate::image::{Image, Pixels};
 use crate::page::{Bookmark, Item, Output, PageNumber, Rect};
+use crate::renderer::Failure;
 use crate::tags::{Id, Kind, Mark, Node as TreeNode, Tree};
 use crate::text::{FaceId, Fonts, ShapedRun};
 
@@ -93,7 +95,7 @@ pub struct Settings<'a> {
     /// needs one.
     pub today: Date,
     /// The document, which diagnostics about its content name.
-    pub source: &'a Source,
+    pub source: &'a InputSource,
 }
 
 /// Writes the pages of `output` as a tagged PDF document, with links, anchors, and bookmarks. The document
@@ -106,12 +108,28 @@ pub fn write(
     fonts: &Fonts,
     metadata: &Metadata,
     settings: &Settings,
-) -> Result<Vec<u8>, Vec<Diagnostic>> {
-    let (document, faces) =
-        compose(output, fonts, metadata, settings).map_err(|message| vec![Diagnostic::new(None, message)])?;
-    document
-        .finish()
-        .map_err(|error| problems(error, output, fonts, &faces, settings))
+    cancel: &Cancel,
+) -> Result<Vec<u8>, Failure> {
+    let (document, faces) = compose(output, fonts, metadata, settings, cancel).map_err(|stop| match stop {
+        Stop::Cancelled => Failure::Cancelled,
+        Stop::Problem(message) => vec![Diagnostic::new(None, message)].into(),
+    })?;
+    let bytes = (document.finish()).map_err(|error| problems(error, output, fonts, &faces, settings))?;
+    // Finishing cannot be stopped, so it may have run past a cancel.
+    cancel.check(CheckPoint::Page)?;
+    Ok(bytes)
+}
+
+/// Why composing a document ended early.
+enum Stop {
+    Cancelled,
+    Problem(String),
+}
+
+impl From<String> for Stop {
+    fn from(message: String) -> Self {
+        Self::Problem(message)
+    }
 }
 
 /// The document ready to be finished, with the faces its text uses.
@@ -120,7 +138,8 @@ fn compose(
     fonts: &Fonts,
     metadata: &Metadata,
     settings: &Settings,
-) -> Result<(Document, BTreeSet<FaceId>), String> {
+    cancel: &Cancel,
+) -> Result<(Document, BTreeSet<FaceId>), Stop> {
     let print = settings.print;
     let margin = print.margin();
     let destination = |anchor: usize| {
@@ -164,6 +183,9 @@ fn compose(
     let mut faces = BTreeSet::new();
     let mut spaces = HashMap::new();
     for (index, page) in output.pages.iter().enumerate() {
+        if cancel.stopped(CheckPoint::Page) {
+            return Err(Stop::Cancelled);
+        }
         let (width, height) = (page.width.0 as f32, page.height.0 as f32);
         let invalid = || format!("invalid page size {} x {} pt", page.width.0, page.height.0);
         let mut page_settings =
@@ -524,14 +546,19 @@ fn problems(
     let KrillaError::Validation(errors) = error else {
         return vec![Diagnostic::new(None, format!("cannot write PDF: {error}"))];
     };
-    let font = |font: &krilla::text::Font| {
-        let face = faces.iter().find(|face| fonts.pdf_font(**face) == font);
-        face.map_or("a font", |face| fonts.file(*face)).to_owned()
-    };
+    let face_of = |font: &krilla::text::Font| faces.iter().find(|face| fonts.pdf_font(**face) == font).copied();
+    let font = |font: &krilla::text::Font| face_of(font).map_or("a font", |face| fonts.file(face)).to_owned();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     for (error, validators) in errors {
         let standards: Vec<&str> = validators.into_iter().map(Validator::as_str).collect();
         let standards = standards.join(" and ");
+        let concerned = match &error {
+            ValidationError::RestrictedLicense(face)
+            | ValidationError::NoCodepointMapping(face, ..)
+            | ValidationError::InvalidCodepointMapping(face, ..)
+            | ValidationError::UnicodePrivateArea(face, ..) => face_of(face).map(|face| fonts.resource(face)),
+            _ => None,
+        };
         let (message, location) = match &error {
             ValidationError::MissingAltText(location) => (
                 format!(
@@ -577,6 +604,10 @@ fn problems(
         let diagnostic = match at {
             Some(at) => Diagnostic::new(Some(settings.source.clone()), message).at(at.line, at.column),
             None => Diagnostic::new(None, message),
+        };
+        let diagnostic = match concerned {
+            Some(resource) => diagnostic.resource(resource),
+            None => diagnostic,
         };
         if !diagnostics.contains(&diagnostic) {
             diagnostics.push(diagnostic);
@@ -796,9 +827,9 @@ mod tests {
             print,
             conformance: &Conformance::default(),
             today: Date::from_unix(0),
-            source: &Source::Document("doc.md".into()),
+            source: &InputSource::Document("doc.md".into()),
         };
-        write(output, fonts, metadata, &settings)
+        write(output, fonts, metadata, &settings, &Cancel::default()).map_err(Failure::into_errors)
     }
 
     fn fonts() -> Fonts<'static> {

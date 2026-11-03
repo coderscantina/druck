@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use druck::diagnostic::{Diagnostic, show_relative_to};
+use druck::cancel::Cancel;
+use druck::diagnostic::Diagnostic;
 use druck::editor::{self, engine, resolved_config};
 use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use druck::resource::{FileResolver, clock_date, normalize, source_date};
@@ -34,9 +35,7 @@ impl Opened {
         let identity = match identity(path) {
             Ok(identity) => identity,
             Err(Failure::Errors(diagnostics)) => {
-                for diagnostic in &diagnostics {
-                    eprintln!("{diagnostic}");
-                }
+                print(&diagnostics);
                 Identity::default()
             }
             Err(Failure::Cancelled) => Identity::default(),
@@ -56,10 +55,9 @@ fn identity(path: &Path) -> Result<Identity, Failure> {
     let resolver = FileResolver::new();
     let renderer = Renderer::new();
     let input = input(&resolver, path)?;
-    let configured = renderer.job(&resolver, &input).configure()?;
-    for warning in configured.warnings() {
-        eprintln!("{warning}");
-    }
+    let cancel = Cancel::default();
+    let configured = renderer.job(&resolver, &input, &cancel).configure()?;
+    print(configured.warnings());
     let (file, text) = editor::document_text(&configured);
     let theme = engine::document_theme(&resolver, file, text, &theme_dirs());
     let metadata = &resolved_config::of(&configured).metadata;
@@ -77,12 +75,19 @@ fn theme_dirs() -> ThemeDirs {
     }
 }
 
-/// The file as an input to the engine. Paths in messages become relative to the working directory.
+/// Prints diagnostics on standard error, with paths relative to the working directory.
+fn print(diagnostics: &[Diagnostic]) {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    for diagnostic in diagnostics {
+        eprintln!("{}", diagnostic.display_from(&working_dir));
+    }
+}
+
+/// The file as an input to the engine.
 fn input(resolver: &FileResolver, path: &Path) -> Result<Input, Failure> {
-    let error = |message: String| vec![Diagnostic::new(None, message)];
+    let error = |message: String| vec![Diagnostic::error(message)];
     let working_dir =
         std::env::current_dir().map_err(|e| error(format!("cannot determine the working directory: {e}")))?;
-    show_relative_to(working_dir.clone());
     let today = match source_date().map_err(error)? {
         Some(day) => day,
         None => clock_date().map_err(error)?,
@@ -109,15 +114,16 @@ mod tests {
         let resolver = FileResolver::new();
         let renderer = Renderer::new();
         let input = input(&resolver, &sample("report.md")).unwrap_or_else(|_| panic!("the sample reads"));
+        let cancel = Cancel::default();
         let configured = renderer
-            .job(&resolver, &input)
+            .job(&resolver, &input, &cancel)
             .configure()
             .unwrap_or_else(|_| panic!("the sample loads"));
         let laid = configured
             .layout(&LayoutOptions::default())
             .unwrap_or_else(|_| panic!("the sample typesets"));
         let pdf = laid
-            .pdf(&PdfOptions::default())
+            .pdf(&PdfOptions::default(), &cancel)
             .unwrap_or_else(|_| panic!("the sample writes"));
         assert!(pdf.parts > 0);
         assert!(pdf.bytes.starts_with(b"%PDF"));

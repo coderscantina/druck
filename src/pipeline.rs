@@ -7,15 +7,16 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::bibliography::Bibliography;
+use crate::cancel::{Cancel, CheckPoint};
 use crate::config::front_matter::{self, FrontMatter};
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::Config;
-use crate::config::source::{Origin, Resource, Source, normalize};
+use crate::config::source::{InputSource, Origin, Resource, normalize};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::image::Image;
 use crate::input::{Input, ThemeDirs, ThemeSelection};
-use crate::renderer::Renderer;
+use crate::renderer::{Failure, Renderer};
 use crate::resource::{Bytes, Files, ResolveError, Resolver};
 use crate::text::{FontSet, Fonts};
 use crate::{citations, document, installed, layout, markdown, page, pdf, theme_path};
@@ -24,6 +25,7 @@ use crate::{citations, document, installed, layout, markdown, page, pdf, theme_p
 pub struct JobContext<'r> {
     pub renderer: &'r Renderer,
     pub resolver: &'r dyn Resolver,
+    pub cancel: &'r Cancel,
     /// This job's place among the renderer's jobs, which decides what its caches keep.
     pub number: u64,
     /// The resources the configuration names, as read for this job.
@@ -33,7 +35,7 @@ pub struct JobContext<'r> {
 /// The document file as read, with where it came from.
 pub struct DocumentFile {
     pub path: PathBuf,
-    pub source: Source,
+    pub source: InputSource,
     pub text: String,
 }
 
@@ -41,7 +43,7 @@ impl DocumentFile {
     /// The Markdown of the document and the line it starts on. A project's joined chapters have no front
     /// matter, so a thematic break at the start of the first one stays a thematic break.
     fn body(&self) -> (&str, u64) {
-        if matches!(self.source, Source::Chapters(_)) {
+        if matches!(self.source, InputSource::Chapters(_)) {
             return (&self.text, 1);
         }
         let split = front_matter::split(&self.text).ok().flatten();
@@ -53,7 +55,7 @@ impl DocumentFile {
     /// What to call the document when it has no title: its file name, or a project's folder name.
     pub fn name(&self) -> Option<&str> {
         let name = match self.source {
-            Source::Chapters(_) => self.path.parent()?.file_name()?,
+            InputSource::Chapters(_) => self.path.parent()?.file_name()?,
             _ => self.path.file_stem()?,
         };
         name.to_str()
@@ -81,10 +83,10 @@ pub fn parse(config: &Config, document: &DocumentFile) -> Result<document::Docum
 }
 
 /// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
-pub fn prepare(job: &JobContext, config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Diagnostic>> {
+pub fn prepare(job: &JobContext, config: &Config, document: &DocumentFile) -> Result<Prepared, Failure> {
     let content = parse(config, document)?;
     let bibliography = load_bibliography(job, config)?;
-    let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source)?;
+    let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source, job.cancel)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let images = load_images(job, &content.images, dir, &document.source)?;
     let theme_images = load_theme_images(job, config)?;
@@ -102,7 +104,7 @@ pub fn typeset(
     config: &Config,
     document: &DocumentFile,
     today: Date,
-) -> Result<(FontSet, page::Output), Vec<Diagnostic>> {
+) -> Result<(FontSet, page::Output), Failure> {
     let set = load_fonts(job, config)?;
     let fonts = set.fonts();
     let prepared = prepare(job, config, document)?;
@@ -115,32 +117,34 @@ pub fn typeset(
         &fonts,
         &document.source,
         today,
+        job.cancel,
     )?;
     Ok((set, laid))
 }
 
 /// The faces the configuration names, from their files and among installed fonts. The installed fonts are looked
 /// at only when a style names such a family.
-fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Vec<Diagnostic>> {
+fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Failure> {
     let faces = &job.renderer.faces;
     if config.installed_fonts.is_empty() {
-        return FontSet::load(config, &BTreeMap::new(), &job.files, faces, job.number);
+        return FontSet::load(config, &BTreeMap::new(), &job.files, faces, job.number, job.cancel);
     }
     let found = installed::lookup(job.resolver, &config.installed_fonts)?;
     let mut files = job.files.clone();
     files.extend(found.files);
-    FontSet::load(config, &found.families, &files, faces, job.number)
+    FontSet::load(config, &found.families, &files, faces, job.number, job.cancel)
 }
 
 /// Reads every resource the configuration names, so a missing file fails before layout and everything in the job
 /// sees the same bytes. Errors name the resource, its origin, and the property.
-pub fn read_resources(resolver: &dyn Resolver, config: &Config) -> Result<Files, Vec<Diagnostic>> {
+pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel) -> Result<Files, Failure> {
     let mut files = Files::default();
     let mut errors = Vec::new();
     for (property, resource) in config.resources() {
         if resource.origin == Origin::Bundled || files.contains(resource) {
             continue;
         }
+        cancel.check(CheckPoint::Resource)?;
         match resolver.read(&resource.origin, &resource.path) {
             Ok(data) => files.insert(resource.clone(), data),
             Err(e) => {
@@ -148,32 +152,43 @@ pub fn read_resources(resolver: &dyn Resolver, config: &Config) -> Result<Files,
                     ResolveError::NotFound(_) => format!("resource not found: {resource}"),
                     e => format!("cannot read {resource}: {e}"),
                 };
-                errors.push(Diagnostic::new(None, message).property(Some(property)));
+                errors.push(
+                    Diagnostic::new(None, message)
+                        .property(Some(property))
+                        .resource(resource),
+                );
             }
         }
     }
-    if errors.is_empty() { Ok(files) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(files)
+    } else {
+        Err(errors.into())
+    }
 }
 
 /// Parses the BibTeX file the configuration names, if any.
-fn load_bibliography(job: &JobContext, config: &Config) -> Result<Option<Bibliography>, Vec<Diagnostic>> {
+fn load_bibliography(job: &JobContext, config: &Config) -> Result<Option<Bibliography>, Failure> {
     let Some(resource) = &config.bibliography_file else {
         return Ok(None);
     };
+    job.cancel.check(CheckPoint::Bibliography)?;
     let path = resource.file().expect("a bibliography is never bundled");
     let text = job.files.get(resource).and_then(|data| text(&data)).map_err(|e| {
         let message = format!("cannot read bibliography {resource}: {e}");
-        vec![Diagnostic::new(None, message).property(Some("bibliography".to_owned()))]
+        let diagnostic = Diagnostic::new(None, message).property(Some("bibliography".to_owned()));
+        vec![diagnostic.resource(resource)]
     })?;
-    Bibliography::parse(&text, &path).map(Some)
+    Ok(Bibliography::parse(&text, &path).map(Some)?)
 }
 
 /// Decodes the theme images that layout may show. Errors name the property.
-fn load_theme_images(job: &JobContext, config: &Config) -> Result<HashMap<Resource, Image>, Vec<Diagnostic>> {
+fn load_theme_images(job: &JobContext, config: &Config) -> Result<HashMap<Resource, Image>, Failure> {
     let used = layout::theme_images(config);
     let mut images = HashMap::new();
     let mut errors = Vec::new();
     for (name, resource) in config.images.iter().filter(|(_, resource)| used.contains(resource)) {
+        job.cancel.check(CheckPoint::Image)?;
         let loaded = match resource.file() {
             None => Err(format!("{resource} is not bundled")),
             Some(path) => {
@@ -188,10 +203,17 @@ fn load_theme_images(job: &JobContext, config: &Config) -> Result<HashMap<Resour
             Ok(image) => {
                 images.insert(resource.clone(), image);
             }
-            Err(message) => errors.push(Diagnostic::new(None, message).property(Some(format!("images.{name}")))),
+            Err(message) => {
+                let property = Some(format!("images.{name}"));
+                errors.push(Diagnostic::new(None, message).property(property).resource(resource));
+            }
         }
     }
-    if errors.is_empty() { Ok(images) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(images)
+    } else {
+        Err(errors.into())
+    }
 }
 
 /// Reads and decodes each image file once, relative to the document. Errors name the first reference.
@@ -199,11 +221,12 @@ fn load_images(
     job: &JobContext,
     files: &[document::ImageFile],
     dir: &Path,
-    source: &Source,
-) -> Result<Vec<Image>, Vec<Diagnostic>> {
+    source: &InputSource,
+) -> Result<Vec<Image>, Failure> {
     let mut images = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     for file in files {
+        job.cancel.check(CheckPoint::Image)?;
         let resource = Resource {
             origin: Origin::Document(dir.to_owned()),
             path: file.path.clone(),
@@ -221,11 +244,16 @@ fn load_images(
         match loaded {
             Ok(image) => images.push(image),
             Err(message) => {
-                errors.push(Diagnostic::new(Some(source.clone()), message).at(file.at.line, file.at.column))
+                let diagnostic = Diagnostic::new(Some(source.clone()), message).resource(&resource);
+                errors.push(diagnostic.at(file.at.line, file.at.column));
             }
         }
     }
-    if errors.is_empty() { Ok(images) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(images)
+    } else {
+        Err(errors.into())
+    }
 }
 
 /// Resolves and checks the configuration for one Markdown document `name` in the folder `dir`.
@@ -237,7 +265,7 @@ pub fn configure(
     text: &str,
 ) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let document_path = normalize(&dir.join(name));
-    let document_source = Source::Document(document_path.clone());
+    let document_source = InputSource::Document(document_path.clone());
     let settings = parse_front_matter(text, &document_source)?;
     let config = resolve_settings(resolver, input, settings, &document_source)?;
     let document = DocumentFile {
@@ -253,7 +281,7 @@ pub(crate) fn resolve_settings(
     resolver: &dyn Resolver,
     input: &Input,
     settings: FrontMatter,
-    source: &Source,
+    source: &InputSource,
 ) -> Result<Config, Vec<Diagnostic>> {
     let theme = selected_theme(resolver, &input.theme, &settings, source)?;
     resolve(Inputs {
@@ -271,7 +299,7 @@ fn selected_theme(
     resolver: &dyn Resolver,
     selection: &ThemeSelection,
     settings: &FrontMatter,
-    source: &Source,
+    source: &InputSource,
 ) -> Result<Option<ThemeInput>, Vec<Diagnostic>> {
     let (path, read) = match selection {
         ThemeSelection::Document { dirs } => {
@@ -284,10 +312,10 @@ fn selected_theme(
         ThemeSelection::File { path } => (path.clone(), read_theme_file(resolver, path)),
         ThemeSelection::Json { text, origin } => {
             let path = origin.file("theme.json").unwrap_or_default();
-            return parse_theme(text, Source::Theme(path)).map(Some);
+            return parse_theme(text, InputSource::Theme(path)).map(Some);
         }
     };
-    let source = Source::Theme(path);
+    let source = InputSource::Theme(path);
     let error = |message: String| {
         vec![Diagnostic::new(
             Some(source.clone()),
@@ -343,7 +371,7 @@ fn read_theme_file(resolver: &dyn Resolver, path: &Path) -> Result<Bytes, Resolv
 /// The theme file that the front matter of a document's `text` names, if it names one and parses.
 #[cfg_attr(not(feature = "editor"), allow(dead_code))]
 pub fn document_theme(resolver: &dyn Resolver, path: &Path, text: &str, dirs: &ThemeDirs) -> Option<PathBuf> {
-    let source = Source::Document(path.to_owned());
+    let source = InputSource::Document(path.to_owned());
     let settings = parse_front_matter(text, &source).ok()?;
     let theme = settings.theme?;
     Some(find_theme(resolver, Path::new(&theme), path.parent()?, dirs).0)
@@ -367,7 +395,7 @@ pub(crate) fn read_text(
     resolver: &dyn Resolver,
     origin: &Origin,
     path: &str,
-    source: &Source,
+    source: &InputSource,
 ) -> Result<String, Vec<Diagnostic>> {
     let error = |message: String| {
         vec![Diagnostic::new(
@@ -379,7 +407,7 @@ pub(crate) fn read_text(
     text(&data).map_err(error)
 }
 
-fn parse_front_matter(text: &str, source: &Source) -> Result<FrontMatter, Vec<Diagnostic>> {
+fn parse_front_matter(text: &str, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
     let split = front_matter::split(text).map_err(|e| vec![Diagnostic::new(Some(source.clone()), e).at(1, 1)])?;
     let Some(split) = split else {
         return Ok(FrontMatter::default());
@@ -397,7 +425,11 @@ fn parse_front_matter(text: &str, source: &Source) -> Result<FrontMatter, Vec<Di
 const PROJECT_FIELDS: &str = "chapters and exports belong in a project's druck.yaml";
 
 /// Reads settings from YAML that starts at 1-based line `first_line` of `source`.
-pub(crate) fn parse_settings(yaml: &str, first_line: u64, source: &Source) -> Result<FrontMatter, Vec<Diagnostic>> {
+pub(crate) fn parse_settings(
+    yaml: &str,
+    first_line: u64,
+    source: &InputSource,
+) -> Result<FrontMatter, Vec<Diagnostic>> {
     serde_saphyr::from_str(yaml).map_err(|error| {
         let mut diagnostic = Diagnostic::new(Some(source.clone()), yaml_message(&error));
         if let Some(location) = error.location() {
@@ -423,7 +455,7 @@ fn yaml_message(error: &serde_saphyr::Error) -> String {
 }
 
 /// Builds settings from `--set key=value` pairs. Values use YAML syntax; dots nest keys.
-pub(crate) fn parse_overrides(pairs: &[String], source: &Source) -> Result<FrontMatter, Vec<Diagnostic>> {
+pub(crate) fn parse_overrides(pairs: &[String], source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
     let error = |message: String| vec![Diagnostic::new(Some(source.clone()), message)];
     let mut settings = Map::new();
     for pair in pairs {
@@ -457,7 +489,7 @@ pub(crate) fn parse_overrides(pairs: &[String], source: &Source) -> Result<Front
 }
 
 /// Builds settings from a JSON object of settings.
-pub(crate) fn overrides_from_value(settings: Value, source: &Source) -> Result<FrontMatter, Vec<Diagnostic>> {
+pub(crate) fn overrides_from_value(settings: Value, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
     if settings.get("chapters").is_some() || settings.get("exports").is_some() {
         let message = format!("--set: {PROJECT_FIELDS}");
         return Err(vec![Diagnostic::new(Some(source.clone()), message)]);
@@ -468,7 +500,7 @@ pub(crate) fn overrides_from_value(settings: Value, source: &Source) -> Result<F
     })
 }
 
-fn parse_theme(text: &str, source: Source) -> Result<ThemeInput, Vec<Diagnostic>> {
+fn parse_theme(text: &str, source: InputSource) -> Result<ThemeInput, Vec<Diagnostic>> {
     let value = serde_json::from_str(text).map_err(|e| {
         let message = e.to_string();
         let message = message.split(" at line ").next().unwrap_or(&message).to_owned();
@@ -485,7 +517,8 @@ pub fn write_pdf(
     laid: &page::Output,
     print: pdf::Print,
     today: Date,
-) -> Result<Vec<u8>, Vec<Diagnostic>> {
+    cancel: &Cancel,
+) -> Result<Vec<u8>, Failure> {
     let settings = pdf::Settings {
         lang: config.document.lang,
         print,
@@ -493,5 +526,5 @@ pub fn write_pdf(
         today,
         source: &document.source,
     };
-    pdf::write(laid, fonts, &config.metadata, &settings)
+    pdf::write(laid, fonts, &config.metadata, &settings, cancel)
 }

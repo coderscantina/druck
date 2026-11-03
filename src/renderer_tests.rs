@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
+use crate::cancel::Cancel;
 use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use crate::renderer::{Failure, LayoutOptions, PdfOptions, Renderer};
 use crate::resource::{Bytes, FileResolver, MemoryResolver, Origin, ResolveError, Resolver};
@@ -57,7 +58,7 @@ fn in_memory_theme() -> ThemeSelection {
 fn pdf(renderer: &Renderer, resolver: &dyn Resolver, input: &Input) -> Vec<u8> {
     on_big_stack(|| {
         renderer
-            .render(resolver, input, &PdfOptions::default())
+            .render(resolver, input, &PdfOptions::default(), &Cancel::default())
             .unwrap_or_else(|failure| panic!("{failure:?}"))
             .bytes
     })
@@ -74,7 +75,7 @@ fn errors(failure: Result<Vec<u8>, Failure>) -> Vec<crate::diagnostic::Diagnosti
 fn try_pdf(renderer: &Renderer, resolver: &dyn Resolver, input: &Input) -> Result<Vec<u8>, Failure> {
     on_big_stack(|| {
         renderer
-            .render(resolver, input, &PdfOptions::default())
+            .render(resolver, input, &PdfOptions::default(), &Cancel::default())
             .map(|rendered| rendered.bytes)
     })
 }
@@ -87,15 +88,16 @@ fn the_simple_and_the_explicit_path_write_the_same_pdf() {
     let renderer = Renderer::new();
     let simple = pdf(&renderer, &resolver, &input);
     let explicit = on_big_stack(|| {
+        let cancel = Cancel::default();
         let configured = renderer
-            .job(&resolver, &input)
+            .job(&resolver, &input, &cancel)
             .configure()
             .unwrap_or_else(|f| panic!("{f:?}"));
         let layout = configured
             .layout(&LayoutOptions::default())
             .unwrap_or_else(|f| panic!("{f:?}"));
         layout
-            .pdf(&PdfOptions::default())
+            .pdf(&PdfOptions::default(), &cancel)
             .unwrap_or_else(|f| panic!("{f:?}"))
             .bytes
     });
@@ -113,7 +115,12 @@ fn errors_in_the_configuration_are_structured() {
     );
     let resolver = MemoryResolver::new();
     let renderer = Renderer::new();
-    let configured = on_big_stack(|| renderer.job(&resolver, &input).configure().map(|_| ()));
+    let configured = on_big_stack(|| {
+        renderer
+            .job(&resolver, &input, &Cancel::default())
+            .configure()
+            .map(|_| ())
+    });
     let Err(Failure::Errors(errors)) = configured else {
         panic!("the front matter is invalid")
     };
@@ -277,9 +284,10 @@ fn what_two_jobs_did_not_use_is_forgotten_and_a_layout_keeps_its_own() {
     let plain = document("Plain text.\n", memory_dir(), "doc.md", no_theme());
     let renderer = Renderer::new();
     let resolver = font_resolver("fonts/LibertinusSerif-Italic.otf");
+    let cancel = Cancel::default();
     let kept = on_big_stack(|| {
         let configured = renderer
-            .job(&resolver, &input)
+            .job(&resolver, &input, &cancel)
             .configure()
             .unwrap_or_else(|f| panic!("{f:?}"));
         configured
@@ -293,7 +301,7 @@ fn what_two_jobs_did_not_use_is_forgotten_and_a_layout_keeps_its_own() {
     pdf(&renderer, &resolver, &plain);
     assert!(renderer.faces.len() < with_theme, "the theme's font is gone");
     assert!(
-        kept.pdf(&PdfOptions::default()).is_ok(),
+        kept.pdf(&PdfOptions::default(), &Cancel::default()).is_ok(),
         "the layout holds its own face"
     );
 }
@@ -421,7 +429,7 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
 
     let picture = document("Text.\n\n![A](gone.png)\n", memory_dir(), "doc.md", no_theme());
     let image_error = errors(try_pdf(&renderer, &missing, &picture));
-    assert_eq!(image_error[0].location, Some((3, 1)));
+    assert_eq!(image_error[0].location, Some((3, 1).into()));
     assert_eq!(
         image_error[0].message,
         format!(

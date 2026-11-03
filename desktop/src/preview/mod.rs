@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use druck::Failure;
 use druck::diagnostic::Diagnostic;
 use druck::editor::engine::Item;
 use gpui::prelude::*;
@@ -27,7 +28,7 @@ use self::bench::Bench;
 pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
 pub use self::job::BodyStyle;
-use self::job::{Layout, Scheduler, Typesetter};
+use self::job::{Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
 use crate::tokens::{self, Tokens};
@@ -128,8 +129,8 @@ impl PreviewView {
         view
     }
 
-    /// Lays out `text` on a background thread and publishes the pages when done. A newer request supersedes
-    /// this one, whose result is then discarded. Does nothing without a document.
+    /// Lays out `text` on a background thread and publishes the pages when done. A newer request cancels this
+    /// one. Does nothing without a document.
     pub fn request(&mut self, text: String, cx: &mut Context<Self>) {
         if let Some(bench) = &mut self.bench {
             bench.requested(&text);
@@ -139,7 +140,7 @@ impl PreviewView {
         }
     }
 
-    /// Whether a layout is running, which the next request would have to wait for.
+    /// Whether a layout is running, which the next request would cancel.
     pub fn is_laying_out(&self) -> bool {
         self.scheduler.is_running()
     }
@@ -174,11 +175,12 @@ impl PreviewView {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
     }
 
-    fn start_layout(&mut self, (number, text): (u64, String), cx: &mut Context<Self>) {
+    fn start_layout(&mut self, (number, text, cancel): Started<String>, cx: &mut Context<Self>) {
         let Some(typesetter) = self.typesetter.clone() else {
             return;
         };
-        let layout = cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(text) });
+        let layout =
+            cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(text, &cancel) });
         cx.spawn(async move |this, cx| {
             let result = layout.await;
             this.update(cx, |view, cx| {
@@ -195,7 +197,7 @@ impl PreviewView {
         .detach();
     }
 
-    fn publish(&mut self, number: u64, result: Result<Layout, Vec<Diagnostic>>, cx: &mut Context<Self>) {
+    fn publish(&mut self, number: u64, result: Result<Layout, Failure>, cx: &mut Context<Self>) {
         match result {
             Ok(layout) => {
                 self.published = number;
@@ -208,7 +210,8 @@ impl PreviewView {
                 let old = self.layout.replace(Arc::new(layout));
                 cx.background_spawn(async move { drop(old) }).detach();
             }
-            Err(diagnostics) => self.diagnostics = diagnostics,
+            Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
+            Err(Failure::Cancelled) => {}
         }
         cx.notify();
     }

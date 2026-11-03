@@ -13,8 +13,8 @@ const PROSE: &str = "The design of a page begins with its proportions. A text bl
     eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the \
     text into fragments and forces frequent hyphenation.";
 
-fn source() -> Source {
-    Source::Document("/fake/doc.md".into())
+fn source() -> InputSource {
+    InputSource::Document("/fake/doc.md".into())
 }
 
 /// The configuration with the partial `theme`.
@@ -25,11 +25,11 @@ fn config(theme: Value) -> Config {
     };
     resolve(Inputs {
         theme: Some(ThemeInput {
-            source: Source::Theme("/fake/theme.json".into()),
+            source: InputSource::Theme("/fake/theme.json".into()),
             value: theme,
         }),
         document: settings(source()),
-        overrides: settings(Source::Cli {
+        overrides: settings(InputSource::Overrides {
             working_dir: "/fake".into(),
         }),
     })
@@ -44,7 +44,7 @@ fn default_config() -> Config {
 fn try_render(config: &Config, body: &str, images: &[Image]) -> Result<Output, Vec<Diagnostic>> {
     let document = crate::markdown::parse(body, 1, &source(), config.document.lang).expect("document parses");
     let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
-    layout(
+    uncancelled(
         &document,
         &crate::citations::Cited::default(),
         images,
@@ -246,7 +246,7 @@ fn notes_too_tall_for_the_page_are_an_error_at_the_note() {
     let body = format!("Text.[^a]\n\n[^a]: {{-}} {long}\n");
     let errors = try_render(&config, &body, &[]).expect_err("the note cannot fit");
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert_eq!(errors[0].location, Some((3, 1)));
+    assert_eq!(errors[0].location, Some((3, 1).into()));
     assert!(
         errors[0].message.starts_with("this margin note is "),
         "{}",
@@ -495,5 +495,5 @@ fn reports_a_placed_table_taller_than_a_page() {
         "{}",
         errors[0].message
     );
-    assert_eq!(errors[0].location, Some((1, 1)));
+    assert_eq!(errors[0].location, Some((1, 1).into()));
 }

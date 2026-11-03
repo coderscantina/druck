@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::*;
+use crate::cancel::Cancel;
 use crate::config::resolved::FaceFile;
 use crate::config::source::{Origin, Resource};
 
@@ -94,7 +95,8 @@ fn single(data: Vec<u8>, name: &str, index: u32) -> FontSet {
     files.insert(file.resource.clone(), data.into());
     let family = BTreeMap::from([(Face::REGULAR, file)]);
     let families = BTreeMap::from([("Test".to_owned(), family)]);
-    FontSet::from_files(&families, &files, &FaceCache::default(), 0).unwrap_or_else(|e| panic!("{e:?}"))
+    FontSet::from_files(&families, &files, &FaceCache::default(), 0, &Cancel::default())
+        .unwrap_or_else(|e| panic!("{e:?}"))
 }
 
 #[test]
@@ -255,7 +257,7 @@ fn restricted_embedding_is_a_warning_naming_the_file() {
         .embedding_warning(FaceId(0))
         .expect("a warning");
     assert!(
-        warning.contains("Restricted.otf") && warning.contains("fsType"),
+        warning.message.contains("Restricted.otf") && warning.message.contains("fsType"),
         "{warning}"
     );
     assert_eq!(load(serif()).set.embedding_warning(FaceId(0)), None);
