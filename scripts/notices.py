@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Generate THIRD_PARTY_NOTICES.md from Cargo.lock and the bundled data.
 
-Usage: python3 scripts/notices.py [--check]
+Usage: python3 scripts/notices.py [--desktop] [--check]
 
 Runs `cargo metadata --locked` once per release target and takes the union of
 the crates that are linked into the binary: normal dependencies only, no build
 scripts, no dev dependencies, no proc macros. License texts come from the
 crate sources in the local cargo registry. Standard library only.
+
+With --desktop it covers the druck-desktop app instead: the crates it links on
+macOS, written to desktop/THIRD_PARTY_NOTICES.md.
 
 With --check the file is not written; the exit code is 1 when it is stale.
 """
@@ -20,6 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "THIRD_PARTY_NOTICES.md"
+DESKTOP_OUTPUT = ROOT / "desktop" / "THIRD_PARTY_NOTICES.md"
 
 # Keep in sync with the release matrix in .github/workflows/release.yml.
 TARGETS = [
@@ -29,6 +33,9 @@ TARGETS = [
     "x86_64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ]
+
+# The desktop app is built for macOS only, see the desktop job in ci.yml.
+DESKTOP_TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 # Crates that publish no license file. Their texts are copied from the upstream
 # repository into scripts/license-overrides/<dir>/ and used instead.
@@ -82,11 +89,11 @@ def metadata(target: str) -> dict:
     return json.loads(out.stdout)
 
 
-def linked_crates(meta: dict) -> set[str]:
-    """Package ids reachable from the root through normal dependency edges."""
+def linked_crates(meta: dict, root: str) -> set[str]:
+    """Package ids reachable from `root` through normal dependency edges."""
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     seen: set[str] = set()
-    stack = [meta["resolve"]["root"]]
+    stack = [root]
     while stack:
         pid = stack.pop()
         if pid in seen:
@@ -98,14 +105,16 @@ def linked_crates(meta: dict) -> set[str]:
     return seen
 
 
-def collect() -> dict[tuple[str, str], dict]:
-    """Return {(name, version): package} for the crates linked on any target."""
+def collect(targets: list[str], package: str | None) -> dict[tuple[str, str], dict]:
+    """Return {(name, version): package} for the crates linked on any target, from the root package or `package`."""
     found: dict[tuple[str, str], dict] = {}
-    for target in TARGETS:
+    for target in targets:
         meta = metadata(target)
         packages = {p["id"]: p for p in meta["packages"]}
         root = meta["resolve"]["root"]
-        for pid in linked_crates(meta):
+        if package:
+            root = next(p["id"] for p in meta["packages"] if p["name"] == package)
+        for pid in linked_crates(meta, root):
             pkg = packages[pid]
             if pid == root or any("proc-macro" in t["kind"] for t in pkg["targets"]):
                 continue
@@ -128,8 +137,9 @@ def license_files(pkg: dict) -> list[tuple[str, str]]:
     return files
 
 
-def render() -> tuple[str, list[str]]:
-    crates = collect()
+def render(desktop: bool) -> tuple[str, list[str]]:
+    targets = DESKTOP_TARGETS if desktop else TARGETS
+    crates = collect(targets, "druck-desktop" if desktop else None)
     warnings: list[str] = []
     rows = []
     texts: dict[str, dict] = {}
@@ -153,7 +163,7 @@ def render() -> tuple[str, list[str]]:
     out = [
         "# Third-party notices",
         "",
-        "Druck's release binaries embed the fonts, hyphenation patterns, and Rust crates listed here.",
+        f"{'Druck Desktop' if desktop else 'Druck'}'s release binaries embed the fonts, hyphenation patterns, and Rust crates listed here.",
         "Their licenses require that the copyright notices and license texts travel with the binary.",
         "This file does that. Ship it next to the executable.",
         "",
@@ -185,7 +195,7 @@ def render() -> tuple[str, list[str]]:
         "",
         "## Rust crates",
         "",
-        f"{len(rows)} crates are linked into the binary on at least one of: {', '.join(TARGETS)}.",
+        f"{len(rows)} crates are linked into the binary on at least one of: {', '.join(targets)}.",
         "Build scripts, procedural macros, and test-only crates are not linked and are not listed.",
         "Where a crate offers a choice of licenses (`OR`), either one applies.",
         "",
@@ -207,17 +217,19 @@ def render() -> tuple[str, list[str]]:
 
 
 def main() -> int:
-    text, warnings = render()
+    desktop = "--desktop" in sys.argv
+    output = DESKTOP_OUTPUT if desktop else OUTPUT
+    text, warnings = render(desktop)
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
     if "--check" in sys.argv:
-        current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else ""
+        current = output.read_text(encoding="utf-8") if output.exists() else ""
         if current != text:
-            print(f"{OUTPUT.name} is stale: run python3 scripts/notices.py", file=sys.stderr)
+            print(f"{output.name} is stale: run python3 scripts/notices.py{' --desktop' if desktop else ''}", file=sys.stderr)
             return 1
         return 0
-    OUTPUT.write_text(text, encoding="utf-8")
-    print(f"wrote {OUTPUT.name}: {len(text.encode()) // 1024} KiB")
+    output.write_text(text, encoding="utf-8")
+    print(f"wrote {output.relative_to(ROOT)}: {len(text.encode()) // 1024} KiB")
     return 0
 
 

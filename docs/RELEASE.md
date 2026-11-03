@@ -33,7 +33,7 @@ CI runs the same scripts. Nothing in this section publishes, tags, or pushes.
 1. Build: `cargo build --release --locked`. The release profile uses fat LTO, one codegen unit, and stripped symbols. Expect about a minute.
 2. Check the binary:
    - Render all samples from another directory: `scripts/render-samples.sh target/release/druck /tmp/druck-pdfs`.
-   - Run it without network. On macOS: put `(version 1)(allow default)(deny network*)` in a file and run `sandbox-exec -f FILE target/release/druck render samples/de.md -o /tmp/de.pdf`. On Linux: `unshare -rn target/release/druck render samples/de.md -o /tmp/de.pdf`. The output must equal the online render. Druck has no network code, so this guards against a future dependency adding one.
+   - Run it without network: `scripts/check-offline.sh target/release/druck` renders every sample normally and with the network denied (`sandbox-exec` on macOS, `unshare -rn` on Linux) from an empty directory with an empty home, and the PDFs must be equal. Druck has no network code, so this guards against a future dependency adding one. Windows has no script: check by hand.
    - Confirm fonts are embedded: `pdffonts /tmp/druck-pdfs/report.pdf` must show `yes` in the `emb` column for every row (Libertinus Serif and Mono).
    - To compare platforms by hand, copy each platform's PDFs into `DIR/<platform>/` and run `scripts/check-pdfs.sh DIR`.
 3. Package: `python3 scripts/package.py <target> target/release/druck dist`. This writes `dist/druck-<version>-<hash>-<target>.tar.gz` (`.zip` for Windows) and a `.sha256` file with it. Verify with `shasum -a 256 -c` (macOS) or `sha256sum -c` (Linux) inside `dist/`.

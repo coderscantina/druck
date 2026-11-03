@@ -38,6 +38,16 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 
 ## Resume note
 
+Release acceptance (milestone 10) is prepared on branch `t3/druck-milestone-10-acceptance`, on top of `t3/finish-druck-milestone-15`, and is **not complete**. The evidence matrix is [acceptance](ACCEPTANCE.md), with its gaps and the boundaries phase 2 will expose. The limits are in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci). What remains, in order:
+
+1. Push, and let CI run for the first time: the `check`, `render`, `compare`, and new `desktop` jobs. Nothing has run on Linux or Windows, so cross-platform layout identity, `cargo test` there, and `check-pdfs.sh` across three OSes are unverified. Docker is installed here but its daemon (OrbStack) was not running, so the Linux suite was not run. To run it: start OrbStack, then `docker run --rm -v "$PWD":/src -w /src rust:latest cargo test --locked` and compare `scripts/render-samples.sh` output with `scripts/check-pdfs.sh`.
+2. The owner's visual review of the samples. The pass recorded below does not replace it.
+3. Decide the two corpus findings below: a sample that shows a continuing footnote, and `report.md` pages 4 and 5.
+4. Merge `t3/desktop-spike-integration` consequences: the layout thread fix is in `desktop/src/preview/job.rs`, which that branch shares unfixed.
+5. veraPDF, epubcheck, and Windows offline checks, which no one has run. Desktop notices need license texts for 41 crates and a decision on the MPL-2.0 `option-ext`.
+
+Then check milestone 10. The previous resume note follows.
+
 Milestone 15 is finished on branch `t3/finish-druck-milestone-15`, which merges `t3/comments-inline-marks-todos` and `t3/druck-project-exports` into the desktop spike. Projects, named exports, comments, inline marks, and `{todo: x}` are in the CLI and covered by tests; the desktop source layer knows the new marks. `final` now reads open todos from the parsed document (`Document::todos`), so it fails at the real chapter file and line and ignores a `{todo:` in a code block. The pairing rules for `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, and `{todo:` live in `druck::markdown::marks`, which the parser and the desktop source layer share.
 
 `scripts/build.sh` in the owner's book can be replaced once the owner chooses to migrate: its comment stripping, joining, `--set draft=true`, and `--bleed 3mm --crop-marks` are the `druck.yaml` in [authoring](AUTHORING.md#example-a-novel-with-a-draft-and-a-print-export). Its `*Offen:*` check is `{todo: x}` and `final: true`; the book's own `*Offen:*` lines stay ordinary text until the owner converts them. The owner's book was not touched.
@@ -80,6 +90,40 @@ Next: milestone 10, release acceptance. The project is now named Druck and MIT l
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Release acceptance preparation, on 2026-11-03 on the owner's M1 Pro (32 GB, macOS 27.0.1, AC power), release build of this branch (`druck 26.10.11-8c433cc`). `src/`, `themes/`, `samples/`, and `schema/` are unchanged from `8c433cc`, so every sample PDF is byte-identical to the previous build by construction; two renders of all 16 PDFs with `scripts/render-samples.sh` were byte-identical to each other.
+
+- Crash: a debug `druck-desktop` died with SIGILL (stack guard hit) while a layout job deserialized a theme. The job runs on a libdispatch worker with 512 KB of stack; a debug build needs 512 to 1024 KB for `pipeline::configure` and under 1 MB for the whole layout, with deserialization alone at 384 to 512 KB. The depth is fixed by the schema, so it is frame size, not recursion. Fixed by laying out on a 16 MB thread (`Typesetter::run`). `layout_does_not_depend_on_the_callers_stack` runs the job from a 256 KB thread: it aborts with a stack overflow without the fix and passes with it. A debug build then opened `samples/report.md` and stayed up 10 s with no new crash report. The debug CLI is not affected (main thread, 8 MB); `t3/desktop-spike-integration` has the same unfixed job code.
+- `cargo test -q`: 385 unit, 1 acceptance, 52 CLI tests passed. `cargo test -q -p druck-desktop`: 97 passed, 1 ignored. `cargo clippy --all-targets -q -- -D warnings` (root and `-p druck-desktop`), `cargo fmt --all --check`, `python3 scripts/notices.py --check` and `--desktop --check` were clean.
+- New checks: `tests/acceptance.rs` (all 16 sample renders: overflow, lost content, references, stability, PDF features; 1.7 s in a debug build). `scripts/check-pdfs.sh` also requires a Unicode map for every font and extractable text; run on two renders of all samples: pass. `scripts/check-offline.sh target/release/druck`: 13 samples identical with `sandbox-exec` denying the network, from an empty directory with an empty home; `curl` under the same profile failed to resolve.
+- Benchmarks: `cargo build --release --locked`, `/usr/bin/time -l`, one warm-up and three runs, median. Inputs are the sample body repeated with unique labels and footnote labels, as before.
+
+| Input | Pages | Time | Peak memory |
+| --- | --- | --- | --- |
+| `samples/en.md` × 5 | 11 | 0.04 s | 25 MB |
+| `samples/en.md` × 24 | 49 | 0.13 s | 39 MB |
+| `samples/en.md` × 49 | 99 | 0.25 s | 59 MB |
+| `samples/tables.md` × 3 | 9 | 0.02 s | 16 MB |
+| `samples/tables.md` × 16 | 45 | 0.10 s | 33 MB |
+| `samples/tables.md` × 36 | 100 | 0.22 s | 62 MB |
+| `samples/report.md` × 1 | 11 | 0.07 s | 42 MB |
+| `samples/report.md` × 6 | 52 | 0.17 s | 55 MB |
+| `samples/report.md` × 12 | 103 | 0.29 s | 76 MB |
+| `samples/report-de.md` × 1 | 10 | 0.03 s | 16 MB |
+| `samples/report-de.md` × 6 | 51 | 0.12 s | 29 MB |
+| `samples/report-de.md` × 12 | 101 | 0.23 s | 43 MB |
+| ttp404 novel, scratch copy of the joined manuscript with `memoir-print` and `literatur.bib` | 203 | 0.38 s | 59 MB |
+
+  Against the milestone 09 table: `en.md` × 52 took 0.42 s and 42 MB for 103 pages, now 0.25 s and 59 MB for 99. The report went from 0.51 s and 40 MB for 119 pages to 0.29 s and 76 MB for 103, with a longer bibliography and index since. Time fell. Memory rose: syntax highlighting loads its syntax set on first use (a one-line document uses 9 MB, with a code block 19 MB), and tagging adds a structure tree. The ttp404 PDF is byte-identical to the owner's `build/buch-1-ttp404-manuscript.pdf`. All inputs are within the limits recorded in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci).
+- CI: `actionlint` is clean on both workflows, and Ruby's YAML parser reads them. A `desktop` job was added (macOS: fmt, notices, build, clippy, test for `druck-desktop`); the other jobs are unchanged. Their cost: `notices.py --desktop` adds one `cargo metadata` run per macOS target, 0.8 s here with the registry warm; on a cold CI cache the 219 extra crates are about 31 MB to download. The workflows have never run. Windows was not available. Docker's daemon was not running, so Linux was not run.
+- Packaging: `python3 scripts/package.py aarch64-apple-darwin target/release/druck dist` wrote `druck-26.10.11-8c433cc-aarch64-apple-darwin.tar.gz` (sha256 `97a0c081d0b2f2ab1842149bd42566fb1de74cb5b4a40f480f466ed38a357d8d`); `shasum -a 256 -c` passed. The unpacked binary, run from `/tmp`, printed its version and rendered `samples/de.md` to a PDF equal to the build's. Nothing was published, tagged, or pushed, and `scripts/release.sh` was not run.
+- Visual pass (mine, not the owner's): all 16 sample PDFs plus `report-de` with `samples/themes/report.json`, rasterized with `pdftoppm -r 60 -png` and viewed as sheets of six pages: `book` (15), `columns`, `de`, `en`, `images`, `margins` (default and theme), `marks`, `offer`, `pagination`, `project`, `report` and `report-de` (default and custom theme, English and German), `tables`, `typography`. Checked: mixed columns and balance, full-width blocks, notes in columns, tables continuing with repeated headers, citations and both bibliographies, the index, callouts, title and cover pages, running heads, chapter openings. Closer looks at `report` pages 4 and 5 and `marks` page 1. Defects found, none fixed:
+  - `report.md` pages 4 to 5, default and custom theme: a column paragraph breaks across the page, leaving a two-line tail on page 5, while page 4 ends 10.8 lines short (`druck check` reports it, and pages 3 and 5 end 5.6 and 17.4 lines short). Cause not established; it sits in page search with column regions and footnotes.
+  - `pagination.md` page 2: the long note fits on the page, so no sample shows a continuing footnote, and the sample's text says note 3 does. Adding three more paragraphs to it did not change that. Needs a sample the owner chooses, or a taller note.
+  - `margins.md` pages 1 and 3 in the default theme: margin notes are set in a column so narrow that most lines hold two words. A theme width question, not a layout fault.
+  - `report.md` page 5 ends about half empty because the tall figure moves with its caption: by design without floats, listed for page density.
+
+Not verified: Linux, Windows, the CI workflows, veraPDF, epubcheck, the owner's visual review.
 
 Desktop spike integration, on 2026-11-03 on the owner's M1 Pro (8 performance and 2 efficiency cores, 32 GB, on AC power), with a release build. The corpus is the 27 manuscript files joined in name order with comments stripped, because the engine still rejects them (242,826 bytes, 203 pages), with a scratch copy of `memoir-print` and `literatur.bib`. Command: `DRUCK_GATE=1 DRUCK_CANVAS=split druck-desktop --open book/stripped.md --theme memoir-print.json`. The driver in `desktop/src/gate.rs` calls the editor's input handler from a timer. Times run from when a key was due to the end of the first paint showing it; presenting adds at most one frame.
 
@@ -155,7 +199,7 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
-- Desktop: CI does not cover `druck-desktop`. The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders. Clicking in Pages cannot locate the text until the engine has source mapping.
+- Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders. Clicking in Pages cannot locate the text until the engine has source mapping.
 - Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
 
 - Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).

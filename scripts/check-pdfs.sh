@@ -5,7 +5,8 @@
 # scripts/render-samples.sh. The check fails when
 #   - a PDF differs byte for byte from the first platform's PDF, or exists on
 #     only some platforms, or
-#   - the first platform's PDFs contain a font that is not embedded.
+#   - the first platform's PDFs contain a font that is not embedded or has no
+#     Unicode map, or give no text to pdftotext (so text cannot be selected).
 #
 # For a byte difference it prints the first differing text lines
 # (pdftotext -layout) and the page counts to show whether the layout changed.
@@ -50,13 +51,21 @@ done
 for pdf in "$ref"/*.pdf; do
   # pdffonts columns: name type encoding emb sub uni object generation.
   # The type can contain spaces, so count the embedded flag from the end.
-  if ! pdffonts "$pdf" | tail -n +3 | awk '$(NF-4) != "yes" { print "NOT EMBEDDED: " $0; bad = 1 } END { exit bad }'; then
+  # The Unicode map flag is third from the end.
+  if ! pdffonts "$pdf" | tail -n +3 | awk '
+    $(NF-4) != "yes" { print "NOT EMBEDDED: " $0; bad = 1 }
+    $(NF-2) != "yes" { print "NO UNICODE MAP: " $0; bad = 1 }
+    END { exit bad }'; then
     echo "in $pdf"
+    status=1
+  fi
+  if [ "$(pdftotext "$pdf" - | wc -w)" -lt 20 ]; then
+    echo "NO SELECTABLE TEXT in $pdf"
     status=1
   fi
 done
 
 if [ "$status" -eq 0 ]; then
-  echo "all PDFs match across platforms and embed their fonts"
+  echo "all PDFs match across platforms, embed their fonts, and have text"
 fi
 exit "$status"

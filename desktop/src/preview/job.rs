@@ -120,6 +120,9 @@ pub struct Timing {
     pub fingerprints: Duration,
 }
 
+/// Stack of the layout thread. Only the pages touched are committed, so the size costs address space.
+const LAYOUT_STACK: usize = 16 * 1024 * 1024;
+
 /// The faces a configuration asks for, which decide whether loaded fonts can be reused.
 #[derive(PartialEq)]
 struct FontRequest {
@@ -162,7 +165,22 @@ impl Typesetter {
         }
     }
 
+    /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
+    /// of stack, and a debug build needs about as much for deserializing a theme alone. The schema's nesting
+    /// is fixed, so one size covers any input.
     pub fn run(&mut self, text: String) -> Result<Layout, Vec<Diagnostic>> {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("druck-layout".into())
+                .stack_size(LAYOUT_STACK)
+                .spawn_scoped(scope, || self.typeset(text))
+                .expect("the system starts a thread")
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    }
+
+    fn typeset(&mut self, text: String) -> Result<Layout, Vec<Diagnostic>> {
         let start = Instant::now();
         let request = Request {
             input: &self.path,
@@ -263,6 +281,18 @@ mod tests {
         assert_eq!((layout.body.size, layout.body.line_height), (13.0, 1.5));
         assert_eq!(layout.body.family, "Libertinus Serif");
         assert!(!layout.body.files.is_empty());
+    }
+
+    #[test]
+    fn layout_does_not_depend_on_the_callers_stack() {
+        let text = std::fs::read_to_string(sample("report.md")).expect("sample");
+        let layout = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || Typesetter::new(&sample("report.md"), None).run(text).is_ok())
+            .expect("thread")
+            .join()
+            .expect("no stack overflow");
+        assert!(layout, "typesets");
     }
 
     #[test]

@@ -82,3 +82,27 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - name: Compare and check fonts
         run: scripts/check-pdfs.sh pdfs
+
+  # The desktop app builds on macOS only. It is not part of the root package's
+  # default members, so the jobs above do not build it, and nothing here
+  # changes what they test.
+  desktop:
+    if: ${{ !startsWith(github.event.head_commit.message, '🔖 release') }}
+    name: desktop on macos-latest
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt -p druck-desktop --check
+      - name: Notices are current
+        run: python3 scripts/notices.py --desktop --check
+      - name: Build
+        run: cargo build -p druck-desktop --locked
+      - name: Clippy
+        run: cargo clippy -p druck-desktop --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test -p druck-desktop --locked
