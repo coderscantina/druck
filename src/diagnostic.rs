@@ -10,6 +10,9 @@ pub struct Diagnostic {
     pub source: Option<Source>,
     /// 1-based line and column in the source file.
     pub location: Option<(u64, u64)>,
+    /// The line and column as parsed, for sorting in reading order across a project's chapters. Zero without
+    /// a location, which sorts first.
+    pub position: (u32, u32),
     /// Dotted property path, such as `styles.body.size`.
     pub property: Option<String>,
     pub message: String,
@@ -22,6 +25,7 @@ impl Diagnostic {
         Self {
             source,
             location: None,
+            position: (0, 0),
             property: None,
             message: message.into(),
             warning: false,
@@ -35,8 +39,15 @@ impl Diagnostic {
         }
     }
 
+    /// Places the diagnostic at a line and column of its source. A line of a project's joined chapters
+    /// becomes the file and line it came from, so every diagnostic made this way names the real chapter.
     pub fn at(mut self, line: u64, column: u64) -> Self {
+        self.position = (line as u32, column as u32);
         self.location = Some((line, column));
+        if let Some((chapter, real)) = self.source.as_ref().and_then(|source| source.chapter_line(line)) {
+            self.source = Some(chapter);
+            self.location = Some((real, column));
+        }
         self
     }
 

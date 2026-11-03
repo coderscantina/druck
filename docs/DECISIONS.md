@@ -1028,6 +1028,24 @@ What the [spike](milestones/14-desktop-spike.md) settled. Measurements are in [p
 - **What phase 2 needs:** source mapping (block id and source offsets on text items, a block-to-range table, and the chapter file), exposing the citation scanner the source layer now reaches through `druck::bibliography::syntax`, paragraph caches beside the shape plan cache, font reuse as a supported call rather than `load_fonts` and `typeset_with`, and no process-wide effects such as `show_relative_to`.
 - **Known limits:** replacing a font file under the same path is not detected while the app runs, since loaded fonts are reused while the configuration asks for the same files. `prepare` decodes images again on each refresh. The galley uses Georgia until a document's first successful layout, which for a corpus chapter with comments means until milestone 15. macOS stops painting a window that is fully covered, so measurements float the window, see `desktop/src/gate.rs`.
 
+## 2026-11-03: Project folders and named exports
+
+A folder with a `druck.yaml` is a document. The manifest deserializes into `FrontMatter`, the type front matter already uses, with `chapters` and `exports` added to it. Serde cannot combine `flatten` with `deny_unknown_fields`, and a second manifest type would parse the settings twice. Front matter and `--set` reject the two project fields with an error, so a single file behaves as before.
+
+Chapters are joined into one text, with a blank line between them, and parsed once. Labels, footnotes, and citations are therefore book-wide with no extra code, and blocks may span chapters as in one document.
+
+Locations are mapped where diagnostics are made. `Source::Chapters` holds a table of each chapter's first joined line, and `Diagnostic::at` turns a joined line into the chapter's `Source::Document` and real line, so no `Location` carries a file. Messages naming an earlier line use `Source::line_name`. `Diagnostic::position` keeps the line as parsed, so errors still sort in reading order across chapters. A diagnostic without a line, such as a page ending short, names the manifest. A line in the blank join counts as the last line of the chapter before it.
+
+The manifest is the document for origins: its paths resolve against its folder through `Origin::Document`, with no rebasing. Paths in chapters, such as images, resolve against the project folder too, whichever folder the chapter is in, because the chapters are one document with one base. A Markdown preview of a single chapter in another tool therefore does not find them. Changing this needs a per-image base.
+
+Unlisted Markdown files are found recursively below `manuscript/`, which took a few lines. A chapter listed twice is an error, because it would otherwise silently repeat text.
+
+Theme lookup is one function, `theme_path::locate`, which the desktop library now calls. A bare name means `themes/<name>/theme.json` in the project, then an exact local file as before, then the shared directory.
+
+An export is a fixed set of fields. Its `theme` and `draft` replace the manifest's before configuration resolves, so `--theme` and `--set` still win and errors still name the manifest. `final` only gates on placeholders and does not imply `draft: false`: a document with `draft: true` needs `draft: false` in the export too. `--export` misuse exits with 2 through clap, as other usage errors do. Consequence: `--crop-marks` cannot turn off marks an export sets, since the flag has no negative form.
+
+There is no JSON schema for `druck.yaml`, as front matter has none. The published schema covers themes only.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

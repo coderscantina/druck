@@ -7,15 +7,10 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+pub use druck::theme_path::Scope;
+use druck::theme_path::{self, PROJECT_FILE, common_file as common_path};
+
 use super::patch;
-
-pub const PROJECT_FILE: &str = "theme.json";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scope {
-    Project,
-    Common,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -29,21 +24,9 @@ pub fn common_dir() -> Option<PathBuf> {
     druck::theme_path::directory()
 }
 
-fn project_path(project: &Path, name: &str) -> PathBuf {
-    project.join("themes").join(name).join(PROJECT_FILE)
-}
-
-fn common_path(common: &Path, name: &str) -> PathBuf {
-    common.join(name).with_extension("json")
-}
-
 /// Names are what `theme_path` accepts as a bare name: ASCII letters, digits, hyphens, underscores.
 fn check_name(name: &str) -> Result<(), String> {
-    let valid = !name.is_empty()
-        && name
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_');
-    if valid {
+    if theme_path::is_name(name) {
         Ok(())
     } else {
         Err(format!(
@@ -54,17 +37,11 @@ fn check_name(name: &str) -> Result<(), String> {
 
 /// A theme by name. A project theme wins over a common one of the same name.
 pub fn locate(name: &str, project: Option<&Path>, common: Option<&Path>) -> Option<Entry> {
-    let project = project.map(|project| (Scope::Project, project_path(project, name)));
-    let common = common.map(|common| (Scope::Common, common_path(common, name)));
-    project
-        .into_iter()
-        .chain(common)
-        .find(|(_, path)| path.is_file())
-        .map(|(scope, path)| Entry {
-            name: name.to_owned(),
-            scope,
-            path,
-        })
+    theme_path::locate(name, project, common).map(|(scope, path)| Entry {
+        name: name.to_owned(),
+        scope,
+        path,
+    })
 }
 
 /// Every theme by name, sorted, with project themes shadowing common ones.

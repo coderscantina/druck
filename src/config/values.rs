@@ -73,6 +73,16 @@ impl Serialize for Length {
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 pub struct Pt(pub f64);
 
+impl Pt {
+    /// Reads a bleed as an absolute length, such as `3mm` or `0.125in`.
+    pub fn bleed(input: &str) -> Result<Self, String> {
+        match Length::parse(input)? {
+            Length::Pt(pt) => Ok(Self(pt)),
+            Length::Em(_) => Err(format!("bleed \"{input}\" needs an absolute unit (pt, mm, cm, or in)")),
+        }
+    }
+}
+
 /// An sRGB color written as `#rrggbb`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color(pub [u8; 3]);

@@ -158,6 +158,68 @@ The source is the document, the theme file, "bundled default theme", or "command
 error: theme.json: styles.body.size: length "12px" has unsupported unit "px" (use pt, mm, cm, in, or em)
 ```
 
+## Projects
+
+A book is easier to keep in many files. A folder with a `druck.yaml` is one document: `druck render ./book` and `druck check ./book` read that file and set its chapters as one book. A single Markdown file keeps working as before and ignores all of this. [`samples/project`](../samples/project) is a small example.
+
+```yaml
+title: Mein Buch
+author: Ada Example
+lang: de
+theme: memoir-print
+bibliography: references.bib
+chapters:
+  - manuscript/00-title.md
+  - manuscript/01-one.md
+  - manuscript/02-two.md
+exports:
+  print:
+    theme: memoir-print
+    bleed: 3mm
+    crop-marks: true
+    final: true
+  review:
+    draft: true
+    output: build/review-copy.pdf
+  ebook:
+    theme: memoir-ebook
+    output: build/mein-buch.epub
+```
+
+`druck.yaml` takes every key of [front matter](#front-matter), with the same meaning and the same errors, plus `chapters` and `exports`. An unknown key is an error at its file and line. Paths in it are relative to the folder of `druck.yaml`.
+
+### Chapters
+
+`chapters` is the reading order. The files are joined as if concatenated with a blank line between them, so labels, footnotes, and citations are book-wide, and a directive opened in one chapter continues into the next. Paths in a chapter, such as images, are relative to the project folder, as in one document kept there.
+
+- A chapter has no front matter. A chapter starting with a `---` line is an error at that file.
+- A listed file that is missing, listed twice, or outside the project folder is an error at its line in `druck.yaml`.
+- A Markdown file anywhere below `manuscript/` that the list does not name is left out, and `check` and `render` warn about it. Other folders, such as `notes/`, are not looked at.
+
+Every problem names the real chapter file and line, also a typesetting warning or a label defined twice:
+
+```
+error: book/manuscript/02-two.md:14:1: label sec:a is already defined on line 3 of book/manuscript/01-one.md
+warning: book/manuscript/01-one.md:27:1: a line of this paragraph on page 1 has its spaces stretched loose
+```
+
+A problem that belongs to no single line, such as a page ending short, names `druck.yaml`.
+
+### Exports
+
+Without `--export`, `druck render ./book` uses the document's own settings and writes `build/<folder name>.pdf`. `exports` names other ways to build it, and `druck render ./book --export print` picks one. `druck check ./book --export print` checks it, and an EPUB export is checked as an EPUB.
+
+| Field | Value | Effect |
+| --- | --- | --- |
+| `theme` | name or path | Replaces the document's `theme`. |
+| `output` | path | Relative to the project folder, and the folder is created. `.epub` writes an EPUB, anything else a PDF. Defaults to `build/<export name>.pdf`. |
+| `bleed` | absolute length | As `--bleed`. PDF only. |
+| `crop-marks` | `true` or `false` | As `--crop-marks`. PDF only. |
+| `draft` | `true` or `false` | Replaces the document's `draft`. |
+| `final` | `true` or `false` | Fails while a `{todo: text}` placeholder remains, at its file and line. It does not change `draft`. |
+
+Command flags override an export: `--theme`, `--set`, `--bleed`, and `-o`, whose path stays relative to the working directory. `--crop-marks` can only turn marks on. `--export` with a single file, or with a name the project does not have, is a usage error.
+
 ## Markdown content
 
 The body is CommonMark. These constructs render:

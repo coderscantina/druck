@@ -9,11 +9,12 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value, json};
+use serde_saphyr::Spanned;
 
 use super::non_null;
 use super::template::is_meta_key;
 use super::theme::{CitationStyle, Conformance, FontFamily, HeadingDepth, Lang, PageSize};
-use super::values::{FontName, LineHeight, Size, Spacing, Spec};
+use super::values::{FontName, LineHeight, Pt, Size, Spacing, Spec};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -82,6 +83,39 @@ pub struct FrontMatter {
     /// Local font families, relative to the document.
     #[serde(default, deserialize_with = "non_null")]
     pub font_files: Option<BTreeMap<String, FontFamily>>,
+
+    /// Chapter files in reading order, relative to the manifest. `druck.yaml` only.
+    #[serde(default, deserialize_with = "non_null")]
+    pub chapters: Option<Vec<Spanned<String>>>,
+    /// Named exports. `druck.yaml` only.
+    #[serde(default, deserialize_with = "non_null")]
+    pub exports: Option<BTreeMap<String, Spanned<Export>>>,
+}
+
+/// One named way to build a project. Unset fields keep the document's settings.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Export {
+    /// Theme name or file, relative to the manifest.
+    #[serde(default, deserialize_with = "non_null")]
+    pub theme: Option<String>,
+    /// Output file, relative to the project folder. The extension picks the format.
+    #[serde(default, deserialize_with = "non_null")]
+    pub output: Option<String>,
+    #[serde(default, deserialize_with = "bleed")]
+    pub bleed: Option<Pt>,
+    #[serde(default)]
+    pub crop_marks: bool,
+    #[serde(default, deserialize_with = "non_null")]
+    pub draft: Option<bool>,
+    /// Fails while the document has open placeholders.
+    #[serde(default, rename = "final")]
+    pub is_final: bool,
+}
+
+fn bleed<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Pt>, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    Pt::bleed(&text).map(Some).map_err(de::Error::custom)
 }
 
 /// Implements the visitor methods that read a number or boolean as its text, so `date: 2024` and

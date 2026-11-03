@@ -6,6 +6,7 @@
 # The binary runs from an empty temporary directory, so nothing may depend on
 # the working directory. Renders use only the bundled fonts and hyphenation
 # data. Picks up whatever samples exist, so new samples need no change here.
+# A folder in samples/ with a druck.yaml is a project, rendered as NAME.pdf.
 #
 # Usage: scripts/render-samples.sh DRUCK OUTDIR
 set -eu
@@ -33,4 +34,11 @@ for md in "$repo"/samples/*.md; do
     echo "render $name with its theme"
     "$bin" render "$md" --theme "$theme" -o "$out/$name-theme.pdf"
   fi
+done
+
+for manifest in "$repo"/samples/*/druck.yaml; do
+  folder=$(dirname "$manifest")
+  name=$(basename "$folder")
+  echo "render project $name"
+  "$bin" render "$folder" -o "$out/$name.pdf"
 done

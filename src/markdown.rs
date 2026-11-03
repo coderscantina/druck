@@ -387,7 +387,7 @@ impl<'a> Builder<'a> {
         }
 
         if !self.diagnostics.is_empty() {
-            self.diagnostics.sort_by_key(|d| d.location);
+            self.diagnostics.sort_by_key(|d| d.position);
             return Err(self.diagnostics);
         }
         let mut blocks = self.blocks.pop().unwrap_or_default();
@@ -493,7 +493,10 @@ impl<'a> Builder<'a> {
                 if let Some(kept) = kept {
                     self.report(offset, format!("bibliography is not allowed inside {kept}"));
                 } else if let Some(first) = self.bibliography {
-                    let message = format!("the bibliography is already placed on line {}", first.line);
+                    let message = format!(
+                        "the bibliography is already placed on {}",
+                        self.source.line_name(first.line)
+                    );
                     self.report(offset, message);
                 } else {
                     self.bibliography = Some(at);
@@ -505,7 +508,7 @@ impl<'a> Builder<'a> {
                 if let Some(kept) = kept {
                     self.report(offset, format!("index is not allowed inside {kept}"));
                 } else if let Some(first) = self.index {
-                    let message = format!("the index is already placed on line {}", first.line);
+                    let message = format!("the index is already placed on {}", self.source.line_name(first.line));
                     self.report(offset, message);
                 } else {
                     self.index = Some(at);
@@ -525,10 +528,10 @@ impl<'a> Builder<'a> {
                     }
                     Some((previous, first)) if previous >= matter => {
                         let message = format!(
-                            "{name} cannot follow the {} on line {}; use front-matter, main-matter, and back-matter \
+                            "{name} cannot follow the {} on {}; use front-matter, main-matter, and back-matter \
                              once each, in this order",
                             matter_name(previous),
-                            first.line
+                            self.source.line_name(first.line)
                         );
                         self.report(offset, message);
                     }
@@ -543,7 +546,10 @@ impl<'a> Builder<'a> {
                 if kept.is_some() || open.contains(&Some(Fence::Columns)) {
                     self.report(offset, "toc is not allowed inside keep, bottom, or columns");
                 } else if let Some(first) = self.contents {
-                    let message = format!("the table of contents is already placed on line {}", first.line);
+                    let message = format!(
+                        "the table of contents is already placed on {}",
+                        self.source.line_name(first.line)
+                    );
                     self.report(offset, message);
                 } else {
                     self.contents = Some(at);
@@ -1168,7 +1174,10 @@ impl<'a> Builder<'a> {
             return None;
         }
         if let Some(first) = self.labels.get(label) {
-            let message = format!("label {label} is already defined on line {}", first.line);
+            let message = format!(
+                "label {label} is already defined on {}",
+                self.source.line_name(first.line)
+            );
             self.report_at(at, message);
             return None;
         }
@@ -1692,9 +1701,8 @@ impl<'a> Builder<'a> {
         }
         let key = label.to_lowercase();
         if let Some(&index) = self.referenced.get(&key) {
-            let first = self.references[index].1.line;
-            let message =
-                format!("footnote [^{label}] is already referenced on line {first}; reference each footnote once");
+            let first = self.source.line_name(self.references[index].1.line);
+            let message = format!("footnote [^{label}] is already referenced on {first}; reference each footnote once");
             self.report_at(at, message);
             return;
         }
@@ -2075,7 +2083,10 @@ impl<'a> Builder<'a> {
                     let key = label.to_lowercase();
                     match self.definitions.get(&key) {
                         Some((_, first, ..)) => {
-                            let message = format!("footnote [^{label}] is already defined on line {}", first.line);
+                            let message = format!(
+                                "footnote [^{label}] is already defined on {}",
+                                self.source.line_name(first.line)
+                            );
                             self.report_at(at, message);
                         }
                         None => {

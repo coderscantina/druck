@@ -904,3 +904,452 @@ fn tags_every_pdf_and_rejects_an_undescribed_image_under_pdf_ua() {
     assert!(pdf.contains("<pdfaid:part>2</pdfaid:part><pdfaid:conformance>A</pdfaid:conformance>"));
     assert!(pdf.contains("/DisplayDocTitle true"));
 }
+
+/// A project in `book/` of a new sandbox, with a manifest and files named relative to the project folder.
+fn project(name: &str, manifest: &str, files: &[(&str, &str)]) -> Sandbox {
+    let sandbox = Sandbox::new(name);
+    let dir = sandbox.root.join("book");
+    for (path, content) in [("druck.yaml", manifest)].iter().chain(files) {
+        let path = dir.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    sandbox
+}
+
+impl Sandbox {
+    fn book(&self) -> String {
+        self.root.join("book").to_str().unwrap().to_owned()
+    }
+
+    /// A path in the project as diagnostics show it.
+    fn in_book(&self, path: &str) -> String {
+        format!("{}/{path}", self.book())
+    }
+
+    fn assert_rejected(&self, expected: &[String]) {
+        let stderr = self.rejection(&[&self.book()]);
+        for line in expected {
+            assert!(stderr.contains(line.as_str()), "wanted {line} in: {stderr}");
+        }
+    }
+}
+
+const TWO_CHAPTERS: &str = "chapters:\n  - manuscript/one.md\n  - manuscript/two.md\n";
+
+#[test]
+fn project_parse_errors_name_the_chapter_and_a_first_definition_in_another() {
+    let sandbox = project(
+        "project-parse",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "# One {#sec:a}\n\nText[^n].\n\n[^n]: Note.\n"),
+            (
+                "manuscript/two.md",
+                "Intro.\n\n# Two {#sec:a}\n\nMore[^m].\n\n[^n]: Again.\n\n[^m]: Fine.\n",
+            ),
+        ],
+    );
+    let (one, two) = (
+        sandbox.in_book("manuscript/one.md"),
+        sandbox.in_book("manuscript/two.md"),
+    );
+    sandbox.assert_rejected(&[
+        format!("{two}:3:1: label sec:a is already defined on line 1 of {one}"),
+        format!("{two}:7:1: footnote [^n] is already defined on line 5 of {one}"),
+    ]);
+}
+
+#[test]
+fn project_labels_and_footnotes_reach_across_chapters() {
+    let sandbox = project(
+        "project-book-wide",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "# One {#sec:one}\n\nNote[^n], see @sec:two.\n"),
+            (
+                "manuscript/two.md",
+                "# Two {#sec:two}\n\nBack to @sec:one.\n\n[^n]: Note.\n",
+            ),
+        ],
+    );
+    let run = sandbox.run(&["check", &sandbox.book()]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+}
+
+#[test]
+fn a_block_left_open_in_a_chapter_is_reported_where_it_opens() {
+    let sandbox = project(
+        "project-open-block",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "Text.\n\n::: keep\n\nMore.\n"),
+            ("manuscript/two.md", "# Two\n\nEnd.\n"),
+        ],
+    );
+    let one = sandbox.in_book("manuscript/one.md");
+    sandbox.assert_rejected(&[format!("{one}:3:1: \"::: keep\" is never closed")]);
+}
+
+#[test]
+fn project_layout_citation_and_image_errors_name_the_chapter() {
+    let long = "x".repeat(200);
+    let wide = format!("Text.\n\n```\nshort\n{long}\n```\n");
+    let sandbox = project(
+        "project-layout",
+        TWO_CHAPTERS,
+        &[("manuscript/one.md", "A.\n\nB.\n"), ("manuscript/two.md", &wide)],
+    );
+    let two = sandbox.in_book("manuscript/two.md");
+    sandbox.assert_rejected(&[format!("{two}:5:1: code line is")]);
+
+    let manifest = format!("bibliography: refs.bib\n{TWO_CHAPTERS}");
+    let bib = "@misc{web, title = {T}, url = {https://example.org}}\n";
+    let sandbox = project(
+        "project-citation",
+        &manifest,
+        &[
+            ("refs.bib", bib),
+            ("manuscript/one.md", "A [@nobody].\n"),
+            (
+                "manuscript/two.md",
+                "One.\n\nTwo [@web; @missing].\n\n![Gone.](gone.png)\n",
+            ),
+        ],
+    );
+    let (one, two) = (
+        sandbox.in_book("manuscript/one.md"),
+        sandbox.in_book("manuscript/two.md"),
+    );
+    let stderr = sandbox.rejection(&[&sandbox.book()]);
+    let first = stderr.find(&format!("{one}:1:4: no entry")).expect(&stderr);
+    let second = stderr.find(&format!("{two}:3:12: no entry")).expect(&stderr);
+    assert!(first < second, "reading order holds across chapters: {stderr}");
+
+    let sandbox = project(
+        "project-image",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "A.\n"),
+            ("manuscript/two.md", "One.\n\n![Gone.](gone.png)\n"),
+        ],
+    );
+    let two = sandbox.in_book("manuscript/two.md");
+    sandbox.assert_rejected(&[format!("{two}:3:1: image not found: \"gone.png\"")]);
+}
+
+#[test]
+fn project_layout_warnings_name_the_chapter() {
+    // Words too long to break leave loose lines in the second chapter.
+    let loose = "a xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ".repeat(12);
+    let two = format!("First.\n\nSecond.\n\n{loose}\n");
+    let sandbox = project(
+        "project-warnings",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", &"Padding.\n\n".repeat(5)),
+            ("manuscript/two.md", &two),
+        ],
+    );
+    let run = sandbox.run(&["check", &sandbox.book()]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let expected = format!("warning: {}:5:1: ", sandbox.in_book("manuscript/two.md"));
+    assert!(run.stderr.contains(&expected), "{}", run.stderr);
+}
+
+#[test]
+fn project_chapter_problems_name_their_file_or_manifest_line() {
+    let manifest = "title: T\nchapters:\n  - manuscript/one.md\n  - manuscript/gone.md\n  - ../outside.md\n  - manuscript/one.md\n";
+    let sandbox = project("project-listed", manifest, &[("manuscript/one.md", "Text.\n")]);
+    let yaml = sandbox.in_book("druck.yaml");
+    sandbox.assert_rejected(&[
+        format!("{yaml}:4:5: chapter not found: manuscript/gone.md"),
+        format!("{yaml}:5:5: chapter \"../outside.md\" is outside the project folder"),
+        format!("{yaml}:6:5: chapter \"manuscript/one.md\" is listed twice"),
+    ]);
+
+    let sandbox = project(
+        "project-chapter-front-matter",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "Text.\n"),
+            ("manuscript/two.md", "---\ntitle: No\n---\nText.\n"),
+        ],
+    );
+    let two = sandbox.in_book("manuscript/two.md");
+    sandbox.assert_rejected(&[format!("{two}:1:1: a chapter has no front matter")]);
+}
+
+#[test]
+fn project_warns_about_unlisted_chapters_and_leaves_them_out() {
+    let sandbox = project(
+        "project-unlisted",
+        "chapters: [manuscript/one.md]\n",
+        &[
+            ("manuscript/one.md", "Listed.\n"),
+            ("manuscript/draft.md", "Not parsed: <b>raw</b>\n\n[^x]\n"),
+            ("manuscript/part/deep.md", "Deep.\n"),
+            ("notes/idea.md", "Ignored.\n"),
+        ],
+    );
+    let book = sandbox.book();
+    for command in ["check", "render"] {
+        let run = sandbox.run(&[command, &book]);
+        assert_eq!(run.code, 0, "{}", run.stderr);
+        for path in ["manuscript/draft.md", "manuscript/part/deep.md"] {
+            let warning = format!("warning: {}: excluded from the book", sandbox.in_book(path));
+            assert!(run.stderr.contains(&warning), "{}", run.stderr);
+        }
+        assert!(!run.stderr.contains("idea.md"), "{}", run.stderr);
+    }
+    assert!(sandbox.root.join("book/build/book.pdf").is_file());
+}
+
+#[test]
+fn project_manifest_errors_are_located_like_front_matter() {
+    let chapter = ("manuscript/one.md", "Text.\n");
+    let cases = [
+        (
+            "title: T\ncolour: red\nchapters: [manuscript/one.md]\n",
+            ":2:1: unknown field `colour`",
+        ),
+        (
+            "chapters: [manuscript/one.md]\nexports:\n  print:\n    paper: a4\n",
+            ":4:5: unknown field `paper`",
+        ),
+        (
+            "chapters: [manuscript/one.md]\nexports:\n  print:\n    bleed: 1em\n",
+            "needs an absolute unit",
+        ),
+        (
+            "chapters: [manuscript/one.md]\nexports:\n  a/b:\n    draft: true\n",
+            "export name \"a/b\"",
+        ),
+        ("title: T\n", "list at least one chapter"),
+    ];
+    for (index, (manifest, expected)) in cases.into_iter().enumerate() {
+        let sandbox = project(&format!("project-manifest-{index}"), manifest, &[chapter]);
+        let stderr = sandbox.rejection(&[&sandbox.book()]);
+        assert!(stderr.contains(&sandbox.in_book("druck.yaml")), "{stderr}");
+        assert!(stderr.contains(expected), "wanted {expected} in: {stderr}");
+    }
+
+    let sandbox = Sandbox::new("project-none");
+    let folder = sandbox.root.join("empty");
+    fs::create_dir_all(&folder).unwrap();
+    let stderr = sandbox.rejection(&[folder.to_str().unwrap()]);
+    assert!(stderr.contains("a project folder needs a druck.yaml"), "{stderr}");
+
+    let document = sandbox.write("doc.md", "---\nchapters: [a.md]\n---\nText.\n");
+    let stderr = sandbox.rejection(&[&document]);
+    assert!(
+        stderr.contains("chapters and exports belong in a project's druck.yaml"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn project_paths_in_the_manifest_resolve_against_its_folder() {
+    let manifest = "theme: local.json\nbibliography: refs.bib\nchapters: [manuscript/one.md]\n";
+    let sandbox = project(
+        "project-origins",
+        manifest,
+        &[
+            ("local.json", r#"{"version": 1, "styles": {"body": {"size": "13pt"}}}"#),
+            ("refs.bib", "@misc{web, title = {T}, url = {https://example.org}}\n"),
+            ("manuscript/one.md", "Text [@web].\n"),
+        ],
+    );
+    let config = sandbox.config(&[&sandbox.book()]);
+    assert_pt(&config, "/styles/body/size", 13.0);
+    assert_eq!(config["bibliography-file"]["dir"], sandbox.book());
+}
+
+#[test]
+fn a_bare_theme_name_means_the_project_theme_before_the_user_theme() {
+    let theme = |size: &str| format!(r#"{{"version": 1, "styles": {{"body": {{"size": "{size}"}}}}}}"#);
+    let manifest = "theme: mine\nchapters: [manuscript/one.md]\n";
+    let project_theme = theme("13pt");
+    let sandbox = project(
+        "project-themes",
+        manifest,
+        &[
+            ("manuscript/one.md", "Text.\n"),
+            ("themes/mine/theme.json", &project_theme),
+        ],
+    );
+    let shared = sandbox.root.join("config/druck/themes");
+    fs::create_dir_all(&shared).unwrap();
+    fs::write(shared.join("mine.json"), theme("14pt")).unwrap();
+    fs::write(shared.join("other.json"), theme("15pt")).unwrap();
+    let size = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_druck"))
+            .args(["check", &sandbox.book(), "--print-config"])
+            .args(args)
+            .env("XDG_CONFIG_HOME", sandbox.root.join("config"))
+            .env("APPDATA", sandbox.root.join("config"))
+            .current_dir(&sandbox.cwd)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let config: Value = serde_json::from_slice(&output.stdout).unwrap();
+        config["styles"]["body"]["size"].as_f64().unwrap()
+    };
+    assert_eq!(size(&[]), 13.0);
+    assert_eq!(size(&["--theme", "mine"]), 13.0);
+    assert_eq!(size(&["--theme", "other"]), 15.0);
+    fs::remove_dir_all(sandbox.root.join("book/themes")).unwrap();
+    assert_eq!(size(&[]), 14.0);
+}
+
+const EXPORTS: &str = "title: T
+theme: base.json
+chapters: [manuscript/one.md]
+exports:
+  print:
+    theme: print.json
+    bleed: 3mm
+    crop-marks: true
+    draft: true
+  web:
+    output: out/deep/web.pdf
+  ebook:
+    output: out/book.epub
+  broken:
+    output: book.epub
+    bleed: 3mm
+";
+
+fn export_sandbox(name: &str) -> Sandbox {
+    project(
+        name,
+        EXPORTS,
+        &[
+            ("manuscript/one.md", "# One\n\nText.\n"),
+            ("base.json", r#"{"version": 1, "styles": {"body": {"size": "11pt"}}}"#),
+            ("print.json", r#"{"version": 1, "styles": {"body": {"size": "12pt"}}}"#),
+        ],
+    )
+}
+
+#[test]
+fn exports_select_settings_and_flags_override_them() {
+    let sandbox = export_sandbox("project-export-settings");
+    let book = sandbox.book();
+    let config = sandbox.config(&[&book]);
+    assert_pt(&config, "/styles/body/size", 11.0);
+    assert_eq!(config["document"]["draft"], false);
+
+    let config = sandbox.config(&[&book, "--export", "print"]);
+    assert_pt(&config, "/styles/body/size", 12.0);
+    assert_eq!(config["document"]["draft"], true);
+
+    let config = sandbox.config(&[&book, "--export", "print", "--set", "draft=false"]);
+    assert_eq!(config["document"]["draft"], false);
+
+    let flag_theme = sandbox.write("flag.json", r#"{"version": 1, "styles": {"body": {"size": "9pt"}}}"#);
+    let config = sandbox.config(&[&book, "--export", "print", "--theme", &flag_theme]);
+    assert_pt(&config, "/styles/body/size", 9.0);
+}
+
+#[test]
+fn exports_choose_the_output_and_create_its_folder() {
+    let sandbox = export_sandbox("project-export-output");
+    let book = sandbox.book();
+    let dir = sandbox.root.join("book");
+
+    let run = sandbox.run(&["render", &book]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let plain = fs::read(dir.join("build/book.pdf")).unwrap();
+    assert!(!String::from_utf8_lossy(&plain).contains("/TrimBox"));
+
+    let run = sandbox.run(&["render", &book, "--export", "print"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(String::from_utf8_lossy(&fs::read(dir.join("build/print.pdf")).unwrap()).contains("/TrimBox"));
+
+    let run = sandbox.run(&["render", &book, "--export", "web"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(dir.join("out/deep/web.pdf").is_file());
+
+    let run = sandbox.run(&["render", &book, "--export", "ebook"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(&fs::read(dir.join("out/book.epub")).unwrap()[..2], b"PK");
+
+    let run = sandbox.run(&["render", &book, "--export", "web", "--bleed", "3mm", "-o", "flag.pdf"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(String::from_utf8_lossy(&fs::read(sandbox.cwd.join("flag.pdf")).unwrap()).contains("/TrimBox"));
+}
+
+#[test]
+fn exports_reject_wrong_use_and_print_settings_on_epub() {
+    let sandbox = export_sandbox("project-export-errors");
+    let book = sandbox.book();
+
+    let run = sandbox.run(&["render", &book, "--export", "nope"]);
+    assert_eq!(run.code, 2, "{}", run.stderr);
+    assert!(
+        run.stderr.contains("the project has: broken, ebook, print, web"),
+        "{}",
+        run.stderr
+    );
+
+    let document = sandbox.write("doc.md", "Text.\n");
+    let run = sandbox.run(&["render", &document, "--export", "print"]);
+    assert_eq!(run.code, 2, "{}", run.stderr);
+    assert!(run.stderr.contains("--export needs a project folder"), "{}", run.stderr);
+
+    let yaml = sandbox.in_book("druck.yaml");
+    for command in ["render", "check"] {
+        let run = sandbox.run(&[command, &book, "--export", "broken"]);
+        assert_eq!(run.code, 1, "{}", run.stderr);
+        assert!(
+            run.stderr.contains(&format!("{yaml}:15:5: export \"broken\"")),
+            "{}",
+            run.stderr
+        );
+    }
+    let run = sandbox.run(&["render", &book, "--export", "ebook", "--crop-marks"]);
+    assert_eq!(run.code, 1, "{}", run.stderr);
+    assert!(run.stderr.contains("apply to PDF output only"), "{}", run.stderr);
+}
+
+#[test]
+fn a_final_export_fails_while_todos_remain() {
+    let manifest = format!("{TWO_CHAPTERS}exports:\n  print:\n    final: true\n  draft:\n    draft: true\n");
+    let sandbox = project(
+        "project-final",
+        &manifest,
+        &[
+            ("manuscript/one.md", "Clean.\n"),
+            ("manuscript/two.md", "First.\n\nThen {todo: check the date} here.\n"),
+        ],
+    );
+    let book = sandbox.book();
+    let two = sandbox.in_book("manuscript/two.md");
+    for command in ["check", "render"] {
+        let run = sandbox.run(&[command, &book, "--export", "print"]);
+        assert_eq!(run.code, 1, "{}", run.stderr);
+        let expected = format!("{two}:3:6: export \"print\" is final, but this placeholder is open: check the date");
+        assert!(run.stderr.contains(&expected), "{}", run.stderr);
+    }
+    assert!(!sandbox.root.join("book/build/print.pdf").exists());
+
+    fs::write(sandbox.root.join("book/manuscript/two.md"), "First.\n").unwrap();
+    let run = sandbox.run(&["render", &book, "--export", "print"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(sandbox.root.join("book/build/print.pdf").is_file());
+}
+
+#[test]
+fn a_chapter_may_start_with_a_blank_line_and_end_without_a_newline() {
+    let sandbox = project(
+        "project-joining",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "\u{feff}A paragraph without a newline"),
+            ("manuscript/two.md", "\nSecond [^gone].\n"),
+        ],
+    );
+    let two = sandbox.in_book("manuscript/two.md");
+    sandbox.assert_rejected(&[format!("{two}:2:8: ")]);
+}
