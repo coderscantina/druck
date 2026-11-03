@@ -20,6 +20,7 @@ actions!(druck_desktop, [Quit]);
 pub fn open(opened: Option<Opened>, scheme: Option<Scheme>, cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+    crate::editor::bind_keys(cx);
     cx.set_menus([Menu::new("Druck").items([MenuItem::action("Quit Druck", Quit)])]);
     cx.on_window_closed(|cx, _| cx.quit()).detach();
 
@@ -76,10 +77,11 @@ impl Shell {
             })
             .detach();
         }
+        let path = opened.as_ref().map(|opened| opened.path.clone());
         Self {
             title,
             sidebar: cx.new(|_| SidebarView::new(opened)),
-            editor: cx.new(|_| EditorView::new()),
+            editor: cx.new(|cx| EditorView::new(path, window, cx)),
             preview: cx.new(|_| PreviewView::new()),
             inspector: cx.new(|_| InspectorView::new()),
             agent: cx.new(|_| AgentView::new()),
