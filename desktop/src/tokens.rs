@@ -19,6 +19,9 @@ pub const SIDEBAR_WIDTH: Pixels = px(232.);
 pub const INSPECTOR_WIDTH: Pixels = px(296.);
 pub const RAIL_WIDTH: Pixels = px(40.);
 pub const ICON_SIZE: Pixels = px(16.);
+pub const ROW_HEIGHT: Pixels = px(36.);
+pub const FIELD_HEIGHT: Pixels = px(30.);
+pub const RADIUS: Pixels = px(6.);
 
 /// A page sheet's size before the preview has real pages: A4 at half scale.
 pub const SHEET_WIDTH: Pixels = px(298.);
@@ -40,6 +43,7 @@ impl From<WindowAppearance> for Scheme {
 }
 
 /// The colors of one appearance. The accent is an oxide red, for the ink of a proof mark.
+#[derive(Clone)]
 pub struct Tokens {
     /// Behind the sheets in the centre pane.
     pub canvas: Rgba,

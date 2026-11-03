@@ -25,7 +25,8 @@ fn select(selection: &Path, base: &Path, directory: Option<&Path>) -> PathBuf {
     local
 }
 
-fn directory() -> Option<PathBuf> {
+/// The folder of named themes shared by all projects, if the platform has a config folder.
+pub fn directory() -> Option<PathBuf> {
     config_root(
         cfg!(windows),
         std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),

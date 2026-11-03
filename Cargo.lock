@@ -1251,6 +1251,7 @@ dependencies = [
  "druck",
  "gpui-pre",
  "gpui-pre-platform",
+ "serde_json",
 ]
 
 [[package]]

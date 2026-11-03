@@ -1,5 +1,7 @@
 //! The window and its three-pane shell. Each pane is a view its own module owns.
 
+use std::path::PathBuf;
+
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, Context, Entity, KeyBinding, Menu, MenuItem, MouseButton, SharedString, TitlebarOptions, Window,
@@ -16,8 +18,8 @@ use crate::tokens::{self, Scheme, Tokens};
 
 actions!(druck_desktop, [Quit]);
 
-/// Opens the only window. A fixed `scheme` overrides the system appearance.
-pub fn open(opened: Option<Opened>, scheme: Option<Scheme>, cx: &mut App) {
+/// Opens the only window. `theme` is the file the inspector edits. A fixed `scheme` overrides the system appearance.
+pub fn open(opened: Option<Opened>, theme: Option<PathBuf>, scheme: Option<Scheme>, cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.set_menus([Menu::new("Druck").items([MenuItem::action("Quit Druck", Quit)])]);
@@ -42,7 +44,7 @@ pub fn open(opened: Option<Opened>, scheme: Option<Scheme>, cx: &mut App) {
     };
     let window = cx.open_window(options, |window, cx| {
         cx.set_global(Tokens::new(scheme.unwrap_or_else(|| window.appearance().into())));
-        cx.new(|cx| Shell::new(opened, title, scheme, window, cx))
+        cx.new(|cx| Shell::new(opened, theme, title, scheme, window, cx))
     });
     if let Err(error) = window {
         eprintln!("cannot open a window: {error}");
@@ -64,6 +66,7 @@ struct Shell {
 impl Shell {
     fn new(
         opened: Option<Opened>,
+        theme: Option<PathBuf>,
         title: SharedString,
         scheme: Option<Scheme>,
         window: &mut Window,
@@ -81,7 +84,7 @@ impl Shell {
             sidebar: cx.new(|_| SidebarView::new(opened)),
             editor: cx.new(|_| EditorView::new()),
             preview: cx.new(|_| PreviewView::new()),
-            inspector: cx.new(|_| InspectorView::new()),
+            inspector: cx.new(|cx| InspectorView::new(theme, window, cx)),
             agent: cx.new(|_| AgentView::new()),
         }
     }
