@@ -8,6 +8,8 @@ pub struct Opened {
     pub path: PathBuf,
     pub title: String,
     pub authors: String,
+    /// The theme file the document's front matter names.
+    pub theme: Option<PathBuf>,
 }
 
 impl Opened {
@@ -22,13 +24,13 @@ impl Opened {
             theme: None,
             overrides: &[],
         };
-        let metadata = match pipeline::load(&request) {
-            Ok((config, _)) => Some(config.metadata),
+        let (metadata, theme) = match pipeline::load(&request) {
+            Ok((config, file)) => (Some(config.metadata), pipeline::document_theme(&file.path, &file.text)),
             Err(diagnostics) => {
                 for diagnostic in &diagnostics {
                     eprintln!("{diagnostic}");
                 }
-                None
+                (None, None)
             }
         };
         let file_name = || path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
@@ -40,6 +42,7 @@ impl Opened {
                 .or_else(file_name)
                 .unwrap_or_default(),
             authors: metadata.map(|metadata| metadata.authors.join(", ")).unwrap_or_default(),
+            theme,
         })
     }
 }
@@ -77,6 +80,14 @@ mod tests {
     fn identity_comes_from_the_document() {
         let opened = Opened::read(&sample("report.md")).unwrap_or_else(|message| panic!("{message}"));
         assert!(!opened.title.is_empty());
+    }
+
+    #[test]
+    fn the_theme_comes_from_the_front_matter() {
+        let path = Path::new("/project/book.md");
+        let theme = pipeline::document_theme(path, "---\ntheme: themes/print.json\n---\n\nText\n");
+        assert_eq!(theme, Some(PathBuf::from("/project/themes/print.json")));
+        assert_eq!(pipeline::document_theme(path, "Text\n"), None);
     }
 
     #[test]

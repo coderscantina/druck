@@ -5,6 +5,7 @@ mod app;
 mod assets;
 mod document;
 mod editor;
+mod gate;
 mod inspector;
 mod preview;
 mod sidebar;
@@ -26,7 +27,7 @@ struct Cli {
     /// Markdown document to open.
     #[arg(long, value_name = "PATH")]
     open: Option<PathBuf>,
-    /// Theme the Styles tab edits: a JSON file, or the name of a common theme.
+    /// Theme to use instead of the document's: a JSON file, or the name of a common theme.
     #[arg(long, value_name = "THEME")]
     theme: Option<PathBuf>,
     /// Use this appearance instead of following the system.
@@ -43,10 +44,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let theme = cli.theme.as_deref().map(|theme| {
+    let asked = cli.theme.as_deref().map(|theme| {
         let working_dir = std::env::current_dir().unwrap_or_default();
         druck::theme_path::resolve(theme, &working_dir)
     });
+    let theme = asked.or_else(|| opened.as_ref().and_then(|opened| opened.theme.clone()));
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx| app::open(opened, theme, cli.appearance, cx));

@@ -59,6 +59,11 @@ impl StylesPanel {
         }
     }
 
+    pub fn set_body_size(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.select(Some("body"), cx);
+        self.commit(Property::Size, text, cx);
+    }
+
     fn path(&self, style: &'static str, property: Property) -> [&'static str; 3] {
         ["styles", style, property.key()]
     }

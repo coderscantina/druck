@@ -23,10 +23,6 @@ pub const ROW_HEIGHT: Pixels = px(36.);
 pub const FIELD_HEIGHT: Pixels = px(30.);
 pub const RADIUS: Pixels = px(6.);
 
-/// A page sheet's size before the preview has real pages: A4 at half scale.
-pub const SHEET_WIDTH: Pixels = px(298.);
-pub const SHEET_HEIGHT: Pixels = px(421.);
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Scheme {
     Dark,

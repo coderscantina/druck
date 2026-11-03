@@ -309,7 +309,7 @@ fn report_refreshes(bench: &Bench) {
 }
 
 /// Resident memory, and the live heap where the platform says.
-fn memory() -> String {
+pub fn memory() -> String {
     let pid = std::process::id().to_string();
     let output = std::process::Command::new("ps")
         .args(["-o", "rss=", "-p", &pid])

@@ -182,14 +182,9 @@ pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Co
     let document = parse_front_matter(&text, &document_source)?;
     let overrides = parse_overrides(args.overrides, &cli_source)?;
 
-    let theme_path = match (args.theme, &document.theme) {
-        (Some(path), _) => Some(theme_path::resolve(path, working_dir)),
-        (None, Some(path)) => document_path
-            .parent()
-            .map(|dir| theme_path::resolve(Path::new(path), dir)),
-        (None, None) => None,
-    };
-    let theme = theme_path.map(|path| load_theme(&path)).transpose()?;
+    let theme = selected_theme(args.theme, &document, &document_path, working_dir)
+        .map(|path| load_theme(&path))
+        .transpose()?;
 
     let config = resolve(Inputs {
         theme,
@@ -210,6 +205,29 @@ pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Co
         text,
     };
     Ok((config, document))
+}
+
+/// The theme file a document uses: the one asked for, else the one its front matter names.
+fn selected_theme(
+    asked: Option<&Path>,
+    document: &FrontMatter,
+    document_path: &Path,
+    working_dir: &Path,
+) -> Option<PathBuf> {
+    match (asked, &document.theme) {
+        (Some(path), _) => Some(theme_path::resolve(path, working_dir)),
+        (None, Some(path)) => document_path
+            .parent()
+            .map(|dir| theme_path::resolve(Path::new(path), dir)),
+        (None, None) => None,
+    }
+}
+
+/// The theme file that the front matter of a document's `text` names, if it names one and parses.
+pub fn document_theme(path: &Path, text: &str) -> Option<PathBuf> {
+    let document = parse_front_matter(text, &Source::Document(path.to_owned())).ok()?;
+    let working_dir = path.parent()?;
+    selected_theme(None, &document, path, working_dir)
 }
 
 fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {

@@ -18,10 +18,20 @@ use image::imageops::{self, FilterType};
 use resvg::tiny_skia::{self, FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::string::StringId;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 /// Decoded images kept between pages. A page reuses a photo only as long as its neighbours do.
 const DECODED_IMAGES: usize = 16;
+
+/// A font's family name: the typographic one if it has one, as the system's font lookup also prefers.
+pub fn family_name(data: &[u8], index: u32) -> Option<String> {
+    let font = FontRef::from_index(data, index).ok()?;
+    [StringId::TYPOGRAPHIC_FAMILY_NAME, StringId::FAMILY_NAME]
+        .into_iter()
+        .find_map(|id| font.localized_strings(id).english_or_first())
+        .map(|name| name.chars().collect())
+}
 
 /// A glyph's outline in font units, y up.
 struct Outline {
@@ -323,7 +333,7 @@ mod tests {
     fn sample_layout() -> super::super::job::Layout {
         let path = FilePath::new(env!("CARGO_MANIFEST_DIR")).join("../samples/report.md");
         let text = std::fs::read_to_string(&path).expect("sample");
-        let Ok(layout) = Typesetter::new(&path).run(text) else {
+        let Ok(layout) = Typesetter::new(&path, None).run(text) else {
             panic!("typesets")
         };
         layout

@@ -163,7 +163,10 @@ impl Element for Galley {
                 view.update(cx, |view, cx| view.mouse_up(event, cx));
             }
         });
-        self.view.update(cx, |view, _| view.trace.painted());
+        self.view.update(cx, |view, _| {
+            view.trace.painted();
+            view.note_painted();
+        });
     }
 }
 

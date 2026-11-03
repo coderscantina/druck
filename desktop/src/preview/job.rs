@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use druck::config::resolved::{Config, FontFiles};
-use druck::config::theme::Face;
+use druck::config::theme::{Face, FontStyle, Weight};
 use druck::diagnostic::Diagnostic;
 use druck::page;
 use druck::pipeline::{self, Request};
 
-use super::raster::{Painter, fingerprint};
+use super::raster::{Painter, family_name, fingerprint};
 
 /// Runs one layout at a time. A request made meanwhile waits, replacing any request already waiting, and
 /// makes the running layout's result obsolete. A running layout cannot be stopped.
@@ -42,6 +42,15 @@ impl<T> Scheduler<T> {
         Some((self.latest, job))
     }
 
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// The number of the newest request.
+    pub fn latest(&self) -> u64 {
+        self.latest
+    }
+
     /// Ends the running layout, returning whether its result counts and the request to start next.
     pub fn finished(&mut self, number: u64) -> (bool, Option<(u64, T)>) {
         let next = self.waiting.take();
@@ -58,7 +67,48 @@ pub struct Layout {
     pub fingerprints: Vec<u64>,
     /// Configuration and typesetting warnings.
     pub warnings: Vec<Diagnostic>,
+    pub body: BodyStyle,
     pub timing: Timing,
+}
+
+/// What the galley needs of the theme's body style, resolved by the engine.
+#[derive(Clone, PartialEq)]
+pub struct BodyStyle {
+    /// The family's name in its font files, which is how the toolkit finds it.
+    pub family: String,
+    /// The font files of the family's regular, bold, and italic faces.
+    pub files: Vec<&'static [u8]>,
+    pub size: f32,
+    pub line_height: f32,
+}
+
+impl BodyStyle {
+    fn of(config: &Config, painter: &Painter) -> Self {
+        let style = &config.styles.body;
+        let fonts = painter.fonts();
+        let mut files: Vec<&'static [u8]> = Vec::new();
+        let mut family = String::new();
+        for (weight, font_style) in [
+            (style.weight, style.style),
+            (Weight::BOLD, FontStyle::Normal),
+            (style.weight, FontStyle::Italic),
+            (Weight::BOLD, FontStyle::Italic),
+        ] {
+            let outlines = fonts.outlines(fonts.face(&style.font, weight, font_style));
+            if family.is_empty() {
+                family = family_name(outlines.data, outlines.index).unwrap_or_else(|| style.font.clone());
+            }
+            if !files.iter().any(|file| std::ptr::eq(*file, outlines.data)) {
+                files.push(outlines.data);
+            }
+        }
+        Self {
+            family,
+            files,
+            size: style.size.0 as f32,
+            line_height: style.line_height as f32,
+        }
+    }
 }
 
 /// Where a layout's time went.
@@ -93,17 +143,20 @@ impl FontRequest {
 /// Lays out one document repeatedly, keeping its fonts while the configuration asks for the same ones.
 pub struct Typesetter {
     path: PathBuf,
+    theme: Option<PathBuf>,
     working_dir: PathBuf,
     loaded: Option<(FontRequest, Arc<Painter>)>,
 }
 
 impl Typesetter {
-    /// `path` is the document the text belongs to: relative paths in it start from its folder.
-    pub fn new(path: &Path) -> Self {
+    /// `path` is the document the text belongs to: relative paths in it start from its folder. `theme`, if any,
+    /// replaces the one the document names.
+    pub fn new(path: &Path, theme: Option<PathBuf>) -> Self {
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
         let working_dir = path.parent().map(Path::to_owned).unwrap_or_default();
         Self {
             path,
+            theme,
             working_dir,
             loaded: None,
         }
@@ -113,7 +166,7 @@ impl Typesetter {
         let start = Instant::now();
         let request = Request {
             input: &self.path,
-            theme: None,
+            theme: self.theme.as_deref(),
             overrides: &[],
         };
         let (config, document) = pipeline::configure(&request, &self.working_dir, text)?;
@@ -125,6 +178,7 @@ impl Typesetter {
         let fingerprints = output.pages.iter().map(fingerprint).collect();
         let warnings = config.warnings.iter().chain(&output.warnings).cloned().collect();
         Ok(Layout {
+            body: BodyStyle::of(&config, &painter),
             output,
             painter,
             fingerprints,
@@ -175,7 +229,7 @@ mod tests {
 
     #[test]
     fn repeated_runs_reuse_the_painter_and_fonts() {
-        let mut typesetter = Typesetter::new(&sample("report.md"));
+        let mut typesetter = Typesetter::new(&sample("report.md"), None);
         let text = std::fs::read_to_string(sample("report.md")).expect("sample");
         let Ok(first) = typesetter.run(text.clone()) else {
             panic!("typesets")
@@ -191,8 +245,29 @@ mod tests {
     }
 
     #[test]
+    fn a_theme_given_to_the_typesetter_sets_the_body_style() {
+        let text = "Body text.\n".to_owned();
+        let dir = std::env::temp_dir().join(format!("druck-job-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temporary folder");
+        let theme = dir.join("theme.json");
+        std::fs::write(
+            &theme,
+            r#"{"version": 1, "styles": {"body": {"size": "13pt", "line-height": 1.5}}}"#,
+        )
+        .expect("theme");
+        let document = dir.join("document.md");
+        let Ok(layout) = Typesetter::new(&document, Some(theme)).run(text) else {
+            panic!("typesets")
+        };
+        std::fs::remove_dir_all(&dir).expect("temporary folder");
+        assert_eq!((layout.body.size, layout.body.line_height), (13.0, 1.5));
+        assert_eq!(layout.body.family, "Libertinus Serif");
+        assert!(!layout.body.files.is_empty());
+    }
+
+    #[test]
     fn invalid_text_reports_diagnostics() {
-        let mut typesetter = Typesetter::new(&sample("report.md"));
+        let mut typesetter = Typesetter::new(&sample("report.md"), None);
         let result = typesetter.run("---\ntitle: [unclosed\n---\n\nBody\n".to_owned());
         let Err(diagnostics) = result else {
             panic!("front matter is invalid")

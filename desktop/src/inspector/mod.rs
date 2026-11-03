@@ -88,6 +88,11 @@ impl InspectorView {
         }
     }
 
+    /// Sets the body size as if typed into its field. For measurements.
+    pub fn set_body_size(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.styles.update(cx, |styles, cx| styles.set_body_size(text, cx));
+    }
+
     fn rail_button(&self, tab: Tab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx);
         let active = tab == self.active;

@@ -9,13 +9,13 @@ mod trace;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, FocusHandle, Focusable, KeyBinding, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString, Task, UTF16Selection,
-    Window, actions, div, point, px, size,
+    App, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString, Task,
+    UTF16Selection, Window, actions, div, point, px, size,
 };
 
 use crate::source::inline::{inline_spans, line_markers};
@@ -187,6 +187,11 @@ struct Located {
     display: usize,
 }
 
+/// The text changed. Reading it is left to whoever decides when that is worth it.
+pub struct TextChanged;
+
+impl EventEmitter<TextChanged> for EditorView {}
+
 pub struct EditorView {
     focus: FocusHandle,
     path: Option<PathBuf>,
@@ -213,6 +218,10 @@ pub struct EditorView {
     caret_on: bool,
     blink: Task<()>,
     trace: Trace,
+    /// The newest revision and body style painted, and when each first was.
+    painted_revision: (u64, Instant),
+    painted_style: (u64, Instant),
+    style_generation: u64,
 }
 
 const TOP_MARGIN: Pixels = px(16.);
@@ -262,9 +271,66 @@ impl EditorView {
             caret_on: true,
             blink: Task::ready(()),
             trace: Trace::from_env(),
+            painted_revision: (0, Instant::now()),
+            painted_style: (0, Instant::now()),
+            style_generation: 0,
         };
         view.restart_blink(cx);
         view
+    }
+
+    /// The document's file, if it opened as one.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub fn text(&self) -> &str {
+        self.buffer.text()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.buffer.revision()
+    }
+
+    /// Puts the caret at `offset`, on a character boundary at or before it, and brings it into view.
+    pub fn jump_to(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let offset = self.buffer.text().floor_char_boundary(offset.min(self.buffer.len()));
+        self.set_selection(Selection::caret(offset), false, window, cx);
+    }
+
+    /// Sets the galley's body from the theme. Every block is shaped again as it comes into view.
+    pub fn set_body(&mut self, family: &str, size: f32, line_height: f32, cx: &mut Context<Self>) {
+        self.style.set_body(family, size, line_height);
+        self.style_generation += 1;
+        for slot in &mut self.slots {
+            slot.layout = None;
+        }
+        cx.notify();
+    }
+
+    pub fn style_generation(&self) -> u64 {
+        self.style_generation
+    }
+
+    /// When `revision` or a newer one was first painted, if it has been.
+    pub fn revision_painted_at(&self, revision: u64) -> Option<Instant> {
+        (self.painted_revision.0 >= revision).then_some(self.painted_revision.1)
+    }
+
+    /// When body style `generation` or a newer one was first painted, if it has been.
+    pub fn style_painted_at(&self, generation: u64) -> Option<Instant> {
+        (self.painted_style.0 >= generation).then_some(self.painted_style.1)
+    }
+
+    /// Called at the end of each paint.
+    fn note_painted(&mut self) {
+        let now = Instant::now();
+        if self.painted_revision.0 != self.buffer.revision() {
+            self.painted_revision = (self.buffer.revision(), now);
+        }
+        if self.painted_style.0 != self.style_generation {
+            self.painted_style = (self.style_generation, now);
+        }
     }
 
     fn restart_blink(&mut self, cx: &mut Context<Self>) {
@@ -306,6 +372,7 @@ impl EditorView {
         self.set_selection(after, false, window, cx);
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
+        cx.emit(TextChanged);
     }
 
     fn resegment(&mut self, splice: crate::source::buffer::Splice) {
@@ -421,6 +488,7 @@ impl EditorView {
         self.set_selection(restored.selection, false, window, cx);
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
+        cx.emit(TextChanged);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {

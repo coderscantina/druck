@@ -1,7 +1,6 @@
 //! Centre pane, pages side: the engine's pages painted natively, never through PDF.
 //!
-//! The integration wave calls [`PreviewView::request`] with the editor's text. Until then the view follows
-//! the opened file's modification time.
+//! The shell calls [`PreviewView::request`] with the editor's text and hears [`Typeset`] when pages change.
 
 mod bench;
 mod cache;
@@ -10,21 +9,24 @@ mod raster;
 mod sheets;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Instant;
 
 use druck::diagnostic::Diagnostic;
+use druck::page::Item;
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, FocusHandle, Focusable, KeyBinding, Pixels, RenderImage, ScrollEvent, Window, actions,
-    canvas, div, fill, point, px, size,
+    App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, Pixels, RenderImage, ScrollEvent, Window,
+    actions, canvas, div, fill, point, px, size,
 };
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
 
 use self::bench::Bench;
+pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
+pub use self::job::BodyStyle;
 use self::job::{Layout, Scheduler, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
@@ -32,8 +34,6 @@ use crate::tokens::{self, Tokens};
 
 actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
 
-/// How often to look at the opened file's modification time.
-const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 /// Fixed zoom levels, as logical pixels per point.
 const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 /// Sharper than this costs too much memory per page; higher zoom enlarges these pixels.
@@ -58,6 +58,11 @@ struct Placed {
     image: Option<Arc<RenderImage>>,
 }
 
+/// New pages were published, with the body style they were set in.
+pub struct Typeset(pub BodyStyle);
+
+impl EventEmitter<Typeset> for PreviewView {}
+
 pub struct PreviewView {
     focus: FocusHandle,
     scheduler: Scheduler<String>,
@@ -77,6 +82,10 @@ pub struct PreviewView {
     /// The first page on screen in the last frame.
     page: usize,
     bench: Option<Bench>,
+    /// The request whose pages are published.
+    published: u64,
+    /// The newest request whose visible pages were all exact in a frame, and when.
+    painted: (u64, Instant),
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -91,8 +100,8 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 impl PreviewView {
-    /// A view of the document at `path`, or an empty one to fill through [`Self::request`].
-    pub fn new(path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+    /// A view of the document at `path` in `theme`, or the theme it names. Without a path it stays empty.
+    pub fn new(path: Option<PathBuf>, theme: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
         let mut view = Self {
             focus: cx.focus_handle(),
@@ -109,14 +118,13 @@ impl PreviewView {
             view: (0.0, 0.0),
             page: 0,
             bench: Bench::from_env(),
+            published: 0,
+            painted: (0, Instant::now()),
         };
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
             view.zoom = Zoom::Fixed(fixed);
         }
-        if let Some(path) = path {
-            view.typesetter = Some(Arc::new(Mutex::new(Typesetter::new(&path))));
-            watch(path, cx);
-        }
+        view.typesetter = path.map(|path| Arc::new(Mutex::new(Typesetter::new(&path, theme))));
         view
     }
 
@@ -131,8 +139,31 @@ impl PreviewView {
         }
     }
 
+    /// Whether a layout is running, which the next request would have to wait for.
+    pub fn is_laying_out(&self) -> bool {
+        self.scheduler.is_running()
+    }
+
+    /// The moment the pages of the newest request were first on screen, if they have been.
+    pub fn painted_at(&self) -> Option<Instant> {
+        (self.painted.0 == self.scheduler.latest()).then_some(self.painted.1)
+    }
+
+    /// The page a run of text containing `needle` is on, and shows it.
+    pub fn show_text(&mut self, needle: &str, cx: &mut Context<Self>) -> Option<usize> {
+        let layout = self.layout.as_ref()?;
+        let page = layout.output.pages.iter().position(|page| {
+            page.items
+                .iter()
+                .any(|item| matches!(item, Item::Text { run, .. } if run.text.contains(needle)))
+        })?;
+        let sheets = self.sheets(self.current_zoom)?;
+        self.scroll.1 = sheets.top(page);
+        cx.notify();
+        Some(page)
+    }
+
     /// Why the latest text has no pages; empty when the pages on screen are current.
-    #[allow(dead_code, reason = "for the diagnostics panel of the integration wave")]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
@@ -153,7 +184,7 @@ impl PreviewView {
             this.update(cx, |view, cx| {
                 let (publish, next) = view.scheduler.finished(number);
                 if publish {
-                    view.publish(result, cx);
+                    view.publish(number, result, cx);
                 }
                 if let Some(next) = next {
                     view.start_layout(next, cx);
@@ -164,13 +195,15 @@ impl PreviewView {
         .detach();
     }
 
-    fn publish(&mut self, result: Result<Layout, Vec<Diagnostic>>, cx: &mut Context<Self>) {
+    fn publish(&mut self, number: u64, result: Result<Layout, Vec<Diagnostic>>, cx: &mut Context<Self>) {
         match result {
             Ok(layout) => {
+                self.published = number;
                 self.diagnostics.clear();
                 if let Some(bench) = &mut self.bench {
                     bench.published(&layout);
                 }
+                cx.emit(Typeset(layout.body.clone()));
                 // Freeing a whole document's runs takes long enough to drop a frame.
                 let old = self.layout.replace(Arc::new(layout));
                 cx.background_spawn(async move { drop(old) }).detach();
@@ -296,6 +329,9 @@ impl PreviewView {
                 image,
             });
         }
+        if exact == visible.len() && self.published > self.painted.0 && self.published == self.scheduler.latest() {
+            self.painted = (self.published, Instant::now());
+        }
         if self.bench.is_some() {
             bench::frame(
                 self,
@@ -368,38 +404,6 @@ fn render_image(pixmap: Pixmap) -> (Arc<RenderImage>, usize) {
     let buffer = RgbaImage::from_raw(width, height, pixels).expect("the buffer matches its size");
     let image = RenderImage::new(vec![image::Frame::new(buffer)]);
     (Arc::new(image), bytes)
-}
-
-/// Requests a layout whenever the file at `path` changes. Stops with the view.
-fn watch(path: PathBuf, cx: &mut Context<PreviewView>) {
-    cx.spawn(async move |this, cx| {
-        let mut seen: Option<SystemTime> = None;
-        loop {
-            let (file, last) = (path.clone(), seen);
-            let changed = cx.background_spawn(async move { read_if_changed(&file, last) }).await;
-            if let Some((modified, text)) = changed {
-                seen = Some(modified);
-                if this.update(cx, |view, cx| view.request(text, cx)).is_err() {
-                    return;
-                }
-            }
-            cx.background_executor().timer(WATCH_INTERVAL).await;
-            if this.update(cx, |_, _| ()).is_err() {
-                return;
-            }
-        }
-    })
-    .detach();
-}
-
-/// The file's time and text if it can be read and differs from `seen`. A file that cannot be read now, such
-/// as one being replaced, gets another look on the next round.
-fn read_if_changed(path: &Path, seen: Option<SystemTime>) -> Option<(SystemTime, String)> {
-    let modified = std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok()?;
-    if seen == Some(modified) {
-        return None;
-    }
-    Some((modified, std::fs::read_to_string(path).ok()?))
 }
 
 impl Focusable for PreviewView {

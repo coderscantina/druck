@@ -10,7 +10,10 @@ use gpui::{
 use super::display::{DisplayLine, RunStyle};
 use crate::source::BlockKind;
 
-/// The galley's look. Fixed values until the theme drives them: the sheet shows document styling, not app chrome.
+/// Logical pixels per point of the theme's sizes. The galley is for reading on screen, larger than the page.
+const POINT: f32 = 1.4;
+
+/// The galley's look. The body comes from the theme: the sheet shows document styling, not app chrome.
 pub struct GalleyStyle {
     pub body: Font,
     pub mono: Font,
@@ -36,6 +39,13 @@ impl GalleyStyle {
             rule: rgb(0xc9c6c0).into(),
             code_background: rgb(0xf0eee9).into(),
         }
+    }
+
+    /// Takes the theme's body font, its size in points, and its line height.
+    pub fn set_body(&mut self, family: &str, size: f32, line_height: f32) {
+        self.body = font(SharedString::from(family.to_owned()));
+        self.body_size = px(size * POINT);
+        self.leading = line_height;
     }
 
     /// The width of a word's worth of body text per character, for estimating blocks not yet shaped.
