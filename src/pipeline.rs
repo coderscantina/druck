@@ -9,7 +9,7 @@ use crate::bibliography::Bibliography;
 use crate::config::front_matter::{self, FrontMatter};
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::{Config, FontFiles};
-use crate::config::source::{Origin, Resource, Source, normalize, show_relative_to};
+use crate::config::source::{Origin, Resource, Source, normalize};
 use crate::diagnostic::Diagnostic;
 use crate::image::Image;
 use crate::text::Fonts;
@@ -25,7 +25,6 @@ pub struct Request<'a> {
 /// The document file as read, with where it came from.
 pub struct DocumentFile {
     pub path: PathBuf,
-    pub working_dir: PathBuf,
     pub source: Source,
     pub text: String,
 }
@@ -118,7 +117,7 @@ pub fn typeset_with(config: &Config, document: &DocumentFile, fonts: &Fonts) -> 
     )
 }
 
-/// Reads and checks the BibTeX file the configuration names, if any. `load` has checked that it exists.
+/// Reads and checks the BibTeX file the configuration names, if any. `resolve_settings` has checked that it exists.
 fn load_bibliography(config: &Config) -> Result<Option<Bibliography>, Vec<Diagnostic>> {
     let Some(resource) = &config.bibliography_file else {
         return Ok(None);
@@ -182,20 +181,6 @@ fn load_images(files: &[document::ImageFile], dir: &Path, source: &Source) -> Re
     if errors.is_empty() { Ok(images) } else { Err(errors) }
 }
 
-/// Reads the document, theme, and overrides, then resolves and checks the configuration. For the CLI:
-/// paths in messages become relative to the working directory, and configuration warnings go to stderr.
-pub fn load(args: &Request) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
-    let working_dir = current_dir()?;
-    show_relative_to(working_dir.clone());
-    let path = normalize(&working_dir.join(args.input));
-    let text = read(&path, &Source::Document(path.clone()))?;
-    let (config, document) = configure(args, &working_dir, text)?;
-    for warning in &config.warnings {
-        eprintln!("{warning}");
-    }
-    Ok((config, document))
-}
-
 /// Resolves and checks the configuration for a document's `text`, which may be newer than its file.
 /// Has no effect on the process, so a long-running one can call it repeatedly from any thread.
 pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
@@ -205,7 +190,6 @@ pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Co
     let config = resolve_settings(args, settings, &document_source, None, working_dir)?;
     let document = DocumentFile {
         path: document_path,
-        working_dir: working_dir.to_owned(),
         source: document_source,
         text,
     };
@@ -264,19 +248,11 @@ fn selected_theme(
 }
 
 /// The theme file that the front matter of a document's `text` names, if it names one and parses.
+#[cfg_attr(not(feature = "editor"), allow(dead_code))]
 pub fn document_theme(path: &Path, text: &str) -> Option<PathBuf> {
     let source = Source::Document(path.to_owned());
     let settings = parse_front_matter(text, &source).ok()?;
     selected_theme(None, &settings, &source, None, path.parent()?)
-}
-
-pub fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
-    std::env::current_dir().map_err(|e| {
-        vec![Diagnostic::new(
-            None,
-            format!("cannot determine the working directory: {e}"),
-        )]
-    })
 }
 
 pub(crate) fn read(path: &Path, source: &Source) -> Result<String, Vec<Diagnostic>> {

@@ -27,6 +27,7 @@ pub struct Output {
     pub tags: Tree,
     /// The margin notes and sidenotes in page order, top to bottom on each page. Their items are on
     /// the page inside `rect`. The PDF finds notes through their tags, so only tests read this.
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
     pub asides: Vec<Aside>,
     /// The typesetting rules the layout breaks, since no better layout was found.
     pub warnings: Vec<Diagnostic>,

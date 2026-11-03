@@ -6,11 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use druck::config::resolved::{Config, FontFiles};
-use druck::config::theme::{Face, FontStyle, Weight};
 use druck::diagnostic::Diagnostic;
-use druck::page;
-use druck::pipeline::{self, Request};
+use druck::editor::engine::{self, Request};
+use druck::editor::resolved_config::{Config, Face, FontFiles, FontStyle, Weight};
 
 use super::raster::{Painter, family_name, fingerprint};
 
@@ -61,7 +59,7 @@ impl<T> Scheduler<T> {
 
 /// The result of one layout.
 pub struct Layout {
-    pub output: page::Output,
+    pub output: engine::Output,
     pub painter: Arc<Painter>,
     /// One per page, see [`fingerprint`].
     pub fingerprints: Vec<u64>,
@@ -187,11 +185,11 @@ impl Typesetter {
             theme: self.theme.as_deref(),
             overrides: &[],
         };
-        let (config, document) = pipeline::configure(&request, &self.working_dir, text)?;
+        let (config, document) = engine::configure(&request, &self.working_dir, text)?;
         let configured = Instant::now();
         let painter = self.painter(&config)?;
         let fonts_ready = Instant::now();
-        let output = pipeline::typeset_with(&config, &document, painter.fonts())?;
+        let output = engine::typeset_with(&config, &document, painter.fonts())?;
         let typeset = Instant::now();
         let fingerprints = output.pages.iter().map(fingerprint).collect();
         let warnings = config.warnings.iter().chain(&output.warnings).cloned().collect();
@@ -217,7 +215,7 @@ impl Typesetter {
         {
             return Ok(painter.clone());
         }
-        let painter = Arc::new(Painter::new(pipeline::load_fonts(config)?));
+        let painter = Arc::new(Painter::new(engine::load_fonts(config)?));
         self.loaded = Some((wanted, painter.clone()));
         Ok(painter)
     }

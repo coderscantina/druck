@@ -7,8 +7,8 @@
 
 use std::ops::Range;
 
-use druck::bibliography::syntax::{self, Segment};
-use druck::markdown::marks;
+use druck::editor::marks;
+use druck::editor::syntax::{self, Segment};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 use super::blocks::BlockKind;

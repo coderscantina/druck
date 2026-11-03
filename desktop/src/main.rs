@@ -46,7 +46,7 @@ fn main() -> ExitCode {
     };
     let asked = cli.theme.as_deref().map(|theme| {
         let working_dir = std::env::current_dir().unwrap_or_default();
-        druck::theme_path::resolve(theme, &working_dir)
+        druck::editor::theme_path::resolve(theme, &working_dir)
     });
     let theme = asked.or_else(|| opened.as_ref().and_then(|opened| opened.theme.clone()));
     gpui_platform::application()

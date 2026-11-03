@@ -19,6 +19,7 @@ use crate::diagnostic::Diagnostic;
 
 /// What a painter needs to draw a face's glyphs: its font file, the face in it, and the variation
 /// coordinates of this instance by axis tag, in the axis's own units.
+#[cfg_attr(not(feature = "editor"), allow(dead_code))]
 pub struct FaceOutlines<'a> {
     pub data: &'static [u8],
     pub index: u32,
@@ -32,6 +33,7 @@ pub struct FaceId(pub usize);
 /// A parsed face. Font bytes live for the rest of the process: bundled fonts are static and
 /// user fonts are leaked once per version of a file, so the shaper and the PDF writer share one copy
 /// and repeated loads in a long-running process add nothing.
+#[cfg_attr(not(feature = "editor"), allow(dead_code))]
 struct Loaded {
     buzz: rustybuzz::Face<'static>,
     font: krilla::text::Font,
@@ -338,6 +340,7 @@ impl Fonts {
     }
 
     /// The font data of a face, for drawing its glyphs by id.
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
     pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
         let face = &self.faces[face.0];
         FaceOutlines {

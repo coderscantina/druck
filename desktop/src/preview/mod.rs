@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use druck::diagnostic::Diagnostic;
-use druck::page::Item;
+use druck::editor::engine::Item;
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, Pixels, RenderImage, ScrollEvent, Window,

@@ -40,6 +40,7 @@ pub fn locate(name: &str, project: Option<&Path>, common: Option<&Path>) -> Opti
     project.into_iter().chain(common).find(|(_, path)| path.is_file())
 }
 
+#[cfg_attr(not(feature = "editor"), allow(dead_code))]
 pub fn resolve(selection: &Path, base: &Path) -> PathBuf {
     resolve_in(selection, base, None)
 }

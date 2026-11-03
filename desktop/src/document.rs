@@ -2,7 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use druck::pipeline::{self, Request};
+use druck::diagnostic::{Diagnostic, show_relative_to};
+use druck::editor::{self, engine, resolved_config};
+use druck::input::{DocumentText, Input};
+use druck::resource::normalize;
+use druck::{Configured, Failure, Renderer};
 
 pub struct Opened {
     pub path: PathBuf,
@@ -19,19 +23,19 @@ impl Opened {
         if !path.exists() {
             return Err(format!("cannot open {}: no such file or folder", path.display()));
         }
-        let request = Request {
-            input: path,
-            theme: None,
-            overrides: &[],
-        };
-        let (metadata, theme) = match pipeline::load(&request) {
-            Ok((config, file)) => (Some(config.metadata), pipeline::document_theme(&file.path, &file.text)),
-            Err(diagnostics) => {
+        let (metadata, theme) = match configure(path) {
+            Ok(configured) => {
+                let (file, text) = editor::document_text(&configured);
+                let theme = engine::document_theme(file, text);
+                (Some(resolved_config::of(&configured).metadata.clone()), theme)
+            }
+            Err(Failure::Errors(diagnostics)) => {
                 for diagnostic in &diagnostics {
                     eprintln!("{diagnostic}");
                 }
                 (None, None)
             }
+            Err(Failure::Cancelled) => (None, None),
         };
         let file_name = || path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
         Ok(Self {
@@ -47,10 +51,33 @@ impl Opened {
     }
 }
 
+/// The file's configuration, with its warnings printed. Paths in messages become relative to the working
+/// directory.
+fn configure(path: &Path) -> Result<Configured, Failure> {
+    let working_dir = std::env::current_dir().map_err(|e| {
+        vec![Diagnostic::new(
+            None,
+            format!("cannot determine the working directory: {e}"),
+        )]
+    })?;
+    show_relative_to(working_dir.clone());
+    let input = Input {
+        text: DocumentText::read(&normalize(&working_dir.join(path)))?,
+        theme: None,
+        overrides: Vec::new(),
+        working_dir,
+    };
+    let configured = Renderer::new().job(&input).configure()?;
+    for warning in configured.warnings() {
+        eprintln!("{warning}");
+    }
+    Ok(configured)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use druck::pdf::Print;
+    use druck::{LayoutOptions, PdfOptions};
 
     fn sample(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples").join(name)
@@ -58,22 +85,15 @@ mod tests {
 
     #[test]
     fn engine_goes_from_markdown_to_pages_and_pdf() {
-        let path = sample("report.md");
-        let request = Request {
-            input: &path,
-            theme: None,
-            overrides: &[],
-        };
-        let (config, file) = pipeline::load(&request).unwrap_or_else(|_| panic!("the sample loads"));
-        let (fonts, laid) = pipeline::typeset(&config, &file).unwrap_or_else(|_| panic!("the sample typesets"));
-        assert!(!laid.pages.is_empty());
-        let print = Print {
-            bleed: druck::config::values::Pt(0.0),
-            crop_marks: false,
-        };
-        let pdf =
-            pipeline::write_pdf(&config, &file, &fonts, &laid, print).unwrap_or_else(|_| panic!("the sample writes"));
-        assert!(pdf.starts_with(b"%PDF"));
+        let configured = configure(&sample("report.md")).unwrap_or_else(|_| panic!("the sample loads"));
+        let laid = configured
+            .layout(&LayoutOptions::default())
+            .unwrap_or_else(|_| panic!("the sample typesets"));
+        let pdf = laid
+            .pdf(&PdfOptions::default())
+            .unwrap_or_else(|_| panic!("the sample writes"));
+        assert!(pdf.parts > 0);
+        assert!(pdf.bytes.starts_with(b"%PDF"));
     }
 
     #[test]
@@ -85,9 +105,9 @@ mod tests {
     #[test]
     fn the_theme_comes_from_the_front_matter() {
         let path = Path::new("/project/book.md");
-        let theme = pipeline::document_theme(path, "---\ntheme: themes/print.json\n---\n\nText\n");
+        let theme = engine::document_theme(path, "---\ntheme: themes/print.json\n---\n\nText\n");
         assert_eq!(theme, Some(PathBuf::from("/project/themes/print.json")));
-        assert_eq!(pipeline::document_theme(path, "Text\n"), None);
+        assert_eq!(engine::document_theme(path, "Text\n"), None);
     }
 
     #[test]

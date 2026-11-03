@@ -14,8 +14,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use druck::config::layer::default_theme_value;
-use druck::config::merge::merge;
+use druck::editor::theme_value::{default_theme_value, merge};
 use serde_json::Value;
 
 pub use validate::Problem;

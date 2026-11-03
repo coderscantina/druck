@@ -9,10 +9,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use druck::config::values::Color;
-use druck::image::{Image, Pixels};
-use druck::page::{Item, Page, Rect};
-use druck::text::{FaceId, Fonts, ShapedRun};
+use druck::editor::engine::{FaceId, Fonts, Image, Item, Page, Pixels, Rect, ShapedRun};
+use druck::editor::resolved_config::Color;
 use image::RgbaImage;
 use image::imageops::{self, FilterType};
 use resvg::tiny_skia::{self, FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform};
@@ -323,9 +321,9 @@ impl OutlinePen for Pen {
 mod tests {
     use std::path::Path as FilePath;
 
-    use druck::config::theme::{FontStyle, Lang, Weight};
-    use druck::config::values::Pt;
-    use druck::pipeline::{self, Request};
+    use druck::editor::engine::{self, Request};
+    use druck::editor::resolved_config::{FontStyle, Lang, Weight};
+    use druck::output::Pt;
 
     use super::*;
     use crate::preview::job::Typesetter;
@@ -483,12 +481,12 @@ mod tests {
             theme: Some(&theme_path),
             overrides: &[],
         };
-        let configured = pipeline::configure(&request, &dir, "Body\n".to_owned());
+        let configured = engine::configure(&request, &dir, "Body\n".to_owned());
         std::fs::remove_dir_all(&dir).expect("temp folder");
         let Ok((config, _)) = configured else {
             panic!("the theme is valid")
         };
-        let Ok(fonts) = pipeline::load_fonts(&config) else {
+        let Ok(fonts) = engine::load_fonts(&config) else {
             panic!("the font loads")
         };
         let shaped: Vec<_> = [100, 900]

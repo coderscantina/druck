@@ -7,9 +7,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use druck::page::{Item, Output};
-use druck::pdf::Print;
-use druck::pipeline::{self, Request};
+use crate::page::{Item, Output};
+use crate::pdf::Print;
+use crate::pipeline::{self, Request};
 
 const SAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/samples");
 
@@ -68,7 +68,7 @@ fn render(variant: &Variant) -> Rendered {
     let (fonts, laid) =
         pipeline::typeset(&config, &document).unwrap_or_else(|errors| panic!("{}: {errors:?}", variant.name));
     let print = Print {
-        bleed: druck::config::values::Pt(0.0),
+        bleed: crate::config::values::Pt(0.0),
         crop_marks: false,
     };
     let pdf = pipeline::write_pdf(&config, &document, &fonts, &laid, print)
@@ -215,7 +215,7 @@ fn references(_: &Variant, rendered: &Rendered) -> Vec<String> {
     for page in &laid.pages {
         for item in &page.items {
             if let Item::Link {
-                link: druck::document::Link::Anchor(id),
+                link: crate::document::Link::Anchor(id),
                 ..
             } = item
                 && !placed.contains(id)

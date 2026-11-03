@@ -1066,6 +1066,19 @@ There is no JSON schema for `druck.yaml`, as front matter has none. The publishe
 - **Layout thread in the desktop app:** the executor's background threads are libdispatch workers with 512 KB of stack. Deserializing a theme alone needs about 450 KB in a debug build, because the derived deserializers for `Theme` (11 KB) and `Styles<BlockStyle>` (7 KB) keep many large locals and each level adds six wrapper frames, so debug builds of `druck-desktop` overflowed the stack and died with SIGILL before a window opened. The depth is fixed by the schema, not by the input, so the need is bounded but not small. The fix is not to depend on the caller's stack: `Typesetter::run` lays out on a scoped thread with 16 MB of stack. Reducing the frames instead would mean reshaping the theme types for a debug-only cost. The CLI runs on the main thread (8 MB) and the integration branch shares the unfixed code. Other desktop paths that resolve a theme (`document.rs`, the theme file validator) run on the main thread and are unchanged.
 - **Desktop CI:** one macOS job builds, tests, and lints `druck-desktop`, checks its format and its notices. The existing jobs are unchanged because the desktop crate is not a default member. `python3 scripts/notices.py --desktop` writes `desktop/THIRD_PARTY_NOTICES.md` for the crates the app links on macOS (352, against 140 for the CLI). 41 of them declare a license but ship no license file, and `option-ext` is MPL-2.0; both need the owner before the app is distributed.
 
+## 2026-11-03: Phase 2 step 1, choices beyond the design
+
+The facade follows [the design](PHASE_2_API.md). These go beyond it or differ from it.
+
+- **`Configured::config_json` returns a pretty `String`, not a `Value`.** `serde_json` is built without `preserve_order`, so a `Value` sorts its keys, and `druck check --print-config` would change its output. Turning the feature on would also change the order in every theme merge, so it is not worth the risk.
+- **`Rendered` has a `parts` field:** pages of a PDF, content documents of an EPUB. The CLI's `wrote N sections` needs the EPUB count, and `Layout` has no public pages yet. The destructuring in the design's summary needs `..`.
+- **`Renderer::render` returns configuration warnings too.** The design lists only layout and export warnings there, but `render` has no `Configured` to read the others from, so they would be lost.
+- **`ExportSettings::print_conflict`:** the diagnostic for an export whose print settings do not suit an EPUB. It needs the manifest location of the export, which the CLI has no way to know.
+- **`Configured::check_final(name)` instead of `Configured::todos`.** Parsing during `configure` would move a parse error ahead of the configuration warnings on stderr, and the CLI cannot build a diagnostic at a joined line. Step 3 can revisit this when the printing moves.
+- **`tests/acceptance.rs` moved to `src/acceptance_tests.rs`.** It reads `page::Output` and needs the private `pipeline`. Gating an integration test on the `editor` feature would skip it in a plain `cargo test`. Step 5 can move it back once `Layout` is public.
+- **Items only the desktop reads carry `#[cfg_attr(not(feature = "editor"), allow(dead_code))]`,** narrowly rather than for the whole crate. CI gains a `cargo clippy --all-features` line, because that build is the one that finds code nothing uses.
+- **`druck-desktop` depends on `druck` with `default-features = false`,** so the app's build does not compile the CLI's feature. It has its own `clap`.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

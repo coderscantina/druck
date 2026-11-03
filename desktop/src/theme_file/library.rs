@@ -7,8 +7,8 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
-pub use druck::theme_path::Scope;
-use druck::theme_path::{self, PROJECT_FILE, common_file as common_path};
+pub use druck::editor::theme_path::Scope;
+use druck::editor::theme_path::{self, PROJECT_FILE, common_file as common_path};
 
 use super::patch;
 
@@ -21,7 +21,7 @@ pub struct Entry {
 
 /// The common theme folder of this machine, which may not exist yet.
 pub fn common_dir() -> Option<PathBuf> {
-    druck::theme_path::directory()
+    theme_path::directory()
 }
 
 /// Names are what `theme_path` accepts as a bare name: ASCII letters, digits, hyphens, underscores.

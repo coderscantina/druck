@@ -92,6 +92,7 @@ fn sniff(data: &[u8]) -> Sniffed {
 #[derive(Clone)]
 pub struct Image {
     /// The file as read, for a painter that draws raster images itself.
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
     source: Data,
     pixels: Pixels,
     width: f64,
@@ -150,6 +151,7 @@ impl Image {
     }
 
     /// The bytes of the image file.
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
     pub fn source(&self) -> &[u8] {
         self.source.as_ref()
     }

@@ -2,7 +2,7 @@
 
 Every requirement of [the briefing](BRIEFING.md) and its amendments, with what shows it. Evidence is a test (`file: name`), a sample with the page inspected, or a command. **Missing** means no evidence exists yet. Nothing here narrows the briefing. The state of the release gate is in [progress](PROGRESS.md).
 
-Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.rs` (every sample, see below). Visual evidence is from the 2026-11-03 pass in [progress](PROGRESS.md#verification), which does not replace the owner's review.
+Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `src/acceptance_tests.rs` (every sample, see below). Visual evidence is from the 2026-11-03 pass in [progress](PROGRESS.md#verification), which does not replace the owner's review.
 
 ## Gaps
 
@@ -18,7 +18,7 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 
 | Short | Means |
 | --- | --- |
-| acceptance | `tests/acceptance.rs: every_sample_passes_the_acceptance_checks`, run over every sample and each sample's theme: overflow (nothing drawn outside its page), lost content (every long word of the prose is on a page), references (every link, anchor, and bookmark has a placed destination, no `??`), stability (two renders write the same PDF), PDF features (fonts embedded with a text map, link annotations equal links, outline present) |
+| acceptance | `src/acceptance_tests.rs: every_sample_passes_the_acceptance_checks`, run over every sample and each sample's theme: overflow (nothing drawn outside its page), lost content (every long word of the prose is on a page), references (every link, anchor, and bookmark has a placed destination, no `??`), stability (two renders write the same PDF), PDF features (fonts embedded with a text map, link annotations equal links, outline present) |
 | samples | `scripts/render-samples.sh` then `scripts/check-pdfs.sh` (fonts embedded, Unicode maps, text extracts) |
 | offline | `scripts/check-offline.sh` |
 

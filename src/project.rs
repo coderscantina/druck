@@ -12,8 +12,9 @@ use crate::config::front_matter::{self, Export, FrontMatter};
 use crate::config::resolved::Config;
 use crate::config::source::{ChapterMap, Source, normalize};
 use crate::diagnostic::Diagnostic;
-use crate::document::Location;
+use crate::input::{DocumentText, ExportSettings};
 use crate::pipeline::{self, DocumentFile, Request};
+use crate::renderer::PdfOptions;
 
 pub const MANIFEST: &str = "druck.yaml";
 
@@ -22,20 +23,14 @@ const MANUSCRIPT: &str = "manuscript";
 
 /// A project with its manifest read and its chapters joined.
 pub struct Project {
-    pub dir: PathBuf,
-    pub exports: BTreeMap<String, Spanned<Export>>,
+    dir: PathBuf,
+    exports: BTreeMap<String, Spanned<Export>>,
     /// Markdown files in `manuscript/` the chapter list does not name.
-    pub warnings: Vec<Diagnostic>,
+    warnings: Vec<Diagnostic>,
     manifest: PathBuf,
     settings: FrontMatter,
     source: Source,
     text: String,
-}
-
-/// A placeholder still open in a document, at its line and column in the joined text.
-pub struct Todo {
-    pub text: String,
-    pub at: Location,
 }
 
 impl Project {
@@ -78,38 +73,66 @@ impl Project {
         })
     }
 
-    /// Resolves the configuration: the manifest's settings, then the export's, then `args`.
-    pub fn configure(
-        self,
-        args: &Request,
-        export: Option<&Export>,
-        working_dir: &Path,
-    ) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
-        let mut settings = self.settings;
-        if let Some(export) = export {
-            settings.theme = export.theme.clone().or(settings.theme);
-            settings.draft = export.draft.or(settings.draft);
-        }
-        let manifest_source = Source::Document(self.manifest.clone());
-        let config = pipeline::resolve_settings(args, settings, &manifest_source, Some(&self.dir), working_dir)?;
-        let document = DocumentFile {
-            path: self.manifest,
-            working_dir: working_dir.to_owned(),
-            source: self.source,
-            text: self.text,
-        };
-        Ok((config, document))
+    /// Markdown files in `manuscript/` the chapter list does not name.
+    pub fn warnings(&self) -> &[Diagnostic] {
+        &self.warnings
     }
 
-    /// Where a render writes: the export's output, else `build/<name>.pdf` in the project folder, named after
-    /// the export or the folder.
-    pub fn output(&self, export: Option<(&str, &Export)>) -> PathBuf {
-        if let Some(path) = export.and_then(|(_, export)| export.output.as_deref()) {
-            return normalize(&self.dir.join(path));
+    /// The named exports of the manifest.
+    pub fn exports(&self) -> impl Iterator<Item = (&str, &Export)> {
+        self.exports.iter().map(|(name, export)| (name.as_str(), &export.value))
+    }
+
+    /// The document with the export's theme and draft applied, with its print and final settings beside it.
+    pub fn export(mut self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Vec<Diagnostic>> {
+        let mut settings = ExportSettings {
+            pdf: PdfOptions::default(),
+            is_final: false,
+            output: None,
+            print_conflict: None,
+        };
+        if let Some(name) = name {
+            let manifest = Source::Document(self.manifest.clone());
+            let Some(export) = self.exports.get(name) else {
+                let message = format!("no export named \"{name}\"");
+                return Err(vec![Diagnostic::new(Some(manifest), message)]);
+            };
+            let has_print = export.value.bleed.is_some() || export.value.crop_marks;
+            settings.print_conflict = has_print.then(|| {
+                let message = format!("export \"{name}\": bleed and crop-marks apply to PDF output only, not to EPUB");
+                at(Diagnostic::new(Some(manifest), message), &export.referenced)
+            });
+            let export = &export.value;
+            settings.pdf.bleed = export.bleed.unwrap_or(settings.pdf.bleed);
+            settings.pdf.crop_marks = export.crop_marks;
+            settings.is_final = export.is_final;
+            settings.output = export.output.as_ref().map(|path| normalize(&self.dir.join(path)));
+            self.settings.theme = export.theme.clone().or(self.settings.theme);
+            self.settings.draft = export.draft.or(self.settings.draft);
         }
-        let folder = self.dir.file_name().and_then(|name| name.to_str());
-        let name = export.map(|(name, _)| name).or(folder).unwrap_or("document");
-        self.dir.join("build").join(format!("{name}.pdf"))
+        Ok((DocumentText::Project(Box::new(self)), settings))
+    }
+
+    /// Resolves the configuration: the manifest's settings with the export's, then `args`.
+    pub(crate) fn configure(
+        &self,
+        args: &Request,
+        working_dir: &Path,
+    ) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
+        let manifest_source = Source::Document(self.manifest.clone());
+        let config = pipeline::resolve_settings(
+            args,
+            self.settings.clone(),
+            &manifest_source,
+            Some(&self.dir),
+            working_dir,
+        )?;
+        let document = DocumentFile {
+            path: self.manifest.clone(),
+            source: self.source.clone(),
+            text: self.text.clone(),
+        };
+        Ok((config, document))
     }
 }
 

@@ -1,19 +1,16 @@
 //! Druck command-line interface: reads inputs, presents diagnostics, and sets exit codes.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::error::ErrorKind;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-use druck::config::resolved::Config;
-use druck::config::source::{Source, normalize, show_relative_to, shown};
-use druck::config::values::Pt;
-use druck::diagnostic::Diagnostic;
-use druck::pipeline::{DocumentFile, Request, current_dir, load, prepare, typeset, write_pdf};
-use druck::project::{self, Project};
-use druck::{date, epub, page, pdf};
+use druck::diagnostic::{Diagnostic, show_relative_to, shown};
+use druck::input::{DocumentText, Input, MANIFEST, Project};
+use druck::output::Pt;
+use druck::resource::normalize;
+use druck::{Configured, EpubOptions, Failure, LayoutOptions, PdfOptions, Renderer};
 
 /// Typeset Markdown documents as PDF and EPUB.
 #[derive(Parser)]
@@ -65,107 +62,119 @@ struct InputArgs {
     overrides: Vec<String>,
 }
 
-impl InputArgs {
-    fn request(&self) -> Request<'_> {
-        Request {
-            input: &self.input,
-            theme: self.theme.as_deref(),
-            overrides: &self.overrides,
-        }
-    }
-}
-
-/// A document ready to build, with what its export or file location decides.
+/// A document ready to configure, with what its export or file location decides.
 struct Job {
-    config: Config,
-    document: DocumentFile,
+    input: Input,
+    /// The document or manifest, for messages.
+    path: PathBuf,
     /// Where a render writes without `-o`.
     output: PathBuf,
     /// Whether a render creates the output folder, as project builds do.
     create_folder: bool,
-    print: pdf::Print,
+    print: PdfOptions,
+    /// The export to check for open placeholders, if it is final.
+    final_export: Option<String>,
     /// Why the export's print settings do not suit an EPUB, if it has any.
     print_conflict: Option<Diagnostic>,
 }
 
 impl Job {
-    fn open(input: &InputArgs) -> Result<Self, Vec<Diagnostic>> {
-        if input.input.is_dir() {
-            return Self::open_project(input);
+    fn open(args: &InputArgs) -> Result<Self, Failure> {
+        if args.input.is_dir() {
+            return Self::open_project(args);
         }
-        if input.export.is_some() {
+        if args.export.is_some() {
             usage_error("--export needs a project folder, not a single file");
         }
-        let (config, document) = load(&input.request())?;
+        let working_dir = current_dir()?;
+        show_relative_to(working_dir.clone());
+        let path = normalize(&working_dir.join(&args.input));
+        let text = DocumentText::read(&path)?;
         Ok(Self {
-            config,
-            output: document.path.with_extension("pdf"),
-            document,
+            input: args.input(text, working_dir),
+            output: path.with_extension("pdf"),
+            path,
             create_folder: false,
-            print: pdf::Print {
-                bleed: Pt(0.0),
-                crop_marks: false,
-            },
+            print: PdfOptions::default(),
+            final_export: None,
             print_conflict: None,
         })
     }
 
-    fn open_project(input: &InputArgs) -> Result<Self, Vec<Diagnostic>> {
+    fn open_project(args: &InputArgs) -> Result<Self, Failure> {
         let working_dir = current_dir()?;
         show_relative_to(working_dir.clone());
-        let project = Project::open(&normalize(&working_dir.join(&input.input)))?;
-        for warning in &project.warnings {
+        let dir = normalize(&working_dir.join(&args.input));
+        let project = Project::open(&dir)?;
+        for warning in project.warnings() {
             eprintln!("{warning}");
         }
-        let export = input.export.as_deref().map(|name| match project.exports.get(name) {
-            Some(export) => (name, export.clone()),
-            None if project.exports.is_empty() => {
-                usage_error(&format!("no export named \"{name}\"; the project has none"))
-            }
-            None => {
-                let known = project
-                    .exports
-                    .keys()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                usage_error(&format!("no export named \"{name}\"; the project has: {known}"))
-            }
-        });
-        let output = project.output(export.as_ref().map(|(name, export)| (*name, &export.value)));
-        let print_conflict = export.as_ref().and_then(|(name, export)| {
-            let has_print = export.value.bleed.is_some() || export.value.crop_marks;
-            has_print.then(|| {
-                let message = format!("export \"{name}\": bleed and crop-marks apply to PDF output only, not to EPUB");
-                let source = Source::Document(project.dir.join(project::MANIFEST));
-                Diagnostic::new(Some(source), message).at(export.referenced.line(), export.referenced.column())
-            })
-        });
-        let settings = export.as_ref().map(|(_, export)| &export.value);
-        let print = pdf::Print {
-            bleed: settings.and_then(|export| export.bleed).unwrap_or(Pt(0.0)),
-            crop_marks: settings.is_some_and(|export| export.crop_marks),
-        };
-        let final_export = export
-            .as_ref()
-            .filter(|(_, export)| export.value.is_final)
-            .map(|(name, _)| *name);
-        let (config, document) = project.configure(&input.request(), settings, &working_dir)?;
-        for warning in &config.warnings {
-            eprintln!("{warning}");
+        let name = args.export.as_deref();
+        if let Some(name) = name {
+            check_export(&project, name);
         }
-        if let Some(name) = final_export {
-            project::check_final(&config, &document, name)?;
-        }
+        let (text, settings) = project.export(name)?;
+        let output = settings.output.unwrap_or_else(|| {
+            let folder = dir.file_name().and_then(|name| name.to_str());
+            let file = name.or(folder).unwrap_or("document");
+            dir.join("build").join(format!("{file}.pdf"))
+        });
         Ok(Self {
-            config,
-            document,
+            input: args.input(text, working_dir),
+            path: dir.join(MANIFEST),
             output,
             create_folder: true,
-            print,
-            print_conflict,
+            print: settings.pdf,
+            final_export: name.filter(|_| settings.is_final).map(str::to_owned),
+            print_conflict: settings.print_conflict,
         })
     }
+
+    /// Resolves the configuration, printing its warnings, and checks a final export.
+    fn configure(&self, renderer: &Renderer) -> Result<Configured, Failure> {
+        let configured = renderer.job(&self.input).configure()?;
+        for warning in configured.warnings() {
+            eprintln!("{warning}");
+        }
+        if let Some(name) = &self.final_export {
+            configured.check_final(name)?;
+        }
+        Ok(configured)
+    }
+}
+
+impl InputArgs {
+    fn input(&self, text: DocumentText, working_dir: PathBuf) -> Input {
+        Input {
+            text,
+            theme: self.theme.clone(),
+            overrides: self.overrides.clone(),
+            working_dir,
+        }
+    }
+}
+
+/// Exits with a usage error unless the project has an export called `name`.
+fn check_export(project: &Project, name: &str) {
+    let known: Vec<&str> = project.exports().map(|(name, _)| name).collect();
+    if known.is_empty() {
+        usage_error(&format!("no export named \"{name}\"; the project has none"));
+    }
+    if !known.contains(&name) {
+        usage_error(&format!(
+            "no export named \"{name}\"; the project has: {}",
+            known.join(", ")
+        ));
+    }
+}
+
+fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
+    std::env::current_dir().map_err(|e| {
+        vec![Diagnostic::new(
+            None,
+            format!("cannot determine the working directory: {e}"),
+        )]
+    })
 }
 
 /// Reports a wrong use of the command line and exits, as clap does for arguments it rejects itself.
@@ -181,7 +190,11 @@ fn is_epub(path: &Path) -> bool {
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(diagnostics) => {
+        Err(Failure::Cancelled) => {
+            eprintln!("error: cancelled");
+            ExitCode::FAILURE
+        }
+        Err(Failure::Errors(diagnostics)) => {
             for diagnostic in &diagnostics {
                 eprintln!("{diagnostic}");
             }
@@ -190,30 +203,28 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
+fn run(cli: Cli) -> Result<(), Failure> {
+    let renderer = Renderer::new();
     match cli.command {
         Command::Check { input, print_config } => {
             let job = Job::open(&input)?;
-            let Job { config, document, .. } = &job;
+            let configured = job.configure(&renderer)?;
             if print_config {
-                let json = serde_json::to_string_pretty(config).expect("configuration serializes");
-                println!("{json}");
+                println!("{}", configured.config_json());
                 return Ok(());
             }
             if is_epub(&job.output) {
                 if let Some(conflict) = job.print_conflict.clone() {
-                    return Err(vec![conflict]);
+                    return Err(Failure::Errors(vec![conflict]));
                 }
-                build_epub(config, document)?;
+                print_warnings(&configured.epub(&EpubOptions::default())?.warnings);
             } else {
-                let (fonts, laid) = typeset(config, document)?;
+                let laid = configured.layout(&LayoutOptions::default())?;
                 // The PDF is written and dropped, so a standard the document must conform to is checked too.
-                write_pdf(config, document, &fonts, &laid, job.print)?;
-                for warning in &laid.warnings {
-                    eprintln!("{warning}");
-                }
+                laid.pdf(&job.print)?;
+                print_warnings(laid.warnings());
             }
-            println!("{}: document is valid", shown(&document.path));
+            println!("{}: document is valid", shown(&job.path));
             Ok(())
         }
         Command::Render {
@@ -223,10 +234,10 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             crop_marks,
         } => {
             let job = Job::open(&input)?;
-            let Job { config, document, .. } = &job;
+            let configured = job.configure(&renderer)?;
             let create_folder = job.create_folder && output.is_none();
             let output = match output {
-                Some(path) => normalize(&document.working_dir.join(path)),
+                Some(path) => normalize(&job.input.working_dir.join(path)),
                 None => job.output.clone(),
             };
             if create_folder && let Some(folder) = output.parent() {
@@ -236,39 +247,27 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
             if is_epub(&output) {
                 if bleed.is_some() || crop_marks {
                     let message = "--bleed and --crop-marks apply to PDF output only, not to EPUB";
-                    return Err(vec![Diagnostic::new(None, message)]);
+                    return Err(Failure::Errors(vec![Diagnostic::new(None, message)]));
                 }
                 if let Some(conflict) = job.print_conflict.clone() {
-                    return Err(vec![conflict]);
+                    return Err(Failure::Errors(vec![conflict]));
                 }
-                return render_epub(config, document, &output);
+                return render_epub(&configured, &output);
             }
-            let (fonts, laid) = typeset(config, document)?;
-            let print = pdf::Print {
+            let laid = configured.layout(&LayoutOptions::default())?;
+            let print = PdfOptions {
                 bleed: bleed.unwrap_or(job.print.bleed),
                 crop_marks: crop_marks || job.print.crop_marks,
             };
-            let pdf = write_pdf(config, document, &fonts, &laid, print)?;
-            let used: BTreeSet<_> = laid
-                .pages
-                .iter()
-                .flat_map(|page| &page.items)
-                .filter_map(|item| match item {
-                    page::Item::Text { run, .. } | page::Item::TurnedText { run, .. } => Some(run.face),
-                    _ => None,
-                })
-                .collect();
-            for warning in used.into_iter().filter_map(|face| fonts.embedding_warning(face)) {
-                eprintln!("warning: {warning}");
-            }
-            match laid.warnings.len() {
+            let pdf = laid.pdf(&print)?;
+            print_warnings(&pdf.warnings);
+            match laid.warnings().len() {
                 0 => {}
                 1 => eprintln!("warning: 1 typesetting rule is broken, `druck check` names it"),
                 count => eprintln!("warning: {count} typesetting rules are broken, `druck check` lists them"),
             }
-            std::fs::write(&output, pdf)
-                .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(&output)))])?;
-            let count = laid.pages.len();
+            write(&output, &pdf.bytes)?;
+            let count = pdf.parts;
             println!(
                 "{}: wrote {count} page{}",
                 shown(&output),
@@ -280,11 +279,11 @@ fn run(cli: Cli) -> Result<(), Vec<Diagnostic>> {
 }
 
 /// Writes the document as an EPUB.
-fn render_epub(config: &Config, document: &DocumentFile, output: &Path) -> Result<(), Vec<Diagnostic>> {
-    let written = build_epub(config, document)?;
-    std::fs::write(output, written.bytes)
-        .map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(output)))])?;
-    let count = written.documents;
+fn render_epub(configured: &Configured, output: &Path) -> Result<(), Failure> {
+    let written = configured.epub(&EpubOptions::default())?;
+    print_warnings(&written.warnings);
+    write(output, &written.bytes)?;
+    let count = written.parts;
     println!(
         "{}: wrote {count} section{}",
         shown(output),
@@ -293,35 +292,12 @@ fn render_epub(config: &Config, document: &DocumentFile, output: &Path) -> Resul
     Ok(())
 }
 
-/// Builds the EPUB and prints its warnings. Nothing is laid out, so the fonts are only read to be embedded.
-fn build_epub(config: &Config, document: &DocumentFile) -> Result<epub::Written, Vec<Diagnostic>> {
-    let prepared = prepare(config, document)?;
-    let today = date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?;
-    // `SOURCE_DATE_EPOCH` fixes the build day; without it an ISO `date` does, so the same input gives the
-    // same bytes.
-    let iso = config
-        .metadata
-        .date
-        .as_deref()
-        .and_then(|text| date::Date::iso(text.trim()));
-    let modified = match std::env::var_os("SOURCE_DATE_EPOCH") {
-        Some(_) => today,
-        None => iso.unwrap_or(today),
-    };
-    let stem = document.name().unwrap_or("Untitled");
-    let written = epub::write(&epub::Book {
-        document: &prepared.content,
-        cited: &prepared.cited,
-        config,
-        source: &document.source,
-        images: &prepared.images,
-        dir: document.path.parent().expect("an absolute file path has a parent"),
-        today,
-        modified,
-        fallback_title: stem,
-    })?;
-    for warning in &written.warnings {
-        eprintln!("warning: {warning}");
+fn print_warnings(warnings: &[Diagnostic]) {
+    for warning in warnings {
+        eprintln!("{warning}");
     }
-    Ok(written)
+}
+
+fn write(path: &Path, bytes: &[u8]) -> Result<(), Vec<Diagnostic>> {
+    std::fs::write(path, bytes).map_err(|e| vec![Diagnostic::new(None, format!("cannot write {}: {e}", shown(path)))])
 }

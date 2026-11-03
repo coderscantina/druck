@@ -33,6 +33,8 @@ jobs:
         run: python3 scripts/notices.py --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy with the editor module
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test
 

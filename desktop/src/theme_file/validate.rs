@@ -4,9 +4,8 @@
 use std::fmt;
 use std::path::Path;
 
-use druck::config::front_matter::FrontMatter;
-use druck::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
-use druck::config::source::Source;
+use druck::diagnostic::Source;
+use druck::editor::resolved_config::{FrontMatter, Inputs, SettingsInput, ThemeInput, resolve};
 use serde_json::Value;
 
 /// One reason a theme is not valid, with the dotted property it concerns when the engine names one.

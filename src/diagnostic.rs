@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use crate::config::source::Source;
+pub use crate::config::source::Source;
+#[doc(hidden)]
+pub use crate::config::source::{show_relative_to, shown};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
