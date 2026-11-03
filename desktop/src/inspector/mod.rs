@@ -1,7 +1,17 @@
 //! Right pane: the panel of the active tab, then the tab rail at the window's edge.
 
+mod input;
+mod strings;
+mod style_property;
+mod styles;
+
+use std::path::PathBuf;
+
 use gpui::prelude::*;
-use gpui::{Context, FontWeight, Window, div, svg};
+use gpui::{Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
+
+use styles::StylesPanel;
+pub use styles::ThemeChanged;
 
 use crate::tokens::{self, Tokens};
 
@@ -59,11 +69,23 @@ impl Tab {
 
 pub struct InspectorView {
     active: Tab,
+    styles: Entity<StylesPanel>,
+    _subscription: Subscription,
 }
 
+/// The inspector announces what its panels change, for the shell to pass on to the galley and the preview.
+impl EventEmitter<ThemeChanged> for InspectorView {}
+
 impl InspectorView {
-    pub fn new() -> Self {
-        Self { active: Tab::Details }
+    /// `theme` is the JSON file the Styles tab edits.
+    pub fn new(theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let styles = cx.new(|cx| StylesPanel::new(theme, window, cx));
+        let subscription = cx.subscribe(&styles, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone()));
+        Self {
+            active: Tab::Styles,
+            styles,
+            _subscription: subscription,
+        }
     }
 
     fn rail_button(&self, tab: Tab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -102,8 +124,11 @@ impl Render for InspectorView {
             .flex_col()
             .bg(tokens.panel)
             .border_l_1()
-            .border_color(tokens.divider)
-            .child(
+            .border_color(tokens.divider);
+        let panel = if self.active == Tab::Styles {
+            panel.child(self.styles.clone())
+        } else {
+            panel.child(
                 div()
                     .flex_none()
                     .h(tokens::SECTION_HEIGHT)
@@ -116,7 +141,8 @@ impl Render for InspectorView {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(tokens.text_quiet)
                     .child(self.active.label()),
-            );
+            )
+        };
         let rail = div()
             .flex_none()
             .w(tokens::RAIL_WIDTH)

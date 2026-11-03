@@ -1254,6 +1254,7 @@ dependencies = [
  "image",
  "pulldown-cmark",
  "resvg 0.47.0",
+ "serde_json",
  "skrifa 0.42.1",
  "unicode-segmentation",
 ]
