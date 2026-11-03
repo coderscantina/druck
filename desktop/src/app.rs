@@ -76,11 +76,12 @@ impl Shell {
             })
             .detach();
         }
+        let preview_path = opened.as_ref().map(|opened| opened.path.clone());
         Self {
             title,
             sidebar: cx.new(|_| SidebarView::new(opened)),
             editor: cx.new(|_| EditorView::new()),
-            preview: cx.new(|_| PreviewView::new()),
+            preview: cx.new(|cx| PreviewView::new(preview_path, cx)),
             inspector: cx.new(|_| InspectorView::new()),
             agent: cx.new(|_| AgentView::new()),
         }

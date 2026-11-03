@@ -1,32 +1,490 @@
-//! Centre pane, pages side: the engine's pages painted natively.
+//! Centre pane, pages side: the engine's pages painted natively, never through PDF.
+//!
+//! The integration wave calls [`PreviewView::request`] with the editor's text. Until then the view follows
+//! the opened file's modification time.
 
+mod bench;
+mod cache;
+mod job;
+mod raster;
+mod sheets;
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+use druck::diagnostic::Diagnostic;
 use gpui::prelude::*;
-use gpui::{Context, Window, div};
+use gpui::{
+    App, Bounds, Context, FocusHandle, Focusable, KeyBinding, Pixels, RenderImage, ScrollEvent, Window, actions,
+    canvas, div, fill, point, px, size,
+};
+use image::RgbaImage;
+use resvg::tiny_skia::Pixmap;
 
+use self::bench::Bench;
+use self::cache::{PageCache, PageKey};
+use self::job::{Layout, Scheduler, Typesetter};
+use self::raster::pixel_size;
+use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
 use crate::tokens::{self, Tokens};
 
-pub struct PreviewView;
+actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
+
+/// How often to look at the opened file's modification time.
+const WATCH_INTERVAL: Duration = Duration::from_millis(250);
+/// Fixed zoom levels, as logical pixels per point.
+const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+/// Sharper than this costs too much memory per page; higher zoom enlarges these pixels.
+const MAX_RESOLUTION: f32 = 4.0;
+/// Rasterized pages kept in memory. Painted ones also have a copy in the GPU atlas.
+const CACHE_BYTES: usize = 128 * 1024 * 1024;
+/// Pages rasterized at the same time.
+const RASTER_THREADS: usize = 3;
+/// Pages rasterized beyond each end of the view, so normal scrolling shows finished pages.
+const PREFETCH_PAGES: usize = 2;
+
+/// How large sheets are drawn.
+#[derive(Clone, Copy, PartialEq)]
+enum Zoom {
+    FitWidth,
+    Fixed(f32),
+}
+
+/// A sheet to paint this frame.
+struct Placed {
+    bounds: Bounds<Pixels>,
+    image: Option<Arc<RenderImage>>,
+}
+
+pub struct PreviewView {
+    focus: FocusHandle,
+    scheduler: Scheduler<String>,
+    typesetter: Option<Arc<Mutex<Typesetter>>>,
+    layout: Option<Arc<Layout>>,
+    /// Why the latest text has no pages. The last good pages stay on screen meanwhile.
+    diagnostics: Vec<Diagnostic>,
+    cache: PageCache<Arc<RenderImage>>,
+    rastering: HashSet<PageKey>,
+    /// Evicted images whose atlas tiles to free on the next frame.
+    dropped: Vec<Arc<RenderImage>>,
+    zoom: Zoom,
+    /// The zoom of the last frame, for moves between zoom levels.
+    current_zoom: f32,
+    scroll: (f32, f32),
+    view: (f32, f32),
+    /// The first page on screen in the last frame.
+    page: usize,
+    bench: Option<Bench>,
+}
+
+pub fn bind_keys(cx: &mut App) {
+    let context = Some("Preview");
+    cx.bind_keys([
+        KeyBinding::new("cmd-=", ZoomIn, context),
+        KeyBinding::new("cmd--", ZoomOut, context),
+        KeyBinding::new("cmd-0", ZoomToFit, context),
+        KeyBinding::new("pagedown", NextScreen, context),
+        KeyBinding::new("pageup", PreviousScreen, context),
+    ]);
+}
 
 impl PreviewView {
-    pub fn new() -> Self {
-        Self
+    /// A view of the document at `path`, or an empty one to fill through [`Self::request`].
+    pub fn new(path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+        bind_keys(cx);
+        let mut view = Self {
+            focus: cx.focus_handle(),
+            scheduler: Scheduler::new(),
+            typesetter: None,
+            layout: None,
+            diagnostics: Vec::new(),
+            cache: PageCache::new(CACHE_BYTES),
+            rastering: HashSet::new(),
+            dropped: Vec::new(),
+            zoom: Zoom::FitWidth,
+            current_zoom: 1.0,
+            scroll: (0.0, 0.0),
+            view: (0.0, 0.0),
+            page: 0,
+            bench: Bench::from_env(),
+        };
+        if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
+            view.zoom = Zoom::Fixed(fixed);
+        }
+        if let Some(path) = path {
+            view.typesetter = Some(Arc::new(Mutex::new(Typesetter::new(&path))));
+            watch(path, cx);
+        }
+        view
+    }
+
+    /// Lays out `text` on a background thread and publishes the pages when done. A newer request supersedes
+    /// this one, whose result is then discarded. Does nothing without a document.
+    pub fn request(&mut self, text: String, cx: &mut Context<Self>) {
+        if let Some(bench) = &mut self.bench {
+            bench.requested(&text);
+        }
+        if let Some(started) = self.scheduler.request(text) {
+            self.start_layout(started, cx);
+        }
+    }
+
+    /// Why the latest text has no pages; empty when the pages on screen are current.
+    #[allow(dead_code, reason = "for the diagnostics panel of the integration wave")]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// What the pages on screen broke, such as typesetting rules.
+    #[allow(dead_code, reason = "for the diagnostics panel of the integration wave")]
+    pub fn warnings(&self) -> &[Diagnostic] {
+        self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
+    }
+
+    fn start_layout(&mut self, (number, text): (u64, String), cx: &mut Context<Self>) {
+        let Some(typesetter) = self.typesetter.clone() else {
+            return;
+        };
+        let layout = cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(text) });
+        cx.spawn(async move |this, cx| {
+            let result = layout.await;
+            this.update(cx, |view, cx| {
+                let (publish, next) = view.scheduler.finished(number);
+                if publish {
+                    view.publish(result, cx);
+                }
+                if let Some(next) = next {
+                    view.start_layout(next, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn publish(&mut self, result: Result<Layout, Vec<Diagnostic>>, cx: &mut Context<Self>) {
+        match result {
+            Ok(layout) => {
+                self.diagnostics.clear();
+                if let Some(bench) = &mut self.bench {
+                    bench.published(&layout);
+                }
+                // Freeing a whole document's runs takes long enough to drop a frame.
+                let old = self.layout.replace(Arc::new(layout));
+                cx.background_spawn(async move { drop(old) }).detach();
+            }
+            Err(diagnostics) => self.diagnostics = diagnostics,
+        }
+        cx.notify();
+    }
+
+    fn zoom_step(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let current = self.current_zoom;
+        let next = if direction > 0 {
+            ZOOMS.iter().find(|zoom| **zoom > current * 1.01)
+        } else {
+            ZOOMS.iter().rev().find(|zoom| **zoom < current * 0.99)
+        };
+        if let Some(next) = next {
+            self.zoom = Zoom::Fixed(*next);
+            cx.notify();
+        }
+    }
+
+    fn sheets(&self, zoom: f32) -> Option<Sheets> {
+        let layout = self.layout.as_ref()?;
+        let pages = layout
+            .output
+            .pages
+            .iter()
+            .map(|page| (page.width.0 as f32, page.height.0 as f32));
+        Some(Sheets::new(pages, zoom, f32::from(tokens::SPACE_4)))
+    }
+
+    /// The zoom in effect for a view `width` pixels wide.
+    fn resolve_zoom(&self, width: f32) -> f32 {
+        if let Zoom::Fixed(zoom) = self.zoom {
+            return zoom;
+        }
+        let Some(unit) = self.sheets(1.0) else {
+            return self.current_zoom;
+        };
+        let margins = 2.0 * f32::from(tokens::SPACE_4);
+        let widest = unit.width() - margins;
+        ((width - margins) / widest).clamp(ZOOMS[0] / 2.0, ZOOMS[ZOOMS.len() - 1])
+    }
+
+    /// Places the visible sheets and starts rasterizing what they lack. Only these pages cost anything.
+    fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Placed> {
+        if let Some(bench) = &mut self.bench {
+            bench.frame_started();
+        }
+        for image in self.dropped.drain(..) {
+            window.drop_image(image).ok();
+        }
+        self.view = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+        let device_scale = window.scale_factor();
+        let zoom = self.resolve_zoom(self.view.0);
+        let Some(layout) = self.layout.clone() else {
+            return Vec::new();
+        };
+        let Some(sheets) = self.sheets(zoom) else {
+            return Vec::new();
+        };
+        if zoom != self.current_zoom {
+            if let Some(old) = self.sheets(self.current_zoom) {
+                self.scroll.1 = rescale_scroll(self.scroll.1, self.view.1, old.height(), sheets.height());
+            }
+            self.current_zoom = zoom;
+        }
+        if let Some(page) = self.bench.as_mut().and_then(Bench::take_page) {
+            self.scroll.1 = sheets.top(page.min(sheets.len().saturating_sub(1)));
+        }
+        self.scroll.0 = clamp_scroll(self.scroll.0, sheets.width(), self.view.0);
+        self.scroll.1 = clamp_scroll(self.scroll.1, sheets.height(), self.view.1);
+
+        let visible = sheets.visible(self.scroll.1, self.view.1);
+        self.page = visible.start;
+        let resolution = (zoom * device_scale).min(MAX_RESOLUTION);
+        let key = |page: usize| PageKey {
+            painter: layout.painter.id(),
+            fingerprint: layout.fingerprints[page],
+            resolution: resolution.to_bits(),
+        };
+        let before = visible.start.saturating_sub(PREFETCH_PAGES)..visible.start;
+        let after = visible.end..(visible.end + PREFETCH_PAGES).min(sheets.len());
+        let wanted: Vec<usize> = visible.clone().chain(before).chain(after).collect();
+        // What is on screen and next to it always fits, or pages would evict each other forever.
+        let bytes_each = |page: &usize| {
+            let (width, height) = pixel_size(&layout.output.pages[*page], resolution);
+            width as usize * height as usize * 4
+        };
+        self.cache
+            .set_budget(CACHE_BYTES.max(wanted.iter().map(bytes_each).sum()));
+        for page in wanted {
+            let key = key(page);
+            if self.rastering.len() < RASTER_THREADS
+                && !self.rastering.contains(&key)
+                && self.cache.get(key, page).is_none()
+            {
+                self.start_raster(layout.clone(), page, key, resolution, cx);
+            }
+        }
+
+        let mut placed = Vec::with_capacity(visible.len());
+        let mut exact = 0;
+        for page in visible.clone() {
+            let (width, height) = sheets.size(page);
+            let centred = ((self.view.0 - width) / 2.0).max(f32::from(tokens::SPACE_4)) - self.scroll.0;
+            let top = sheets.top(page) - self.scroll.1;
+            // Whole device pixels, so an image at full resolution maps one to one.
+            let snap = |length: f32| (length * device_scale).round() / device_scale;
+            let image = match self.cache.get(key(page), page) {
+                Some(image) => {
+                    exact += 1;
+                    Some(image)
+                }
+                None => self.cache.stale(page),
+            };
+            placed.push(Placed {
+                bounds: Bounds::new(
+                    point(bounds.origin.x + px(snap(centred)), bounds.origin.y + px(snap(top))),
+                    size(px(snap(width)), px(snap(height))),
+                ),
+                image,
+            });
+        }
+        if self.bench.is_some() {
+            bench::frame(
+                self,
+                exact == visible.len(),
+                visible.len() - exact,
+                sheets.height(),
+                window,
+                cx,
+            );
+        }
+        placed
+    }
+
+    fn start_raster(
+        &mut self,
+        layout: Arc<Layout>,
+        page: usize,
+        key: PageKey,
+        resolution: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.rastering.insert(key);
+        let raster =
+            cx.background_spawn(
+                async move { render_image(layout.painter.paint(&layout.output.pages[page], resolution)) },
+            );
+        cx.spawn(async move |this, cx| {
+            let (image, bytes) = raster.await;
+            this.update(cx, |view, cx| {
+                view.rastering.remove(&key);
+                let evicted = view.cache.insert(key, page, image, bytes);
+                view.dropped.extend(evicted);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let delta = event.delta.pixel_delta(px(20.));
+        self.scroll.0 -= f32::from(delta.x);
+        self.scroll.1 -= f32::from(delta.y);
+        cx.notify();
+    }
+
+    fn status(&self) -> String {
+        let Some(layout) = &self.layout else {
+            return if self.diagnostics.is_empty() {
+                "No pages yet".to_owned()
+            } else {
+                "No pages".to_owned()
+            };
+        };
+        let pages = layout.output.pages.len();
+        let page = (self.page + 1).min(pages);
+        let percent = (self.current_zoom * 100.0).round();
+        format!("Page {page} of {pages} \u{00b7} {percent}%")
+    }
+}
+
+/// Turns a finished page into what the GPU atlas takes: BGRA, with its size in bytes.
+fn render_image(pixmap: Pixmap) -> (Arc<RenderImage>, usize) {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    let mut pixels = pixmap.take();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    let bytes = pixels.len();
+    let buffer = RgbaImage::from_raw(width, height, pixels).expect("the buffer matches its size");
+    let image = RenderImage::new(vec![image::Frame::new(buffer)]);
+    (Arc::new(image), bytes)
+}
+
+/// Requests a layout whenever the file at `path` changes. Stops with the view.
+fn watch(path: PathBuf, cx: &mut Context<PreviewView>) {
+    cx.spawn(async move |this, cx| {
+        let mut seen: Option<SystemTime> = None;
+        loop {
+            let (file, last) = (path.clone(), seen);
+            let changed = cx.background_spawn(async move { read_if_changed(&file, last) }).await;
+            if let Some((modified, text)) = changed {
+                seen = Some(modified);
+                if this.update(cx, |view, cx| view.request(text, cx)).is_err() {
+                    return;
+                }
+            }
+            cx.background_executor().timer(WATCH_INTERVAL).await;
+            if this.update(cx, |_, _| ()).is_err() {
+                return;
+            }
+        }
+    })
+    .detach();
+}
+
+/// The file's time and text if it can be read and differs from `seen`. A file that cannot be read now, such
+/// as one being replaced, gets another look on the next round.
+fn read_if_changed(path: &Path, seen: Option<SystemTime>) -> Option<(SystemTime, String)> {
+    let modified = std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok()?;
+    if seen == Some(modified) {
+        return None;
+    }
+    Some((modified, std::fs::read_to_string(path).ok()?))
+}
+
+impl Focusable for PreviewView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
     }
 }
 
 impl Render for PreviewView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
+        let this = cx.entity();
+        let painted = this.clone();
+        let pages = canvas(
+            move |bounds, window, cx| this.update(cx, |view, cx| view.frame(bounds, window, cx)),
+            move |bounds, placed, window, cx| {
+                window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+                    for sheet in placed {
+                        window.paint_quad(fill(sheet.bounds, gpui::white()));
+                        if let Some(image) = sheet.image {
+                            let corners = gpui::Corners::default();
+                            window
+                                .paint_image(sheet.bounds, sheet.bounds, corners, image, 0, false)
+                                .ok();
+                        }
+                    }
+                });
+                painted.update(cx, |view, _| {
+                    if let Some(bench) = &mut view.bench {
+                        bench.frame_painted();
+                    }
+                });
+            },
+        )
+        .size_full();
+        let problem = self.diagnostics.first().map(|first| {
+            let more = self.diagnostics.len() - 1;
+            let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
+            format!("{first}{suffix}")
+        });
+        let strip = div()
+            .flex_none()
+            .h(tokens::SECTION_HEIGHT)
+            .px(tokens::SPACE_3)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(tokens::SPACE_3)
+            .border_t_1()
+            .border_color(tokens.divider)
+            .bg(tokens.panel)
+            .text_size(tokens::TEXT_SMALL)
+            .text_color(tokens.text_quiet)
+            .child(div().flex_none().child(self.status()))
+            .when_some(problem, |strip, problem| {
+                strip.child(div().min_w_0().truncate().text_color(tokens.accent).child(problem))
+            });
         div()
+            .id("preview")
+            .key_context("Preview")
+            .track_focus(&self.focus)
             .flex_1()
             .min_w_0()
             .flex()
             .flex_col()
-            .items_center()
-            .gap(tokens::SPACE_2)
-            .pt(tokens::SPACE_4)
-            .text_size(tokens::TEXT_SMALL)
-            .text_color(tokens.text_faint)
-            .child("Pages")
-            .child(div().w(tokens::SHEET_WIDTH).h(tokens::SHEET_HEIGHT).bg(tokens.sheet))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|view, _, window, cx| window.focus(&view.focus, cx)),
+            )
+            .on_scroll(cx.listener(Self::on_scroll))
+            .on_action(cx.listener(|view, _: &ZoomIn, _, cx| view.zoom_step(1, cx)))
+            .on_action(cx.listener(|view, _: &ZoomOut, _, cx| view.zoom_step(-1, cx)))
+            .on_action(cx.listener(|view, _: &ZoomToFit, _, cx| {
+                view.zoom = Zoom::FitWidth;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|view, _: &NextScreen, _, cx| {
+                view.scroll.1 += view.view.1 * 0.9;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|view, _: &PreviousScreen, _, cx| {
+                view.scroll.1 -= view.view.1 * 0.9;
+                cx.notify();
+            }))
+            .child(div().flex_1().min_h_0().overflow_hidden().child(pages))
+            .child(strip)
     }
 }

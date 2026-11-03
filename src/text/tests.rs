@@ -299,6 +299,15 @@ pub(crate) fn variable_file(italic: bool) -> FaceFile {
 }
 
 #[test]
+fn loading_a_file_again_reuses_its_bytes() {
+    let files = || BTreeMap::from([(Face::REGULAR, variable_file(false))]);
+    let (first, second) = (load(files()), load(files()));
+    let face = |fonts: &Fonts| fonts.face("Test", Weight::of_font(400), FontStyle::Normal);
+    let bytes = |fonts: &Fonts| fonts.outlines(face(fonts)).data.as_ptr();
+    assert_eq!(bytes(&first), bytes(&second));
+}
+
+#[test]
 fn variable_files_supply_weights_and_separate_italics_with_matching_pdf_instances() {
     let fonts = load(BTreeMap::from([
         (Face::REGULAR, variable_file(false)),

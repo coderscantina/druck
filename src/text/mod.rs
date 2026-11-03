@@ -9,21 +9,35 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use crate::config::resolved::{Config, FaceFile, FontFiles};
 use crate::config::theme::{Face, FigureSpacing, FigureStyle, Figures, FontStyle, Lang, Weight};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 
+/// What a painter needs to draw a face's glyphs: its font file, the face in it, and the variation
+/// coordinates of this instance by axis tag, in the axis's own units.
+pub struct FaceOutlines<'a> {
+    pub data: &'static [u8],
+    pub index: u32,
+    pub coordinates: &'a [([u8; 4], f32)],
+}
+
 /// Index of a loaded face in its [`Fonts`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FaceId(pub usize);
 
 /// A parsed face. Font bytes live for the rest of the process: bundled fonts are static and
-/// user fonts are leaked once per file, so the shaper and the PDF writer share one copy.
+/// user fonts are leaked once per version of a file, so the shaper and the PDF writer share one copy
+/// and repeated loads in a long-running process add nothing.
 struct Loaded {
     buzz: rustybuzz::Face<'static>,
     font: krilla::text::Font,
+    data: &'static [u8],
+    index: u32,
+    coordinates: Vec<([u8; 4], f32)>,
     /// The face's file, as in diagnostics.
     file: String,
     /// Whether the font's OS/2 `fsType` restricts embedding or subsetting.
@@ -73,12 +87,11 @@ impl Fonts {
             faces: Vec::new(),
             families: BTreeMap::new(),
         };
-        let mut files: HashMap<PathBuf, &'static [u8]> = HashMap::new();
         let mut errors = Vec::new();
         for (name, family) in families {
             let mut instances = BTreeMap::new();
             for (face, file) in family {
-                let result = read(file, &mut files).and_then(|data| {
+                let result = read(file).and_then(|data| {
                     if !file.variable {
                         instances.insert(*face, (data, file));
                         return Ok(());
@@ -293,24 +306,44 @@ impl Fonts {
         }
     }
 
+    /// The font data of a face, for drawing its glyphs by id.
+    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
+        let face = &self.faces[face.0];
+        FaceOutlines {
+            data: face.data,
+            index: face.index,
+            coordinates: &face.coordinates,
+        }
+    }
+
     /// The font handle krilla embeds and subsets for a face.
     pub(crate) fn pdf_font(&self, face: FaceId) -> &krilla::text::Font {
         &self.faces[face.0].font
     }
 }
 
-/// The bytes of a face's file, read once per file.
-fn read(file: &FaceFile, files: &mut HashMap<PathBuf, &'static [u8]>) -> Result<&'static [u8], String> {
+/// The bytes of a face's file, read and leaked once per version of the file for the whole process.
+fn read(file: &FaceFile) -> Result<&'static [u8], String> {
+    type Version = (PathBuf, u64, Option<SystemTime>);
+    static FILES: OnceLock<Mutex<HashMap<Version, &'static [u8]>>> = OnceLock::new();
+
     let resource = &file.resource;
     let Some(path) = resource.file() else {
         return bundled::font(&resource.path).ok_or_else(|| format!("unknown bundled font: {resource}"));
     };
-    if let Some(data) = files.get(&path) {
+    let unreadable = |e: std::io::Error| format!("cannot read font {}: {e}", path.display());
+    let metadata = std::fs::metadata(&path).map_err(unreadable)?;
+    let version = (path.clone(), metadata.len(), metadata.modified().ok());
+    let mut files = FILES
+        .get_or_init(Default::default)
+        .lock()
+        .expect("no panic while reading a font");
+    if let Some(data) = files.get(&version) {
         return Ok(data);
     }
-    let bytes = std::fs::read(&path).map_err(|e| format!("cannot read font {}: {e}", path.display()))?;
+    let bytes = std::fs::read(&path).map_err(unreadable)?;
     let data: &'static [u8] = Vec::leak(bytes);
-    files.insert(path, data);
+    files.insert(version, data);
     Ok(data)
 }
 
@@ -328,6 +361,8 @@ fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, Str
         .iter()
         .map(|variation| (krilla::text::Tag::new(&variation.tag.to_bytes()), variation.value))
         .collect();
+    let index = file.index;
+    let coordinates = coordinates.iter().map(|v| (v.tag.to_bytes(), v.value)).collect();
     let font = krilla::text::Font::new_variable(data.into(), file.index, &pdf_coordinates).ok_or_else(invalid)?;
     let restricted = restricts_embedding(&buzz);
     let file = match file.index {
@@ -337,6 +372,9 @@ fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, Str
     Ok(Loaded {
         buzz,
         font,
+        data,
+        index,
+        coordinates,
         file,
         restricted,
     })

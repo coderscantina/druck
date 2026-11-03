@@ -65,21 +65,31 @@ pub fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec
 
 /// Loads the fonts and lays out the document, reporting everything `render` reports before writing.
 pub fn typeset(config: &Config, document: &DocumentFile) -> Result<(Fonts, page::Output), Vec<Diagnostic>> {
+    let fonts = load_fonts(config)?;
+    let laid = typeset_with(config, document, &fonts)?;
+    Ok((fonts, laid))
+}
+
+/// Loads the faces the configuration names, from their files and among installed fonts.
+pub fn load_fonts(config: &Config) -> Result<Fonts, Vec<Diagnostic>> {
     let installed = find_installed(config)?;
-    let fonts = Fonts::load(config, &installed)?;
+    Fonts::load(config, &installed)
+}
+
+/// Lays out the document with fonts already loaded, so a long-running process can reuse them.
+pub fn typeset_with(config: &Config, document: &DocumentFile, fonts: &Fonts) -> Result<page::Output, Vec<Diagnostic>> {
     let prepared = prepare(config, document)?;
     let today = date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?;
-    let laid = layout::layout(
+    layout::layout(
         &prepared.content,
         &prepared.cited,
         &prepared.images,
         &prepared.theme_images,
         config,
-        &fonts,
+        fonts,
         &document.source,
         today,
-    )?;
-    Ok((fonts, laid))
+    )
 }
 
 /// Reads and checks the BibTeX file the configuration names, if any. `load` has checked that it exists.
@@ -146,27 +156,34 @@ fn load_images(files: &[document::ImageFile], dir: &Path, source: &Source) -> Re
     if errors.is_empty() { Ok(images) } else { Err(errors) }
 }
 
-/// Reads the document, theme, and overrides, then resolves and checks the configuration.
+/// Reads the document, theme, and overrides, then resolves and checks the configuration. For the CLI:
+/// paths in messages become relative to the working directory, and configuration warnings go to stderr.
 pub fn load(args: &Request) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
-    let working_dir = std::env::current_dir().map_err(|e| {
-        vec![Diagnostic::new(
-            None,
-            format!("cannot determine the working directory: {e}"),
-        )]
-    })?;
+    let working_dir = current_dir()?;
     show_relative_to(working_dir.clone());
+    let path = normalize(&working_dir.join(args.input));
+    let text = read(&path, &Source::Document(path.clone()))?;
+    let (config, document) = configure(args, &working_dir, text)?;
+    for warning in &config.warnings {
+        eprintln!("{warning}");
+    }
+    Ok((config, document))
+}
+
+/// Resolves and checks the configuration for a document's `text`, which may be newer than its file.
+/// Has no effect on the process, so a long-running one can call it repeatedly from any thread.
+pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let document_path = normalize(&working_dir.join(args.input));
     let document_source = Source::Document(document_path.clone());
     let cli_source = Source::Cli {
-        working_dir: working_dir.clone(),
+        working_dir: working_dir.to_owned(),
     };
 
-    let text = read(&document_path, &document_source)?;
     let document = parse_front_matter(&text, &document_source)?;
     let overrides = parse_overrides(args.overrides, &cli_source)?;
 
     let theme_path = match (args.theme, &document.theme) {
-        (Some(path), _) => Some(theme_path::resolve(path, &working_dir)),
+        (Some(path), _) => Some(theme_path::resolve(path, working_dir)),
         (None, Some(path)) => document_path
             .parent()
             .map(|dir| theme_path::resolve(Path::new(path), dir)),
@@ -186,16 +203,22 @@ pub fn load(args: &Request) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
         },
     })?;
     check_resources(&config)?;
-    for warning in &config.warnings {
-        eprintln!("{warning}");
-    }
     let document = DocumentFile {
         path: document_path,
-        working_dir,
+        working_dir: working_dir.to_owned(),
         source: document_source,
         text,
     };
     Ok((config, document))
+}
+
+fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
+    std::env::current_dir().map_err(|e| {
+        vec![Diagnostic::new(
+            None,
+            format!("cannot determine the working directory: {e}"),
+        )]
+    })
 }
 
 fn read(path: &Path, source: &Source) -> Result<String, Vec<Diagnostic>> {
