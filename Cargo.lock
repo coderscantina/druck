@@ -1251,7 +1251,10 @@ dependencies = [
  "druck",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "pulldown-cmark",
+ "resvg 0.47.0",
+ "skrifa 0.42.1",
  "unicode-segmentation",
 ]
 

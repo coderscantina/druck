@@ -15,3 +15,8 @@ gpui = { package = "gpui-pre", version = "=0.3.11" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", default-features = false, features = ["font-kit", "runtime_shaders"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 unicode-segmentation = "1.13.3"
+# The preview rasterizes pages itself, see preview/raster.rs. All three are permissively licensed and, with
+# the image crate that gpui uses, already in the lockfile through krilla and gpui.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+resvg = { version = "0.47", default-features = false, features = ["text", "raster-images"] }
+skrifa = "0.42"

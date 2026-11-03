@@ -81,8 +81,8 @@ impl Shell {
         Self {
             title,
             sidebar: cx.new(|_| SidebarView::new(opened)),
-            editor: cx.new(|cx| EditorView::new(path, window, cx)),
-            preview: cx.new(|_| PreviewView::new()),
+            editor: cx.new(|cx| EditorView::new(path.clone(), window, cx)),
+            preview: cx.new(|cx| PreviewView::new(path, cx)),
             inspector: cx.new(|_| InspectorView::new()),
             agent: cx.new(|_| AgentView::new()),
         }

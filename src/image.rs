@@ -11,6 +11,7 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use krilla::Data;
 use krilla::image::Image as RasterImage;
 use png::Transformations;
 use usvg::fontdb::{Database, Source};
@@ -90,6 +91,8 @@ fn sniff(data: &[u8]) -> Sniffed {
 /// A decoded, validated image. Cheap to clone.
 #[derive(Clone)]
 pub struct Image {
+    /// The file as read, for a painter that draws raster images itself.
+    source: Data,
     pixels: Pixels,
     width: f64,
     height: f64,
@@ -136,7 +139,7 @@ impl Image {
         match format {
             Format::Png => decode_png(data),
             Format::Jpeg => decode_jpeg(data),
-            Format::Svg => decode_svg(&data),
+            Format::Svg => decode_svg(data),
         }
     }
 
@@ -144,6 +147,11 @@ impl Image {
     /// (72 dpi); SVG uses CSS units, 96 px per inch, so 0.75 pt per px.
     pub fn size(&self) -> (Pt, Pt) {
         (Pt(self.width), Pt(self.height))
+    }
+
+    /// The bytes of the image file.
+    pub fn source(&self) -> &[u8] {
+        self.source.as_ref()
     }
 
     pub fn pixels(&self) -> &Pixels {
@@ -169,8 +177,9 @@ fn decode_png(data: Vec<u8>) -> Result<Image, String> {
     let mut buffer = vec![0; reader.output_buffer_size().ok_or("image is too large")?];
     reader.next_frame(&mut buffer).map_err(|e| malformed(Format::Png, e))?;
     let density = density::png(reader.info());
-    let image = RasterImage::from_png(data.into(), false).map_err(|e| malformed(Format::Png, e))?;
-    raster(image, density)
+    let source = Data::from(data);
+    let image = RasterImage::from_png(source.clone(), false).map_err(|e| malformed(Format::Png, e))?;
+    raster(source, image, density)
 }
 
 fn decode_jpeg(data: Vec<u8>) -> Result<Image, String> {
@@ -179,30 +188,33 @@ fn decode_jpeg(data: Vec<u8>) -> Result<Image, String> {
         .decode()
         .map_err(|e| malformed(Format::Jpeg, e))?;
     let density = density::jpeg(&data);
-    let image = RasterImage::from_jpeg(data.into(), false).map_err(|e| malformed(Format::Jpeg, e))?;
-    raster(image, density)
+    let source = Data::from(data);
+    let image = RasterImage::from_jpeg(source.clone(), false).map_err(|e| malformed(Format::Jpeg, e))?;
+    raster(source, image, density)
 }
 
-fn raster(image: RasterImage, density: Option<Density>) -> Result<Image, String> {
+fn raster(source: Data, image: RasterImage, density: Option<Density>) -> Result<Image, String> {
     let (width, height) = image.size();
     if width == 0 || height == 0 {
         return Err("image has no pixels".to_owned());
     }
     let (per_pixel_x, per_pixel_y) = density.map_or((1.0, 1.0), |d| (PT_PER_INCH / d.x, PT_PER_INCH / d.y));
     Ok(Image {
+        source,
         width: f64::from(width) * per_pixel_x,
         height: f64::from(height) * per_pixel_y,
         pixels: Pixels::Raster(image),
     })
 }
 
-fn decode_svg(data: &[u8]) -> Result<Image, String> {
-    let tree = parse_svg(data)?;
+fn decode_svg(data: Vec<u8>) -> Result<Image, String> {
+    let tree = parse_svg(&data)?;
     let size = tree.size();
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return Err("image has no area".to_owned());
     }
     Ok(Image {
+        source: data.into(),
         width: f64::from(size.width()) * PT_PER_SVG_PX,
         height: f64::from(size.height()) * PT_PER_SVG_PX,
         pixels: Pixels::Svg(Arc::new(tree)),
