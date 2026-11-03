@@ -1251,6 +1251,8 @@ dependencies = [
  "druck",
  "gpui-pre",
  "gpui-pre-platform",
+ "pulldown-cmark",
+ "unicode-segmentation",
 ]
 
 [[package]]

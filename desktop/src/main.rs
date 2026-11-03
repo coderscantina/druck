@@ -8,6 +8,7 @@ mod editor;
 mod inspector;
 mod preview;
 mod sidebar;
+mod source;
 mod tokens;
 
 use std::path::PathBuf;

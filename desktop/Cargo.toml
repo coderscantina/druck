@@ -13,3 +13,5 @@ druck = { path = ".." }
 # 0.3.11 is zed@f816e1f.
 gpui = { package = "gpui-pre", version = "=0.3.11" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", default-features = false, features = ["font-kit", "runtime_shaders"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
+unicode-segmentation = "1.13.3"
