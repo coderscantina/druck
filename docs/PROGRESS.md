@@ -33,8 +33,17 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 11: Installed fonts and custom styles.
 - [x] 12: Page geometry, covers, and bands.
 - [x] 13: Rich tables.
+- [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
 
 ## Resume note
+
+The desktop spike is integrated on branch `t3/desktop-spike-integration`: editor, native pages, theme file and Styles tab, and agent probe in one window, measured on the 203-page corpus ([results](DECISIONS.md#2026-11-03-desktop-spike-results), [verification](#verification)). Typing stayed under 36 ms during refreshes, pages follow a pause in under 0.65 s, and live heap stayed flat over 200 refreshes. Run it with `cargo run --release -p druck-desktop -- --open FILE`.
+
+Next action: the owner runs the IME test below. Milestone 14 stays unchecked until then. After that comes [milestone 15](milestones/15-engine-amendment.md), which also lets corpus files keep their comments.
+
+IME test, in the running app: with Deutsch active press ´ then e (é), ` then a (à), ^ then o (ô), and pending dead keys show underlined; hold a for the accent popup and pick ä; with Pinyin type nihao, where the underlined text and candidate window sit at the caret, Space commits, Escape cancels, and one Cmd+Z removes the whole composition.
+
+Older notes follow.
 
 Typesetting rules were added on 2026-10-17 at the owner's request, on branch `typesetting-rules`: one-line paragraphs and headings stay off page edges, chapters avoid short last pages, duplex spreads end level, paragraphs limit hyphens in a row and avoid short last lines, hyphen fragments follow the language, abbreviations and units get no-break spaces, and broken rules are warnings ([decision](DECISIONS.md#2026-10-17-typesetting-rules), [themes](THEMES.md#typesetting), [authoring](AUTHORING.md#typesetting-warnings)). Follow-ups: tune the costs against more books, and decide whether German should default to 2 and 2 letter fragments.
 
@@ -57,6 +66,17 @@ Next: milestone 10, release acceptance. The project is now named Druck and MIT l
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Desktop spike integration, on 2026-11-03 on the owner's M1 Pro (8 performance and 2 efficiency cores, 32 GB, on AC power), with a release build. The corpus is the 27 manuscript files joined in name order with comments stripped, because the engine still rejects them (242,826 bytes, 203 pages), with a scratch copy of `memoir-print` and `literatur.bib`. Command: `DRUCK_GATE=1 DRUCK_CANVAS=split druck-desktop --open book/stripped.md --theme memoir-print.json`. The driver in `desktop/src/gate.rs` calls the editor's input handler from a timer. Times run from when a key was due to the end of the first paint showing it; presenting adds at most one frame.
+
+- Typing, 360 keys, in bursts that land in refreshes: median 15.5 ms, p95 28.8 ms, max 35.1 ms. The 59 keys during a layout: median 26.0 ms, p95 34.1 ms, max 35.1 ms. The 301 with no layout running: median 13.9 ms, p95 21.5 ms, max 23.7 ms. Before the shape plan cache, 236 keys during a layout had a median of 15.6 ms and a max of 35.0 ms. No priority change was needed.
+- Pause to painted pages, last key to the visible pages exact, including the 150 ms pause: median 488 ms, max 492 ms with nothing running at the key; median 618 ms, max 623 ms when the key lands just after a layout started. Before the shape plan cache: 755 ms and 1.17 s, max 1.20 s.
+- Theme edit of the body size, 12 samples, through the Styles panel's commit: pages median 338 ms, max 354 ms; galley median 333 ms, max 343 ms. The file's diff was one added member. A separate theme setting the body to `$fonts.mono` at 9pt showed in galley and pages, inspected on screen.
+- Memory over 200 refreshes: live heap 166 MB at every 25th refresh from 0 to 200. The page cache's budget is 128 MB of that. Resident moved between 600 and 740 MB without a trend. GPU atlas memory is not in these numbers.
+- Screenshots of Write, Pages, and split in dark and light, on `samples/report.md`, a stripped corpus chapter, its original with comments, and the whole book at page 104, all inspected. The chapter alone shows its diagnostic in the strip, as it should: raw HTML in the original, a citation without a bibliography in the stripped copy. Fixed from this: a long path running into the canvas switch.
+- `cargo test -q`: 363 unit and 35 integration tests passed. `cargo test -q -p druck-desktop`: 93 passed, 1 ignored (needs the installed CLI), including round trips of every sample and corpus file. `cargo clippy --all-targets -q -- -D warnings` and the same with `-p druck-desktop`, `cargo fmt --all --check`, and `python3 scripts/notices.py --check` were clean. `scripts/render-samples.sh` from a release build of `f4d8505` and of this tree: all 14 PDFs byte-identical, and the corpus PDF too.
+
+Not verified: the IME test needs a person. Keys came through the input handler rather than the OS keyboard path in this run, because a real key would need the owner's focus. Only this machine was measured. The live agent probe (`desktop/examples/agent_probe.rs`) was not repeated; `desktop/src/agent` is unchanged from its task branch.
 
 Typesetting amendment, on 2026-10-12 on the owner's macOS machine, after merging the five branches: `cargo test -q` passed 349 unit and 35 integration tests; `cargo clippy --all-targets -q -- -D warnings`, `cargo fmt --check`, `git diff --check`, and `python3 scripts/notices.py --check` were clean. `syntect` and `two-face` are new dependencies; the release binary grew from 9.2 to 11.6 MB. Every sample rendered with a release build, is tagged, and passed `druck check --set 'conformance=[pdf/a-2a, pdf/ua-1]'`, the themed renders too. Before merging, each branch rendered all samples it did not change byte-identical to `6fda127` (tagging: identical rasters). The EPUBs of `book`, `report`, `report-de`, and `margins` passed `xmllint --noout`. Inspected: `report` pages 9 to 11 (callouts, one split across pages, highlighted code, the index), `report-de` page 9, `book` pages 13 to 15, and every page of `margins` in both themes. Not run: veraPDF, epubcheck, Ace, a screen reader, Linux, and Windows.
 
@@ -119,6 +139,7 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
+- Desktop: CI does not cover `druck-desktop`. The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders. Clicking in Pages cannot locate the text until the engine has source mapping.
 - Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
 
 - Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).

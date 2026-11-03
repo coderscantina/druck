@@ -1001,7 +1001,7 @@ At the owner's request: Druck should produce book-quality pages from rules and t
 
 Settled with the owner in an interview. The contract is [the desktop briefing](DESKTOP_BRIEFING.md).
 
-- **Toolkit:** gpui, since Rust-only rules out Tauri and webviews. crates.io has 0.2.2, reported as far behind Zed main, so expect a pinned git revision. Zed's `editor` crate is GPL-3.0, so its code cannot be used in MIT Druck, and the rich text editor is our own.
+- **Toolkit:** gpui through the crates `gpui-pre` and `gpui-pre-platform`, pinned at exactly 0.3.11, since Rust-only rules out Tauri and webviews. They are snapshots of zed@f816e1f published by one person, chosen because they have the editor APIs and AccessKit without Zed git sources. `src/` of gpui matches that commit apart from small `action.rs` changes; the platform crates beyond `gpui_platform` were not diffed. Zed's `editor` crate is GPL-3.0, so its code cannot be used in MIT Druck, and the rich text editor is our own.
 - **Text is the truth:** a block model that serializes on save would reformat files that agents and other editors also change. This needs a source-preserving layer, since the parser records only block start locations and cannot reproduce source.
 - **Spike before milestone 10:** the owner chose to retire the editor risk first. This replaces "next: milestone 10" until the spike and engine amendment are done.
 - **Comments are accepted:** "Embedded HTML is not rendered" still holds. Comments were errors, which forced `build.sh` to strip them and pointed diagnostics at a generated file.
@@ -1012,6 +1012,21 @@ Settled with the owner in an interview. The contract is [the desktop briefing](D
 - **Agent panel spawns the CLI:** the Agent SDK is not a Rust library. The login policy question is open until Anthropic confirms it.
 
 Unresolved: Anthropic's answer on subscription logins, and gpui's accessibility on each platform.
+
+## 2026-11-03: Desktop spike results
+
+What the [spike](milestones/14-desktop-spike.md) settled. Measurements are in [progress](PROGRESS.md#verification).
+
+- **Pages are rasterized on the CPU:** with skrifa, tiny-skia, and resvg, because gpui's `Font` has no variation coordinates, finds fonts by family name rather than by file, and its glyph sprites cannot rotate, which the watermark needs. See `desktop/src/preview/raster.rs`.
+- **The galley finds the theme's body font by name:** the engine's bytes for the family are given to gpui with `add_fonts`, and its name is read from the file. Sizes are the theme's points at 1.4 logical pixels each, because the galley is for reading on screen. Headings scale from the body. Other theme properties do not reach the galley yet.
+- **Text buffer and block rules:** the buffer holds the file's bytes and every change is an edit to them. A blank line ends a block. Each source line is one visual line, soft wrapped. Each `:::` line is its own block. Inline markers reveal when the caret touches their span's edges, and line markers when the caret is on their line.
+- **Theme edits splice text:** one member changes in the file's text instead of re-serializing, so a partial theme stays partial and keeps its formatting. A project theme is `themes/<name>/theme.json`, and wins over a common one of the same name.
+- **Theme selection:** `--theme`, else the file the document's `theme:` names, resolved by the engine, so the inspector and the pages always use the same file.
+- **Refresh:** pages are requested 150 ms after the last edit, and the running layout finishes before the newest text starts, because a layout cannot be stopped. Text stays in memory until Cmd+S. Layout keeps gpui's default background priority, since typing did not suffer from it on an 8 performance core M1 Pro. Lower it if a smaller machine shows otherwise.
+- **Shape plans are cached per face, script, language, and features:** rustybuzz built one on every call. The worst case of pause to painted pages was 1.2 s without the cache. With it, a 203-page render went from 0.67 s to 0.39 s, and PDFs stayed byte-identical because the plan's inputs are the ones `rustybuzz::shape` uses.
+- **Agent protocol:** `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio`, plus `--model` and `--resume` when set. `--permission-prompt-tool stdio` works but has no entry of its own in `--help`, so it is the most likely to change; `2.1.317` names the flag only in passing in another option's text. The panel keeps default tools and settings, so project `CLAUDE.md`, skills, and MCP behave as in a terminal, at a cost of about 33,700 cached tokens on a bare call.
+- **What phase 2 needs:** source mapping (block id and source offsets on text items, a block-to-range table, and the chapter file), exposing the citation scanner the source layer now reaches through `druck::bibliography::syntax`, paragraph caches beside the shape plan cache, font reuse as a supported call rather than `load_fonts` and `typeset_with`, and no process-wide effects such as `show_relative_to`.
+- **Known limits:** replacing a font file under the same path is not detected while the app runs, since loaded fonts are reused while the configuration asks for the same files. `prepare` decodes images again on each refresh. The galley uses Georgia until a document's first successful layout, which for a corpus chapter with comments means until milestone 15. macOS stops painting a window that is fully covered, so measurements float the window, see `desktop/src/gate.rs`.
 
 ## Recording a decision
 
