@@ -57,6 +57,7 @@ use crate::highlight;
 use crate::spacing;
 
 mod comments;
+pub mod marks;
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
@@ -1746,8 +1747,7 @@ impl<'a> Builder<'a> {
 
     /// Whether a backslash escapes the character at `offset`.
     fn escaped(&self, offset: usize) -> bool {
-        let before = &self.body[..offset];
-        (before.len() - before.trim_end_matches('\\').len()) % 2 == 1
+        marks::escaped(self.body, offset)
     }
 
     /// Pushes `text` ahead of a mark, unless it is empty.
@@ -1777,22 +1777,13 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The superscript or subscript that the `^` or `~` at `at` opens, if the same delimiter closes it before
-    /// any white space. A `^` after `{` or `[` belongs to an index mark or a footnote.
+    /// The superscript or subscript that the `^` or `~` at `at` opens, as a closer.
     fn script(&self, at: usize) -> Option<Closer> {
-        let delimiter = self.body[at..].chars().next()?;
-        let after = &self.body[at + 1..];
-        if after.starts_with(delimiter) || self.body[..at].ends_with([delimiter, '{', '[']) || self.escaped(at) {
-            return None;
-        }
-        let length = after.find(|c: char| !(c.is_alphanumeric() || "+-=(),.%°±−".contains(c)))?;
-        let end = at + 1 + length;
-        let closes =
-            length > 0 && self.body[end..].starts_with(delimiter) && !self.body[end + 1..].starts_with(delimiter);
-        closes.then(|| Closer {
-            at: end,
-            end: end + 1,
-            mark: if delimiter == '^' {
+        let script = marks::script(self.body, at)?;
+        Some(Closer {
+            at: script.close,
+            end: script.close + 1,
+            mark: if script.superscript {
                 Mark::Superscript
             } else {
                 Mark::Subscript
@@ -1801,25 +1792,20 @@ impl<'a> Builder<'a> {
     }
 
     /// Starts the `[text]{.underline}` or `[text]{.smallcaps}` whose `[` is at `offset`, if one starts there,
-    /// and returns whether it did. Any other `{.name}` stays text. The text may not hold brackets.
+    /// and returns whether it did.
     fn open_attribute_mark(&mut self, offset: usize) -> bool {
-        let Some(close) = self.body[offset + 1..].find(['[', ']']).map(|close| offset + 1 + close) else {
+        let Some(attribute) = marks::attribute(self.body, offset) else {
             return false;
         };
-        let attribute = self.body[close..].strip_prefix(']');
-        let found = [("{.underline}", Mark::Underline), ("{.smallcaps}", Mark::SmallCaps)]
-            .into_iter()
-            .find(|(name, _)| attribute.is_some_and(|rest| rest.starts_with(name)));
-        let Some((name, mark)) = found else {
-            return false;
+        let mark = if attribute.small_caps {
+            Mark::SmallCaps
+        } else {
+            Mark::Underline
         };
-        if close == offset + 1 || self.body[offset..close].contains("\n\n") {
-            return false;
-        }
         self.marks.open(mark);
         self.closers.push(Closer {
-            at: close,
-            end: close + "]".len() + name.len(),
+            at: attribute.close,
+            end: attribute.end,
             mark,
         });
         true
@@ -1829,10 +1815,7 @@ impl<'a> Builder<'a> {
     /// output as written, with line breaks as spaces. It may span lines but not a blank line.
     fn todo(&mut self, offset: usize) -> usize {
         let note = offset + "{todo:".len();
-        let close = self.body[note..]
-            .find('}')
-            .filter(|&close| !self.body[note..note + close].contains("\n\n"));
-        let Some(close) = close.map(|close| note + close) else {
+        let Some(close) = marks::todo_close(self.body, offset) else {
             self.report(offset, "this todo is not closed; end it with }");
             return note;
         };

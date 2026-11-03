@@ -34,12 +34,26 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 12: Page geometry, covers, and bands.
 - [x] 13: Rich tables.
 - [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
+- [x] 15: Engine amendment.
 
 ## Resume note
 
-The desktop spike is integrated on branch `t3/desktop-spike-integration`: editor, native pages, theme file and Styles tab, and agent probe in one window, measured on the 203-page corpus ([results](DECISIONS.md#2026-11-03-desktop-spike-results), [verification](#verification)). Typing stayed under 36 ms during refreshes, pages follow a pause in under 0.65 s, and live heap stayed flat over 200 refreshes. Run it with `cargo run --release -p druck-desktop -- --open FILE`.
+Milestone 15 is finished on branch `t3/finish-druck-milestone-15`, which merges `t3/comments-inline-marks-todos` and `t3/druck-project-exports` into the desktop spike. Projects, named exports, comments, inline marks, and `{todo: x}` are in the CLI and covered by tests; the desktop source layer knows the new marks. `final` now reads open todos from the parsed document (`Document::todos`), so it fails at the real chapter file and line and ignores a `{todo:` in a code block. The pairing rules for `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, and `{todo:` live in `druck::markdown::marks`, which the parser and the desktop source layer share.
 
-Next action: the owner runs the IME test below. Milestone 14 stays unchecked until then. After that comes [milestone 15](milestones/15-engine-amendment.md), which also lets corpus files keep their comments.
+`scripts/build.sh` in the owner's book can be replaced once the owner chooses to migrate: its comment stripping, joining, `--set draft=true`, and `--bleed 3mm --crop-marks` are the `druck.yaml` in [authoring](AUTHORING.md#example-a-novel-with-a-draft-and-a-print-export). Its `*Offen:*` check is `{todo: x}` and `final: true`; the book's own `*Offen:*` lines stay ordinary text until the owner converts them. The owner's book was not touched.
+
+Acceptance, on a scratch copy of `buch-1-ttp404` with its comments intact, front matter moved to `druck.yaml`, the 27 chapters listed in name order, `theme: memoir-print` found in `~/.config/druck/themes`, `literatur.bib` beside the manifest, and exports `draft` (`draft: true`) and `print` (`bleed: 3mm`, `crop-marks: true`, `final: true`):
+
+- `druck render ./book`: 203 pages. `pdftotext -layout` against `build/buch-1-ttp404-manuscript.pdf`: no difference (6,016 lines each). `pdftoppm -r 50` of all 203 pages: every PNG byte-identical to the reference.
+- `--export draft` shows the ENTWURF watermark. `--export print`: `pdfinfo -box` gives MediaBox 429.69 x 628.11, BleedBox 15 to 414.69 by 15 to 613.11, TrimBox 23.5 to 406.18 by 23.5 to 604.60 (382.68 x 581.1, as the reference page), and crop marks show on page 1.
+- A `{todo: Quelle prüfen}` appended to line 67 of `11-k01.md`: `--export print` fails with `11-k01.md:67:211: export "print" is final, but this placeholder is open: Quelle prüfen` and writes no PDF; `--export draft` writes 203 pages and page 20 shows the highlighted TODO, inspected.
+- An unlisted `manuscript/50-extra.md` warns `excluded from the book: not listed under chapters in druck.yaml`. With `90-epilog.md` moved away, `check` fails with `druck.yaml:37:5: chapter not found: manuscript/90-epilog.md`.
+- Inspected pages: title (page 1, with watermark and with crop marks), copyright (2), Prolog opening (7), a footnote page (20), and `samples/marks.md`.
+- Desktop, release build, `14-k03.md` from the copy with 9 comments, opened with `--open`: the comments show as quiet blocks, the app saved after a key sent to its own PID with `CGEventPostToPid` (Cmd+Down, `Q`, Cmd+S), and the file equals the original plus the typed byte. A chapter on its own reports "a citation needs a bibliography", as any bibliography-less file does. A debug build of `druck-desktop` overflows its stack while deserializing a theme and exits with SIGILL before any window; release builds are unaffected.
+
+Next action: the owner runs the IME test below and decides whether to migrate the book. Milestone 14 stays unchecked until then. Phase 2 needs source mapping, see [decisions](DECISIONS.md#2026-11-03-desktop-spike-results).
+
+The desktop spike (milestone 14) is integrated on `t3/desktop-spike-integration`: editor, native pages, theme file and Styles tab, and agent probe in one window, measured on the 203-page corpus ([results](DECISIONS.md#2026-11-03-desktop-spike-results), [verification](#verification)). Run it with `cargo run --release -p druck-desktop -- --open FILE`.
 
 IME test, in the running app: with Deutsch active press ´ then e (é), ` then a (à), ^ then o (ô), and pending dead keys show underlined; hold a for the accent popup and pick ä; with Pinyin type nihao, where the underlined text and candidate window sit at the caret, Space commits, Escape cancels, and one Cmd+Z removes the whole composition.
 
@@ -75,6 +89,8 @@ Desktop spike integration, on 2026-11-03 on the owner's M1 Pro (8 performance an
 - Memory over 200 refreshes: live heap 166 MB at every 25th refresh from 0 to 200. The page cache's budget is 128 MB of that. Resident moved between 600 and 740 MB without a trend. GPU atlas memory is not in these numbers.
 - Screenshots of Write, Pages, and split in dark and light, on `samples/report.md`, a stripped corpus chapter, its original with comments, and the whole book at page 104, all inspected. The chapter alone shows its diagnostic in the strip, as it should: raw HTML in the original, a citation without a bibliography in the stripped copy. Fixed from this: a long path running into the canvas switch.
 - `cargo test -q`: 363 unit and 35 integration tests passed. `cargo test -q -p druck-desktop`: 93 passed, 1 ignored (needs the installed CLI), including round trips of every sample and corpus file. `cargo clippy --all-targets -q -- -D warnings` and the same with `-p druck-desktop`, `cargo fmt --all --check`, and `python3 scripts/notices.py --check` were clean. `scripts/render-samples.sh` from a release build of `f4d8505` and of this tree: all 14 PDFs byte-identical, and the corpus PDF too.
+
+Milestone 15, on 2026-11-03, release builds. `cargo test -q`: 385 unit and 52 integration tests passed. `cargo test -q -p druck-desktop`: 96 passed, 1 ignored. `cargo clippy --all-targets -q -- -D warnings` and the same with `-p druck-desktop`, `cargo fmt --all --check`, and `python3 scripts/notices.py --check` were clean. `scripts/render-samples.sh` from a build of this branch and of `t3/desktop-spike-integration`: all 14 earlier PDFs byte-identical; `marks` and `project` are new. The acceptance commands and results are in the resume note.
 
 Not verified: the IME test needs a person. Keys came through the input handler rather than the OS keyboard path in this run, because a real key would need the owner's focus. Only this machine was measured. The live agent probe (`desktop/examples/agent_probe.rs`) was not repeated; `desktop/src/agent` is unchanged from its task branch.
 

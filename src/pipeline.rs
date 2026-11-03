@@ -61,16 +61,21 @@ pub struct Prepared {
     pub theme_images: HashMap<Resource, Image>,
 }
 
-/// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
-pub fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Diagnostic>> {
+/// Parses the Markdown body into the document model.
+pub fn parse(config: &Config, document: &DocumentFile) -> Result<document::Document, Vec<Diagnostic>> {
     let (body, first_line) = document.body();
-    let content = markdown::parse_with(
+    markdown::parse_with(
         body,
         first_line,
         &document.source,
         config.document.lang,
         config.typesetting.no_break_spaces,
-    )?;
+    )
+}
+
+/// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
+pub fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Diagnostic>> {
+    let content = parse(config, document)?;
     let bibliography = load_bibliography(config)?;
     let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");

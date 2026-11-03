@@ -220,6 +220,37 @@ Without `--export`, `druck render ./book` uses the document's own settings and w
 
 Command flags override an export: `--theme`, `--set`, `--bleed`, and `-o`, whose path stays relative to the working directory. `--crop-marks` can only turn marks on. `--export` with a single file, or with a name the project does not have, is a usage error.
 
+### Example: a novel with a draft and a print export
+
+This `druck.yaml` replaces a script that joined chapters, stripped comments, and called `druck render` with different flags. The chapters keep their `<!-- -->` notes, the title page chapter lost its front matter to the manifest, and `bibliography` is relative to the manifest. The theme `memoir-print` is found in the user's theme folder. A `{todo: ...}` shows in `draft` and stops `print`.
+
+```yaml
+theme: memoir-print
+lang: de
+title: "404: Gott nicht gefunden"
+subtitle: Ein Entwickler sucht seinen Schöpfer
+author: Michael Wallner
+bibliography: literatur.bib
+meta:
+  publisher: Coder's Cantina
+  isbn: 978-3-XXXXX-XX-X
+chapters:
+  - manuscript/00-titelei.md
+  - manuscript/01-prolog.md
+  # ... the other files in reading order
+exports:
+  draft:
+    output: build/draft.pdf
+    draft: true
+  print:
+    output: build/print.pdf
+    bleed: 3mm
+    crop-marks: true
+    final: true
+```
+
+`druck render ./book` writes `build/book.pdf`, `--export draft` the watermarked copy, and `--export print` the PDF with trim and bleed boxes and crop marks.
+
 ## Markdown content
 
 The body is CommonMark. These constructs render:

@@ -1341,6 +1341,49 @@ fn a_final_export_fails_while_todos_remain() {
 }
 
 #[test]
+fn a_todo_in_a_code_block_does_not_fail_a_final_export() {
+    let manifest = format!("{TWO_CHAPTERS}exports:\n  print:\n    final: true\n");
+    let sandbox = project(
+        "project-final-code",
+        &manifest,
+        &[
+            ("manuscript/one.md", "Clean.\n"),
+            ("manuscript/two.md", "```\n{todo: only an example}\n```\n"),
+        ],
+    );
+    let run = sandbox.run(&["render", &sandbox.book(), "--export", "print"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+}
+
+#[test]
+fn comments_at_chapter_boundaries_keep_the_real_file_and_line() {
+    let sandbox = project(
+        "project-comments",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "Text. <!-- spans\n"),
+            (
+                "manuscript/two.md",
+                "the boundary -->\n\n<!-- adjacent -->\nBad [^gone].\n",
+            ),
+        ],
+    );
+    let two = sandbox.in_book("manuscript/two.md");
+    sandbox.assert_rejected(&[format!("{two}:4:5: ")]);
+
+    let sandbox = project(
+        "project-comment-open",
+        TWO_CHAPTERS,
+        &[
+            ("manuscript/one.md", "Fine.\n\n<!-- never closed\n"),
+            ("manuscript/two.md", "More.\n"),
+        ],
+    );
+    let one = sandbox.in_book("manuscript/one.md");
+    sandbox.assert_rejected(&[format!("{one}:3:1: ")]);
+}
+
+#[test]
 fn a_chapter_may_start_with_a_blank_line_and_end_without_a_newline() {
     let sandbox = project(
         "project-joining",

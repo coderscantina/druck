@@ -1,12 +1,14 @@
 //! The syntax markers inside one block, as ranges relative to the block's start, so a view can hide them.
 //!
-//! Emphasis, strong, code, and links come from pulldown-cmark, the engine's parser, run over the block alone.
-//! Footnote references and citations are recognised here: the first need a definition the block does not have, and
-//! the second come from the engine's own citation scanner.
+//! Emphasis, strong, strikethrough, code, and links come from pulldown-cmark, the engine's parser, run over the block
+//! alone. Footnote references and citations are recognised here: the first need a definition the block does not have,
+//! and the second come from the engine's own citation scanner. The marks the engine pairs from the source, such as
+//! `^x^` and `[x]{.underline}`, use the same functions as the engine, [`druck::markdown::marks`].
 
 use std::ops::Range;
 
 use druck::bibliography::syntax::{self, Segment};
+use druck::markdown::marks;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 use super::blocks::BlockKind;
@@ -21,6 +23,18 @@ pub enum SpanKind {
     Citation,
     /// `<!-- -->` inside a paragraph.
     Comment,
+    /// `~~x~~`
+    Strike,
+    /// `^x^`
+    Superscript,
+    /// `~x~`
+    Subscript,
+    /// `[x]{.underline}`
+    Underline,
+    /// `[x]{.smallcaps}`
+    SmallCaps,
+    /// `{todo: x}`, which shows as written.
+    Todo,
 }
 
 /// One inline construct: `range` holds all of it, `open` and `close` its markers at either end. A span whose markers
@@ -75,8 +89,14 @@ pub fn inline_spans(kind: BlockKind, text: &str) -> Vec<InlineSpan> {
         .filter(|span| matches!(span.kind, SpanKind::Code | SpanKind::Link | SpanKind::Comment))
         .map(|span| span.range.clone())
         .collect();
+    // Delimiters the parser has already paired are not paired again from the source.
+    let paired: Vec<Range<usize>> = spans
+        .iter()
+        .filter(|span| matches!(span.kind, SpanKind::Strike | SpanKind::Subscript))
+        .flat_map(|span| [span.open.clone(), span.close.clone()])
+        .collect();
     for gap in gaps(text.len(), &opaque) {
-        marks_in(&text[gap.clone()], gap.start, &mut spans);
+        marks_in(text, gap, &paired, &mut spans);
     }
     spans.sort_by_key(|span| (span.range.start, std::cmp::Reverse(span.range.end)));
     spans
@@ -87,6 +107,7 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_SUBSCRIPT
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
         | Options::ENABLE_GFM;
@@ -101,11 +122,13 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
             _ if in_image > 0 => {}
             Event::Start(Tag::Emphasis) => open.push((SpanKind::Emphasis, range, 1)),
             Event::Start(Tag::Strong) => open.push((SpanKind::Strong, range, 2)),
+            Event::Start(Tag::Strikethrough) => open.push((SpanKind::Strike, range, 2)),
+            Event::Start(Tag::Subscript) => open.push((SpanKind::Subscript, range, 1)),
             Event::Start(Tag::Link { .. }) => {
                 open.push((SpanKind::Link, range, 1));
                 last_inner_end = 0;
             }
-            Event::End(TagEnd::Emphasis | TagEnd::Strong) => {
+            Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Subscript) => {
                 if let Some((kind, whole, marker)) = open.pop() {
                     last_inner_end = last_inner_end.max(whole.end);
                     spans.push(InlineSpan {
@@ -159,12 +182,14 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
     spans
 }
 
-/// Adds footnote references and citations found in `text`, which starts at `base` in the block.
-fn marks_in(text: &str, base: usize, spans: &mut Vec<InlineSpan>) {
+/// Adds the marks found in `gap` of `text`: footnote references, citations, and the marks the source closes itself.
+fn marks_in(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &mut Vec<InlineSpan>) {
+    let base = gap.start;
+    let part = &text[gap.clone()];
     let mut search = 0;
-    while let Some(at) = text[search..].find("[^") {
+    while let Some(at) = part[search..].find("[^") {
         let start = search + at;
-        let rest = &text[start + 2..];
+        let rest = &part[start + 2..];
         let Some(close) = rest
             .find([']', ' ', '\n', '\t'])
             .filter(|close| rest.as_bytes()[*close] == b']' && *close > 0)
@@ -174,7 +199,7 @@ fn marks_in(text: &str, base: usize, spans: &mut Vec<InlineSpan>) {
         };
         let end = start + 2 + close + 1;
         // A definition's own label is not a reference.
-        if !text[end..].starts_with(':') {
+        if !part[end..].starts_with(':') {
             let range = base + start..base + end;
             spans.push(InlineSpan {
                 kind: SpanKind::FootnoteReference,
@@ -185,7 +210,7 @@ fn marks_in(text: &str, base: usize, spans: &mut Vec<InlineSpan>) {
         }
         search = end;
     }
-    for segment in syntax::find(text) {
+    for segment in syntax::find(part) {
         if let Segment::Citation(citation) = segment {
             let range = base + citation.range.start..base + citation.range.end;
             spans.push(InlineSpan {
@@ -196,6 +221,75 @@ fn marks_in(text: &str, base: usize, spans: &mut Vec<InlineSpan>) {
             });
         }
     }
+    source_marks(text, gap, paired, spans);
+}
+
+/// Adds `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, and `{todo: x}` in `gap`, paired as the engine does.
+fn source_marks(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &mut Vec<InlineSpan>) {
+    let mut at = gap.start;
+    while at < gap.end {
+        let rest = &text[at..gap.end];
+        let Some(found) = rest.find(['^', '~', '[', '{']) else {
+            break;
+        };
+        at += found;
+        let delimiter = text.as_bytes()[at];
+        let step = match delimiter {
+            b'^' | b'~' if !paired.iter().any(|range| range.contains(&at)) => marks::script(text, at)
+                .filter(|script| script.close < gap.end)
+                .map(|script| {
+                    let kind = match (delimiter, script.superscript) {
+                        (b'~', _) => SpanKind::Subscript,
+                        _ => SpanKind::Superscript,
+                    };
+                    push_span(spans, kind, at, at + 1, script.close, script.close + 1);
+                    script.close + 1
+                }),
+            b'[' if !marks::escaped(text, at) => marks::attribute(text, at)
+                .filter(|attribute| attribute.end <= gap.end)
+                .map(|attribute| {
+                    let kind = if attribute.small_caps {
+                        SpanKind::SmallCaps
+                    } else {
+                        SpanKind::Underline
+                    };
+                    push_span(spans, kind, at, at + 1, attribute.close, attribute.end);
+                    // Marks inside the brackets are still found.
+                    at + 1
+                }),
+            b'{' if text[at + 1..].starts_with("todo:") && !marks::escaped(text, at) => marks::todo_close(text, at)
+                .filter(|close| *close < gap.end)
+                .map(|close| {
+                    let range = at..close + 1;
+                    spans.push(InlineSpan {
+                        kind: SpanKind::Todo,
+                        open: range.start..range.start,
+                        close: range.end..range.end,
+                        range: range.clone(),
+                    });
+                    close + 1
+                }),
+            _ => None,
+        };
+        at = step.unwrap_or(at + 1);
+    }
+}
+
+/// Adds a span from `start` to `end`, whose markers are `start..open_end` and `close_start..end`.
+fn push_span(
+    spans: &mut Vec<InlineSpan>,
+    kind: SpanKind,
+    start: usize,
+    open_end: usize,
+    close_start: usize,
+    end: usize,
+) {
+    spans.push(InlineSpan {
+        kind,
+        range: start..end,
+        open: start..open_end,
+        close: close_start..end,
+    });
 }
 
 /// The parts of `0..len` that `covered`, in any order and possibly nested, does not touch.
@@ -345,6 +439,42 @@ mod tests {
                 (Strong, "**c**", "**", "**"),
                 (Code, "`d`", "`", "`"),
                 (Code, "``e``", "``", "``"),
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_the_marks_the_engine_pairs_with_their_markers() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("~~a~~ x^2^ H~2~O ~b~ [u]{.underline} [s]{.smallcaps} {todo: c}"),
+            [
+                (Strike, "~~a~~", "~~", "~~"),
+                (Superscript, "^2^", "^", "^"),
+                (Subscript, "~2~", "~", "~"),
+                (Subscript, "~b~", "~", "~"),
+                (Underline, "[u]{.underline}", "[", "]{.underline}"),
+                (SmallCaps, "[s]{.smallcaps}", "[", "]{.smallcaps}"),
+                (Todo, "{todo: c}", "", ""),
+            ]
+        );
+    }
+
+    #[test]
+    fn index_marks_footnotes_and_other_attributes_are_not_marks() {
+        assert_eq!(spans("{^a} and {^b} [x]{.other} [^n] ^open ~~ x ~~").len(), 1);
+        assert!(matches!(spans("a [^n] b")[0].0, SpanKind::FootnoteReference));
+    }
+
+    #[test]
+    fn marks_inside_code_and_comments_are_not_marks() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("`^a^` <!-- ~~b~~ --> ~~c~~"),
+            [
+                (Code, "`^a^`", "`", "`"),
+                (Comment, "<!-- ~~b~~ -->", "", ""),
+                (Strike, "~~c~~", "~~", "~~"),
             ]
         );
     }

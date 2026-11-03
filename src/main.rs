@@ -155,7 +155,7 @@ impl Job {
             eprintln!("{warning}");
         }
         if let Some(name) = final_export {
-            project::check_final(&document, name)?;
+            project::check_final(&config, &document, name)?;
         }
         Ok(Self {
             config,

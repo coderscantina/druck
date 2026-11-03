@@ -114,8 +114,9 @@ impl Project {
 }
 
 /// The errors for a final export of a document with open placeholders, at their real locations.
-pub fn check_final(document: &DocumentFile, export: &str) -> Result<(), Vec<Diagnostic>> {
-    let errors: Vec<_> = open_todos(document)
+pub fn check_final(config: &Config, document: &DocumentFile, export: &str) -> Result<(), Vec<Diagnostic>> {
+    let errors: Vec<_> = pipeline::parse(config, document)?
+        .todos
         .into_iter()
         .map(|todo| {
             let message = format!(
@@ -126,26 +127,6 @@ pub fn check_final(document: &DocumentFile, export: &str) -> Result<(), Vec<Diag
         })
         .collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
-}
-
-/// The seam for placeholders. The parser does not know `{todo: text}` yet, so this scans the raw text. Once it
-/// does, replace the body with the document model's list; `check_final` is the only caller.
-fn open_todos(document: &DocumentFile) -> Vec<Todo> {
-    const OPEN: &str = "{todo:";
-    let mut todos = Vec::new();
-    for (index, line) in document.text.lines().enumerate() {
-        for (start, _) in line.match_indices(OPEN) {
-            let rest = &line[start + OPEN.len()..];
-            todos.push(Todo {
-                text: rest.split('}').next().unwrap_or(rest).trim().to_owned(),
-                at: Location {
-                    line: index as u64 + 1,
-                    column: line[..start].chars().count() as u64 + 1,
-                },
-            });
-        }
-    }
-    todos
 }
 
 fn at(diagnostic: Diagnostic, location: &serde_saphyr::Location) -> Diagnostic {

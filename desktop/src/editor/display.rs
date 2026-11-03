@@ -12,6 +12,8 @@ pub struct RunStyle {
     pub italic: bool,
     pub code: bool,
     pub link: bool,
+    pub strike: bool,
+    pub underline: bool,
     /// A visible marker, a reference, or a comment.
     pub quiet: bool,
     /// Marked text of an input method.
@@ -139,6 +141,10 @@ fn span_style(kind: SpanKind, style: &mut RunStyle) {
         SpanKind::Strong => style.bold = true,
         SpanKind::Code => style.code = true,
         SpanKind::Link => style.link = true,
+        SpanKind::Strike => style.strike = true,
+        SpanKind::Underline => style.underline = true,
+        SpanKind::Todo => style.bold = true,
+        SpanKind::Superscript | SpanKind::Subscript | SpanKind::SmallCaps => {}
         SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::Comment => style.quiet = true,
     }
 }

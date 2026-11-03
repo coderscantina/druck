@@ -3,8 +3,8 @@
 use std::ops::Range;
 
 use gpui::{
-    Font, FontStyle, FontWeight, Hsla, Pixels, SharedString, TextRun, UnderlineStyle, Window, WrappedLine, font, px,
-    rgb,
+    Font, FontStyle, FontWeight, Hsla, Pixels, SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window,
+    WrappedLine, font, px, rgb,
 };
 
 use super::display::{DisplayLine, RunStyle};
@@ -127,12 +127,15 @@ impl GalleyStyle {
             font,
             color,
             background_color: style.code.then_some(self.code_background),
-            underline: (style.marked || style.link).then_some(UnderlineStyle {
+            underline: (style.marked || style.link || style.underline).then_some(UnderlineStyle {
                 thickness: px(1.),
                 color: Some(color),
                 wavy: false,
             }),
-            strikethrough: None,
+            strikethrough: style.strike.then_some(StrikethroughStyle {
+                thickness: px(1.),
+                color: Some(color),
+            }),
         }
     }
 
