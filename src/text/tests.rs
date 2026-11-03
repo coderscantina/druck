@@ -231,6 +231,7 @@ fn restricted_embedding_is_a_warning_naming_the_file() {
     let fonts = Fonts {
         faces: vec![parse(leak(data), &file, Face::REGULAR).unwrap()],
         families: BTreeMap::new(),
+        plans: Default::default(),
     };
     let warning = fonts.embedding_warning(FaceId(0)).expect("a warning");
     assert!(

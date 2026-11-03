@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::SystemTime;
 
 use crate::config::resolved::{Config, FaceFile, FontFiles};
@@ -44,10 +44,18 @@ struct Loaded {
     restricted: bool,
 }
 
+/// The features every run sets, in the order of a [`PlanKey`]'s values.
+const FEATURES: [&[u8; 4]; 7] = [b"kern", b"liga", b"smcp", b"lnum", b"onum", b"pnum", b"tnum"];
+
+/// What decides a shape plan: the face, the script, the language, and the values of the features.
+type PlanKey = (FaceId, rustybuzz::Script, &'static str, [u32; 7]);
+
 /// Every face named by the configuration, loaded and parsed, with each family's faces in face order.
 pub struct Fonts {
     faces: Vec<Loaded>,
     families: BTreeMap<String, Vec<(Face, FaceId)>>,
+    /// Building a plan takes about as long as shaping a word with it, and a document needs few of them.
+    plans: RwLock<HashMap<PlanKey, Arc<rustybuzz::ShapePlan>>>,
 }
 
 impl Fonts {
@@ -86,6 +94,7 @@ impl Fonts {
         let mut fonts = Self {
             faces: Vec::new(),
             families: BTreeMap::new(),
+            plans: RwLock::default(),
         };
         let mut errors = Vec::new();
         for (name, family) in families {
@@ -248,19 +257,18 @@ impl Fonts {
         };
         buffer.set_language(rustybuzz::Language::from_str(language).expect("language tag"));
         buffer.guess_segment_properties();
-        let ligatures = u32::from(tracking == 0.0);
         let on = u32::from;
-        let features = [
-            (b"kern", 1),
-            (b"liga", ligatures),
-            (b"smcp", on(small_caps)),
-            (b"lnum", on(figures.style == FigureStyle::Lining)),
-            (b"onum", on(figures.style == FigureStyle::Oldstyle)),
-            (b"pnum", on(figures.spacing == FigureSpacing::Proportional)),
-            (b"tnum", on(figures.spacing == FigureSpacing::Tabular)),
-        ]
-        .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..));
-        let shaped = rustybuzz::shape(buzz, &features, buffer);
+        let values = [
+            1,
+            on(tracking == 0.0),
+            on(small_caps),
+            on(figures.style == FigureStyle::Lining),
+            on(figures.style == FigureStyle::Oldstyle),
+            on(figures.spacing == FigureSpacing::Proportional),
+            on(figures.spacing == FigureSpacing::Tabular),
+        ];
+        let plan = self.plan((face, buffer.script(), language, values), buffer.language().as_ref());
+        let shaped = rustybuzz::shape_with_plan(buzz, &plan, buffer);
 
         let scale = size.0 / f64::from(buzz.units_per_em());
         let points = |units: i32| Pt(f64::from(units) * scale);
@@ -304,6 +312,27 @@ impl Fonts {
             width: Pt(width),
             spacing: Pt(spacing),
         }
+    }
+
+    /// The plan `rustybuzz::shape` would build for these properties, built once.
+    fn plan(&self, key: PlanKey, language: Option<&rustybuzz::Language>) -> Arc<rustybuzz::ShapePlan> {
+        if let Some(plan) = self.plans.read().expect("no panic while planning").get(&key) {
+            return plan.clone();
+        }
+        let (face, script, _, values) = key;
+        let features = std::iter::zip(FEATURES, values)
+            .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..))
+            .collect::<Vec<_>>();
+        let plan = Arc::new(rustybuzz::ShapePlan::new(
+            &self.faces[face.0].buzz,
+            rustybuzz::Direction::LeftToRight,
+            // A run with no letters has no script, which the buffer reports as unknown.
+            (script != rustybuzz::script::UNKNOWN).then_some(script),
+            language,
+            &features,
+        ));
+        let mut plans = self.plans.write().expect("no panic while planning");
+        plans.entry(key).or_insert(plan).clone()
     }
 
     /// The font data of a face, for drawing its glyphs by id.
