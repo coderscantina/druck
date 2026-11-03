@@ -780,6 +780,18 @@
     "footnote-marker": {
       "size": "0.7em",
       "raise": "0.35em"
+    },
+    "superscript": {
+      "size": "0.7em",
+      "raise": "0.35em"
+    },
+    "subscript": {
+      "size": "0.7em",
+      "lower": "0.15em"
+    },
+    "todo": {
+      "color": "$colors.text",
+      "background": "#ffe58a"
     }
   },
   "lists": {

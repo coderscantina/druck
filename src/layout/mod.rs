@@ -39,6 +39,8 @@ mod index_tests;
 mod margin;
 #[cfg(test)]
 mod margin_tests;
+#[cfg(test)]
+mod mark_tests;
 mod notes;
 mod numbering;
 mod pages;

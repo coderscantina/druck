@@ -517,13 +517,13 @@ fn uses_font_files_relative_to_the_document() {
 #[test]
 fn reports_unsupported_content_with_its_location_and_writes_nothing() {
     let sandbox = Sandbox::new("unsupported");
-    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n~~gone~~\n\na <b>x</b>\n");
+    let document = sandbox.write("doc.md", "---\ntitle: T\n---\n\nText.\n\n- [ ] open\n\na <b>x</b>\n");
     let run = sandbox.run(&["render", &document]);
 
     assert_eq!(run.code, 1);
     assert!(
         run.stderr
-            .contains(&format!("{document}:7:1: strikethrough is not supported")),
+            .contains(&format!("{document}:7:3: task lists are not supported")),
         "{}",
         run.stderr
     );

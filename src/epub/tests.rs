@@ -217,6 +217,18 @@ fn escapes_text_and_link_targets() {
 }
 
 #[test]
+fn writes_marks_and_todos_as_elements_and_cuts_comments() {
+    let body = "~~Struck~~ H~2~O, m^2^, [under]{.underline}, [caps]{.smallcaps} *[both]{.underline}*, \
+        {todo: check <this>}.\n\n<!-- gone -->\n\nNext.\n";
+    let (content, _) = write(&config("", json!({"version": 1})), body, None);
+    assert_eq!(
+        bodies(&content)[0],
+        "<p><s>Struck</s> H<sub>2</sub>O, m<sup>2</sup>, <u>under</u>, <span class=\"small-caps\">caps</span> \
+         <em><u>both</u></em>, <span class=\"todo\">TODO: check &lt;this&gt;</span>.</p><p>Next.</p>"
+    );
+}
+
+#[test]
 fn colors_code_by_token_class_and_leaves_other_blocks_plain() {
     let body = "```json\n{\"a\": true}\n```\n\n```klingon\nnuqneH <b>\n```\n\n```\nplain\n```\n";
     let on = config("", json!({"version": 1}));
@@ -247,7 +259,7 @@ fn opens_chapters_with_the_number_above_an_ornament_free_heading_and_a_lead_in()
         bodies(&content)[0],
         "<section epub:type=\"chapter\" role=\"doc-chapter\"><h1 id=\"a0\" class=\"chapter\"><span class=\"chapter-number s-heading-1\">\
          Chapter I</span> The arrival</h1><p class=\"s-epigraph\">A quiet line.</p><p class=\"opening\"><span \
-         class=\"lead-in\">Elias came</span> to the island late.</p><p>Then more.</p></section>"
+         class=\"small-caps\">Elias came</span> to the island late.</p><p>Then more.</p></section>"
     );
 }
 

@@ -819,6 +819,9 @@ pub struct InlineStyles {
     pub code: InlineCode,
     pub link: Link,
     pub footnote_marker: FootnoteMarker,
+    pub superscript: Superscript,
+    pub subscript: Subscript,
+    pub todo: TodoStyle,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -845,6 +848,31 @@ pub struct Link {
 pub struct FootnoteMarker {
     pub size: Spec<Size>,
     pub raise: Spec<Spacing>,
+}
+
+/// `^text^`: smaller text raised above the baseline.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Superscript {
+    pub size: Spec<Size>,
+    pub raise: Spec<Spacing>,
+}
+
+/// `~text~`: smaller text lowered below the baseline.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Subscript {
+    pub size: Spec<Size>,
+    pub lower: Spec<Spacing>,
+}
+
+/// `{todo: text}`, a note to the author that shows in the output.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TodoStyle {
+    pub color: Spec<Color>,
+    /// A box behind the note, or `null` for none.
+    pub background: Option<Spec<Color>>,
 }
 
 /// List layout. `em` lengths refer to the list style size.

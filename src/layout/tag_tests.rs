@@ -114,6 +114,19 @@ fn adds_elements_in_document_order_and_leaves_running_heads_and_the_watermark_as
 }
 
 #[test]
+fn keeps_marked_text_in_its_paragraph_without_elements_of_its_own() {
+    let body = "A ~~struck~~ word, H~2~O, [under]{.underline}, [Caps]{.smallcaps}, and {todo: check} end.\n";
+    let output = render("{}", body);
+    assert_eq!(output.tags.nodes.len(), 1);
+    assert_eq!(output.tags.nodes[0].kind, Kind::Paragraph);
+    let (marked, decoration) = runs(&output);
+    for text in ["A", "struck", "2", "under", "Caps", "TODO:", "end."] {
+        assert!(marked.iter().any(|run| run == text), "{text} is content: {marked:?}");
+    }
+    assert_eq!(decoration, ["1"], "only the page number is decoration");
+}
+
+#[test]
 fn tags_callouts_the_index_and_margin_notes() {
     let body = "Text beside[^m] a note.\n\n> [!TIP]\n> Advice{^term}.\n\n[^m]: {-} In the margin.\n";
     let output = render("{}", body);

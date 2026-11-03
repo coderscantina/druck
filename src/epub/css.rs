@@ -109,6 +109,7 @@ pub fn rules(config: &Config) -> (String, BTreeSet<String>) {
             ("text-decoration", underline.to_owned()),
         ],
     );
+    sheet.marks(config);
     sheet.figures(config);
     sheet.tables(config);
     sheet.notes(config);
@@ -319,15 +320,13 @@ impl Sheet<'_> {
             );
             self.rule(".ornament img", image_width(ornament.width, heading.size));
         }
-        if chapters.lead_in > 0 {
-            self.rule(
-                ".lead-in",
-                vec![
-                    ("font-variant", "small-caps".to_owned()),
-                    ("font-variant-caps", "small-caps".to_owned()),
-                ],
-            );
-        }
+        self.rule(
+            ".small-caps",
+            vec![
+                ("font-variant", "small-caps".to_owned()),
+                ("font-variant-caps", "small-caps".to_owned()),
+            ],
+        );
         if chapters.drop_cap > 0 {
             // A floated capital as tall as the lines it spans, from the cap height of the first, taking cap
             // height as 0.7 em; readers that support `initial-letter` size it exactly.
@@ -560,6 +559,34 @@ impl Sheet<'_> {
                 ("text-decoration", "none".to_owned()),
             ],
         );
+    }
+
+    /// Superscripts, subscripts, and notes to the author.
+    fn marks(&mut self, config: &Config) {
+        let inline = &config.inline;
+        let body = self.body;
+        let ems = |length: Length| match length {
+            Length::Em(value) => value,
+            Length::Pt(value) => value / body.0,
+        };
+        for (selector, size, shift) in [
+            ("sup", inline.superscript_size, ems(inline.superscript_raise)),
+            ("sub", inline.subscript_size, -ems(inline.subscript_lower)),
+        ] {
+            self.rule(
+                selector,
+                vec![
+                    ("font-size", length(size, body)),
+                    ("vertical-align", format!("{}em", number(shift / ems(size)))),
+                    ("line-height", "0".to_owned()),
+                ],
+            );
+        }
+        let mut todo = vec![("color", inline.todo_color.to_string())];
+        if let Some(background) = inline.todo_background {
+            todo.push(("background-color", background.to_string()));
+        }
+        self.rule(".todo", todo);
     }
 
     /// Bibliography entries with a hanging indent, spaced at least `bibliography.entry-spacing` apart.
@@ -885,7 +912,28 @@ mod tests {
         assert!(css.contains("h1.chapter { margin-top: 2em; }"), "{css}");
         assert!(css.contains("initial-letter: 3;"), "{css}");
         assert!(css.contains("p.opening::first-letter { float: left;"), "{css}");
-        assert!(css.contains(".lead-in { font-variant: small-caps;"), "{css}");
+        assert!(css.contains(".small-caps { font-variant: small-caps;"), "{css}");
+    }
+
+    #[test]
+    fn writes_script_and_todo_rules_from_the_inline_section() {
+        let css = css(json!({
+            "version": 1,
+            "inline": {
+                "superscript": { "size": "0.5em", "raise": "0.25em" },
+                "subscript": { "size": "0.5em", "lower": "0.1em" },
+                "todo": { "color": "#aa0000", "background": null }
+            }
+        }));
+        assert!(
+            css.contains("sup { font-size: 0.5em; vertical-align: 0.5em; line-height: 0; }"),
+            "{css}"
+        );
+        assert!(
+            css.contains("sub { font-size: 0.5em; vertical-align: -0.2em; line-height: 0; }"),
+            "{css}"
+        );
+        assert!(css.contains(".todo { color: #aa0000; }"), "{css}");
     }
 
     #[test]

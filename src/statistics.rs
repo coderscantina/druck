@@ -174,6 +174,7 @@ fn written(content: &[Inline]) -> String {
     let mut raw = String::new();
     for inline in content {
         match inline {
+            Inline::Text { style, .. } if style.todo => {}
             Inline::Text { text, .. } => raw.push_str(text),
             Inline::LineBreak => raw.push(' '),
             Inline::FootnoteRef(_)
@@ -297,6 +298,19 @@ mod tests {
         assert_eq!(sentences(german, Lang::De), 3);
         // In English a number can end a sentence.
         assert_eq!(sentences("It began in 2024. Then it ended.", Lang::En), 2);
+    }
+
+    #[test]
+    fn todo_text_counts_as_nothing() {
+        let todo = Inline::Text {
+            text: "TODO: check the date".to_owned(),
+            style: InlineStyle {
+                todo: true,
+                ..InlineStyle::default()
+            },
+        };
+        let statistics = count(vec![paragraph(vec![text("Two words. "), todo])], Lang::En);
+        assert_eq!((statistics.words, statistics.chars), (2, "Two words.".len()));
     }
 
     #[test]

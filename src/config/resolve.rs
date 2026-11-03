@@ -926,6 +926,27 @@ impl<'a> Resolver<'a> {
                         "inline.footnote-marker.raise",
                     )?
                     .0,
+                superscript_size: self
+                    .value(&self.tokens.sizes, &inline.superscript.size, "inline.superscript.size")?
+                    .0,
+                superscript_raise: self
+                    .value(
+                        &self.tokens.spacing,
+                        &inline.superscript.raise,
+                        "inline.superscript.raise",
+                    )?
+                    .0,
+                subscript_size: self
+                    .value(&self.tokens.sizes, &inline.subscript.size, "inline.subscript.size")?
+                    .0,
+                subscript_lower: self
+                    .value(&self.tokens.spacing, &inline.subscript.lower, "inline.subscript.lower")?
+                    .0,
+                todo_color: self.color(&inline.todo.color, "inline.todo.color")?,
+                todo_background: match &inline.todo.background {
+                    Some(color) => Some(self.color(color, "inline.todo.background")?),
+                    None => None,
+                },
             })
         })();
 

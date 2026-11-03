@@ -52,6 +52,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `page.column-change-spacing` | The column gap. |
 | `tables.top-rule`, `tables.header-rule`, `tables.row-rule` | No such rule. |
 | `inline.code.background` | No box behind inline code. |
+| `inline.todo.background` | No box behind todo notes. |
 | `highlight` | No highlighting: code blocks are set in the `code-block` color. |
 | `fonts.<family>.<face>` other than `regular` | The family has no such face. |
 
@@ -69,7 +70,7 @@ Every layer is validated on its own, so a later override never excuses an invali
 | `page` | Page size, margins and their mirroring, prose width and wide blocks, column gap, header and footer offsets. |
 | `styles` | One style per block element. |
 | `custom-styles` | Named styles that documents apply with `{.name}`. |
-| `inline` | Inline code, links, footnote markers. |
+| `inline` | Inline code, links, footnote markers, superscripts, subscripts, todo notes. |
 | `lists` | Indent, item spacing, bullets per level, and the marker style. |
 | `tables` | Cell padding and rules. |
 | `callouts` | Padding, background, and bar of the five callout kinds. |
@@ -249,6 +250,28 @@ The box spans the code from its ascender to its descender, spaces inside the spa
 ```json
 "inline": {
   "code": { "color": "#24292f", "background": "#eff1f3", "padding": "0.2em" }
+}
+```
+
+## Marks and notes
+
+`inline.superscript`, `inline.subscript`, and `inline.todo` style the [inline marks](AUTHORING.md#inline-marks) `^text^` and `~text~` and the [todo notes](AUTHORING.md#comments-and-todos) `{todo: text}`:
+
+| Field | Values |
+| --- | --- |
+| `inline.superscript.size`, `raise` | The size of raised text and how far its baseline moves up, in em of the surrounding text. Defaults `0.7em` and `0.35em`, as for the footnote marker. |
+| `inline.subscript.size`, `lower` | The size of lowered text and how far its baseline moves down. Defaults `0.7em` and `0.15em`. |
+| `inline.todo.color` | The text color of a todo. Default `$colors.text`. |
+| `inline.todo.background` | `#rrggbb` or `$colors.x` for a box behind the note, or `null` for none. Default `#ffe58a`, a highlighter yellow. |
+
+Raised and lowered text is the surrounding font scaled and shifted, so it works in any font, and the line height does not change. A todo box is drawn like the one behind [inline code](#inline-code), without padding: one box per line, spaces included.
+
+Underline and strikethrough have no settings. Both take the text color and use the line position and thickness the font declares. Small capitals use the font's `smcp` feature, or capitals at 80% size for a font without it, as the lead-in of a [chapter opening](#books) does.
+
+```json
+"inline": {
+  "superscript": { "size": "0.6em", "raise": "0.4em" },
+  "todo": { "color": "#8a1c1c", "background": null }
 }
 ```
 
@@ -676,7 +699,7 @@ What carries over:
 - **Lists** take `lists.indent`, `lists.item-spacing`, and the bullets by depth. Readers without text bullets show discs.
 - **Tables** take `tables.cell-padding` and the top, header, and row rules. Column alignment applies as in the PDF.
 - **Code highlighting** becomes a class per category, such as `.hl-keyword`, with the category's color on `pre` content.
-- **Inline styles** take the code font, size, color, background, and padding, the link color and underline, and the footnote marker's size and raise.
+- **Inline styles** take the code font, size, color, background, and padding, the link color and underline, the footnote marker's size and raise, the size and shift of superscripts and subscripts, and the todo color and background. Small capitals become `.small-caps`.
 - **Footnotes** follow the chapter below a separator of `footnotes.separator-width`, `separator-thickness`, and `separator-color`, `footnotes.gap` below the text and `footnotes.spacing` apart. Sidenotes are footnotes there.
 - **Margin notes** follow the block that references them in the style `margin-notes.style` names, indented by `margin-notes.gap` and `margin-notes.spacing` above and below.
 - **Chapters** keep `sink` as the space above a chapter heading, the number above the heading with the `chapter` label, the ornament, the lead-in in small capitals, and the drop capital. The drop capital uses CSS `initial-letter` where readers support it, and a floated letter of about the same size elsewhere.

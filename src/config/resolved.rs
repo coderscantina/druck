@@ -327,6 +327,12 @@ pub struct InlineStyles {
     pub link_underline: bool,
     pub footnote_marker_size: Length,
     pub footnote_marker_raise: Length,
+    pub superscript_size: Length,
+    pub superscript_raise: Length,
+    pub subscript_size: Length,
+    pub subscript_lower: Length,
+    pub todo_color: Color,
+    pub todo_background: Option<Color>,
 }
 
 #[derive(Debug, Clone, Serialize)]

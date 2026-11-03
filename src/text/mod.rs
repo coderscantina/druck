@@ -192,11 +192,13 @@ impl Fonts {
         let (position, thickness) = buzz.underline_metrics().map_or((-upem / 10, upem / 20), |line| {
             (line.position.into(), line.thickness.into())
         });
+        let strikeout = buzz.strikeout_metrics().map_or(upem / 4, |line| line.position.into());
         Metrics {
             ascender: Pt(f64::from(buzz.ascender()) * scale),
             descender: Pt(f64::from(-buzz.descender()) * scale),
             underline_position: Pt(f64::from(-position) * scale),
             underline_thickness: Pt(f64::from(thickness) * scale),
+            strikeout_position: Pt(f64::from(strikeout) * scale),
         }
     }
 
@@ -442,6 +444,9 @@ pub struct Metrics {
     pub descender: Pt,
     pub underline_position: Pt,
     pub underline_thickness: Pt,
+    /// The distance from the baseline up to the top of the strikethrough stroke, which has the thickness of
+    /// the underline.
+    pub strikeout_position: Pt,
 }
 
 /// Shaped text in one face and size. Glyphs are in visual (left-to-right) order.

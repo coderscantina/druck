@@ -461,6 +461,58 @@
             }
           },
           "description": "Footnote reference marks."
+        },
+        "superscript": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "description": "Text size. em is relative to the surrounding text.",
+              "$ref": "#/$defs/sizeSpec"
+            },
+            "raise": {
+              "description": "Baseline shift upward. em is relative to the surrounding text.",
+              "$ref": "#/$defs/spacingSpec"
+            }
+          },
+          "description": "Superscript, written ^text^."
+        },
+        "subscript": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "description": "Text size. em is relative to the surrounding text.",
+              "$ref": "#/$defs/sizeSpec"
+            },
+            "lower": {
+              "description": "Baseline shift downward. em is relative to the surrounding text.",
+              "$ref": "#/$defs/spacingSpec"
+            }
+          },
+          "description": "Subscript, written ~text~."
+        },
+        "todo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "color": {
+              "description": "Text color.",
+              "$ref": "#/$defs/colorSpec"
+            },
+            "background": {
+              "description": "Color of a box behind the note, or null for none.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/colorSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "description": "Notes to the author, written {todo: text}."
         }
       },
       "description": "Inline styles."

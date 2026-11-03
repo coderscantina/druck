@@ -38,7 +38,7 @@ struct Fragment {
     link: Option<Link>,
     metrics: Metrics,
     breaks: Breaks,
-    /// How far the baseline is raised, for footnote markers.
+    /// How far the baseline is raised, for footnote markers and superscripts, or lowered when negative.
     rise: f64,
     /// The footnote this fragment marks.
     note: Option<usize>,
@@ -48,8 +48,11 @@ struct Fragment {
     tracking: f64,
     /// The figures of the style, which reshaping keeps.
     figures: Figures,
-    /// The code span this fragment belongs to, by its index in the content, and its box color.
+    /// The code span or todo this fragment belongs to, by its index in the content, and its box color.
     background: Option<(usize, Color)>,
+    /// Whether a line runs under the fragment, and whether one runs through it.
+    underline: bool,
+    strike: bool,
     /// Anchors placed where the fragment starts, from index marks next to it.
     anchors: Vec<usize>,
 }
@@ -705,6 +708,8 @@ fn position(
     let mut items = Vec::new();
     let mut open_link: Option<usize> = None;
     let mut open_code: Option<(usize, usize)> = None;
+    // The rectangles of the underline and strikethrough that run on from the previous fragment.
+    let mut open_lines: [Option<usize>; 2] = [None; 2];
     // The link whose text is marked, for tagging.
     let mut marked_link: Option<&Link> = None;
     let mut x = indent + start;
@@ -716,6 +721,8 @@ fn position(
             items.extend(fragment.anchors.iter().map(|&id| anchor_item(id, x)));
         }
         let width = run.width.0;
+        // Shifted fragments carry their rectangles with them.
+        let base = baseline - fragment.rise;
         if marked_link != fragment.link.as_ref() {
             if marked_link.is_some() {
                 items.push(Item::End);
@@ -737,7 +744,7 @@ fn position(
                 items.push(Item::Rect {
                     rect: Rect {
                         x: Pt(x),
-                        y: Pt(baseline - metrics.ascender.0),
+                        y: Pt(base - metrics.ascender.0),
                         width: Pt(width),
                         height: Pt(metrics.ascender.0 + metrics.descender.0),
                     },
@@ -759,7 +766,7 @@ fn position(
                     items.push(Item::Link {
                         rect: Rect {
                             x: Pt(x),
-                            y: Pt(baseline - metrics.ascender.0),
+                            y: Pt(base - metrics.ascender.0),
                             width: Pt(width),
                             height: Pt(metrics.ascender.0 + metrics.descender.0),
                         },
@@ -770,7 +777,7 @@ fn position(
             if underline {
                 let rect = Rect {
                     x: Pt(x),
-                    y: Pt(baseline + metrics.underline_position.0),
+                    y: Pt(base + metrics.underline_position.0),
                     width: Pt(width),
                     height: metrics.underline_thickness,
                 };
@@ -782,7 +789,23 @@ fn position(
         } else {
             open_link = None;
         }
-        let text = text_item(x, baseline - fragment.rise, run, fragment.color);
+        // A link that the theme underlines already has its line.
+        let underlined = fragment.underline && !(underline && fragment.link.is_some());
+        let metrics = fragment.metrics;
+        let lines = [
+            underlined.then_some(base + metrics.underline_position.0),
+            fragment.strike.then_some(base - metrics.strikeout_position.0),
+        ];
+        for (open, y) in open_lines.iter_mut().zip(lines) {
+            let rect = y.map(|y| Rect {
+                x: Pt(x),
+                y: Pt(y),
+                width: Pt(width),
+                height: metrics.underline_thickness,
+            });
+            extend_line(&mut items, open, rect, fragment.color);
+        }
+        let text = text_item(x, base, run, fragment.color);
         match fragment.note {
             Some(note) => items.extend([Item::Begin(tags::Mark::Note(note)), text, Item::End]),
             None => items.push(text),
@@ -793,6 +816,28 @@ fn position(
         items.push(Item::End);
     }
     items
+}
+
+/// Draws `rect`, a line under or through a fragment, or extends the open line `open` to its end, so the line
+/// runs on across the space between two fragments. `None` ends the open line.
+fn extend_line(items: &mut Vec<Item>, open: &mut Option<usize>, rect: Option<Rect>, color: Color) {
+    let Some(rect) = rect else {
+        *open = None;
+        return;
+    };
+    if let Some(Item::Rect {
+        rect: line,
+        color: line_color,
+    }) = open.and_then(|index| items.get_mut(index))
+        && line.y == rect.y
+        && line.height == rect.height
+        && *line_color == color
+    {
+        line.width = Pt(rect.x.0 + rect.width.0 - line.x.0);
+        return;
+    }
+    *open = Some(items.len());
+    items.push(Item::Rect { rect, color });
 }
 
 /// Widens `run` by `before` ahead of its first glyph and `after` behind its last.
@@ -908,6 +953,8 @@ fn tokens(
                     tracking: 0.0,
                     figures: Figures::default(),
                     background: None,
+                    underline: false,
+                    strike: false,
                     anchors: std::mem::take(&mut anchors),
                 });
                 continue;
@@ -926,6 +973,17 @@ fn tokens(
                 style.figures,
             )
         };
+        // Superscripts and subscripts are smaller and shifted, relative to the text around them.
+        let (size, rise) = if text_style.superscript {
+            (
+                inline.superscript_size.to_pt(size),
+                inline.superscript_raise.to_pt(size).0,
+            )
+        } else if text_style.subscript {
+            (inline.subscript_size.to_pt(size), -inline.subscript_lower.to_pt(size).0)
+        } else {
+            (size, 0.0)
+        };
         let upper;
         let text = if style.uppercase && !text_style.code {
             upper = text.to_uppercase();
@@ -936,7 +994,15 @@ fn tokens(
         let color = match (&text_style.link, text_style.code) {
             (Some(_), _) => inline.link_color,
             (None, true) => inline.code_color,
+            (None, false) if text_style.todo => inline.todo_color,
             (None, false) => style.color,
+        };
+        let background = if text_style.code {
+            inline.code_background
+        } else if text_style.todo {
+            inline.todo_background
+        } else {
+            None
         };
         let metrics = fonts.metrics(face, size);
         // Code pads its first and last part, so spaces at its edges do not move the padding.
@@ -978,12 +1044,14 @@ fn tokens(
                         link: text_style.link.clone(),
                         metrics: fonts.metrics(face, size),
                         breaks: Breaks::Never,
-                        rise: 0.0,
+                        rise,
                         note: None,
                         margin: Vec::new(),
                         tracking,
                         figures,
                         background: None,
+                        underline: text_style.underline,
+                        strike: text_style.strike,
                         anchors: std::mem::take(&mut anchors),
                     });
                 }
@@ -1016,15 +1084,14 @@ fn tokens(
                 link: text_style.link.clone(),
                 metrics,
                 breaks,
-                rise: 0.0,
+                rise,
                 note: None,
                 margin: Vec::new(),
                 tracking,
                 figures,
-                background: inline
-                    .code_background
-                    .filter(|_| text_style.code)
-                    .map(|color| (span, color)),
+                background: background.map(|color| (span, color)),
+                underline: text_style.underline,
+                strike: text_style.strike,
                 anchors: std::mem::take(&mut anchors),
             });
         }

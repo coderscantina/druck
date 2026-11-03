@@ -19,6 +19,15 @@
 //! citations, so Markdown inside them stays as written. `::: index` places the index; without it a document
 //! with marks gets one at the end.
 //!
+//! HTML comments are cut out before anything else, see [`comments`]; other raw HTML is an error.
+//!
+//! Inline marks are `~~strike~~`, `^superscript^`, `~subscript~`, `[text]{.underline}`, and `[text]{.smallcaps}`.
+//! pulldown-cmark reads `~~` as strikethrough and a single `~` as subscript when both are enabled, so a tilde
+//! has one meaning per run length. It pairs them only at word edges and leaves `H~2~O` as text, which
+//! [`Builder::script`] pairs from the source. Superscript is only read there: pulldown-cmark's would pair the
+//! carets of two index marks, as in `{^a} and {^b}`. A `{todo: text}` is a note to the author that shows in
+//! the output and is listed in [`Document::todos`].
+//!
 //! A custom style is applied with `{.name}` at the end of a heading or paragraph, or on a line of its
 //! own directly before a list. A heading may combine it with its label, as in `{#sec:name .name}`.
 //!
@@ -42,10 +51,12 @@ use crate::config::theme::{CalloutKind, Lang};
 use crate::diagnostic::Diagnostic;
 use crate::document::{
     Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, IndexMark, Inline,
-    InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See,
+    InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See, Todo,
 };
 use crate::highlight;
 use crate::spacing;
+
+mod comments;
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.
 ///
@@ -60,21 +71,25 @@ pub fn parse(body: &str, first_line: u64, source: &Source, lang: Lang) -> Result
 /// Like [`parse`], and joins abbreviations, units, and page references with no-break spaces in text
 /// when `no_break_spaces` is set, see [`crate::spacing`].
 pub fn parse_with(
-    body: &str,
+    original: &str,
     first_line: u64,
     source: &Source,
     lang: Lang,
     no_break_spaces: bool,
 ) -> Result<Document, Vec<Diagnostic>> {
-    // Strikethrough and task lists are enabled only so they can be recognised and reported. GFM adds
-    // only the alert kinds of block quotations.
+    // Task lists are enabled only so they can be recognised and reported. GFM adds only the alert kinds of
+    // block quotations.
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_SUBSCRIPT
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
         | Options::ENABLE_SMART_PUNCTUATION
         | Options::ENABLE_GFM;
+    let comments = comments::find(original, options);
+    let (written, cuts) = comments.strip(original);
+    let body = written.as_ref();
     let directives = directive_lines(body, options);
     let mut text = String::with_capacity(body.len());
     let mut end = 0;
@@ -86,8 +101,12 @@ pub fn parse_with(
     text.push_str(&body[end..]);
 
     let directives = directives.into_iter().map(|line| (line.start, &body[line])).collect();
-    let mut builder = Builder::new(&text, first_line, source, lang, directives);
+    let mut builder = Builder::new(&text, original, cuts, first_line, source, lang, directives);
     builder.no_break_spaces = no_break_spaces;
+    if let Some(start) = comments.unterminated {
+        let at = builder.locate(start);
+        builder.report_at(at, "this comment is never closed; end it with -->");
+    }
     for (event, range) in Parser::new_ext(&text, options).into_offset_iter() {
         builder.event(event, range);
     }
@@ -234,10 +253,14 @@ struct CodeBlock {
 }
 
 struct Builder<'a> {
+    /// The text that is parsed: the written text without comments and with blanked directive lines.
     body: &'a str,
+    /// The text as written, which locations refer to, and where its comments were cut from `body`.
+    original: &'a str,
+    cuts: comments::Cuts,
     source: &'a Source,
     first_line: u64,
-    /// Byte offset of each line start in `body`.
+    /// Byte offset of each line start in `original`.
     line_starts: Vec<usize>,
     diagnostics: Vec<Diagnostic>,
     /// One block list per open container, plus the document's own at the bottom.
@@ -248,6 +271,10 @@ struct Builder<'a> {
     code: Option<CodeBlock>,
     emphasis: u32,
     strong: u32,
+    marks: Marks,
+    /// The marks that [`Builder::script`] and `[text]{.name}` opened, by the offset of their closing text.
+    closers: Vec<Closer>,
+    todos: Vec<Todo>,
     links: Vec<String>,
     /// Nesting depth inside a construct that is reported and otherwise ignored.
     skip: u32,
@@ -292,10 +319,20 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(body: &'a str, first_line: u64, source: &'a Source, lang: Lang, directives: Vec<(usize, &'a str)>) -> Self {
-        let newlines = body.match_indices('\n').map(|(index, _)| index + 1);
+    fn new(
+        body: &'a str,
+        original: &'a str,
+        cuts: comments::Cuts,
+        first_line: u64,
+        source: &'a Source,
+        lang: Lang,
+        directives: Vec<(usize, &'a str)>,
+    ) -> Self {
+        let newlines = original.match_indices('\n').map(|(index, _)| index + 1);
         Self {
             body,
+            original,
+            cuts,
             source,
             first_line,
             line_starts: std::iter::once(0).chain(newlines).collect(),
@@ -307,6 +344,9 @@ impl<'a> Builder<'a> {
             code: None,
             emphasis: 0,
             strong: 0,
+            marks: Marks::default(),
+            closers: Vec::new(),
+            todos: Vec::new(),
             links: Vec::new(),
             skip: 0,
             depth: 0,
@@ -414,6 +454,7 @@ impl<'a> Builder<'a> {
             images: self.images,
             citations: self.citations,
             index_marks: self.index_marks,
+            todos: self.todos,
         })
     }
 
@@ -661,12 +702,18 @@ impl<'a> Builder<'a> {
     }
 
     /// The file location of a byte offset in `body`.
+    /// Where `offset` in the parsed text is written.
     fn location(&self, offset: usize) -> Location {
+        self.locate(self.cuts.original(offset))
+    }
+
+    /// The location of `offset` in the text as written.
+    fn locate(&self, offset: usize) -> Location {
         let line = self.line_starts.partition_point(|&start| start <= offset);
         let line_start = self.line_starts[line - 1];
         Location {
             line: line as u64 + self.first_line - 1,
-            column: self.body[line_start..offset].chars().count() as u64 + 1,
+            column: self.original[line_start..offset].chars().count() as u64 + 1,
         }
     }
 
@@ -687,7 +734,12 @@ impl<'a> Builder<'a> {
             code,
             link: self.links.last().cloned().map(Link::Url),
             unbreakable: false,
-            small_caps: false,
+            small_caps: self.marks.on(Mark::SmallCaps),
+            strike: self.marks.on(Mark::Strike),
+            underline: self.marks.on(Mark::Underline),
+            superscript: self.marks.on(Mark::Superscript),
+            subscript: self.marks.on(Mark::Subscript),
+            todo: false,
         }
     }
 
@@ -958,6 +1010,7 @@ impl<'a> Builder<'a> {
             return;
         };
         self.unclosed_span();
+        self.close_marks();
         if level.is_none() {
             self.lone_marks(&content);
         }
@@ -1270,6 +1323,7 @@ impl<'a> Builder<'a> {
                     }
                 }
             },
+            Event::Code(_) if offset < self.consumed => {}
             Event::Code(text) => self.push_text(offset, &text, true),
             // A citation group may span lines.
             Event::SoftBreak if offset < self.consumed => {}
@@ -1280,6 +1334,7 @@ impl<'a> Builder<'a> {
                 let at = self.location(offset);
                 self.push_block(Block::SceneBreak { at });
             }
+            Event::InlineHtml(_) if offset < self.consumed => {}
             Event::InlineHtml(_) => self.report(offset, "raw HTML is not rendered"),
             Event::FootnoteReference(label) => self.footnote_reference(offset, &label),
             Event::TaskListMarker(_) => self.report(offset, "task lists are not supported"),
@@ -1300,6 +1355,22 @@ impl<'a> Builder<'a> {
             text = &text[skipped.len()..];
             offset = self.consumed;
         }
+        // The `]` of a `[text]{.name}` ends the marked text, and the attribute after it is skipped.
+        let closing = self
+            .closers
+            .iter()
+            .position(|closer| closer.end > closer.at + 1 && (offset..offset + text.len()).contains(&closer.at));
+        if let Some(position) = closing.filter(|_| self.body.get(offset..offset + text.len()) == Some(text)) {
+            let closer = self.closers.remove(position);
+            let split = closer.at - offset;
+            if split > 0 {
+                self.text(&text[..split], offset..closer.at);
+            }
+            self.marks.close(closer.mark);
+            self.consumed = closer.end;
+            self.text(&text[split..], closer.at..range.end);
+            return;
+        }
         // The `]` of a `[text]{^}` mark ends its text, and the mark after it is read from the source.
         if let Some(close) = self.span.as_ref().map(|span| span.close)
             && (offset..offset + text.len()).contains(&close)
@@ -1313,9 +1384,13 @@ impl<'a> Builder<'a> {
             self.text(&text[split..], close..range.end);
             return;
         }
-        if text == "[" {
+        if text == "[" && !self.escaped(offset) {
             self.check_undefined_footnote(offset);
-            if self.bracketed_reference(offset) || self.bracketed_citation(offset) || self.open_span(offset) {
+            let opened = self.bracketed_reference(offset)
+                || self.bracketed_citation(offset)
+                || self.open_span(offset)
+                || self.open_attribute_mark(offset);
+            if opened {
                 return;
             }
         }
@@ -1329,11 +1404,38 @@ impl<'a> Builder<'a> {
             return;
         }
         let mut start = 0;
-        for (index, mark) in text.match_indices(['@', '{']) {
+        for (index, mark) in text.match_indices(['@', '{', '^', '~']) {
+            if mark == "^" || mark == "~" {
+                if index >= start {
+                    let at = offset + index;
+                    if let Some(position) = self.closers.iter().position(|closer| closer.at == at) {
+                        self.push_text_before(offset + start, &text[start..index]);
+                        let closer = self.closers.remove(position);
+                        self.marks.close(closer.mark);
+                        start = index + 1;
+                    } else if let Some(closer) = self.script(at) {
+                        self.push_text_before(offset + start, &text[start..index]);
+                        self.open_mark(at, closer.mark);
+                        self.closers.push(closer);
+                        start = index + 1;
+                    }
+                }
+                continue;
+            }
             if mark == "{" {
                 let escapes =
                     self.body[..offset + index].len() - self.body[..offset + index].trim_end_matches('\\').len();
-                if text[index + 1..].starts_with('^') && escapes.is_multiple_of(2) && index >= start {
+                if self.body[offset + index + 1..].starts_with("todo:") && escapes.is_multiple_of(2) && index >= start {
+                    self.push_text_before(offset + start, &text[start..index]);
+                    let end = self.todo(offset + index) - offset;
+                    if end > text.len() {
+                        self.consumed = offset + end;
+                        return;
+                    }
+                    start = end;
+                    continue;
+                }
+                if self.body[offset + index + 1..].starts_with('^') && escapes.is_multiple_of(2) && index >= start {
                     if index > start {
                         self.push_text(offset + start, &text[start..index], false);
                     }
@@ -1633,6 +1735,123 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Whether a backslash escapes the character at `offset`.
+    fn escaped(&self, offset: usize) -> bool {
+        let before = &self.body[..offset];
+        (before.len() - before.trim_end_matches('\\').len()) % 2 == 1
+    }
+
+    /// Pushes `text` ahead of a mark, unless it is empty.
+    fn push_text_before(&mut self, offset: usize, text: &str) {
+        if !text.is_empty() {
+            self.push_text(offset, text, false);
+        }
+    }
+
+    /// Starts `mark`, which an end event or the closer pushed with it ends.
+    fn open_mark(&mut self, offset: usize, mark: Mark) {
+        let other = match mark {
+            Mark::Superscript => Mark::Subscript,
+            Mark::Subscript => Mark::Superscript,
+            _ => mark,
+        };
+        if other != mark && self.marks.on(other) {
+            self.report(offset, "superscript and subscript cannot be nested");
+        }
+        self.marks.open(mark);
+    }
+
+    /// Ends the marks that no closing text ended, at the end of their paragraph.
+    fn close_marks(&mut self) {
+        for closer in std::mem::take(&mut self.closers) {
+            self.marks.close(closer.mark);
+        }
+    }
+
+    /// The superscript or subscript that the `^` or `~` at `at` opens, if the same delimiter closes it before
+    /// any white space. A `^` after `{` or `[` belongs to an index mark or a footnote.
+    fn script(&self, at: usize) -> Option<Closer> {
+        let delimiter = self.body[at..].chars().next()?;
+        let after = &self.body[at + 1..];
+        if after.starts_with(delimiter) || self.body[..at].ends_with([delimiter, '{', '[']) || self.escaped(at) {
+            return None;
+        }
+        let length = after.find(|c: char| !(c.is_alphanumeric() || "+-=(),.%°±−".contains(c)))?;
+        let end = at + 1 + length;
+        let closes =
+            length > 0 && self.body[end..].starts_with(delimiter) && !self.body[end + 1..].starts_with(delimiter);
+        closes.then(|| Closer {
+            at: end,
+            end: end + 1,
+            mark: if delimiter == '^' {
+                Mark::Superscript
+            } else {
+                Mark::Subscript
+            },
+        })
+    }
+
+    /// Starts the `[text]{.underline}` or `[text]{.smallcaps}` whose `[` is at `offset`, if one starts there,
+    /// and returns whether it did. Any other `{.name}` stays text. The text may not hold brackets.
+    fn open_attribute_mark(&mut self, offset: usize) -> bool {
+        let Some(close) = self.body[offset + 1..].find(['[', ']']).map(|close| offset + 1 + close) else {
+            return false;
+        };
+        let attribute = self.body[close..].strip_prefix(']');
+        let found = [("{.underline}", Mark::Underline), ("{.smallcaps}", Mark::SmallCaps)]
+            .into_iter()
+            .find(|(name, _)| attribute.is_some_and(|rest| rest.starts_with(name)));
+        let Some((name, mark)) = found else {
+            return false;
+        };
+        if close == offset + 1 || self.body[offset..close].contains("\n\n") {
+            return false;
+        }
+        self.marks.open(mark);
+        self.closers.push(Closer {
+            at: close,
+            end: close + "]".len() + name.len(),
+            mark,
+        });
+        true
+    }
+
+    /// Reads the `{todo: text}` whose brace is at `offset` and returns where it ends. Its text shows in the
+    /// output as written, with line breaks as spaces. It may span lines but not a blank line.
+    fn todo(&mut self, offset: usize) -> usize {
+        let note = offset + "{todo:".len();
+        let close = self.body[note..]
+            .find('}')
+            .filter(|&close| !self.body[note..note + close].contains("\n\n"));
+        let Some(close) = close.map(|close| note + close) else {
+            self.report(offset, "this todo is not closed; end it with }");
+            return note;
+        };
+        let text = self.body[note..close].split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() {
+            self.report(offset, "write the note after {todo:, as in {todo: check the date}");
+        } else if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
+            self.report(offset, "a heading cannot hold a todo");
+        } else {
+            let style = InlineStyle {
+                todo: true,
+                ..self.style(false)
+            };
+            self.todos.push(Todo {
+                at: self.location(offset),
+                text: text.clone(),
+            });
+            self.push_inline(
+                offset,
+                Inline::Text {
+                    text: format!("TODO: {text}"),
+                    style,
+                },
+            );
+        }
+        close + 1
+    }
+
     fn reference(&mut self, offset: usize, label: String, page: bool) {
         if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
             self.report(offset, "a heading cannot hold a cross-reference");
@@ -1878,7 +2097,9 @@ impl<'a> Builder<'a> {
             Tag::Emphasis => self.emphasis += 1,
             Tag::Strong => self.strong += 1,
             Tag::Link { dest_url, .. } => self.links.push(dest_url.into_string()),
-            Tag::Strikethrough => self.report(offset, "strikethrough is not supported"),
+            Tag::Strikethrough => self.open_mark(offset, Mark::Strike),
+            Tag::Superscript => self.open_mark(offset, Mark::Superscript),
+            Tag::Subscript => self.open_mark(offset, Mark::Subscript),
             Tag::Image { dest_url, title, .. } => self.image(offset, &dest_url, &title),
             Tag::HtmlBlock => self.skip_reported(offset, "raw HTML is not rendered"),
             Tag::Table(align) => {
@@ -2139,6 +2360,9 @@ impl<'a> Builder<'a> {
             }
             TagEnd::Emphasis => self.emphasis -= 1,
             TagEnd::Strong => self.strong -= 1,
+            TagEnd::Strikethrough => self.marks.close(Mark::Strike),
+            TagEnd::Superscript => self.marks.close(Mark::Superscript),
+            TagEnd::Subscript => self.marks.close(Mark::Subscript),
             TagEnd::Link => {
                 self.links.pop();
             }
@@ -2236,6 +2460,41 @@ fn marks(blocks: &[Block]) -> Vec<usize> {
         }
     }
     marks
+}
+
+/// The inline marks that apply to the text being read, with how many of each are open.
+#[derive(Default)]
+struct Marks([u32; 5]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Strike,
+    Superscript,
+    Subscript,
+    Underline,
+    SmallCaps,
+}
+
+impl Marks {
+    fn on(&self, mark: Mark) -> bool {
+        self.0[mark as usize] > 0
+    }
+
+    fn open(&mut self, mark: Mark) {
+        self.0[mark as usize] += 1;
+    }
+
+    fn close(&mut self, mark: Mark) {
+        self.0[mark as usize] = self.0[mark as usize].saturating_sub(1);
+    }
+}
+
+/// A mark that the source closes with its own text: the closing `^` or `~` at `at`, or the `]` of a
+/// `[text]{.name}` at `at` with its attribute ending at `end`.
+struct Closer {
+    at: usize,
+    end: usize,
+    mark: Mark,
 }
 
 /// The bracketed text of a `[text]{^}` mark: where its `]` is, its mark, and where its content starts in the
@@ -2826,7 +3085,7 @@ mod tests {
             ("<div>\nhi\n</div>", "raw HTML is not rendered"),
             ("a <b>x</b>", "raw HTML is not rendered"),
             ("- [ ] todo", "task lists are not supported"),
-            ("~~gone~~", "strikethrough is not supported"),
+            ("<!-- ok --><span>x</span>", "raw HTML is not rendered"),
         ];
         for (body, message) in cases {
             let errors = diagnostics(body, 1);
@@ -3775,6 +4034,222 @@ mod tests {
             errors[2].1
         );
         assert!(errors[2].1.ends_with("; write \\{ for a brace"), "{}", errors[2].1);
+    }
+
+    fn styled(text: &str, style: InlineStyle) -> Inline {
+        self::text(text, style)
+    }
+
+    #[test]
+    fn cuts_comments_everywhere_but_code_and_keeps_later_locations() {
+        let body =
+            "One.\n\n<!-- a\n\nb -->\n\nTwo <!-- c --> {todo: x}.\n\n```\n<!-- code -->\n```\n\nLast `<!-- y -->`.\n";
+        let blocks = blocks(body);
+        assert_eq!(blocks[0], paragraph(1, 1, "One."));
+        let Block::Paragraph { at: two, content, .. } = &blocks[1] else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!((*two, content[0].clone()), (at(7, 1), plain("Two  ")));
+        assert_eq!(
+            blocks[2],
+            Block::Code {
+                at: at(9, 1),
+                first_line: 10,
+                language: None,
+                lines: vec!["<!-- code -->".into()],
+            }
+        );
+        let Block::Paragraph { content, .. } = &blocks[3] else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(
+            content[1],
+            styled(
+                "<!-- y -->",
+                InlineStyle {
+                    code: true,
+                    ..Default::default()
+                }
+            )
+        );
+        // The todo stands where it is written, after the comments before it.
+        let document = parse(body, 1, &source(), Lang::En).expect("parses");
+        assert_eq!(
+            document.todos,
+            vec![Todo {
+                at: at(7, 16),
+                text: "x".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_comment_between_paragraphs_is_a_blank_line() {
+        let commented = blocks("One.\n\n<!-- note -->\n\nTwo.\nThree.\n<!-- note -->\nFour.\n");
+        let removed = blocks("One.\n\n\n\nTwo.\nThree.\n\nFour.\n");
+        assert_eq!(commented, removed);
+        assert_eq!(commented.len(), 3);
+    }
+
+    #[test]
+    fn reports_unterminated_comments_at_their_start_and_other_html_at_its_own_location() {
+        let errors = diagnostics("One.\n\nTwo <!-- never\nclosed\n", 1);
+        assert_eq!(
+            errors,
+            vec![(Some((3, 5)), "this comment is never closed; end it with -->".to_owned())]
+        );
+        let errors = diagnostics("<!-- fine -->\n<div>x</div>\n\nA <!-- c --><b>y</b>\n", 5);
+        let found: Vec<_> = errors.iter().map(|(at, _)| *at).collect();
+        assert_eq!(found, [Some((6, 1)), Some((8, 13)), Some((8, 17))], "{errors:?}");
+    }
+
+    #[test]
+    fn reads_one_meaning_for_each_tilde_and_caret() {
+        let mark = |text: &str, style: InlineStyle| styled(text, style);
+        let strike = InlineStyle {
+            strike: true,
+            ..Default::default()
+        };
+        let sup = InlineStyle {
+            superscript: true,
+            ..Default::default()
+        };
+        let sub = InlineStyle {
+            subscript: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            inlines("~~a~~ ~b~ ^c^ H~2~O m^2^ 10^-3^, **~~d~~**\n"),
+            vec![
+                mark("a", strike.clone()),
+                plain(" "),
+                mark("b", sub.clone()),
+                plain(" "),
+                mark("c", sup.clone()),
+                plain(" H"),
+                mark("2", sub),
+                plain("O m"),
+                mark("2", sup.clone()),
+                plain(" 10"),
+                mark("-3", sup),
+                plain(", "),
+                mark(
+                    "d",
+                    InlineStyle {
+                        strike: true,
+                        strong: true,
+                        ..Default::default()
+                    }
+                ),
+            ]
+        );
+        assert_eq!(
+            inlines("~/a and ~/b, 2^10 and 3^4, a ~ b ~ c, x~~y, \\~z~ \\^w^\n"),
+            vec![plain("~/a and ~/b, 2^10 and 3^4, a ~ b ~ c, x~~y, ~z~ ^w^")]
+        );
+    }
+
+    #[test]
+    fn reads_underline_and_small_caps_spans_and_leaves_other_names_alone() {
+        let underline = InlineStyle {
+            underline: true,
+            ..Default::default()
+        };
+        let caps = InlineStyle {
+            small_caps: true,
+            emphasis: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            inlines("A [x]{.underline} and [y *z*]{.smallcaps} end [q]{.other} [r]{.underline}\n"),
+            vec![
+                plain("A "),
+                styled("x", underline.clone()),
+                plain(" and "),
+                styled(
+                    "y ",
+                    InlineStyle {
+                        small_caps: true,
+                        ..Default::default()
+                    }
+                ),
+                styled("z", caps),
+                plain(" end [q]{.other} "),
+                styled("r", underline),
+            ]
+        );
+        let Block::Paragraph { class, .. } = &blocks("Text [q]{.other}\n")[0] else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(class.as_ref().map(|class| class.name.as_str()), Some("other"));
+    }
+
+    #[test]
+    fn reports_superscript_inside_subscript() {
+        let errors = diagnostics("~a ^b^ c~\n", 1);
+        assert_eq!(
+            errors,
+            vec![(Some((1, 4)), "superscript and subscript cannot be nested".to_owned())]
+        );
+    }
+
+    #[test]
+    fn reads_todos_inline_and_as_paragraphs_and_keeps_placeholders() {
+        let todo = InlineStyle {
+            todo: true,
+            ..Default::default()
+        };
+        let document = parse(
+            "Check {todo: the *date*\nagain} now, {words}.\n\n{todo: whole}\n",
+            1,
+            &source(),
+            Lang::En,
+        )
+        .expect("parses");
+        assert_eq!(
+            document.todos,
+            vec![
+                Todo {
+                    at: at(1, 7),
+                    text: "the *date* again".into()
+                },
+                Todo {
+                    at: at(4, 1),
+                    text: "whole".into()
+                },
+            ]
+        );
+        let Block::Paragraph { content, .. } = &document.blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(content[1], styled("TODO: the *date* again", todo.clone()));
+        assert!(matches!(
+            content[3],
+            Inline::Field {
+                placeholder: Placeholder::Words,
+                ..
+            }
+        ));
+        assert_eq!(
+            document.blocks[1],
+            Block::Paragraph {
+                at: at(4, 1),
+                content: vec![styled("TODO: whole", todo)],
+                class: None
+            }
+        );
+        let errors = diagnostics("# A {todo: x} b\n\n{todo:}\n\n{todo: open\n\nb} {todo}\n", 1);
+        let messages: Vec<_> = errors.iter().map(|(at, message)| (*at, message.as_str())).collect();
+        assert_eq!(messages[0], (Some((1, 5)), "a heading cannot hold a todo"));
+        assert_eq!(
+            messages[1],
+            (
+                Some((3, 1)),
+                "write the note after {todo:, as in {todo: check the date}"
+            )
+        );
+        assert_eq!(messages[2], (Some((5, 1)), "this todo is not closed; end it with }"));
+        assert!(messages[3].1.starts_with("unknown placeholder {todo}"), "{messages:?}");
     }
 
     #[test]

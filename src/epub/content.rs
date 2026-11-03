@@ -736,7 +736,12 @@ impl Writer<'_> {
             (style.strong, "<strong>", "</strong>"),
             (style.emphasis, "<em>", "</em>"),
             (style.code, "<code>", "</code>"),
-            (style.small_caps, "<span class=\"lead-in\">", "</span>"),
+            (style.strike, "<s>", "</s>"),
+            (style.underline, "<u>", "</u>"),
+            (style.superscript, "<sup>", "</sup>"),
+            (style.subscript, "<sub>", "</sub>"),
+            (style.small_caps, "<span class=\"small-caps\">", "</span>"),
+            (style.todo, "<span class=\"todo\">", "</span>"),
         ];
         for (_, start, _) in tags.iter().filter(|(on, ..)| *on) {
             self.push(start);

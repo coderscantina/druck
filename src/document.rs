@@ -28,6 +28,18 @@ pub struct Document {
     pub citations: Vec<Citation>,
     /// The index marks in source order. [`Inline::IndexMark`] refers to them by index.
     pub index_marks: Vec<IndexMark>,
+    /// The `{todo: text}` placeholders in source order. A final export fails while any remain.
+    pub todos: Vec<Todo>,
+}
+
+/// A `{todo: text}` placeholder: a note to the author that shows in the output. Its text is also set in
+/// the document, as [`InlineStyle::todo`] text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Todo {
+    /// Where the opening brace is written.
+    pub at: Location,
+    /// The note without the `todo:` label, white space runs as one space.
+    pub text: String,
 }
 
 /// An index mark, `{^entry!sub-entry}` or `[text]{^}`, with an optional `|see` or `|see also` reference.
@@ -375,6 +387,17 @@ pub struct InlineStyle {
     pub link: Option<Link>,
     /// Text that never breaks across lines. Layout sets it on cross-reference text.
     pub unbreakable: bool,
-    /// Lowercase letters set as small capitals. Layout sets it on the lead-in of a chapter's first paragraph.
+    /// Lowercase letters set as small capitals, from `[text]{.smallcaps}`. Layout also sets it on the lead-in
+    /// of a chapter's first paragraph.
     pub small_caps: bool,
+    /// `~~text~~`: struck through.
+    pub strike: bool,
+    /// `[text]{.underline}`: underlined, whether or not it is a link.
+    pub underline: bool,
+    /// `^text^`: smaller and raised.
+    pub superscript: bool,
+    /// `~text~`: smaller and lowered.
+    pub subscript: bool,
+    /// The text of a `{todo: text}` placeholder, set in the theme's todo style. Statistics skip it.
+    pub todo: bool,
 }

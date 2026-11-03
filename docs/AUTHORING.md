@@ -167,6 +167,8 @@ The body is CommonMark. These constructs render:
 - Block quotations, and [callouts](#callouts) written as GitHub alerts.
 - Fenced and indented code blocks. Code is never wrapped: a code line wider than the text area is an error naming its line. Tabs become four spaces. A fence with a language, as in ```` ```rust ````, is colored by token, see [syntax highlighting](#syntax-highlighting).
 - `*emphasis*`, `**strong**`, `` `code` ``, links, and hard line breaks (a trailing backslash or two trailing spaces).
+- [Inline marks](#inline-marks): `~~strikethrough~~`, `^superscript^`, `~subscript~`, `[underline]{.underline}`, and `[small capitals]{.smallcaps}`.
+- [Comments](#comments-and-todos), `<!-- ... -->`, which are skipped, and `{todo: ...}` notes to the author, which show.
 - [Images](#images-and-captions) with captions.
 - [Tables](#tables) with captions.
 - [Footnotes](#footnotes), [margin notes](#margin-notes), and the [layout directives](#layout-directives) for columns, full-width blocks, keep groups, and page breaks.
@@ -186,9 +188,53 @@ Line breaks are chosen for each whole paragraph. Words are hyphenated by the rul
 
 The following are reported as errors with their line and column, and no PDF is written:
 
-- Not supported: strikethrough, task lists, and raw HTML.
+- Not supported: task lists and raw HTML other than [comments](#comments-and-todos).
 
 A character the selected font has no glyph for is an error, as is a word wider than the line even after hyphenation.
+
+## Inline marks
+
+| Write | Result |
+| --- | --- |
+| `~~struck~~` | Struck through. |
+| `^raised^` | Superscript: smaller text above the baseline. |
+| `~lowered~` | Subscript: smaller text below the baseline. |
+| `[text]{.underline}` | Underlined. |
+| `[text]{.smallcaps}` | Small capitals. |
+
+A mark covers its text across line breaks, and the text still breaks and hyphenates, except small capitals, which are never hyphenated. Marks combine with emphasis, strong text, links, and one another, as in `~~**old**~~` or `[*[both]{.underline}*](https://example.com)`, except that a superscript inside a subscript, or the other way around, is an error.
+
+- **Tildes:** two tildes strike through and one lowers, so a tilde has one meaning for each run length. Strikethrough may hold spaces. A single `~` and every `^` mark text only when the same character closes it before any space, as in `H~2~O`, `m^2^`, `3^rd^`, and `10^-3^`. Letters, digits, and `+ - = ( ) , . % ° ±` may stand inside. Anything else stays text: `~/dir`, `2^10 and 3^4`, `a ~ b ~ c`. A backslash keeps a character as typed, as in `\~` and `\^`. A caret after `{` or `[` belongs to an [index mark](#index) or a footnote.
+- **Underline and small capitals:** only these two names are marks. Any other `[text]{.name}` is text, as before, and a `{.name}` at the end of a paragraph is its [custom style](#custom-styles). A heading ending in `{.name}` takes it as its style too, so follow a mark at the end of a heading with other text.
+- **Lines:** underline and strikethrough use the text color and the font's own line position and thickness. A link that the theme underlines does not get a second line.
+- **Small capitals:** the font's own small capitals, the OpenType `smcp` feature, and capitals at 80% size for a font that has none.
+- **Size and shift:** superscripts and subscripts are the same font scaled and moved by the theme, see [inline marks](THEMES.md#marks-and-notes). Druck does not use the font's `sups` and `subs` glyphs, so every font works the same way.
+
+In the EPUB these are `<s>`, `<sup>`, `<sub>`, `<u>`, and `<span class="small-caps">`. In the PDF the text stays in its paragraph's structure element, and the lines are decoration.
+
+## Comments and todos
+
+`<!-- ... -->` is a comment. It is skipped wherever it stands: between blocks, inside a paragraph, and over several lines, blank lines included. A comment is cut out as if it had not been written, so one on a line of its own leaves a blank line, which separates paragraphs but changes nothing about the first-line indent, and text on both sides of a comment inside a line joins. Diagnostics still give the lines and columns as written. A comment in a code block or code span stays code, and `\<!--` is text.
+
+```markdown
+Text before.
+
+<!-- Checked on 3 November against the second edition. -->
+
+The next paragraph.
+```
+
+A comment with no `-->` is an error at its start. Every other raw HTML is still an error at its location.
+
+`{todo: text}` is a note to the author that stays visible. Druck sets "TODO: text" in the theme's [todo style](THEMES.md#marks-and-notes), a highlighted box by default, in every render, inline or alone in a paragraph. The text may span lines but not a blank line. It is plain text: it ends at the first `}`, and markup in it shows as written. A project export marked `final` fails at each todo that remains.
+
+```markdown
+The first edition appeared in {todo: year?} and sold well.
+
+{todo: Replace this figure with the final one}
+```
+
+Todo text does not count in the [statistics](#what-the-statistics-count). A todo in a heading, one without text, and one without a closing brace are errors. `{todo}` without a colon is still an unknown [placeholder](#placeholders).
 
 ## Pages
 

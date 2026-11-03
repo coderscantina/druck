@@ -87,6 +87,17 @@ fn schema_and_layer_check_agree_on_partial_themes() {
             true,
         ),
         (
+            "script and todo styles",
+            json!({"version": 1, "inline": {"superscript": {"raise": "0.4em"}, "subscript": {"lower": "2pt"},
+                "todo": {"background": null}}}),
+            true,
+        ),
+        (
+            "superscript is raised, not lowered",
+            json!({"version": 1, "inline": {"superscript": {"lower": "0.4em"}}}),
+            false,
+        ),
+        (
             "unknown wide block",
             json!({"version": 1, "page": {"wide": ["quote"]}}),
             false,
