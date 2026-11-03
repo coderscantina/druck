@@ -1,18 +1,35 @@
 //! The entry points: a renderer, and the stages of one job.
+//!
+//! A [`Renderer`] keeps what is expensive to prepare, by content hash, and can run jobs from several threads at
+//! once. A job keeps its own state: [`Job`] and [`Configured`] are `Send` but not `Sync`, and borrow the renderer,
+//! resolver, and input. A [`Layout`] owns what it needs and outlives them all.
 
-use std::path::Path;
+use std::cell::Cell;
+use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::resolved::Config;
+use crate::config::source::{Origin, Source};
+use crate::date::Date;
 use crate::diagnostic::Diagnostic;
+use crate::image::ImageCache;
 use crate::input::{DocumentText, Input};
 use crate::output::{Layout, Pt};
-use crate::pipeline::{self, DocumentFile};
-use crate::{date, epub, project};
+use crate::pipeline::{self, DocumentFile, JobContext};
+use crate::resource::Resolver;
+use crate::text::face::FaceCache;
+use crate::{epub, project};
 
-/// Runs jobs. Keeps nothing between them yet, so it costs nothing to make.
+/// Runs jobs, reusing faces and decoded images between them. Every job reads its resources again through its
+/// resolver, so a replaced file is seen, and an unchanged one costs a read and a hash. What the last two jobs did
+/// not use is forgotten when the next one starts.
 #[derive(Default)]
-pub struct Renderer(());
+pub struct Renderer {
+    pub(crate) faces: FaceCache,
+    pub(crate) images: ImageCache,
+    jobs: AtomicU64,
+}
 
 impl Renderer {
     pub fn new() -> Self {
@@ -20,8 +37,8 @@ impl Renderer {
     }
 
     /// The simple path: Markdown and configuration in, PDF bytes and every warning out.
-    pub fn render(&self, input: &Input, options: &PdfOptions) -> Result<Rendered, Failure> {
-        let configured = self.job(input).configure()?;
+    pub fn render(&self, resolver: &dyn Resolver, input: &Input, options: &PdfOptions) -> Result<Rendered, Failure> {
+        let configured = self.job(resolver, input).configure()?;
         let layout = configured.layout(&LayoutOptions::default())?;
         let mut rendered = layout.pdf(options)?;
         let mut warnings = configured.warnings().to_vec();
@@ -32,40 +49,78 @@ impl Renderer {
     }
 
     /// The explicit path, one stage at a time. A job is one document on one thread.
-    pub fn job<'r>(&'r self, input: &'r Input) -> Job<'r> {
-        Job { input }
+    pub fn job<'r>(&'r self, resolver: &'r dyn Resolver, input: &'r Input) -> Job<'r> {
+        Job {
+            renderer: self,
+            resolver,
+            input,
+            one_thread: PhantomData,
+        }
+    }
+
+    /// Numbers a new job and forgets what neither of the two jobs before it used.
+    fn begin(&self) -> u64 {
+        let number = self.jobs.fetch_add(1, Ordering::Relaxed) + 1;
+        let oldest = number.saturating_sub(2);
+        self.faces.sweep(oldest);
+        self.images.sweep(oldest);
+        number
     }
 }
 
 /// One document on its way to being configured.
 pub struct Job<'r> {
+    renderer: &'r Renderer,
+    resolver: &'r dyn Resolver,
     input: &'r Input,
+    one_thread: PhantomData<Cell<()>>,
 }
 
-impl Job<'_> {
-    /// Resolves and checks the configuration. Errors here never reach layout.
-    pub fn configure(self) -> Result<Configured, Failure> {
-        let input = self.input;
+impl<'r> Job<'r> {
+    /// Resolves and checks the configuration, and reads every resource it names. Errors here never reach layout.
+    pub fn configure(self) -> Result<Configured<'r>, Failure> {
+        let Self {
+            renderer,
+            resolver,
+            input,
+            ..
+        } = self;
         let (config, document) = match &input.text {
-            DocumentText::Single { path, text } => {
-                pipeline::configure(&input.request(path), &input.working_dir, text.clone())?
+            DocumentText::Single { text, origin, name } => {
+                let Origin::Document(dir) = origin else {
+                    let message = "a document's origin must be a document folder";
+                    return Err(vec![Diagnostic::new(Some(Source::Document(name.into())), message)].into());
+                };
+                pipeline::configure(resolver, input, dir, name, text)?
             }
-            DocumentText::Project(project) => project.configure(&input.request(Path::new("")), &input.working_dir)?,
+            DocumentText::Project(project) => project.configure(resolver, input)?,
         };
+        let files = pipeline::read_resources(resolver, &config)?;
         Ok(Configured {
+            job: JobContext {
+                renderer,
+                resolver,
+                number: renderer.begin(),
+                files,
+            },
             config: Arc::new(config),
             document: Arc::new(document),
+            today: input.today,
+            one_thread: PhantomData,
         })
     }
 }
 
-/// A document with its configuration resolved.
-pub struct Configured {
+/// A document with its configuration resolved and its resources read.
+pub struct Configured<'r> {
+    job: JobContext<'r>,
     pub(crate) config: Arc<Config>,
     pub(crate) document: Arc<DocumentFile>,
+    today: Date,
+    one_thread: PhantomData<Cell<()>>,
 }
 
-impl Configured {
+impl Configured<'_> {
     /// What is wrong with the configuration without stopping the job.
     pub fn warnings(&self) -> &[Diagnostic] {
         &self.config.warnings
@@ -83,40 +138,30 @@ impl Configured {
 
     /// Lays out the document, reporting everything a render reports before writing.
     pub fn layout(&self, _options: &LayoutOptions) -> Result<Layout, Failure> {
-        let (fonts, laid) = pipeline::typeset(&self.config, &self.document)?;
+        let (fonts, laid) = pipeline::typeset(&self.job, &self.config, &self.document, self.today)?;
         Ok(Layout {
             config: self.config.clone(),
             document: self.document.clone(),
             fonts,
             laid,
+            today: self.today,
         })
     }
 
     /// Writes an EPUB, which needs no layout. `parts` is the number of content documents.
-    pub fn epub(&self, _options: &EpubOptions) -> Result<Rendered, Failure> {
+    pub fn epub(&self, options: &EpubOptions) -> Result<Rendered, Failure> {
         let (config, document) = (&*self.config, &*self.document);
-        let prepared = pipeline::prepare(config, document)?;
-        let today = date::Date::today().map_err(|e| vec![Diagnostic::new(None, e)])?;
-        // `SOURCE_DATE_EPOCH` fixes the build day; without it an ISO `date` does, so the same input gives the
-        // same bytes.
-        let iso = config
-            .metadata
-            .date
-            .as_deref()
-            .and_then(|text| date::Date::iso(text.trim()));
-        let modified = match std::env::var_os("SOURCE_DATE_EPOCH") {
-            Some(_) => today,
-            None => iso.unwrap_or(today),
-        };
+        let prepared = pipeline::prepare(&self.job, config, document)?;
+        let iso = config.metadata.date.as_deref().and_then(|text| Date::iso(text.trim()));
         let written = epub::write(&epub::Book {
             document: &prepared.content,
             cited: &prepared.cited,
             config,
             source: &document.source,
             images: &prepared.images,
-            dir: document.path.parent().expect("an absolute file path has a parent"),
-            today,
-            modified,
+            files: &self.job.files,
+            today: self.today,
+            modified: options.modified.or(iso).unwrap_or(self.today),
             fallback_title: document.name().unwrap_or("Untitled"),
         })?;
         Ok(Rendered {
@@ -161,7 +206,11 @@ impl Default for PdfOptions {
 }
 
 #[derive(Default)]
-pub struct EpubOptions {}
+pub struct EpubOptions {
+    /// The day of `dcterms:modified`. Without it an ISO `date` setting decides, then `Input::today`, so the same
+    /// input gives the same bytes. A build with `SOURCE_DATE_EPOCH` passes that day.
+    pub modified: Option<Date>,
+}
 
 /// Why a job produced no output.
 #[derive(Debug)]
@@ -177,47 +226,26 @@ impl From<Vec<Diagnostic>> for Failure {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// What the documented sharing rests on: a renderer, a layout, and resolvers go between threads and are shared, a
+/// job moves to one thread and stays there.
+const _: () = {
+    const fn shared<T: Send + Sync>() {}
+    const fn moved<T: Send>() {}
+    shared::<Renderer>();
+    shared::<Layout>();
+    shared::<Input>();
+    shared::<crate::resource::FileResolver>();
+    shared::<crate::resource::MemoryResolver>();
+    shared::<crate::cancel::Cancel>();
+    moved::<Job<'static>>();
+    moved::<Configured<'static>>();
+};
 
-    fn input(text: &str) -> Input {
-        Input {
-            text: DocumentText::Single {
-                path: Path::new("/nowhere/document.md").to_owned(),
-                text: text.to_owned(),
-            },
-            theme: None,
-            overrides: Vec::new(),
-            working_dir: Path::new("/nowhere").to_owned(),
-        }
-    }
-
-    fn pages(rendered: Result<Rendered, Failure>) -> Rendered {
-        rendered.unwrap_or_else(|failure| panic!("{failure:?}"))
-    }
-
-    #[test]
-    fn the_simple_and_the_explicit_path_write_the_same_pdf() {
-        let input = input("---\ntitle: Same\ndate: 2026-01-02\n---\n\nSome text.\n");
-        let renderer = Renderer::new();
-        let simple = pages(renderer.render(&input, &PdfOptions::default()));
-        let configured = renderer.job(&input).configure().unwrap_or_else(|f| panic!("{f:?}"));
-        let layout = configured
-            .layout(&LayoutOptions::default())
-            .unwrap_or_else(|f| panic!("{f:?}"));
-        let explicit = pages(layout.pdf(&PdfOptions::default()));
-        assert!(simple.bytes.starts_with(b"%PDF"));
-        assert_eq!(simple.bytes, explicit.bytes);
-        assert_eq!(simple.parts, 1);
-    }
-
-    #[test]
-    fn errors_in_the_configuration_are_structured() {
-        let input = input("---\ntitle: [unclosed\n---\n\nText.\n");
-        let Err(Failure::Errors(errors)) = Renderer::new().job(&input).configure() else {
-            panic!("the front matter is invalid")
-        };
-        assert!(!errors.is_empty());
-    }
+/// Fails to compile when its type argument is `Sync`, because `_` then has two answers.
+trait NotSync<Answer> {
+    const HOLDS: () = ();
 }
+impl<T: ?Sized> NotSync<()> for T {}
+impl<T: ?Sized + Sync> NotSync<u8> for T {}
+const _: () = <Job<'static> as NotSync<_>>::HOLDS;
+const _: () = <Configured<'static> as NotSync<_>>::HOLDS;

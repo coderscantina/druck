@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use druck::diagnostic::{Diagnostic, show_relative_to};
 use druck::editor::{self, engine, resolved_config};
-use druck::input::{DocumentText, Input};
-use druck::resource::normalize;
-use druck::{Configured, Failure, Renderer};
+use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
+use druck::resource::{FileResolver, clock_date, normalize, source_date};
+use druck::{Failure, Renderer};
 
 pub struct Opened {
     pub path: PathBuf,
@@ -16,6 +16,14 @@ pub struct Opened {
     pub theme: Option<PathBuf>,
 }
 
+/// What a document says about itself.
+#[derive(Default)]
+struct Identity {
+    title: Option<String>,
+    authors: Vec<String>,
+    theme: Option<PathBuf>,
+}
+
 impl Opened {
     /// Reads a document's identity. A document the engine rejects still opens, under its file name, because
     /// the editor is where its problems get fixed. Only a path that does not exist is an error.
@@ -23,55 +31,68 @@ impl Opened {
         if !path.exists() {
             return Err(format!("cannot open {}: no such file or folder", path.display()));
         }
-        let (metadata, theme) = match configure(path) {
-            Ok(configured) => {
-                let (file, text) = editor::document_text(&configured);
-                let theme = engine::document_theme(file, text);
-                (Some(resolved_config::of(&configured).metadata.clone()), theme)
-            }
+        let identity = match identity(path) {
+            Ok(identity) => identity,
             Err(Failure::Errors(diagnostics)) => {
                 for diagnostic in &diagnostics {
                     eprintln!("{diagnostic}");
                 }
-                (None, None)
+                Identity::default()
             }
-            Err(Failure::Cancelled) => (None, None),
+            Err(Failure::Cancelled) => Identity::default(),
         };
         let file_name = || path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
         Ok(Self {
             path: path.to_owned(),
-            title: metadata
-                .as_ref()
-                .and_then(|metadata| metadata.title.clone())
-                .or_else(file_name)
-                .unwrap_or_default(),
-            authors: metadata.map(|metadata| metadata.authors.join(", ")).unwrap_or_default(),
-            theme,
+            title: identity.title.or_else(file_name).unwrap_or_default(),
+            authors: identity.authors.join(", "),
+            theme: identity.theme,
         })
     }
 }
 
-/// The file's configuration, with its warnings printed. Paths in messages become relative to the working
-/// directory.
-fn configure(path: &Path) -> Result<Configured, Failure> {
-    let working_dir = std::env::current_dir().map_err(|e| {
-        vec![Diagnostic::new(
-            None,
-            format!("cannot determine the working directory: {e}"),
-        )]
-    })?;
-    show_relative_to(working_dir.clone());
-    let input = Input {
-        text: DocumentText::read(&normalize(&working_dir.join(path)))?,
-        theme: None,
-        overrides: Vec::new(),
-        working_dir,
-    };
-    let configured = Renderer::new().job(&input).configure()?;
+/// The file's title, authors, and theme, with the warnings of its configuration printed.
+fn identity(path: &Path) -> Result<Identity, Failure> {
+    let resolver = FileResolver::new();
+    let renderer = Renderer::new();
+    let input = input(&resolver, path)?;
+    let configured = renderer.job(&resolver, &input).configure()?;
     for warning in configured.warnings() {
         eprintln!("{warning}");
     }
-    Ok(configured)
+    let (file, text) = editor::document_text(&configured);
+    let theme = engine::document_theme(&resolver, file, text, &theme_dirs());
+    let metadata = &resolved_config::of(&configured).metadata;
+    Ok(Identity {
+        title: metadata.title.clone(),
+        authors: metadata.authors.clone(),
+        theme,
+    })
+}
+
+fn theme_dirs() -> ThemeDirs {
+    ThemeDirs {
+        project: None,
+        shared: FileResolver::shared_themes(),
+    }
+}
+
+/// The file as an input to the engine. Paths in messages become relative to the working directory.
+fn input(resolver: &FileResolver, path: &Path) -> Result<Input, Failure> {
+    let error = |message: String| vec![Diagnostic::new(None, message)];
+    let working_dir =
+        std::env::current_dir().map_err(|e| error(format!("cannot determine the working directory: {e}")))?;
+    show_relative_to(working_dir.clone());
+    let today = match source_date().map_err(error)? {
+        Some(day) => day,
+        None => clock_date().map_err(error)?,
+    };
+    Ok(Input {
+        text: DocumentText::read(resolver, &normalize(&working_dir.join(path)))?,
+        theme: ThemeSelection::Document { dirs: theme_dirs() },
+        overrides: Overrides::default(),
+        today,
+    })
 }
 
 #[cfg(test)]
@@ -85,7 +106,13 @@ mod tests {
 
     #[test]
     fn engine_goes_from_markdown_to_pages_and_pdf() {
-        let configured = configure(&sample("report.md")).unwrap_or_else(|_| panic!("the sample loads"));
+        let resolver = FileResolver::new();
+        let renderer = Renderer::new();
+        let input = input(&resolver, &sample("report.md")).unwrap_or_else(|_| panic!("the sample reads"));
+        let configured = renderer
+            .job(&resolver, &input)
+            .configure()
+            .unwrap_or_else(|_| panic!("the sample loads"));
         let laid = configured
             .layout(&LayoutOptions::default())
             .unwrap_or_else(|_| panic!("the sample typesets"));
@@ -105,9 +132,10 @@ mod tests {
     #[test]
     fn the_theme_comes_from_the_front_matter() {
         let path = Path::new("/project/book.md");
-        let theme = engine::document_theme(path, "---\ntheme: themes/print.json\n---\n\nText\n");
+        let (resolver, dirs) = (FileResolver::new(), ThemeDirs::default());
+        let theme = engine::document_theme(&resolver, path, "---\ntheme: themes/print.json\n---\n\nText\n", &dirs);
         assert_eq!(theme, Some(PathBuf::from("/project/themes/print.json")));
-        assert_eq!(engine::document_theme(path, "Text\n"), None);
+        assert_eq!(engine::document_theme(&resolver, path, "Text\n", &dirs), None);
     }
 
     #[test]

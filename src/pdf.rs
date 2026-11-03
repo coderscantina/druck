@@ -801,7 +801,7 @@ mod tests {
         write(output, fonts, metadata, &settings)
     }
 
-    fn fonts() -> Fonts {
+    fn fonts() -> Fonts<'static> {
         let regular = FaceFile {
             resource: Resource {
                 origin: Origin::Bundled,

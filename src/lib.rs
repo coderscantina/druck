@@ -49,3 +49,5 @@ pub mod editor;
 
 #[cfg(test)]
 mod acceptance_tests;
+#[cfg(test)]
+mod renderer_tests;

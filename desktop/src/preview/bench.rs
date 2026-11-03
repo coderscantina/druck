@@ -114,11 +114,10 @@ impl Bench {
         self.published = Some(Instant::now());
         let timing = layout.timing;
         eprintln!(
-            "layout: {} pages in {:?} (configure {:?}, fonts {:?}, typeset {:?}, fingerprints {:?})",
+            "layout: {} pages in {:?} (configure {:?}, typeset {:?}, fingerprints {:?})",
             layout.output.pages.len(),
             self.requested.elapsed(),
             timing.configure,
-            timing.fonts,
             timing.typeset,
             timing.fingerprints,
         );

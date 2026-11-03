@@ -1079,6 +1079,40 @@ The facade follows [the design](PHASE_2_API.md). These go beyond it or differ fr
 - **Items only the desktop reads carry `#[cfg_attr(not(feature = "editor"), allow(dead_code))]`,** narrowly rather than for the whole crate. CI gains a `cargo clippy --all-features` line, because that build is the one that finds code nothing uses.
 - **`druck-desktop` depends on `druck` with `default-features = false`,** so the app's build does not compile the CLI's feature. It has its own `clap`.
 
+## 2026-11-03: Phase 2 step 2, choices beyond the design
+
+The resolver and renderer follow [the design](PHASE_2_API.md). These go beyond it or differ from it.
+
+- **`ResolveError::NotFound` carries the resolver's own message.** The engine prints it in `cannot read file: {e}`, so `No such file or directory (os error 2)` stays as it was on every platform. The design's unit variant would have changed the CLI's stderr.
+- **`Bytes` wraps `krilla::Data`, not `Arc<[u8]>`.** krilla wants a `Data`, which is an `Arc` over anything that gives bytes, so a file read into a `Vec` and a bundled `&'static [u8]` go through without a copy. `MemoryResolver::insert` still takes `impl Into<Arc<[u8]>>`.
+- **The content hash is std's SipHash 1-3 with a key of this process.** It measures 3.4 GB/s here, so no hash crate is needed. The key means nobody can prepare a file offline that collides with another. Hashes never reach output. A bundled file hashes its path, since its path fixes its contents, so bundled fonts cost no hashing per job.
+- **A theme file is read through `Origin::Theme(its folder)`,** whatever selected it, so a memory resolver holds a theme and its assets under one origin. Nothing else is rebased.
+- **`ThemeSelection::Name` has a `base`.** A bare name also means an exact local file, as before, between the project and the shared folder, and that needs a folder. `ThemeSelection::asked` makes the `--theme` choice between `Name` and `File`.
+- **`Overrides::parse` and `from_json` take the working directory.** Relative paths in overrides resolve against `Origin::WorkingDir`, and the design's signature had nowhere to get it from.
+- **`EpubOptions::modified`.** `dcterms:modified` depended on whether `SOURCE_DATE_EPOCH` is set, which the core may no longer read. The caller passes the day.
+- **`resource.rs` holds what touches the machine,** for both clients: `FileResolver`, `FileResolver::shared_themes`, `source_date`, and `clock_date`. The CLI and the desktop would otherwise each copy them.
+- **`InstalledFace` is `{ path, index, weight, italic }`.** `FileResolver::installed` applies the fontdb rules (the width closest to normal, italic before oblique, first path wins). The engine reads the files through the resolver and expands variable ones to their instances, so a resolver of another kind supplies the same thing. The lookup stays in the layout stage, because `check --print-config` and an EPUB never needed installed fonts.
+- **A face's file name lives in the job's `FontSet`, not in `Face`.** The same bytes can sit under another name in the next job, and a message must name this job's file. Section 5 of the design has `Face::file`; step 4 should take it from the set.
+- **Reuse is tracked by job number.** Each job takes the next number and, when it starts, drops what neither of the two jobs before it used. That leaves the same table as the design's "when a job ends" without a `Drop` that has to know what ended. With three or more themes alternating, faces get rebuilt: correct, without the gain.
+- **An image that would pass the 256 MB budget is used and not kept.** Others are not evicted for it. The cost is the file plus 4 bytes per pixel, since krilla keeps decoded samples.
+- **Configuration reads every resource it names,** including theme images no layout shows, because that replaces the existence check. `check --print-config` now reads fonts.
+- **Desktop:** the painter is kept while the `FontSet` compares equal, which holds when the renderer returned the same faces, so a replaced font makes a new painter and new page images. `FontRequest` is gone. The galley's fonts are copied once per content hash for `add_fonts`, which needs `'static` or owned bytes. `Timing::fonts` is gone, because `layout` now covers it.
+
+CLI behaviour that changes, in cases outside the guard:
+
+- An invalid `SOURCE_DATE_EPOCH` fails first, including for `check --print-config`, which did not read it before. The caller must read it to build an `Input`.
+- A bad `--set` is reported before a bad front matter when a document has both, since overrides are parsed to build the input.
+- A font, image, or bibliography that exists and cannot be read now fails while configuring, as `cannot read {resource}: {reason}` with its property, rather than later with a message per kind.
+- An image path naming a folder says `image not found` rather than `cannot read image ... Is a directory`, because a folder is not a file for every other resource either.
+- Document image paths are normalized without touching the filesystem, as every other resource path already was, so `link/../x.png` through a symbolic link resolves differently.
+
+Where the design was wrong or contradicts itself:
+
+- Section 10 asks for a test that "the renderer holds no face after a job whose layout was dropped". Section 4's two-job rule keeps those faces, and the desktop needs that between refreshes. Section 4 is implemented, with a test that faces go after two jobs that do not use them and that a held layout keeps its own.
+- Section 4's "microseconds per face" holds: about 8 microseconds per Libertinus face and about 30 per Fira Code face, 230 microseconds for the corpus's 11 faces. A render now does it about three times per face (once to key the face, once for shaping, once for the PDF writer's space glyph), which does not show next to a layout of 275 ms.
+
+Temporary until later steps: `editor::engine::into_parts`, the PDF writer's per-run shaping of a space, `show_relative_to`, and `shown`.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

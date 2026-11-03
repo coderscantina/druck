@@ -4,11 +4,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::config::resolved::Config;
+use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::page;
 use crate::pipeline::{self, DocumentFile};
 use crate::renderer::{Failure, PdfOptions, Rendered};
-use crate::text::Fonts;
+use crate::text::FontSet;
 
 pub use crate::config::values::Pt;
 
@@ -16,8 +17,9 @@ pub use crate::config::values::Pt;
 pub struct Layout {
     pub(crate) config: Arc<Config>,
     pub(crate) document: Arc<DocumentFile>,
-    pub(crate) fonts: Fonts,
+    pub(crate) fonts: FontSet,
     pub(crate) laid: page::Output,
+    pub(crate) today: Date,
 }
 
 impl Layout {
@@ -33,7 +35,9 @@ impl Layout {
             bleed: options.bleed,
             crop_marks: options.crop_marks,
         };
-        let bytes = pipeline::write_pdf(&self.config, &self.document, &self.fonts, &self.laid, print)?;
+        // Temporary: the PDF writer still shapes a space per run, until it reads the display list alone.
+        let fonts = self.fonts.fonts();
+        let bytes = pipeline::write_pdf(&self.config, &self.document, &fonts, &self.laid, print, self.today)?;
         let used: BTreeSet<_> = self
             .laid
             .pages

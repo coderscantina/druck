@@ -133,7 +133,8 @@ struct Shell {
     refresh: Task<()>,
     /// The body style the galley shows, and the font files already given to the toolkit.
     body: Option<BodyStyle>,
-    fonts: HashSet<*const u8>,
+    /// The content hashes of the font files the toolkit has.
+    fonts: HashSet<u64>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -218,8 +219,8 @@ impl Shell {
         let new_files: Vec<Cow<'static, [u8]>> = body
             .files
             .iter()
-            .filter(|file| self.fonts.insert(file.as_ptr()))
-            .map(|file| Cow::Borrowed(*file))
+            .filter(|file| self.fonts.insert(file.hash()))
+            .map(|file| Cow::Owned(file.to_vec()))
             .collect();
         if !new_files.is_empty()
             && let Err(error) = cx.text_system().add_fonts(new_files)

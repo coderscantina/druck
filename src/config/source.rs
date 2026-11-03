@@ -158,16 +158,21 @@ pub struct Resource {
     pub path: String,
 }
 
+impl Origin {
+    /// The file `path` means from this origin, or `None` for bundled resources.
+    pub fn file(&self, path: &str) -> Option<PathBuf> {
+        match self {
+            Self::Bundled => None,
+            Self::Theme(dir) | Self::Document(dir) | Self::WorkingDir(dir) => Some(normalize(&dir.join(path))),
+            Self::Installed => Some(PathBuf::from(path)),
+        }
+    }
+}
+
 impl Resource {
     /// The file to read, or `None` for bundled resources.
     pub fn file(&self) -> Option<PathBuf> {
-        match &self.origin {
-            Origin::Bundled => None,
-            Origin::Theme(dir) | Origin::Document(dir) | Origin::WorkingDir(dir) => {
-                Some(normalize(&dir.join(&self.path)))
-            }
-            Origin::Installed => Some(PathBuf::from(&self.path)),
-        }
+        self.origin.file(&self.path)
     }
 }
 

@@ -16,7 +16,6 @@ mod tests;
 mod xml;
 mod zip;
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -24,7 +23,7 @@ use self::content::{Context, Item, Picture, file_name};
 use self::pages::Landmark;
 use crate::citations::Cited;
 use crate::config::resolved::Config;
-use crate::config::source::{Resource, Source};
+use crate::config::source::{Origin, Resource, Source};
 use crate::config::theme::{Lang, WideBlock};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
@@ -32,6 +31,7 @@ use crate::document::{Block, Document};
 use crate::image::Image;
 use crate::layout::fields::Fields;
 use crate::layout::structure::{Structure, plain};
+use crate::resource::{Bytes, Files};
 
 /// What an EPUB is made from.
 pub struct Book<'a> {
@@ -39,9 +39,10 @@ pub struct Book<'a> {
     pub cited: &'a Cited,
     pub config: &'a Config,
     pub source: &'a Source,
-    /// The decoded [`Document::images`], whose files are relative to `dir`.
+    /// The decoded [`Document::images`].
     pub images: &'a [Image],
-    pub dir: &'a Path,
+    /// The fonts and images the configuration names, as read.
+    pub files: &'a Files,
     /// The build date, for `{build-date}` and `{year}`.
     pub today: Date,
     /// The day of `dcterms:modified`.
@@ -62,11 +63,11 @@ pub struct Written {
 pub struct Asset {
     pub path: String,
     pub media_type: &'static str,
-    pub data: Cow<'static, [u8]>,
+    pub data: Bytes,
 }
 
-/// Writes `book` as an EPUB. The content is checked as layout checks it; images and fonts are read again
-/// to be embedded as they are.
+/// Writes `book` as an EPUB. The content is checked as layout checks it; images and fonts are embedded as
+/// they were read.
 pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
     let Book { document, config, .. } = *book;
     let fields = Fields::new(document, config, book.today);
@@ -90,12 +91,12 @@ pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
         vec![Diagnostic::new(Some(book.source.clone()), message).property(Some("meta.isbn".to_owned()))]
     })?;
 
-    let (pictures, mut assets) = images(book)?;
-    let (theme_images, theme_assets) = theme_images(config)?;
+    let (pictures, mut assets) = images(book);
+    let (theme_images, theme_assets) = theme_images(config, book.files)?;
     assets.extend(theme_assets);
-    let cover = cover(config)?;
+    let cover = cover(config, book.files)?;
     let (rules, families) = css::rules(config);
-    let fonts = fonts::embed(config, &families)?;
+    let fonts = fonts::embed(config, &families, book.files)?;
     let stylesheet = css::font_faces(&fonts.faces) + &rules;
     assets.extend(fonts.files);
 
@@ -257,7 +258,7 @@ pub fn write(book: &Book) -> Result<Written, Vec<Diagnostic>> {
 
 /// The document images as pictures and files. A picture is as wide as its natural width in the PDF's text
 /// width, so images keep their size relative to the text.
-fn images(book: &Book) -> Result<(Vec<Picture>, Vec<Asset>), Vec<Diagnostic>> {
+fn images(book: &Book) -> (Vec<Picture>, Vec<Asset>) {
     let page = &book.config.page;
     let frame = if page.wide.contains(&WideBlock::Figure) {
         page.text_width()
@@ -266,40 +267,28 @@ fn images(book: &Book) -> Result<(Vec<Picture>, Vec<Asset>), Vec<Diagnostic>> {
     };
     let mut pictures = Vec::new();
     let mut assets = Vec::new();
-    let mut errors = Vec::new();
-    for (index, (file, image)) in book.document.images.iter().zip(book.images).enumerate() {
-        match std::fs::read(book.dir.join(&file.path)) {
-            Ok(data) => {
-                let (media_type, extension) = image_type(&data);
-                let path = format!("images/image-{}.{extension}", index + 1);
-                pictures.push(Picture {
-                    path: path.clone(),
-                    width: (image.size().0.0 / frame.0 * 100.0).min(100.0),
-                });
-                assets.push(Asset {
-                    path,
-                    media_type,
-                    data: Cow::Owned(data),
-                });
-            }
-            Err(e) => {
-                let message = format!("cannot read image {}: {e}", file.path);
-                errors.push(Diagnostic::new(Some(book.source.clone()), message).at(file.at.line, file.at.column));
-            }
-        }
+    for (index, image) in book.images.iter().enumerate() {
+        let data = image.source();
+        let (media_type, extension) = image_type(data);
+        let path = format!("images/image-{}.{extension}", index + 1);
+        pictures.push(Picture {
+            path: path.clone(),
+            width: (image.size().0.0 / frame.0 * 100.0).min(100.0),
+        });
+        assets.push(Asset {
+            path,
+            media_type,
+            data: data.clone(),
+        });
     }
-    if errors.is_empty() {
-        Ok((pictures, assets))
-    } else {
-        Err(errors)
-    }
+    (pictures, assets)
 }
 
 /// The EPUB path of each theme image by resource.
 type ThemePaths = HashMap<Resource, String>;
 
 /// The theme images the book shows, with their EPUB paths.
-fn theme_images(config: &Config) -> Result<(ThemePaths, Vec<Asset>), Vec<Diagnostic>> {
+fn theme_images(config: &Config, files: &Files) -> Result<(ThemePaths, Vec<Asset>), Vec<Diagnostic>> {
     let used = crate::layout::theme_images(config);
     let mut paths = HashMap::new();
     let mut assets = Vec::new();
@@ -307,25 +296,21 @@ fn theme_images(config: &Config) -> Result<(ThemePaths, Vec<Asset>), Vec<Diagnos
         if paths.contains_key(resource) {
             continue;
         }
-        let data = read(resource, &format!("images.{name}"))?;
+        let data = read(files, resource, &format!("images.{name}"))?;
         let (media_type, extension) = image_type(&data);
         let path = format!("images/theme-{}.{extension}", paths.len() + 1);
         paths.insert(resource.clone(), path.clone());
-        assets.push(Asset {
-            path,
-            media_type,
-            data: Cow::Owned(data),
-        });
+        assets.push(Asset { path, media_type, data });
     }
     Ok((paths, assets))
 }
 
 /// The cover image from front matter `cover`, checked to be a PNG, JPEG, or SVG image.
-fn cover(config: &Config) -> Result<Option<Asset>, Vec<Diagnostic>> {
+fn cover(config: &Config, files: &Files) -> Result<Option<Asset>, Vec<Diagnostic>> {
     let Some(resource) = &config.cover_file else {
         return Ok(None);
     };
-    let data = read(resource, "cover")?;
+    let data = read(files, resource, "cover")?;
     let extension = Path::new(&resource.path)
         .extension()
         .and_then(|e| e.to_str())
@@ -338,18 +323,18 @@ fn cover(config: &Config) -> Result<Option<Asset>, Vec<Diagnostic>> {
     Ok(Some(Asset {
         path: format!("images/cover.{extension}"),
         media_type,
-        data: Cow::Owned(data),
+        data,
     }))
 }
 
-fn read(resource: &Resource, property: &str) -> Result<Vec<u8>, Vec<Diagnostic>> {
-    let path = resource.file().ok_or_else(|| {
-        vec![Diagnostic::new(None, format!("{resource} is not bundled")).property(Some(property.to_owned()))]
-    })?;
-    std::fs::read(path).map_err(|e| {
-        let message = format!("cannot read image {resource}: {e}");
-        vec![Diagnostic::new(None, message).property(Some(property.to_owned()))]
-    })
+fn read(files: &Files, resource: &Resource, property: &str) -> Result<Bytes, Vec<Diagnostic>> {
+    if resource.origin == Origin::Bundled {
+        let message = format!("{resource} is not bundled");
+        return Err(vec![Diagnostic::new(None, message).property(Some(property.to_owned()))]);
+    }
+    files
+        .get(resource)
+        .map_err(|message| vec![Diagnostic::new(None, message).property(Some(property.to_owned()))])
 }
 
 /// The media type and extension of an image that [`Image::decode`] accepted.

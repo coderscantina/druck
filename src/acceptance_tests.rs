@@ -7,9 +7,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use crate::page::{Item, Output};
-use crate::pdf::Print;
-use crate::pipeline::{self, Request};
+use crate::renderer::{LayoutOptions, PdfOptions, Renderer};
+use crate::resource::FileResolver;
 
 const SAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/samples");
 
@@ -58,22 +59,35 @@ struct Rendered {
 
 fn render(variant: &Variant) -> Rendered {
     let source = fs::read_to_string(&variant.document).expect("sample");
-    let request = Request {
-        input: &variant.document,
-        theme: variant.theme.as_deref(),
-        overrides: &[],
+    let resolver = FileResolver::new();
+    let input = Input {
+        text: DocumentText::read(&resolver, &variant.document).expect("sample"),
+        theme: match &variant.theme {
+            Some(path) => ThemeSelection::File { path: path.clone() },
+            None => ThemeSelection::Document {
+                dirs: ThemeDirs::default(),
+            },
+        },
+        overrides: Overrides::default(),
+        today: Date::from_unix(0),
     };
-    let (config, document) = pipeline::configure(&request, Path::new(SAMPLES), source.clone())
-        .unwrap_or_else(|errors| panic!("{}: {errors:?}", variant.name));
-    let (fonts, laid) =
-        pipeline::typeset(&config, &document).unwrap_or_else(|errors| panic!("{}: {errors:?}", variant.name));
-    let print = Print {
-        bleed: crate::config::values::Pt(0.0),
-        crop_marks: false,
-    };
-    let pdf = pipeline::write_pdf(&config, &document, &fonts, &laid, print)
-        .unwrap_or_else(|errors| panic!("{}: {errors:?}", variant.name));
-    Rendered { source, laid, pdf }
+    let renderer = Renderer::new();
+    let configured = renderer
+        .job(&resolver, &input)
+        .configure()
+        .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name));
+    let layout = configured
+        .layout(&LayoutOptions::default())
+        .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name));
+    let pdf = layout
+        .pdf(&PdfOptions::default())
+        .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name))
+        .bytes;
+    Rendered {
+        source,
+        laid: layout.laid,
+        pdf,
+    }
 }
 
 type Check = fn(&Variant, &Rendered) -> Vec<String>;

@@ -25,21 +25,26 @@ pub mod resolved_config {
     pub use crate::config::theme::{Face, FontStyle, Lang, Weight};
     pub use crate::config::values::Color;
 
-    pub fn of(configured: &crate::Configured) -> &Config {
+    pub fn of<'a>(configured: &'a crate::Configured<'_>) -> &'a Config {
         &configured.config
     }
 }
 
 /// The document's absolute path and its text.
-pub fn document_text(configured: &crate::Configured) -> (&Path, &str) {
+pub fn document_text<'a>(configured: &'a crate::Configured<'_>) -> (&'a Path, &'a str) {
     (&configured.document.path, &configured.document.text)
 }
 
-/// Page and glyph data and font reuse for the desktop painter. Temporary: `Layout`, `Face`, and `Picture`
-/// replace all of this once the renderer owns its fonts and the display list is public.
+/// Page and glyph data for the desktop painter. Temporary: `Layout`, `Face`, and `Picture` replace all of this once
+/// the display list is public.
 pub mod engine {
     pub use crate::image::{Image, Pixels};
     pub use crate::page::{Item, Output, Page, Rect};
-    pub use crate::pipeline::{Request, configure, document_theme, load_fonts, typeset_with};
-    pub use crate::text::{FaceId, Fonts, ShapedRun};
+    pub use crate::pipeline::{document_theme, theme_file};
+    pub use crate::text::{FaceId, FontSet, Fonts, ShapedRun};
+
+    /// A layout's pages and the fonts its runs name.
+    pub fn into_parts(layout: crate::output::Layout) -> (Output, FontSet) {
+        (layout.laid, layout.fonts)
+    }
 }

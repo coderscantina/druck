@@ -1,7 +1,9 @@
-//! Font families looked up among the fonts installed on the machine. Only the CLI looks there, so
+//! Font families looked up among the fonts installed on the machine. Only [`FileResolver`] looks there, so
 //! configuration and layout never depend on the system.
+//!
+//! [`FileResolver`]: crate::resource::FileResolver
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use fontdb::{Database, FaceInfo, Source, Stretch, Style};
 
@@ -9,30 +11,39 @@ use crate::config::resolved::{FaceFile, FontFiles};
 use crate::config::source::{Origin, Resource};
 use crate::config::theme::{Face, FontStyle, Weight};
 use crate::diagnostic::Diagnostic;
+use crate::resource::{Bytes, InstalledFace, Resolver};
 
-/// The fonts installed in the system's font directories.
-pub fn system() -> Database {
-    let mut database = Database::new();
-    database.load_system_fonts();
-    database
+/// The faces of installed families, with the bytes of their files.
+#[derive(Default)]
+pub struct Found {
+    pub families: BTreeMap<String, FontFiles>,
+    pub files: HashMap<Resource, Bytes>,
 }
 
 /// The faces of every family in `requests`, which maps a family name to the faces styles request
 /// and the first property requesting each. Each requested face must be installed; the family's other
 /// faces serve inline emphasis and strong text. Errors name the family and face searched for.
 pub fn lookup(
-    database: &Database,
+    resolver: &dyn Resolver,
     requests: &BTreeMap<String, BTreeMap<Face, String>>,
-) -> Result<BTreeMap<String, FontFiles>, Vec<Diagnostic>> {
-    let mut found = BTreeMap::new();
+) -> Result<Found, Vec<Diagnostic>> {
+    let mut found = Found::default();
     let mut errors = Vec::new();
     for (family, requested) in requests {
-        let faces = family_faces(database, family);
+        let (first, property) = requested.first_key_value().expect("a family is requested for a face");
+        let installed = match resolver.installed(family) {
+            Ok(installed) => installed,
+            Err(e) => {
+                let message = format!("cannot look up installed font family \"{family}\": {e}");
+                errors.push(Diagnostic::new(None, message).property(Some(property.clone())));
+                continue;
+            }
+        };
+        let faces = supported_faces(resolver, &installed, &mut found.files);
         if faces.is_empty() {
-            let (face, property) = requested.first_key_value().expect("a family is requested for a face");
             let message = format!(
                 "font family \"{family}\" is not defined in fonts and not installed; searched the installed fonts \
-                 for \"{family}\" {face}"
+                 for \"{family}\" {first}"
             );
             errors.push(Diagnostic::new(None, message).property(Some(property.clone())));
             continue;
@@ -45,15 +56,66 @@ pub fn lookup(
             );
             errors.push(Diagnostic::new(None, message).property(Some(property.clone())));
         }
-        found.insert(family.clone(), faces);
+        found.families.insert(family.clone(), faces);
     }
     if errors.is_empty() { Ok(found) } else { Err(errors) }
+}
+
+/// The faces of `installed` with the instances a variable file supports. A file that cannot be read or
+/// parsed supplies none. The first file to supply a face keeps it.
+fn supported_faces(
+    resolver: &dyn Resolver,
+    installed: &[InstalledFace],
+    files: &mut HashMap<Resource, Bytes>,
+) -> FontFiles {
+    let mut faces = FontFiles::new();
+    for face in installed {
+        let key = Face {
+            weight: Weight::of_font(face.weight),
+            style: if face.italic {
+                FontStyle::Italic
+            } else {
+                FontStyle::Normal
+            },
+        };
+        let resource = Resource {
+            origin: Origin::Installed,
+            path: face.path.clone(),
+        };
+        let data = match files.get(&resource) {
+            Some(data) => data.clone(),
+            None => match resolver.read(&resource.origin, &resource.path) {
+                Ok(data) => {
+                    files.insert(resource.clone(), data.clone());
+                    data
+                }
+                Err(_) => continue,
+            },
+        };
+        let Some(font) = rustybuzz::Face::from_slice(&data, face.index) else {
+            continue;
+        };
+        let supported = if font.is_variable() {
+            crate::text::variations::faces(&font, key)
+        } else {
+            vec![key]
+        };
+        for key in supported {
+            faces.entry(key).or_insert_with(|| FaceFile {
+                resource: resource.clone(),
+                index: face.index,
+                // This file is already expanded to its supported instances.
+                variable: false,
+            });
+        }
+    }
+    faces
 }
 
 /// The installed faces whose family name is `family`, ignoring ASCII case. Only the width closest
 /// to normal counts, so condensed faces do not stand in for regular ones. Where two files hold the
 /// same face, italic beats oblique, then the first path and index win.
-fn family_faces(database: &Database, family: &str) -> FontFiles {
+pub fn family_faces(database: &Database, family: &str) -> Vec<InstalledFace> {
     let mut faces: Vec<(&FaceInfo, &str)> = database
         .faces()
         .filter(|face| face.families.iter().any(|(name, _)| name.eq_ignore_ascii_case(family)))
@@ -67,52 +129,29 @@ fn family_faces(database: &Database, family: &str) -> FontFiles {
     faces.retain(|(face, _)| Some(distance(face)) == width);
     faces.sort_by_key(|(face, path)| (face.style == Style::Oblique, *path, face.index));
 
-    let mut files = FontFiles::new();
-    for (face, path) in faces {
-        let key = Face {
-            weight: Weight::of_font(face.weight.0),
-            style: match face.style {
-                Style::Normal => FontStyle::Normal,
-                Style::Italic | Style::Oblique => FontStyle::Italic,
-            },
-        };
-        let supported = database
-            .with_face_data(face.id, |data, index| {
-                let font = rustybuzz::Face::from_slice(data, index)?;
-                Some(if font.is_variable() {
-                    crate::text::variations::faces(&font, key)
-                } else {
-                    vec![key]
-                })
-            })
-            .flatten()
-            .unwrap_or_default();
-        for key in supported {
-            files.entry(key).or_insert_with(|| FaceFile {
-                resource: Resource {
-                    origin: Origin::Installed,
-                    path: path.to_owned(),
-                },
-                index: face.index,
-                // Lookup already expanded this file to its supported instances.
-                variable: false,
-            });
-        }
-    }
-    files
+    faces
+        .into_iter()
+        .map(|(face, path)| InstalledFace {
+            path: path.to_owned(),
+            index: face.index,
+            weight: face.weight.0,
+            italic: face.style != Style::Normal,
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resource::FileResolver;
     use crate::text::bundled;
     use crate::text::tests::collection;
 
     /// The bundled Libertinus fonts stand in for installed ones.
-    fn fixture() -> Database {
+    fn fixture() -> FileResolver {
         let mut database = Database::new();
         database.load_fonts_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts"));
-        database
+        FileResolver::with_fonts(database)
     }
 
     fn face(name: &str) -> Face {
@@ -127,7 +166,7 @@ mod tests {
     #[test]
     fn finds_every_face_of_a_family_by_weight_and_italic() {
         let found = lookup(&fixture(), &requests("libertinus serif", &["bold-italic"])).expect("installed");
-        let faces = &found["libertinus serif"];
+        let faces = &found.families["libertinus serif"];
         let names: Vec<_> = faces.keys().map(Face::to_string).collect();
         assert_eq!(names, ["regular", "italic", "bold", "bold-italic"]);
         let file = &faces[&face("bold-italic")];
@@ -142,8 +181,11 @@ mod tests {
     fn discovers_variable_weight_ranges_and_separate_italic_files() {
         let mut database = Database::new();
         database.load_fonts_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fonts"));
-        let found = lookup(&database, &requests("Public Sans", &["300", "900-italic"])).unwrap();
-        let faces = &found["Public Sans"];
+        let resolver = FileResolver::with_fonts(database);
+        let Ok(found) = lookup(&resolver, &requests("Public Sans", &["300", "900-italic"])) else {
+            panic!("installed")
+        };
+        let faces = &found.families["Public Sans"];
         assert_eq!(faces.len(), 18);
         assert!(faces[&face("300")].resource.path.ends_with("PublicSans.ttf"));
         assert!(
@@ -152,7 +194,7 @@ mod tests {
                 .path
                 .ends_with("PublicSans-Italic.ttf")
         );
-        let fonts = crate::text::Fonts::from_files(&found).unwrap_or_else(|errors| panic!("{errors:?}"));
+        let fonts = crate::text::Fonts::from_files(&found.families).unwrap_or_else(|errors| panic!("{errors:?}"));
         let light = fonts.face("Public Sans", Weight::of_font(300), FontStyle::Normal);
         let black = fonts.face("Public Sans", Weight::of_font(900), FontStyle::Normal);
         assert_ne!(
@@ -177,7 +219,9 @@ mod tests {
 
     #[test]
     fn reports_a_missing_family_or_face_with_what_was_searched_for() {
-        let errors = lookup(&fixture(), &requests("Nope Sans", &["500"])).unwrap_err();
+        let errors = lookup(&fixture(), &requests("Nope Sans", &["500"]))
+            .err()
+            .expect("not installed");
         assert_eq!(errors[0].property.as_deref(), Some("styles.body.font"));
         assert_eq!(
             errors[0].message,
@@ -185,7 +229,9 @@ mod tests {
              for \"Nope Sans\" 500"
         );
 
-        let errors = lookup(&fixture(), &requests("Libertinus Serif", &["regular", "300-italic"])).unwrap_err();
+        let errors = lookup(&fixture(), &requests("Libertinus Serif", &["regular", "300-italic"]))
+            .err()
+            .expect("no such face");
         assert_eq!(errors.len(), 1);
         assert_eq!(
             errors[0].message,
@@ -204,9 +250,11 @@ mod tests {
         std::fs::write(&path, collection(&[regular, bold])).unwrap();
         let mut database = Database::new();
         database.load_fonts_dir(&dir);
-        let found = lookup(&database, &requests("Libertinus Serif", &["bold"])).expect("installed");
+        let resolver = FileResolver::with_fonts(database);
+        let found = lookup(&resolver, &requests("Libertinus Serif", &["bold"]));
         std::fs::remove_dir_all(&dir).unwrap();
-        let bold = &found["Libertinus Serif"][&face("bold")];
+        let Ok(found) = found else { panic!("installed") };
+        let bold = &found.families["Libertinus Serif"][&face("bold")];
         assert_eq!(bold.index, 1);
         assert!(bold.resource.path.ends_with("Serif.ttc"), "{bold:?}");
     }

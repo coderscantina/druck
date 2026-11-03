@@ -325,7 +325,7 @@ struct Pass<'a> {
     theme_images: &'a HashMap<Resource, Image>,
     config: &'a Config,
     fields: &'a Fields<'a>,
-    fonts: &'a Fonts,
+    fonts: &'a Fonts<'a>,
     source: &'a Source,
     structure: &'a Structure,
     notes: &'a NoteStyles,
@@ -610,7 +610,7 @@ impl<'a> Frame<'a> {
 struct Flow<'a> {
     config: &'a Config,
     fields: &'a Fields<'a>,
-    fonts: &'a Fonts,
+    fonts: &'a Fonts<'a>,
     source: &'a Source,
     cited: &'a Cited,
     images: &'a [Image],

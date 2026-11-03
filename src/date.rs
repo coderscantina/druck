@@ -1,9 +1,4 @@
-//! The day of the run, for `{build-date}` and `{year}`.
-//!
-//! It is the UTC day of the system clock, or of `SOURCE_DATE_EPOCH` when set, so builds that must give
-//! the same bytes can fix it.
-
-use std::time::{SystemTime, UNIX_EPOCH};
+//! Days of the calendar, for `{build-date}` and `{year}`. The caller says which day a run happens on.
 
 use crate::config::theme::Lang;
 
@@ -47,22 +42,6 @@ pub struct Date {
 }
 
 impl Date {
-    /// The UTC day of `SOURCE_DATE_EPOCH`, if set, else of the system clock.
-    pub fn today() -> Result<Self, String> {
-        let seconds = match std::env::var("SOURCE_DATE_EPOCH") {
-            Ok(value) => value.trim().parse::<i64>().map_err(|_| {
-                format!("SOURCE_DATE_EPOCH must be a whole number of seconds since 1970, not \"{value}\"")
-            })?,
-            Err(_) => {
-                let elapsed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|_| "the system clock is set before 1970".to_owned())?;
-                i64::try_from(elapsed.as_secs()).map_err(|_| "the system clock is out of range".to_owned())?
-            }
-        };
-        Ok(Self::from_unix(seconds))
-    }
-
     /// The day written as `YYYY-MM-DD`, if `text` is one and the day exists.
     pub fn iso(text: &str) -> Option<Self> {
         let number = |part: &str, digits: usize| {

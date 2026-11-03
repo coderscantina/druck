@@ -7,9 +7,9 @@ use clap::error::ErrorKind;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
 use druck::diagnostic::{Diagnostic, show_relative_to, shown};
-use druck::input::{DocumentText, Input, MANIFEST, Project};
+use druck::input::{Date, DocumentText, Input, MANIFEST, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::output::Pt;
-use druck::resource::normalize;
+use druck::resource::{FileResolver, clock_date, normalize, source_date};
 use druck::{Configured, EpubOptions, Failure, LayoutOptions, PdfOptions, Renderer};
 
 /// Typeset Markdown documents as PDF and EPUB.
@@ -65,6 +65,9 @@ struct InputArgs {
 /// A document ready to configure, with what its export or file location decides.
 struct Job {
     input: Input,
+    working_dir: PathBuf,
+    /// The day `SOURCE_DATE_EPOCH` fixes, if it is set.
+    source_date: Option<Date>,
     /// The document or manifest, for messages.
     path: PathBuf,
     /// Where a render writes without `-o`.
@@ -79,9 +82,9 @@ struct Job {
 }
 
 impl Job {
-    fn open(args: &InputArgs) -> Result<Self, Failure> {
+    fn open(args: &InputArgs, resolver: &FileResolver) -> Result<Self, Failure> {
         if args.input.is_dir() {
-            return Self::open_project(args);
+            return Self::open_project(args, resolver);
         }
         if args.export.is_some() {
             usage_error("--export needs a project folder, not a single file");
@@ -89,9 +92,12 @@ impl Job {
         let working_dir = current_dir()?;
         show_relative_to(working_dir.clone());
         let path = normalize(&working_dir.join(&args.input));
-        let text = DocumentText::read(&path)?;
+        let text = DocumentText::read(resolver, &path)?;
+        let (input, source_date) = args.input(text, &working_dir, None)?;
         Ok(Self {
-            input: args.input(text, working_dir),
+            input,
+            working_dir,
+            source_date,
             output: path.with_extension("pdf"),
             path,
             create_folder: false,
@@ -101,11 +107,11 @@ impl Job {
         })
     }
 
-    fn open_project(args: &InputArgs) -> Result<Self, Failure> {
+    fn open_project(args: &InputArgs, resolver: &FileResolver) -> Result<Self, Failure> {
         let working_dir = current_dir()?;
         show_relative_to(working_dir.clone());
         let dir = normalize(&working_dir.join(&args.input));
-        let project = Project::open(&dir)?;
+        let project = Project::open(resolver, &dir)?;
         for warning in project.warnings() {
             eprintln!("{warning}");
         }
@@ -119,8 +125,11 @@ impl Job {
             let file = name.or(folder).unwrap_or("document");
             dir.join("build").join(format!("{file}.pdf"))
         });
+        let (input, source_date) = args.input(text, &working_dir, Some(dir.clone()))?;
         Ok(Self {
-            input: args.input(text, working_dir),
+            input,
+            working_dir,
+            source_date,
             path: dir.join(MANIFEST),
             output,
             create_folder: true,
@@ -130,9 +139,15 @@ impl Job {
         })
     }
 
+    fn epub_options(&self) -> EpubOptions {
+        EpubOptions {
+            modified: self.source_date,
+        }
+    }
+
     /// Resolves the configuration, printing its warnings, and checks a final export.
-    fn configure(&self, renderer: &Renderer) -> Result<Configured, Failure> {
-        let configured = renderer.job(&self.input).configure()?;
+    fn configure<'r>(&'r self, renderer: &'r Renderer, resolver: &'r FileResolver) -> Result<Configured<'r>, Failure> {
+        let configured = renderer.job(resolver, &self.input).configure()?;
         for warning in configured.warnings() {
             eprintln!("{warning}");
         }
@@ -144,13 +159,35 @@ impl Job {
 }
 
 impl InputArgs {
-    fn input(&self, text: DocumentText, working_dir: PathBuf) -> Input {
-        Input {
+    /// The input for `text`, with the day `SOURCE_DATE_EPOCH` fixes beside it, if it is set. `project` is the
+    /// folder of a project document, whose own themes come first.
+    fn input(
+        &self,
+        text: DocumentText,
+        working_dir: &Path,
+        project: Option<PathBuf>,
+    ) -> Result<(Input, Option<Date>), Failure> {
+        let dirs = ThemeDirs {
+            project,
+            shared: FileResolver::shared_themes(),
+        };
+        let theme = match &self.theme {
+            Some(theme) => ThemeSelection::asked(theme, working_dir, dirs),
+            None => ThemeSelection::Document { dirs },
+        };
+        let overrides = Overrides::parse(&self.overrides, working_dir)?;
+        let source_date = source_date().map_err(|e| vec![Diagnostic::new(None, e)])?;
+        let today = match source_date {
+            Some(day) => day,
+            None => clock_date().map_err(|e| vec![Diagnostic::new(None, e)])?,
+        };
+        let input = Input {
             text,
-            theme: self.theme.clone(),
-            overrides: self.overrides.clone(),
-            working_dir,
-        }
+            theme,
+            overrides,
+            today,
+        };
+        Ok((input, source_date))
     }
 }
 
@@ -205,10 +242,11 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), Failure> {
     let renderer = Renderer::new();
+    let resolver = FileResolver::new();
     match cli.command {
         Command::Check { input, print_config } => {
-            let job = Job::open(&input)?;
-            let configured = job.configure(&renderer)?;
+            let job = Job::open(&input, &resolver)?;
+            let configured = job.configure(&renderer, &resolver)?;
             if print_config {
                 println!("{}", configured.config_json());
                 return Ok(());
@@ -217,7 +255,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
                 if let Some(conflict) = job.print_conflict.clone() {
                     return Err(Failure::Errors(vec![conflict]));
                 }
-                print_warnings(&configured.epub(&EpubOptions::default())?.warnings);
+                print_warnings(&configured.epub(&job.epub_options())?.warnings);
             } else {
                 let laid = configured.layout(&LayoutOptions::default())?;
                 // The PDF is written and dropped, so a standard the document must conform to is checked too.
@@ -233,11 +271,11 @@ fn run(cli: Cli) -> Result<(), Failure> {
             bleed,
             crop_marks,
         } => {
-            let job = Job::open(&input)?;
-            let configured = job.configure(&renderer)?;
+            let job = Job::open(&input, &resolver)?;
+            let configured = job.configure(&renderer, &resolver)?;
             let create_folder = job.create_folder && output.is_none();
             let output = match output {
-                Some(path) => normalize(&job.input.working_dir.join(path)),
+                Some(path) => normalize(&job.working_dir.join(path)),
                 None => job.output.clone(),
             };
             if create_folder && let Some(folder) = output.parent() {
@@ -252,7 +290,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
                 if let Some(conflict) = job.print_conflict.clone() {
                     return Err(Failure::Errors(vec![conflict]));
                 }
-                return render_epub(&configured, &output);
+                return render_epub(&configured, &job.epub_options(), &output);
             }
             let laid = configured.layout(&LayoutOptions::default())?;
             let print = PdfOptions {
@@ -279,8 +317,8 @@ fn run(cli: Cli) -> Result<(), Failure> {
 }
 
 /// Writes the document as an EPUB.
-fn render_epub(configured: &Configured, output: &Path) -> Result<(), Failure> {
-    let written = configured.epub(&EpubOptions::default())?;
+fn render_epub(configured: &Configured, options: &EpubOptions, output: &Path) -> Result<(), Failure> {
+    let written = configured.epub(options)?;
     print_warnings(&written.warnings);
     write(output, &written.bytes)?;
     let count = written.parts;

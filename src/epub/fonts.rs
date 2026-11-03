@@ -4,17 +4,19 @@
 //!
 //! A variable file is embedded whole and declared for the weights of its `wght` axis.
 
-use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 
 use rustybuzz::ttf_parser::Tag;
 
 use super::Asset;
-use crate::config::resolved::{Config, FaceFile};
+use crate::config::resolved::Config;
+#[cfg(test)]
+use crate::config::resolved::FaceFile;
 use crate::config::source::Resource;
 use crate::config::theme::Face;
 use crate::diagnostic::Diagnostic;
-use crate::text::{bundled, restricts_embedding};
+use crate::resource::Files;
+use crate::text::restricts_embedding;
 
 /// A face as `@font-face` declares it.
 #[derive(Debug, PartialEq)]
@@ -35,21 +37,21 @@ pub struct Embedded {
 }
 
 /// The faces and files of `families`, as `config` defines them. A file shared by faces is embedded once.
-pub fn embed(config: &Config, families: &BTreeSet<String>) -> Result<Embedded, Vec<Diagnostic>> {
+pub fn embed(config: &Config, families: &BTreeSet<String>, files: &Files) -> Result<Embedded, Vec<Diagnostic>> {
     let mut embedded = Embedded::default();
     let mut paths: HashMap<&Resource, String> = HashMap::new();
     let mut errors = Vec::new();
     for family in families {
-        let Some(files) = config.fonts.get(family) else {
+        let Some(family_files) = config.fonts.get(family) else {
             embedded.warnings.push(format!(
                 "font family \"{family}\" has no font files in the theme, so the EPUB names it without embedding \
                  it; readers that lack it show a fallback font"
             ));
             continue;
         };
-        for (face, file) in files {
+        for (face, file) in family_files {
             let property = || Some(format!("fonts.{family}.{face}"));
-            let data = match read(file) {
+            let data = match files.get(&file.resource) {
                 Ok(data) => data,
                 Err(message) => {
                     errors.push(Diagnostic::new(None, message).property(property()));
@@ -103,18 +105,6 @@ pub fn embed(config: &Config, families: &BTreeSet<String>) -> Result<Embedded, V
     if errors.is_empty() { Ok(embedded) } else { Err(errors) }
 }
 
-fn read(file: &FaceFile) -> Result<Cow<'static, [u8]>, String> {
-    let resource = &file.resource;
-    match resource.file() {
-        None => bundled::font(&resource.path)
-            .map(Cow::Borrowed)
-            .ok_or_else(|| format!("unknown bundled font: {resource}")),
-        Some(path) => std::fs::read(&path)
-            .map(Cow::Owned)
-            .map_err(|e| format!("cannot read font {resource}: {e}")),
-    }
-}
-
 /// The weights of a variable font's `wght` axis, within the CSS range of 1 to 1000.
 fn weight_range(font: &rustybuzz::Face<'_>) -> Option<(u16, u16)> {
     let axis = font
@@ -150,6 +140,8 @@ mod tests {
     use super::*;
     use crate::config::source::Origin;
     use crate::config::theme::{FontStyle, Weight};
+    use crate::resource::FileResolver;
+    use crate::text::bundled;
     use crate::text::tests::{collection, variable_file};
 
     fn config(fonts: Vec<(&str, Face, FaceFile)>) -> Config {
@@ -188,7 +180,7 @@ mod tests {
             ("Serif", italic, bundled("fonts/LibertinusSerif-Italic.otf")),
             ("Mono", regular, bundled("fonts/LibertinusSerif-Regular.otf")),
         ]);
-        let embedded = embed(&config, &families(&["Mono", "Serif", "Avenir Next"])).unwrap();
+        let embedded = embed(&config, &families(&["Mono", "Serif", "Avenir Next"]), &Files::default()).unwrap();
 
         let declared: Vec<_> = (embedded.faces.iter())
             .map(|face| (face.family.as_str(), face.weight.as_str(), face.path.as_str()))
@@ -225,7 +217,10 @@ mod tests {
             ("Variable", Face::REGULAR, variable_file(false)),
             ("Collected", Face::REGULAR, in_collection),
         ]);
-        let embedded = embed(&config, &families(&["Collected", "Variable"])).unwrap();
+        let Ok(files) = crate::pipeline::read_resources(&FileResolver::new(), &config) else {
+            panic!("the files are there")
+        };
+        let embedded = embed(&config, &families(&["Collected", "Variable"]), &files).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(embedded.faces.len(), 1);

@@ -10,11 +10,12 @@ use serde_saphyr::Spanned;
 
 use crate::config::front_matter::{self, Export, FrontMatter};
 use crate::config::resolved::Config;
-use crate::config::source::{ChapterMap, Source, normalize};
+use crate::config::source::{ChapterMap, Origin, Source, normalize};
 use crate::diagnostic::Diagnostic;
-use crate::input::{DocumentText, ExportSettings};
-use crate::pipeline::{self, DocumentFile, Request};
+use crate::input::{DocumentText, ExportSettings, Input};
+use crate::pipeline::{self, DocumentFile};
 use crate::renderer::PdfOptions;
+use crate::resource::{Bytes, ResolveError, Resolver};
 
 pub const MANIFEST: &str = "druck.yaml";
 
@@ -35,24 +36,29 @@ pub struct Project {
 
 impl Project {
     /// Reads the manifest in `dir`, which is absolute, and joins the chapters it lists.
-    pub fn open(dir: &Path) -> Result<Self, Vec<Diagnostic>> {
+    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Vec<Diagnostic>> {
         let manifest = dir.join(MANIFEST);
         let source = Source::Document(manifest.clone());
-        if !manifest.is_file() {
-            return Err(vec![Diagnostic::new(
-                Some(source),
-                "not found: a project folder needs a druck.yaml",
-            )]);
-        }
-        let text = pipeline::read(&manifest, &source)?;
+        let origin = Origin::Document(dir.to_owned());
+        let text = match resolver.read(&origin, MANIFEST) {
+            Ok(data) => pipeline::text(&data)
+                .map_err(|e| vec![Diagnostic::new(Some(source.clone()), format!("cannot read file: {e}"))])?,
+            Err(ResolveError::NotFound(_)) => {
+                return Err(vec![Diagnostic::new(
+                    Some(source),
+                    "not found: a project folder needs a druck.yaml",
+                )]);
+            }
+            Err(e) => return Err(vec![Diagnostic::new(Some(source), format!("cannot read file: {e}"))]),
+        };
         let mut settings = pipeline::parse_settings(&text, 1, &source)?;
         let chapters = settings.chapters.take().unwrap_or_default();
         let exports = settings.exports.take().unwrap_or_default();
         check_exports(&exports, &source)?;
-        let paths = chapter_paths(&chapters, dir, &source)?;
-        let (map, text) = join(&paths, manifest.clone())?;
-        let listed: BTreeSet<&PathBuf> = paths.iter().collect();
-        let warnings = markdown_files(&dir.join(MANUSCRIPT))
+        let read = read_chapters(resolver, &chapters, dir, &source)?;
+        let (map, text) = join(&read, manifest.clone())?;
+        let listed: BTreeSet<&PathBuf> = read.iter().map(|chapter| &chapter.path).collect();
+        let warnings = markdown_files(resolver, &origin, dir)
             .into_iter()
             .filter(|path| !listed.contains(path))
             .map(|path| {
@@ -113,20 +119,14 @@ impl Project {
         Ok((DocumentText::Project(Box::new(self)), settings))
     }
 
-    /// Resolves the configuration: the manifest's settings with the export's, then `args`.
+    /// Resolves the configuration: the manifest's settings with the export's, then the input's.
     pub(crate) fn configure(
         &self,
-        args: &Request,
-        working_dir: &Path,
+        resolver: &dyn Resolver,
+        input: &Input,
     ) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
         let manifest_source = Source::Document(self.manifest.clone());
-        let config = pipeline::resolve_settings(
-            args,
-            self.settings.clone(),
-            &manifest_source,
-            Some(&self.dir),
-            working_dir,
-        )?;
+        let config = pipeline::resolve_settings(resolver, input, self.settings.clone(), &manifest_source)?;
         let document = DocumentFile {
             path: self.manifest.clone(),
             source: self.source.clone(),
@@ -168,49 +168,61 @@ fn check_exports(exports: &BTreeMap<String, Spanned<Export>>, source: &Source) -
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-/// The absolute chapter paths, checked against the project folder. Errors name the manifest line.
-fn chapter_paths(chapters: &[Spanned<String>], dir: &Path, source: &Source) -> Result<Vec<PathBuf>, Vec<Diagnostic>> {
+/// A chapter's absolute path and what reading it gave.
+struct ReadChapter {
+    path: PathBuf,
+    data: Result<Bytes, ResolveError>,
+}
+
+/// Reads the chapter files, checked against the project folder. Errors name the manifest line.
+fn read_chapters(
+    resolver: &dyn Resolver,
+    chapters: &[Spanned<String>],
+    dir: &Path,
+    source: &Source,
+) -> Result<Vec<ReadChapter>, Vec<Diagnostic>> {
     if chapters.is_empty() {
         return Err(vec![Diagnostic::new(
             Some(source.clone()),
             "chapters: list at least one chapter file",
         )]);
     }
-    let mut paths = Vec::with_capacity(chapters.len());
+    let origin = Origin::Document(dir.to_owned());
+    let mut read = Vec::with_capacity(chapters.len());
     let mut seen = BTreeSet::new();
     let mut errors = Vec::new();
     for chapter in chapters {
         let path = normalize(&dir.join(&chapter.value));
         let name = &chapter.value;
-        let problem = if !path.starts_with(dir) {
-            Some(format!("chapter \"{name}\" is outside the project folder"))
-        } else if !path.is_file() {
-            Some(format!("chapter not found: {name}"))
-        } else if !seen.insert(path.clone()) {
-            Some(format!("chapter \"{name}\" is listed twice"))
-        } else {
-            None
+        let data = path.starts_with(dir).then(|| resolver.read(&origin, name));
+        let problem = match &data {
+            None => Some(format!("chapter \"{name}\" is outside the project folder")),
+            Some(Err(ResolveError::NotFound(_))) => Some(format!("chapter not found: {name}")),
+            Some(_) if !seen.insert(path.clone()) => Some(format!("chapter \"{name}\" is listed twice")),
+            Some(_) => None,
         };
-        match problem {
-            Some(message) => errors.push(at(Diagnostic::new(Some(source.clone()), message), &chapter.referenced)),
-            None => paths.push(path),
+        match (problem, data) {
+            (None, Some(data)) => read.push(ReadChapter { path, data }),
+            (Some(message), _) => errors.push(at(Diagnostic::new(Some(source.clone()), message), &chapter.referenced)),
+            (None, None) => unreachable!("a chapter outside the folder has a problem"),
         }
     }
-    if errors.is_empty() { Ok(paths) } else { Err(errors) }
+    if errors.is_empty() { Ok(read) } else { Err(errors) }
 }
 
 /// Joins chapter files in order with a blank line between them, recording where each one landed.
-fn join(paths: &[PathBuf], manifest: PathBuf) -> Result<(ChapterMap, String), Vec<Diagnostic>> {
+fn join(chapters: &[ReadChapter], manifest: PathBuf) -> Result<(ChapterMap, String), Vec<Diagnostic>> {
     let mut map = ChapterMap::new(manifest);
     let mut joined = String::new();
     let mut next_line = 1;
     let mut errors = Vec::new();
-    for path in paths {
+    for ReadChapter { path, data } in chapters {
         let source = Source::Document(path.clone());
-        let text = match pipeline::read(path, &source) {
+        let read = (data.as_ref().map_err(ToString::to_string)).and_then(|data| pipeline::text(data));
+        let text = match read {
             Ok(text) => text,
-            Err(mut read) => {
-                errors.append(&mut read);
+            Err(e) => {
+                errors.push(Diagnostic::new(Some(source), format!("cannot read file: {e}")));
                 continue;
             }
         };
@@ -241,24 +253,13 @@ fn join(paths: &[PathBuf], manifest: PathBuf) -> Result<(ChapterMap, String), Ve
     }
 }
 
-/// The Markdown files below `dir`, in every subfolder, sorted. A missing folder has none.
-fn markdown_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut folders = vec![dir.to_owned()];
-    while let Some(folder) = folders.pop() {
-        for path in std::fs::read_dir(&folder)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-        {
-            if path.is_dir() {
-                folders.push(path);
-            } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
-                files.push(path);
-            }
-        }
-    }
+/// The absolute paths of the Markdown files below `manuscript/`, in every subfolder, sorted. A missing folder,
+/// or a resolver that cannot list, has none.
+fn markdown_files(resolver: &dyn Resolver, origin: &Origin, dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = (resolver.list(origin, MANUSCRIPT).unwrap_or_default().iter())
+        .map(|path| normalize(&dir.join(path)))
+        .filter(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")))
+        .collect();
     files.sort();
     files
 }

@@ -21,7 +21,7 @@ pub struct Entry {
 
 /// The common theme folder of this machine, which may not exist yet.
 pub fn common_dir() -> Option<PathBuf> {
-    theme_path::directory()
+    druck::resource::FileResolver::shared_themes()
 }
 
 /// Names are what `theme_path` accepts as a bare name: ASCII letters, digits, hyphens, underscores.
@@ -37,7 +37,10 @@ fn check_name(name: &str) -> Result<(), String> {
 
 /// A theme by name. A project theme wins over a common one of the same name.
 pub fn locate(name: &str, project: Option<&Path>, common: Option<&Path>) -> Option<Entry> {
-    theme_path::locate(name, project, common).map(|(scope, path)| Entry {
+    let project = project.map(|project| (Scope::Project, theme_path::project_file(project, name)));
+    let common = common.map(|common| (Scope::Common, common_path(common, name)));
+    let (scope, path) = project.into_iter().chain(common).find(|(_, path)| path.is_file())?;
+    Some(Entry {
         name: name.to_owned(),
         scope,
         path,

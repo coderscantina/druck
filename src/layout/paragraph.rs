@@ -164,7 +164,7 @@ pub fn prepare<'a>(
     content: &[Inline],
     style: &'a Style,
     inline: &'a InlineStyles,
-    fonts: &'a Fonts,
+    fonts: &'a Fonts<'a>,
     rules: Rules,
 ) -> Result<Prepared<'a>, String> {
     let tokens = tokens(content, style, inline, fonts, rules.lang)?;
@@ -203,7 +203,7 @@ pub fn prepare<'a>(
 pub struct Prepared<'a> {
     style: &'a Style,
     inline: &'a InlineStyles,
-    fonts: &'a Fonts,
+    fonts: &'a Fonts<'a>,
     rules: Rules,
     words: Vec<Word>,
     /// Natural space before each word. Zero at the start of the paragraph and after hard breaks.
@@ -347,7 +347,7 @@ impl Prepared<'_> {
 
 /// Turns words and spaces into breaking items, with hyphenation points and margin hangs.
 struct Builder<'a> {
-    fonts: &'a Fonts,
+    fonts: &'a Fonts<'a>,
     rules: Rules,
     hyphenate: bool,
     justify: bool,

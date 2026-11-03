@@ -6,12 +6,14 @@
 //! Images are fully decoded here, so a malformed file is reported with the layout error and never
 //! surfaces while the PDF is written. SVG text uses only the bundled fonts, and an SVG cannot read files.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
-use krilla::Data;
 use krilla::image::Image as RasterImage;
 use png::Transformations;
 use usvg::fontdb::{Database, Source};
@@ -22,6 +24,7 @@ mod density;
 
 use self::density::Density;
 use crate::config::values::Pt;
+use crate::resource::Bytes;
 use crate::text::bundled;
 
 /// PDF points per inch.
@@ -38,6 +41,8 @@ const SVG_FONTS: [&str; 5] = [
     "fonts/LibertinusMono-Regular.otf",
 ];
 const UNSUPPORTED: &str = "unsupported image format; use PNG, JPEG, or SVG";
+/// The bytes of decoded images a renderer keeps between jobs.
+const CACHE_BUDGET: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -91,9 +96,8 @@ fn sniff(data: &[u8]) -> Sniffed {
 /// A decoded, validated image. Cheap to clone.
 #[derive(Clone)]
 pub struct Image {
-    /// The file as read, for a painter that draws raster images itself.
-    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
-    source: Data,
+    /// The file as read, for the EPUB and for a painter that draws raster images itself.
+    source: Bytes,
     pixels: Pixels,
     width: f64,
     height: f64,
@@ -121,27 +125,10 @@ impl Image {
     /// (may be empty). Errors are plain messages without file name or location.
     ///
     /// PNG and JPEG are decoded once here to validate them. krilla decodes PNG again when the PDF is written.
-    pub fn decode(data: Vec<u8>, extension: &str) -> Result<Image, String> {
-        let claimed = Format::from_extension(extension);
-        let format = match (sniff(&data), claimed) {
-            (Sniffed::Gif, _) => return Err("GIF images are not supported; use PNG, JPEG, or SVG".to_owned()),
-            (Sniffed::WebP, _) => return Err("WebP images are not supported; use PNG, JPEG, or SVG".to_owned()),
-            (_, None) => return Err(UNSUPPORTED.to_owned()),
-            (Sniffed::Known(found), Some(claimed)) if found != claimed => return Err(mismatch(found, extension)),
-            (Sniffed::Known(found), Some(_)) => found,
-            (Sniffed::Unknown, Some(Format::Svg)) => Format::Svg,
-            (Sniffed::Unknown, Some(claimed)) => {
-                return match parse_svg(&data) {
-                    Ok(_) => Err(mismatch(Format::Svg, extension)),
-                    Err(_) => Err(malformed(claimed, "invalid file signature")),
-                };
-            }
-        };
-        match format {
-            Format::Png => decode_png(data),
-            Format::Jpeg => decode_jpeg(data),
-            Format::Svg => decode_svg(data),
-        }
+    pub fn decode(data: impl Into<Bytes>, extension: &str) -> Result<Image, String> {
+        let data = data.into();
+        let format = check(&data, extension)?;
+        decode_as(format, data)
     }
 
     /// The natural size in points. Raster images use their stored density, else count one pixel as one point
@@ -151,13 +138,110 @@ impl Image {
     }
 
     /// The bytes of the image file.
-    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
-    pub fn source(&self) -> &[u8] {
-        self.source.as_ref()
+    pub fn source(&self) -> &Bytes {
+        &self.source
+    }
+
+    /// Roughly what keeping this image costs: the file, and the samples krilla decodes a raster image into.
+    fn cost(&self) -> usize {
+        let samples = match &self.pixels {
+            Pixels::Raster(image) => {
+                let (width, height) = image.size();
+                width as usize * height as usize * 4
+            }
+            Pixels::Svg(_) => 0,
+        };
+        self.source.len() + samples
     }
 
     pub fn pixels(&self) -> &Pixels {
         &self.pixels
+    }
+}
+
+/// What format a file is, if its contents suit the extension it has. A decoded result depends on the bytes alone
+/// once this has passed, so a cache keyed by content can answer after it.
+fn check(data: &[u8], extension: &str) -> Result<Format, String> {
+    let claimed = Format::from_extension(extension);
+    match (sniff(data), claimed) {
+        (Sniffed::Gif, _) => Err("GIF images are not supported; use PNG, JPEG, or SVG".to_owned()),
+        (Sniffed::WebP, _) => Err("WebP images are not supported; use PNG, JPEG, or SVG".to_owned()),
+        (_, None) => Err(UNSUPPORTED.to_owned()),
+        (Sniffed::Known(found), Some(claimed)) if found != claimed => Err(mismatch(found, extension)),
+        (Sniffed::Known(found), Some(_)) => Ok(found),
+        (Sniffed::Unknown, Some(Format::Svg)) => Ok(Format::Svg),
+        (Sniffed::Unknown, Some(claimed)) => match parse_svg(data) {
+            Ok(_) => Err(mismatch(Format::Svg, extension)),
+            Err(_) => Err(malformed(claimed, "invalid file signature")),
+        },
+    }
+}
+
+fn decode_as(format: Format, data: Bytes) -> Result<Image, String> {
+    match format {
+        Format::Png => decode_png(data),
+        Format::Jpeg => decode_jpeg(data),
+        Format::Svg => decode_svg(data),
+    }
+}
+
+struct Kept {
+    image: Image,
+    /// The newest job that used this image.
+    used: AtomicU64,
+}
+
+#[derive(Default)]
+struct Table {
+    images: HashMap<u64, Kept>,
+    cost: usize,
+}
+
+/// The decoded images a renderer keeps between jobs, by content. Only ever gains completed images, so a failed
+/// job leaves it sound.
+#[derive(Default)]
+pub struct ImageCache {
+    table: RwLock<Table>,
+    #[cfg(test)]
+    pub(crate) decodes: AtomicUsize,
+}
+
+impl ImageCache {
+    /// Like [`Image::decode`], decoding only what no job has decoded yet. An image that would pass the budget
+    /// serves this job and is not kept.
+    pub fn image(&self, data: &Bytes, extension: &str, job: u64) -> Result<Image, String> {
+        let format = check(data, extension)?;
+        if let Some(kept) = self
+            .table
+            .read()
+            .expect("no panic while caching")
+            .images
+            .get(&data.hash())
+        {
+            kept.used.store(job, Ordering::Relaxed);
+            return Ok(kept.image.clone());
+        }
+        let image = decode_as(format, data.clone())?;
+        #[cfg(test)]
+        self.decodes.fetch_add(1, Ordering::Relaxed);
+        let cost = image.cost();
+        let mut table = self.table.write().expect("no panic while caching");
+        if table.cost + cost <= CACHE_BUDGET && !table.images.contains_key(&data.hash()) {
+            table.cost += cost;
+            let used = AtomicU64::new(job);
+            let image = image.clone();
+            table.images.insert(data.hash(), Kept { image, used });
+        }
+        Ok(image)
+    }
+
+    /// Forgets the images no job since `oldest` used.
+    pub fn sweep(&self, oldest: u64) {
+        let mut table = self.table.write().expect("no panic while caching");
+        table
+            .images
+            .retain(|_, kept| kept.used.load(Ordering::Relaxed) >= oldest);
+        table.cost = table.images.values().map(|kept| kept.image.cost()).sum();
     }
 }
 
@@ -172,30 +256,28 @@ fn malformed(format: Format, detail: impl fmt::Display) -> String {
     format!("malformed {} image: {detail}", format.name())
 }
 
-fn decode_png(data: Vec<u8>) -> Result<Image, String> {
-    let mut decoder = png::Decoder::new(Cursor::new(&data));
+fn decode_png(data: Bytes) -> Result<Image, String> {
+    let mut decoder = png::Decoder::new(Cursor::new(&*data));
     decoder.set_transformations(Transformations::EXPAND);
     let mut reader = decoder.read_info().map_err(|e| malformed(Format::Png, e))?;
     let mut buffer = vec![0; reader.output_buffer_size().ok_or("image is too large")?];
     reader.next_frame(&mut buffer).map_err(|e| malformed(Format::Png, e))?;
     let density = density::png(reader.info());
-    let source = Data::from(data);
-    let image = RasterImage::from_png(source.clone(), false).map_err(|e| malformed(Format::Png, e))?;
-    raster(source, image, density)
+    let image = RasterImage::from_png(data.data(), false).map_err(|e| malformed(Format::Png, e))?;
+    raster(data, image, density)
 }
 
-fn decode_jpeg(data: Vec<u8>) -> Result<Image, String> {
+fn decode_jpeg(data: Bytes) -> Result<Image, String> {
     // krilla embeds JPEG data as is and reads only the headers, so decode all of it here.
-    JpegDecoder::new(Cursor::new(&data))
+    JpegDecoder::new(Cursor::new(&*data))
         .decode()
         .map_err(|e| malformed(Format::Jpeg, e))?;
     let density = density::jpeg(&data);
-    let source = Data::from(data);
-    let image = RasterImage::from_jpeg(source.clone(), false).map_err(|e| malformed(Format::Jpeg, e))?;
-    raster(source, image, density)
+    let image = RasterImage::from_jpeg(data.data(), false).map_err(|e| malformed(Format::Jpeg, e))?;
+    raster(data, image, density)
 }
 
-fn raster(source: Data, image: RasterImage, density: Option<Density>) -> Result<Image, String> {
+fn raster(source: Bytes, image: RasterImage, density: Option<Density>) -> Result<Image, String> {
     let (width, height) = image.size();
     if width == 0 || height == 0 {
         return Err("image has no pixels".to_owned());
@@ -209,14 +291,14 @@ fn raster(source: Data, image: RasterImage, density: Option<Density>) -> Result<
     })
 }
 
-fn decode_svg(data: Vec<u8>) -> Result<Image, String> {
+fn decode_svg(data: Bytes) -> Result<Image, String> {
     let tree = parse_svg(&data)?;
     let size = tree.size();
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return Err("image has no area".to_owned());
     }
     Ok(Image {
-        source: data.into(),
+        source: data,
         width: f64::from(size.width()) * PT_PER_SVG_PX,
         height: f64::from(size.height()) * PT_PER_SVG_PX,
         pixels: Pixels::Svg(Arc::new(tree)),

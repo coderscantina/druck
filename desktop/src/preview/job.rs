@@ -1,14 +1,16 @@
 //! From document text to published pages: the engine call, and which request's result counts. Holds no gpui
 //! types.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use druck::diagnostic::Diagnostic;
-use druck::editor::engine::{self, Request};
-use druck::editor::resolved_config::{Config, Face, FontFiles, FontStyle, Weight};
+use druck::editor::engine::{self, FontSet};
+use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
+use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
+use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
+use druck::{Failure, LayoutOptions, Renderer};
 
 use super::raster::{Painter, family_name, fingerprint};
 
@@ -75,7 +77,7 @@ pub struct BodyStyle {
     /// The family's name in its font files, which is how the toolkit finds it.
     pub family: String,
     /// The font files of the family's regular, bold, and italic faces.
-    pub files: Vec<&'static [u8]>,
+    pub files: Vec<Bytes>,
     pub size: f32,
     pub line_height: f32,
 }
@@ -84,7 +86,7 @@ impl BodyStyle {
     fn of(config: &Config, painter: &Painter) -> Self {
         let style = &config.styles.body;
         let fonts = painter.fonts();
-        let mut files: Vec<&'static [u8]> = Vec::new();
+        let mut files: Vec<Bytes> = Vec::new();
         let mut family = String::new();
         for (weight, font_style) in [
             (style.weight, style.style),
@@ -96,8 +98,8 @@ impl BodyStyle {
             if family.is_empty() {
                 family = family_name(outlines.data, outlines.index).unwrap_or_else(|| style.font.clone());
             }
-            if !files.iter().any(|file| std::ptr::eq(*file, outlines.data)) {
-                files.push(outlines.data);
+            if !files.contains(outlines.data) {
+                files.push(outlines.data.clone());
             }
         }
         Self {
@@ -113,7 +115,6 @@ impl BodyStyle {
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
     pub configure: Duration,
-    pub fonts: Duration,
     pub typeset: Duration,
     pub fingerprints: Duration,
 }
@@ -121,32 +122,15 @@ pub struct Timing {
 /// Stack of the layout thread. Only the pages touched are committed, so the size costs address space.
 const LAYOUT_STACK: usize = 16 * 1024 * 1024;
 
-/// The faces a configuration asks for, which decide whether loaded fonts can be reused.
-#[derive(PartialEq)]
-struct FontRequest {
-    fonts: BTreeMap<String, FontFiles>,
-    installed: BTreeMap<String, BTreeMap<Face, String>>,
-    requested: BTreeMap<String, BTreeMap<Face, String>>,
-    excluded: BTreeMap<String, Vec<Face>>,
-}
-
-impl FontRequest {
-    fn of(config: &Config) -> Self {
-        Self {
-            fonts: config.fonts.clone(),
-            installed: config.installed_fonts.clone(),
-            requested: config.requested_fonts.clone(),
-            excluded: config.excluded_fonts.clone(),
-        }
-    }
-}
-
-/// Lays out one document repeatedly, keeping its fonts while the configuration asks for the same ones.
+/// Lays out one document repeatedly. Its renderer keeps fonts and images by content, so each run reads them again
+/// and prepares only what changed.
 pub struct Typesetter {
     path: PathBuf,
     theme: Option<PathBuf>,
     working_dir: PathBuf,
-    loaded: Option<(FontRequest, Arc<Painter>)>,
+    renderer: Renderer,
+    resolver: FileResolver,
+    painter: Option<Arc<Painter>>,
 }
 
 impl Typesetter {
@@ -159,7 +143,9 @@ impl Typesetter {
             path,
             theme,
             working_dir,
-            loaded: None,
+            renderer: Renderer::new(),
+            resolver: FileResolver::new(),
+            painter: None,
         }
     }
 
@@ -180,44 +166,72 @@ impl Typesetter {
 
     fn typeset(&mut self, text: String) -> Result<Layout, Vec<Diagnostic>> {
         let start = Instant::now();
-        let request = Request {
-            input: &self.path,
-            theme: self.theme.as_deref(),
-            overrides: &[],
-        };
-        let (config, document) = engine::configure(&request, &self.working_dir, text)?;
-        let configured = Instant::now();
-        let painter = self.painter(&config)?;
-        let fonts_ready = Instant::now();
-        let output = engine::typeset_with(&config, &document, painter.fonts())?;
+        let input = self.input(text)?;
+        let configured = self.renderer.job(&self.resolver, &input).configure().map_err(errors)?;
+        let configured_at = Instant::now();
+        let layout = configured.layout(&LayoutOptions::default()).map_err(errors)?;
         let typeset = Instant::now();
+        let config = resolved_config::of(&configured);
+        let warnings = config.warnings.iter().chain(layout.warnings()).cloned().collect();
+        let (output, fonts) = engine::into_parts(layout);
+        let painter = same_fonts(&mut self.painter, fonts);
+        let fingerprints_from = Instant::now();
         let fingerprints = output.pages.iter().map(fingerprint).collect();
-        let warnings = config.warnings.iter().chain(&output.warnings).cloned().collect();
         Ok(Layout {
-            body: BodyStyle::of(&config, &painter),
+            body: BodyStyle::of(config, &painter),
             output,
             painter,
             fingerprints,
             warnings,
             timing: Timing {
-                configure: configured - start,
-                fonts: fonts_ready - configured,
-                typeset: typeset - fonts_ready,
-                fingerprints: typeset.elapsed(),
+                configure: configured_at - start,
+                typeset: typeset - configured_at,
+                fingerprints: fingerprints_from.elapsed(),
             },
         })
     }
 
-    fn painter(&mut self, config: &Config) -> Result<Arc<Painter>, Vec<Diagnostic>> {
-        let wanted = FontRequest::of(config);
-        if let Some((request, painter)) = &self.loaded
-            && *request == wanted
-        {
-            return Ok(painter.clone());
-        }
-        let painter = Arc::new(Painter::new(engine::load_fonts(config)?));
-        self.loaded = Some((wanted, painter.clone()));
-        Ok(painter)
+    fn input(&self, text: String) -> Result<Input, Vec<Diagnostic>> {
+        let dirs = ThemeDirs {
+            project: None,
+            shared: FileResolver::shared_themes(),
+        };
+        let theme = match &self.theme {
+            Some(theme) => ThemeSelection::asked(theme, &self.working_dir, dirs),
+            None => ThemeSelection::Document { dirs },
+        };
+        let name = self.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let today = match source_date() {
+            Ok(Some(day)) => Ok(day),
+            Ok(None) => clock_date(),
+            Err(message) => Err(message),
+        };
+        Ok(Input {
+            text: DocumentText::Single {
+                text,
+                origin: Origin::Document(self.working_dir.clone()),
+                name,
+            },
+            theme,
+            overrides: Overrides::default(),
+            today: today.map_err(|message| vec![Diagnostic::new(None, message)])?,
+        })
+    }
+}
+
+/// The painter of the previous layout while the fonts are the same, since it keeps their outlines. The renderer
+/// gives unchanged fonts the same faces, so a replaced file makes a new painter.
+fn same_fonts(painter: &mut Option<Arc<Painter>>, fonts: FontSet) -> Arc<Painter> {
+    match painter {
+        Some(painter) if *painter.fonts() == fonts => painter.clone(),
+        _ => painter.insert(Arc::new(Painter::new(fonts))).clone(),
+    }
+}
+
+fn errors(failure: Failure) -> Vec<Diagnostic> {
+    match failure {
+        Failure::Errors(errors) => errors,
+        Failure::Cancelled => Vec::new(),
     }
 }
 
@@ -258,6 +272,35 @@ mod tests {
             first.fingerprints[0], second.fingerprints[0],
             "an unchanged page keeps its fingerprint"
         );
+    }
+
+    #[test]
+    fn a_replaced_font_makes_a_new_painter() {
+        let dir = std::env::temp_dir().join(format!("druck-job-replace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temporary folder");
+        let fixture = |name: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../fonts").join(name);
+        let font = dir.join("body.otf");
+        std::fs::copy(fixture("LibertinusSerif-Regular.otf"), &font).expect("font");
+        let theme = dir.join("theme.json");
+        std::fs::write(
+            &theme,
+            r#"{"version": 1, "fonts": {"Body": {"regular": "body.otf"}}, "styles": {"body": {"font": "Body"}}}"#,
+        )
+        .expect("theme");
+        let mut typesetter = Typesetter::new(&dir.join("document.md"), Some(theme));
+        let run = |typesetter: &mut Typesetter| {
+            let Ok(layout) = typesetter.run("Body text.\n".to_owned()) else {
+                panic!("typesets")
+            };
+            layout
+        };
+        let (first, second) = (run(&mut typesetter), run(&mut typesetter));
+        assert!(Arc::ptr_eq(&first.painter, &second.painter));
+
+        std::fs::copy(fixture("LibertinusSerif-Bold.otf"), &font).expect("font");
+        let replaced = run(&mut typesetter);
+        std::fs::remove_dir_all(&dir).expect("temporary folder");
+        assert!(!Arc::ptr_eq(&first.painter, &replaced.painter));
     }
 
     #[test]

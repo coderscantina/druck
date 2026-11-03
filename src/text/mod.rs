@@ -1,71 +1,76 @@
-//! Fonts and text shaping: loads the configured faces and turns text into positioned glyphs.
+//! Fonts and text shaping: finds the configured faces and turns text into positioned glyphs.
 
 pub mod bundled;
+pub mod face;
 #[cfg(test)]
 pub(crate) mod tests;
 pub(crate) mod variations;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::Range;
-use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::SystemTime;
+use std::sync::Arc;
 
-use crate::config::resolved::{Config, FaceFile, FontFiles};
+use self::face::FaceCache;
+use crate::config::resolved::{Config, FontFiles};
 use crate::config::theme::{Face, FigureSpacing, FigureStyle, Figures, FontStyle, Lang, Weight};
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
+use crate::resource::{Bytes, Files};
 
 /// What a painter needs to draw a face's glyphs: its font file, the face in it, and the variation
 /// coordinates of this instance by axis tag, in the axis's own units.
 #[cfg_attr(not(feature = "editor"), allow(dead_code))]
 pub struct FaceOutlines<'a> {
-    pub data: &'static [u8],
+    pub data: &'a Bytes,
     pub index: u32,
     pub coordinates: &'a [([u8; 4], f32)],
 }
 
-/// Index of a loaded face in its [`Fonts`].
+/// Index of a face in its [`FontSet`] and [`Fonts`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FaceId(pub usize);
 
-/// A parsed face. Font bytes live for the rest of the process: bundled fonts are static and
-/// user fonts are leaked once per version of a file, so the shaper and the PDF writer share one copy
-/// and repeated loads in a long-running process add nothing.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
-struct Loaded {
-    buzz: rustybuzz::Face<'static>,
-    font: krilla::text::Font,
-    data: &'static [u8],
-    index: u32,
-    coordinates: Vec<([u8; 4], f32)>,
-    /// The face's file, as in diagnostics.
+/// A face as a document uses it.
+#[derive(Clone)]
+struct Named {
+    face: Arc<face::Face>,
+    /// The face's file in this job, as in diagnostics. The same bytes may sit under another name in another job.
     file: String,
-    /// Whether the font's OS/2 `fsType` restricts embedding or subsetting.
-    restricted: bool,
 }
 
-/// The features every run sets, in the order of a [`PlanKey`]'s values.
+/// The features every run sets, in the order of a plan key's values.
 const FEATURES: [&[u8; 4]; 7] = [b"kern", b"liga", b"smcp", b"lnum", b"onum", b"pnum", b"tnum"];
 
-/// What decides a shape plan: the face, the script, the language, and the values of the features.
-type PlanKey = (FaceId, rustybuzz::Script, &'static str, [u32; 7]);
-
-/// Every face named by the configuration, loaded and parsed, with each family's faces in face order.
-pub struct Fonts {
-    faces: Vec<Loaded>,
+/// Every face named by the configuration, with each family's faces in face order. Owned, so it can outlive the
+/// job that found it.
+#[derive(Clone)]
+pub struct FontSet {
+    faces: Vec<Named>,
     families: BTreeMap<String, Vec<(Face, FaceId)>>,
-    /// Building a plan takes about as long as shaping a word with it, and a document needs few of them.
-    plans: RwLock<HashMap<PlanKey, Arc<rustybuzz::ShapePlan>>>,
 }
 
-impl Fonts {
-    /// Loads every face of `config.fonts` and of the `installed` families found for
-    /// `config.installed_fonts`. Bundled faces are compiled into the binary; others are read from
-    /// their files. Errors name the resource and property.
-    pub fn load(config: &Config, installed: &BTreeMap<String, FontFiles>) -> Result<Self, Vec<Diagnostic>> {
-        let mut fonts = Self::from_files(config.fonts.iter().chain(installed))?;
+/// Two sets are equal when their faces are the same objects, as a renderer gives for unchanged fonts.
+impl PartialEq for FontSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.families == other.families
+            && self.faces.len() == other.faces.len()
+            && std::iter::zip(&self.faces, &other.faces).all(|(a, b)| Arc::ptr_eq(&a.face, &b.face))
+    }
+}
+
+impl FontSet {
+    /// Finds every face of `config.fonts` and of the `installed` families found for
+    /// `config.installed_fonts`, from `files` and the faces `cache` keeps for `job`. Errors name the resource
+    /// and property.
+    pub(crate) fn load(
+        config: &Config,
+        installed: &BTreeMap<String, FontFiles>,
+        files: &Files,
+        cache: &FaceCache,
+        job: u64,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        let mut fonts = Self::from_files(config.fonts.iter().chain(installed), files, cache, job)?;
         for (family, excluded) in &config.excluded_fonts {
             fonts
                 .families
@@ -92,22 +97,24 @@ impl Fonts {
 
     pub(crate) fn from_files<'a>(
         families: impl IntoIterator<Item = (&'a String, &'a FontFiles)>,
+        files: &Files,
+        cache: &FaceCache,
+        job: u64,
     ) -> Result<Self, Vec<Diagnostic>> {
         let mut fonts = Self {
             faces: Vec::new(),
             families: BTreeMap::new(),
-            plans: RwLock::default(),
         };
         let mut errors = Vec::new();
         for (name, family) in families {
             let mut instances = BTreeMap::new();
             for (face, file) in family {
-                let result = read(file).and_then(|data| {
+                let result = files.get(&file.resource).and_then(|data| {
                     if !file.variable {
                         instances.insert(*face, (data, file));
                         return Ok(());
                     }
-                    let font = rustybuzz::Face::from_slice(data, file.index)
+                    let font = rustybuzz::Face::from_slice(&data, file.index)
                         .ok_or_else(|| format!("{} is not a parsable font", file.resource))?;
                     if !font.is_variable() {
                         return Err(format!(
@@ -121,9 +128,9 @@ impl Fonts {
                     }
                     for instance in supported {
                         if instance.style == face.style && family.get(&instance).is_none_or(|entry| entry.variable) {
-                            instances.insert(instance, (data, file));
+                            instances.insert(instance, (data.clone(), file));
                         } else {
-                            instances.entry(instance).or_insert((data, file));
+                            instances.entry(instance).or_insert((data.clone(), file));
                         }
                     }
                     Ok(())
@@ -134,9 +141,15 @@ impl Fonts {
             }
             let mut loaded = Vec::with_capacity(instances.len());
             for (face, (data, file)) in instances {
-                match parse(data, file, face) {
-                    Ok(parsed) => {
-                        fonts.faces.push(parsed);
+                match cache.face(&data, file, face, job) {
+                    Ok(built) => {
+                        fonts.faces.push(Named {
+                            face: built,
+                            file: match file.index {
+                                0 => file.resource.to_string(),
+                                index => format!("face {index} of {}", file.resource),
+                            },
+                        });
                         loaded.push((face, FaceId(fonts.faces.len() - 1)));
                     }
                     Err(message) => {
@@ -148,6 +161,14 @@ impl Fonts {
             fonts.families.insert(name.clone(), loaded);
         }
         if errors.is_empty() { Ok(fonts) } else { Err(errors) }
+    }
+
+    /// These faces as the shaper reads them, for one job on one thread.
+    pub fn fonts(&self) -> Fonts<'_> {
+        Fonts {
+            set: self,
+            buzz: self.faces.iter().map(|named| named.face.shaper()).collect(),
+        }
     }
 
     /// The face of a family closest to `weight` and `style`. Block styles always find their exact
@@ -171,12 +192,12 @@ impl Fonts {
 
     /// A warning for a face whose font restricts embedding, naming its file.
     pub fn embedding_warning(&self, face: FaceId) -> Option<String> {
-        let face = &self.faces[face.0];
-        face.restricted.then(|| {
+        let named = &self.faces[face.0];
+        named.face.restricted().then(|| {
             format!(
                 "{} restricts embedding in its license (OS/2 fsType); it is embedded anyway, so check that \
                  its license allows this",
-                face.file
+                named.file
             )
         })
     }
@@ -186,9 +207,55 @@ impl Fonts {
         &self.faces[face.0].file
     }
 
+    /// The font data of a face, for drawing its glyphs by id.
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
+    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
+        let face = &self.faces[face.0].face;
+        FaceOutlines {
+            data: face.data(),
+            index: face.index(),
+            coordinates: face.coordinates(),
+        }
+    }
+
+    /// The font handle krilla embeds and subsets for a face.
+    pub(crate) fn pdf_font(&self, face: FaceId) -> &krilla::text::Font {
+        self.faces[face.0].face.pdf()
+    }
+}
+
+/// The faces of a [`FontSet`] parsed for shaping. Parsing borrows the font files, so this lives as long as the
+/// set it reads and costs a few table lookups per face to make.
+pub struct Fonts<'j> {
+    set: &'j FontSet,
+    buzz: Vec<rustybuzz::Face<'j>>,
+}
+
+impl Fonts<'_> {
+    /// See [`FontSet::face`].
+    pub fn face(&self, family: &str, weight: Weight, style: FontStyle) -> FaceId {
+        self.set.face(family, weight, style)
+    }
+
+    /// See [`FontSet::file`].
+    pub fn file(&self, face: FaceId) -> &str {
+        self.set.file(face)
+    }
+
+    /// See [`FontSet::pdf_font`].
+    pub(crate) fn pdf_font(&self, face: FaceId) -> &krilla::text::Font {
+        self.set.pdf_font(face)
+    }
+
+    /// See [`FontSet::outlines`].
+    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
+    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
+        self.set.outlines(face)
+    }
+
     /// Vertical metrics of a face at `size`.
     pub fn metrics(&self, face: FaceId, size: Pt) -> Metrics {
-        let buzz = &self.faces[face.0].buzz;
+        let buzz = &self.buzz[face.0];
         let upem = buzz.units_per_em();
         let scale = size.0 / f64::from(upem);
         let (position, thickness) = buzz.underline_metrics().map_or((-upem / 10, upem / 20), |line| {
@@ -206,7 +273,7 @@ impl Fonts {
 
     /// The height of capital letters of a face at `size`, or 0.7 em if the font does not say.
     pub fn cap_height(&self, face: FaceId, size: Pt) -> Pt {
-        let buzz = &self.faces[face.0].buzz;
+        let buzz = &self.buzz[face.0];
         let units = buzz
             .capital_height()
             .map_or(0.7 * f64::from(buzz.units_per_em()), f64::from);
@@ -233,7 +300,7 @@ impl Fonts {
     /// Whether a face has small capitals of its own, the OpenType `smcp` feature.
     pub fn has_small_caps(&self, face: FaceId) -> bool {
         let tag = rustybuzz::ttf_parser::Tag::from_bytes(b"smcp");
-        let gsub = self.faces[face.0].buzz.tables().gsub;
+        let gsub = self.buzz[face.0].tables().gsub;
         gsub.is_some_and(|gsub| gsub.features.into_iter().any(|feature| feature.tag == tag))
     }
 
@@ -251,7 +318,7 @@ impl Fonts {
         small_caps: bool,
         figures: Figures,
     ) -> ShapedRun {
-        let buzz = &self.faces[face.0].buzz;
+        let buzz = &self.buzz[face.0];
         let mut buffer = rustybuzz::UnicodeBuffer::new();
         buffer.push_str(text);
         buffer.set_direction(rustybuzz::Direction::LeftToRight);
@@ -271,7 +338,20 @@ impl Fonts {
             on(figures.spacing == FigureSpacing::Proportional),
             on(figures.spacing == FigureSpacing::Tabular),
         ];
-        let plan = self.plan((face, buffer.script(), language, values), buffer.language().as_ref());
+        let script = buffer.script();
+        let plan = self.set.faces[face.0].face.plan((script, language, values), || {
+            let features = std::iter::zip(FEATURES, values)
+                .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..))
+                .collect::<Vec<_>>();
+            rustybuzz::ShapePlan::new(
+                buzz,
+                rustybuzz::Direction::LeftToRight,
+                // A run with no letters has no script, which the buffer reports as unknown.
+                (script != rustybuzz::script::UNKNOWN).then_some(script),
+                buffer.language().as_ref(),
+                &features,
+            )
+        });
         let shaped = rustybuzz::shape_with_plan(buzz, &plan, buffer);
 
         let scale = size.0 / f64::from(buzz.units_per_em());
@@ -317,101 +397,6 @@ impl Fonts {
             spacing: Pt(spacing),
         }
     }
-
-    /// The plan `rustybuzz::shape` would build for these properties, built once.
-    fn plan(&self, key: PlanKey, language: Option<&rustybuzz::Language>) -> Arc<rustybuzz::ShapePlan> {
-        if let Some(plan) = self.plans.read().expect("no panic while planning").get(&key) {
-            return plan.clone();
-        }
-        let (face, script, _, values) = key;
-        let features = std::iter::zip(FEATURES, values)
-            .map(|(tag, value)| rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(tag), value, ..))
-            .collect::<Vec<_>>();
-        let plan = Arc::new(rustybuzz::ShapePlan::new(
-            &self.faces[face.0].buzz,
-            rustybuzz::Direction::LeftToRight,
-            // A run with no letters has no script, which the buffer reports as unknown.
-            (script != rustybuzz::script::UNKNOWN).then_some(script),
-            language,
-            &features,
-        ));
-        let mut plans = self.plans.write().expect("no panic while planning");
-        plans.entry(key).or_insert(plan).clone()
-    }
-
-    /// The font data of a face, for drawing its glyphs by id.
-    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
-    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
-        let face = &self.faces[face.0];
-        FaceOutlines {
-            data: face.data,
-            index: face.index,
-            coordinates: &face.coordinates,
-        }
-    }
-
-    /// The font handle krilla embeds and subsets for a face.
-    pub(crate) fn pdf_font(&self, face: FaceId) -> &krilla::text::Font {
-        &self.faces[face.0].font
-    }
-}
-
-/// The bytes of a face's file, read and leaked once per version of the file for the whole process.
-fn read(file: &FaceFile) -> Result<&'static [u8], String> {
-    type Version = (PathBuf, u64, Option<SystemTime>);
-    static FILES: OnceLock<Mutex<HashMap<Version, &'static [u8]>>> = OnceLock::new();
-
-    let resource = &file.resource;
-    let Some(path) = resource.file() else {
-        return bundled::font(&resource.path).ok_or_else(|| format!("unknown bundled font: {resource}"));
-    };
-    let unreadable = |e: std::io::Error| format!("cannot read font {}: {e}", path.display());
-    let metadata = std::fs::metadata(&path).map_err(unreadable)?;
-    let version = (path.clone(), metadata.len(), metadata.modified().ok());
-    let mut files = FILES
-        .get_or_init(Default::default)
-        .lock()
-        .expect("no panic while reading a font");
-    if let Some(data) = files.get(&version) {
-        return Ok(data);
-    }
-    let bytes = std::fs::read(&path).map_err(unreadable)?;
-    let data: &'static [u8] = Vec::leak(bytes);
-    files.insert(version, data);
-    Ok(data)
-}
-
-/// Parses the face of `file` in `data`.
-fn parse(data: &'static [u8], file: &FaceFile, face: Face) -> Result<Loaded, String> {
-    let resource = &file.resource;
-    let invalid = || match file.index {
-        0 => format!("{resource} is not a parsable OpenType or TrueType font"),
-        index => format!("{resource} has no parsable face at index {index}"),
-    };
-    let mut buzz = rustybuzz::Face::from_slice(data, file.index).ok_or_else(invalid)?;
-    let coordinates = variations::coordinates(&buzz, face).map_err(|message| format!("{resource}: {message}"))?;
-    buzz.set_variations(&coordinates);
-    let pdf_coordinates: Vec<_> = coordinates
-        .iter()
-        .map(|variation| (krilla::text::Tag::new(&variation.tag.to_bytes()), variation.value))
-        .collect();
-    let index = file.index;
-    let coordinates = coordinates.iter().map(|v| (v.tag.to_bytes(), v.value)).collect();
-    let font = krilla::text::Font::new_variable(data.into(), file.index, &pdf_coordinates).ok_or_else(invalid)?;
-    let restricted = restricts_embedding(&buzz);
-    let file = match file.index {
-        0 => resource.to_string(),
-        index => format!("face {index} of {resource}"),
-    };
-    Ok(Loaded {
-        buzz,
-        font,
-        data,
-        index,
-        coordinates,
-        file,
-        restricted,
-    })
 }
 
 /// Whether a font's license, its OS/2 `fsType`, restricts embedding or subsetting.
@@ -421,7 +406,7 @@ pub(crate) fn restricts_embedding(face: &rustybuzz::Face<'_>) -> bool {
         || !face.is_outline_embedding_allowed()
 }
 
-/// How well a face of weight `have` serves a request for `wanted`; lower is better. See [`Fonts::face`].
+/// How well a face of weight `have` serves a request for `wanted`; lower is better. See [`FontSet::face`].
 fn weight_rank(wanted: Weight, have: Weight) -> (u8, u16) {
     let (wanted, have) = (wanted.get(), have.get());
     let tier = if (400..=500).contains(&wanted) {
@@ -436,6 +421,40 @@ fn weight_rank(wanted: Weight, have: Weight) -> (u8, u16) {
         u8::from(have < wanted)
     };
     (tier, wanted.abs_diff(have))
+}
+
+#[cfg(test)]
+impl Fonts<'static> {
+    /// Faces for a test that needs no renderer, read from files. The set lives as long as the test process.
+    pub(crate) fn load(config: &Config, installed: &BTreeMap<String, FontFiles>) -> Result<Self, Vec<Diagnostic>> {
+        let files = files_of(config.fonts.values().chain(installed.values()));
+        let set = FontSet::load(config, installed, &files, &FaceCache::default(), 0)?;
+        Ok(Box::leak(Box::new(set)).fonts())
+    }
+
+    /// Like [`Fonts::load`] for families alone.
+    pub(crate) fn from_files<'a>(
+        families: impl IntoIterator<Item = (&'a String, &'a FontFiles)>,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        let families: Vec<_> = families.into_iter().collect();
+        let files = files_of(families.iter().map(|(_, files)| *files));
+        let set = FontSet::from_files(families, &files, &FaceCache::default(), 0)?;
+        Ok(Box::leak(Box::new(set)).fonts())
+    }
+}
+
+/// The files of `families` that can be read.
+#[cfg(test)]
+fn files_of<'a>(families: impl Iterator<Item = &'a FontFiles>) -> Files {
+    use crate::resource::{FileResolver, Resolver};
+    let mut files = Files::default();
+    for file in families.flat_map(|family| family.values()) {
+        let read = FileResolver::new().read(&file.resource.origin, &file.resource.path);
+        if let Ok(data) = read {
+            files.insert(file.resource.clone(), data);
+        }
+    }
+    files
 }
 
 /// Vertical font metrics in points at a given size. `descender` is positive below the baseline.

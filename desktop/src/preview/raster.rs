@@ -9,7 +9,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use druck::editor::engine::{FaceId, Fonts, Image, Item, Page, Pixels, Rect, ShapedRun};
+use druck::editor::engine::{FaceId, FontSet, Image, Item, Page, Pixels, Rect, ShapedRun};
 use druck::editor::resolved_config::Color;
 use image::RgbaImage;
 use image::imageops::{self, FilterType};
@@ -40,13 +40,13 @@ struct Outline {
 /// Paints pages with one set of loaded fonts. Shared by the threads that rasterize pages.
 pub struct Painter {
     id: u64,
-    fonts: Fonts,
+    fonts: FontSet,
     outlines: RwLock<HashMap<(FaceId, u16), Arc<Outline>>>,
     decoded: Mutex<HashMap<u64, Arc<Option<RgbaImage>>>>,
 }
 
 impl Painter {
-    pub fn new(fonts: Fonts) -> Self {
+    pub fn new(fonts: FontSet) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
@@ -60,7 +60,7 @@ impl Painter {
         self.id
     }
 
-    pub fn fonts(&self) -> &Fonts {
+    pub fn fonts(&self) -> &FontSet {
         &self.fonts
     }
 
@@ -255,7 +255,7 @@ pub fn fingerprint(page: &Page) -> u64 {
             Item::Image { rect, image } => {
                 3_u8.hash(&mut hasher);
                 hash_rect(rect, &mut hasher);
-                image.source().hash(&mut hasher);
+                Hash::hash(&image.source().hash(), &mut hasher);
             }
             Item::Link { .. } | Item::Anchor { .. } | Item::Begin(_) | Item::End => {}
         }
@@ -321,7 +321,6 @@ impl OutlinePen for Pen {
 mod tests {
     use std::path::Path as FilePath;
 
-    use druck::editor::engine::{self, Request};
     use druck::editor::resolved_config::{FontStyle, Lang, Weight};
     use druck::output::Pt;
 
@@ -476,26 +475,19 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp folder");
         let theme_path = dir.join("variable.json");
         std::fs::write(&theme_path, theme).expect("theme");
-        let request = Request {
-            input: FilePath::new("doc.md"),
-            theme: Some(&theme_path),
-            overrides: &[],
-        };
-        let configured = engine::configure(&request, &dir, "Body\n".to_owned());
+        let typeset = Typesetter::new(&dir.join("doc.md"), Some(theme_path)).run("Body\n".to_owned());
         std::fs::remove_dir_all(&dir).expect("temp folder");
-        let Ok((config, _)) = configured else {
-            panic!("the theme is valid")
+        let Ok(layout) = typeset else {
+            panic!("the theme is valid and the font loads")
         };
-        let Ok(fonts) = engine::load_fonts(&config) else {
-            panic!("the font loads")
-        };
+        let painter = layout.painter;
+        let shaper = painter.fonts().fonts();
         let shaped: Vec<_> = [100, 900]
             .map(|weight| {
-                let face = fonts.face("Var", Weight::of_font(weight), FontStyle::Normal);
-                fonts.shape("Hamburg", face, Pt(12.0), Lang::En)
+                let face = painter.fonts().face("Var", Weight::of_font(weight), FontStyle::Normal);
+                shaper.shape("Hamburg", face, Pt(12.0), Lang::En)
             })
             .into();
-        let painter = Painter::new(fonts);
         let ink: Vec<usize> = shaped
             .into_iter()
             .map(|run| {
