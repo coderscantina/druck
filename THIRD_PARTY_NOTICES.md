@@ -295,7 +295,7 @@ Where a crate offers a choice of licenses (`OR`), either one applies.
 | write-fonts | 0.48.1 | MIT OR Apache-2.0 |
 | xmlwriter | 0.1.0 | MIT |
 | xmp-writer | 0.3.3 | MIT OR Apache-2.0 |
-| yoke | 0.8.3 | Unicode-3.0 |
+| yoke | 0.8.4 | Unicode-3.0 |
 | zerofrom | 0.1.8 | Unicode-3.0 |
 | zlib-rs | 0.6.8 | Zlib |
 | zmij | 1.0.23 | MIT |
@@ -2748,7 +2748,7 @@ MIT License
 
 ### LICENSE
 
-Used by: yoke 0.8.3, zerofrom 0.1.8
+Used by: yoke 0.8.4, zerofrom 0.1.8
 
 ```text
 UNICODE LICENSE V3

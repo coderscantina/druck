@@ -251,6 +251,15 @@ Added on 2026-10-12 at the owner's request, to meet what authors expect from a t
 - **Callouts.** GitHub alert quotations such as `> [!NOTE]` render as labeled, styled blocks.
 - **Figure placement.** Images and tables may go to the top or bottom of a page or column, keeping their order. This is a bounded exception to the exclusion of automatic floats.
 
+## Desktop amendment
+
+Added on 2026-11-03 at the owner's request. A [desktop app](DESKTOP_BRIEFING.md) now follows the CLI and is out of scope for this briefing, except that the CLI gains what it and real book projects need. Delivered by [milestone 15](milestones/15-engine-amendment.md), before release acceptance.
+
+- **Project folders.** A folder with `druck.yaml` is a document: metadata, an ordered chapter list, and named exports.
+- **Comments.** `<!-- -->` comments are skipped. All other raw HTML stays an error.
+- **Inline marks.** Strikethrough, superscript, subscript, underline, and small caps.
+- **Placeholders.** `{todo: text}` shows in drafts and fails an export marked `final`.
+
 ## Acceptance and performance
 
 Judge visual quality against the project's own reviewed English and German sample documents. LaTeX reference PDFs and matching LaTeX line or page breaks are not acceptance requirements.

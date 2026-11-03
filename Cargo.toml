@@ -11,6 +11,14 @@ readme = "README.md"
 keywords = ["markdown", "pdf", "typesetting", "typography", "cli"]
 categories = ["command-line-utilities", "text-processing"]
 
+# The desktop app builds only when asked for, as in `cargo build -p druck-desktop`.
+[workspace]
+members = [".", "desktop"]
+default-members = ["."]
+
+[lib]
+doctest = false
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }

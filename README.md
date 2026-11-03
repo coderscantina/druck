@@ -43,7 +43,7 @@ The binaries are not signed yet. On macOS, clear the quarantine flag once with `
 To build from source, install Rust and run:
 
 ```sh
-cargo install --locked --git https://github.com/coderscantina/druck
+cargo install --locked --git https://github.com/coderscantina/druck druck
 ```
 
 ## Quick start

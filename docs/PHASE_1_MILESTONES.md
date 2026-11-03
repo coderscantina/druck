@@ -21,8 +21,12 @@ The three delivery stages in [the product briefing](BRIEFING.md) remain intact: 
 11. [Installed fonts and custom styles](milestones/11-typography.md).
 12. [Page geometry, covers, and bands](milestones/12-page-geometry.md).
 13. [Rich tables](milestones/13-rich-tables.md).
+14. [Desktop spike](milestones/14-desktop-spike.md).
+15. [Engine amendment](milestones/15-engine-amendment.md).
 
 Milestones 11 to 13 deliver the [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07. Milestones 11 and 12 depend only on milestone 09 and may run in parallel; 13 needs both. The release acceptance of milestone 10 covers them once they are complete.
+
+Milestones 14 and 15 come before milestone 10. The [desktop briefing](DESKTOP_BRIEFING.md#sequence) sets their order.
 
 Each milestone depends on the preceding milestones unless its brief states otherwise. Work may be split into smaller sessions. Begin a later milestone only within the user's authorized scope and with its prerequisites satisfied.
 

@@ -1,0 +1,15 @@
+[package]
+name = "druck-desktop"
+version = "0.0.0"
+edition = "2024"
+description = "Native desktop composer and theme editor for Druck"
+license = "MIT"
+publish = false
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+druck = { path = ".." }
+# Weekly snapshots of Zed's gpui crates, pinned exactly because any snapshot may change the API.
+# 0.3.11 is zed@f816e1f.
+gpui = { package = "gpui-pre", version = "=0.3.11" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", default-features = false, features = ["font-kit", "runtime_shaders"] }

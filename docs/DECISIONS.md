@@ -997,6 +997,22 @@ At the owner's request: Druck should produce book-quality pages from rules and t
 - **Effect:** on the owner's manuscript (A5-like, German, recto chapters), both cases are fixed and the book grows from 201 to 207 pages: the one-liner rule adds 4 and the spread rule 2, since chapters start on odd pages. Pages more than a line short rose from 22 to 33 (32.6 to 46.5 lines in total), and no one-line paragraph stands at a page edge any more. Still reported: 7 headings with two lines below them, 3 short chapter endings, and 20 uneven spreads. Rendering took 0.65 s user time and 62 MB, against 0.59 s and 52 MB before.
 - **Left out:** microtypography (font expansion, protrusion of ragged text), a baseline grid, and river detection.
 
+## 2026-11-03: Desktop app
+
+Settled with the owner in an interview. The contract is [the desktop briefing](DESKTOP_BRIEFING.md).
+
+- **Toolkit:** gpui, since Rust-only rules out Tauri and webviews. crates.io has 0.2.2, reported as far behind Zed main, so expect a pinned git revision. Zed's `editor` crate is GPL-3.0, so its code cannot be used in MIT Druck, and the rich text editor is our own.
+- **Text is the truth:** a block model that serializes on save would reformat files that agents and other editors also change. This needs a source-preserving layer, since the parser records only block start locations and cannot reproduce source.
+- **Spike before milestone 10:** the owner chose to retire the editor risk first. This replaces "next: milestone 10" until the spike and engine amendment are done.
+- **Comments are accepted:** "Embedded HTML is not rendered" still holds. Comments were errors, which forced `build.sh` to strip them and pointed diagnostics at a generated file.
+- **Underline and strikethrough are added:** this reverses "not supported" in authoring, at the owner's request, though they are weak typography.
+- **Overrides are named styles:** the mockup's per-block inline styles are not adopted, because the briefing rules out cascading rules and keeps Markdown additions small.
+- **Theme forks copy assets:** the briefing forbids parent chains, so a project theme is a self-contained copy. Common theme updates do not flow in.
+- **Chapter order is a manifest list:** chosen over file name order, so an agent adding a chapter must also edit `druck.yaml`; until then it is flagged and excluded.
+- **Agent panel spawns the CLI:** the Agent SDK is not a Rust library. The login policy question is open until Anthropic confirms it.
+
+Unresolved: Anthropic's answer on subscription logins, and gpui's accessibility on each platform.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

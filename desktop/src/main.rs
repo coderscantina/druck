@@ -1,0 +1,45 @@
+//! Druck desktop: a native composer and theme editor on the same engine as the CLI.
+
+mod agent;
+mod app;
+mod assets;
+mod document;
+mod editor;
+mod inspector;
+mod preview;
+mod sidebar;
+mod tokens;
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::Parser;
+
+use document::Opened;
+use tokens::Scheme;
+
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    /// Markdown document to open.
+    #[arg(long, value_name = "PATH")]
+    open: Option<PathBuf>,
+    /// Use this appearance instead of following the system.
+    #[arg(long, value_enum)]
+    appearance: Option<Scheme>,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let opened = match cli.open.as_deref().map(Opened::read).transpose() {
+        Ok(opened) => opened,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    gpui_platform::application()
+        .with_assets(assets::Assets)
+        .run(move |cx| app::open(opened, cli.appearance, cx));
+    ExitCode::SUCCESS
+}
