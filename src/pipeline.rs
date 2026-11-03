@@ -30,6 +30,29 @@ pub struct DocumentFile {
     pub text: String,
 }
 
+impl DocumentFile {
+    /// The Markdown of the document and the line it starts on. A project's joined chapters have no front
+    /// matter, so a thematic break at the start of the first one stays a thematic break.
+    fn body(&self) -> (&str, u64) {
+        if matches!(self.source, Source::Chapters(_)) {
+            return (&self.text, 1);
+        }
+        let split = front_matter::split(&self.text).ok().flatten();
+        let body = split.map_or(self.text.as_str(), |split| split.body);
+        let first_line = self.text[..self.text.len() - body.len()].matches('\n').count() as u64 + 1;
+        (body, first_line)
+    }
+
+    /// What to call the document when it has no title: its file name, or a project's folder name.
+    pub fn name(&self) -> Option<&str> {
+        let name = match self.source {
+            Source::Chapters(_) => self.path.parent()?.file_name()?,
+            _ => self.path.file_stem()?,
+        };
+        name.to_str()
+    }
+}
+
 /// Everything layout needs besides the configuration and fonts.
 pub struct Prepared {
     pub content: document::Document,
@@ -40,9 +63,7 @@ pub struct Prepared {
 
 /// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
 pub fn prepare(config: &Config, document: &DocumentFile) -> Result<Prepared, Vec<Diagnostic>> {
-    let split = front_matter::split(&document.text).ok().flatten();
-    let body = split.map_or(document.text.as_str(), |split| split.body);
-    let first_line = document.text[..document.text.len() - body.len()].matches('\n').count() as u64 + 1;
+    let (body, first_line) = document.body();
     let content = markdown::parse_with(
         body,
         first_line,
@@ -175,29 +196,8 @@ pub fn load(args: &Request) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
 pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Config, DocumentFile), Vec<Diagnostic>> {
     let document_path = normalize(&working_dir.join(args.input));
     let document_source = Source::Document(document_path.clone());
-    let cli_source = Source::Cli {
-        working_dir: working_dir.to_owned(),
-    };
-
-    let document = parse_front_matter(&text, &document_source)?;
-    let overrides = parse_overrides(args.overrides, &cli_source)?;
-
-    let theme = selected_theme(args.theme, &document, &document_path, working_dir)
-        .map(|path| load_theme(&path))
-        .transpose()?;
-
-    let config = resolve(Inputs {
-        theme,
-        document: SettingsInput {
-            source: document_source.clone(),
-            settings: document,
-        },
-        overrides: SettingsInput {
-            source: cli_source,
-            settings: overrides,
-        },
-    })?;
-    check_resources(&config)?;
+    let settings = parse_front_matter(&text, &document_source)?;
+    let config = resolve_settings(args, settings, &document_source, None, working_dir)?;
     let document = DocumentFile {
         path: document_path,
         working_dir: working_dir.to_owned(),
@@ -207,30 +207,65 @@ pub fn configure(args: &Request, working_dir: &Path, text: String) -> Result<(Co
     Ok((config, document))
 }
 
-/// The theme file a document uses: the one asked for, else the one its front matter names.
+/// Resolves and checks the configuration from settings read from `source`, which paths in them are relative
+/// to. A document of a project folder gets that folder as `project`, for the themes in it.
+pub(crate) fn resolve_settings(
+    args: &Request,
+    settings: FrontMatter,
+    source: &Source,
+    project: Option<&Path>,
+    working_dir: &Path,
+) -> Result<Config, Vec<Diagnostic>> {
+    let cli_source = Source::Cli {
+        working_dir: working_dir.to_owned(),
+    };
+    let overrides = parse_overrides(args.overrides, &cli_source)?;
+
+    let theme = selected_theme(args.theme, &settings, source, project, working_dir)
+        .map(|path| load_theme(&path))
+        .transpose()?;
+
+    let config = resolve(Inputs {
+        theme,
+        document: SettingsInput {
+            source: source.clone(),
+            settings,
+        },
+        overrides: SettingsInput {
+            source: cli_source,
+            settings: overrides,
+        },
+    })?;
+    check_resources(&config)?;
+    Ok(config)
+}
+
+/// The theme file a document uses: the one asked for, else the one its settings name.
 fn selected_theme(
     asked: Option<&Path>,
-    document: &FrontMatter,
-    document_path: &Path,
+    settings: &FrontMatter,
+    source: &Source,
+    project: Option<&Path>,
     working_dir: &Path,
 ) -> Option<PathBuf> {
-    match (asked, &document.theme) {
-        (Some(path), _) => Some(theme_path::resolve(path, working_dir)),
-        (None, Some(path)) => document_path
-            .parent()
-            .map(|dir| theme_path::resolve(Path::new(path), dir)),
+    match (asked, &settings.theme) {
+        (Some(path), _) => Some(theme_path::resolve_in(path, working_dir, project)),
+        (None, Some(path)) => match source.origin() {
+            Origin::Document(dir) => Some(theme_path::resolve_in(Path::new(path), &dir, project)),
+            _ => None,
+        },
         (None, None) => None,
     }
 }
 
 /// The theme file that the front matter of a document's `text` names, if it names one and parses.
 pub fn document_theme(path: &Path, text: &str) -> Option<PathBuf> {
-    let document = parse_front_matter(text, &Source::Document(path.to_owned())).ok()?;
-    let working_dir = path.parent()?;
-    selected_theme(None, &document, path, working_dir)
+    let source = Source::Document(path.to_owned());
+    let settings = parse_front_matter(text, &source).ok()?;
+    selected_theme(None, &settings, &source, None, path.parent()?)
 }
 
-fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
+pub fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
     std::env::current_dir().map_err(|e| {
         vec![Diagnostic::new(
             None,
@@ -239,7 +274,7 @@ fn current_dir() -> Result<PathBuf, Vec<Diagnostic>> {
     })
 }
 
-fn read(path: &Path, source: &Source) -> Result<String, Vec<Diagnostic>> {
+pub(crate) fn read(path: &Path, source: &Source) -> Result<String, Vec<Diagnostic>> {
     std::fs::read_to_string(path)
         .map_err(|e| vec![Diagnostic::new(Some(source.clone()), format!("cannot read file: {e}"))])
 }
@@ -249,10 +284,24 @@ fn parse_front_matter(text: &str, source: &Source) -> Result<FrontMatter, Vec<Di
     let Some(split) = split else {
         return Ok(FrontMatter::default());
     };
-    serde_saphyr::from_str(split.yaml).map_err(|error| {
+    let settings = parse_settings(split.yaml, split.first_line, source)?;
+    let project_field = settings.chapters.is_some() || settings.exports.is_some();
+    if project_field {
+        return Err(vec![
+            Diagnostic::new(Some(source.clone()), PROJECT_FIELDS).at(split.first_line, 1),
+        ]);
+    }
+    Ok(settings)
+}
+
+const PROJECT_FIELDS: &str = "chapters and exports belong in a project's druck.yaml";
+
+/// Reads settings from YAML that starts at 1-based line `first_line` of `source`.
+pub(crate) fn parse_settings(yaml: &str, first_line: u64, source: &Source) -> Result<FrontMatter, Vec<Diagnostic>> {
+    serde_saphyr::from_str(yaml).map_err(|error| {
         let mut diagnostic = Diagnostic::new(Some(source.clone()), yaml_message(&error));
         if let Some(location) = error.location() {
-            diagnostic = diagnostic.at(location.line() + split.first_line - 1, location.column());
+            diagnostic = diagnostic.at(location.line() + first_line - 1, location.column());
         }
         vec![diagnostic]
     })
@@ -303,6 +352,9 @@ fn parse_overrides(pairs: &[String], source: &Source) -> Result<FrontMatter, Vec
                 _ => return Err(error(format!("--set {key}: \"{part}\" is already set to a value"))),
             };
         }
+    }
+    if settings.contains_key("chapters") || settings.contains_key("exports") {
+        return Err(error(format!("--set: {PROJECT_FIELDS}")));
     }
     serde_path_to_error::deserialize(Value::Object(settings)).map_err(|e| {
         let path = e.path().to_string();

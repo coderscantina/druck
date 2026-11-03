@@ -17,6 +17,7 @@ pub mod markdown;
 pub mod page;
 pub mod pdf;
 pub mod pipeline;
+pub mod project;
 pub mod spacing;
 pub mod statistics;
 pub mod tags;

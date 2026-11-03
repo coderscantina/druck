@@ -65,7 +65,7 @@ pub fn resolve(
         }
     }
     if !errors.is_empty() {
-        errors.sort_by_key(|diagnostic| diagnostic.location);
+        errors.sort_by_key(|diagnostic| diagnostic.position);
         return Err(errors);
     }
 

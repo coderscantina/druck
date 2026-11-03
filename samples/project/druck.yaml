@@ -1,0 +1,17 @@
+title: A small project
+author: Ada Example
+lang: en
+toc: true
+chapters:
+  - manuscript/01-start.md
+  - manuscript/02-end.md
+exports:
+  print:
+    bleed: 3mm
+    crop-marks: true
+    final: true
+  review:
+    draft: true
+    output: build/review-copy.pdf
+  ebook:
+    output: build/a-small-project.epub

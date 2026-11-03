@@ -11,6 +11,14 @@ Use `druck render article.md --theme latex-1`, or `theme: latex-1` in front matt
 
 Names contain ASCII letters, digits, hyphens, or underscores. An existing file with that exact name takes precedence: relative to the working directory for `--theme`, or the document directory for front matter. A value with an extension or path separator is always a file path, so `--theme ./latex-1` explicitly selects a local file. A missing named theme reports the searched JSON path. Assets resolve relative to the selected JSON file, including when it came from the shared directory. No network access is involved.
 
+In a [project folder](AUTHORING.md#projects), a bare name looks in the project first:
+
+1. `themes/<name>/theme.json` in the project folder.
+2. An existing file with that exact name, as above.
+3. `<name>.json` in the shared directory.
+
+This holds for `theme` in `druck.yaml`, `theme` in an export, and `--theme`. A single-file document does not look in any `themes/` folder. Assets resolve relative to the selected JSON file here too, so a project theme keeps its fonts and images beside it. The desktop app uses the same lookup.
+
 The reference themes prepared on 2026-10-07 are installed in `~/.config/druck/themes`: `coderscantina`, `latex-1`, `latex-2`, and `latex-3`. Their metadata and column instructions are in that directory's `README.md`. The three LaTeX references differ in body size, margins, title treatment, and columns, so they remain separate. They use bundled Libertinus. `coderscantina` uses static faces generated from the owner's installed Bad variable fonts; the JSON and its `fonts/bad` directory travel together. These personal themes are not bundled into the binary.
 
 `druck check` loads and validates a theme, and `druck check --print-config` shows the resolved result. `druck render` uses it to typeset a document.
