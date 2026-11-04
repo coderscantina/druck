@@ -38,6 +38,8 @@ pub struct DisplayLine {
     pub bullet: Option<String>,
     /// Leading spaces of a list line, which become indentation.
     pub nesting: usize,
+    /// An empty line inside a hidden comment, which takes no room.
+    pub inside_hidden: bool,
 }
 
 impl DisplayLine {
@@ -64,7 +66,7 @@ impl DisplayLine {
 
     /// A line whose whole content is hidden takes no room.
     pub fn is_collapsed(&self) -> bool {
-        self.text.is_empty() && !self.source.is_empty()
+        self.text.is_empty() && (!self.source.is_empty() || self.inside_hidden)
     }
 }
 
@@ -101,14 +103,16 @@ fn line_holds(lines: &[Range<usize>], caret: Option<usize>, at: usize) -> bool {
         .is_some_and(|line| line.start <= caret && caret <= line.end)
 }
 
-/// What stays hidden with the caret at `caret`: line markers unless the caret is on their line, inline markers unless
-/// the caret touches their span, and the leading spaces of list lines always.
+/// What stays hidden with the caret at `caret`: line markers unless the caret is on their line, inline markers and
+/// comments unless the caret touches their span or `show_comments` asks for them, and the leading spaces of list lines
+/// always.
 pub fn hidden_ranges(
     kind: BlockKind,
     text: &str,
     syntax: &Syntax,
     caret: Option<usize>,
     trailing_line: bool,
+    show_comments: bool,
 ) -> Vec<Range<usize>> {
     let lines = lines(text, trailing_line);
     let mut hidden = Vec::new();
@@ -120,8 +124,14 @@ pub fn hidden_ranges(
     for span in &syntax.spans {
         let revealed = caret.is_some_and(|caret| span.range.start <= caret && caret <= span.range.end);
         if !revealed {
-            hidden.push(span.open.clone());
-            hidden.push(span.close.clone());
+            if span.kind == SpanKind::Comment {
+                if !show_comments {
+                    hidden.push(span.range.clone());
+                }
+            } else {
+                hidden.push(span.open.clone());
+                hidden.push(span.close.clone());
+            }
         }
     }
     if kind == BlockKind::List {
@@ -212,8 +222,13 @@ fn display_line(
             MarkerKind::Number => Some(text[marker.range.clone()].trim_end().to_owned()),
             MarkerKind::Heading | MarkerKind::Quote => None,
         });
+    let inside_hidden = line.is_empty()
+        && hidden
+            .iter()
+            .any(|range| range.start < line.start && line.end < range.end);
     DisplayLine {
         source: line,
+        inside_hidden,
         text: display,
         segments,
         runs,
@@ -311,7 +326,7 @@ mod tests {
 
     fn show(kind: BlockKind, text: &str, caret: Option<usize>) -> Vec<DisplayLine> {
         let syntax = syntax(kind, text);
-        let hidden = hidden_ranges(kind, text, &syntax, caret, false);
+        let hidden = hidden_ranges(kind, text, &syntax, caret, false, false);
         display_lines(kind, text, &syntax, &hidden, None, false)
     }
 
@@ -373,6 +388,27 @@ mod tests {
         };
         let plain = RunStyle::default();
         assert_eq!(line.runs, [(2, plain), (1, bold), (1, plain), (1, italic), (1, plain)]);
+    }
+
+    #[test]
+    fn a_comment_hides_like_a_marker_and_shows_when_asked() {
+        let text = "a <!-- b --> c";
+        assert_eq!(show(BlockKind::Paragraph, text, None)[0].text, "a  c");
+        assert_eq!(show(BlockKind::Paragraph, text, Some(5))[0].text, text);
+        let syntax = syntax(BlockKind::Paragraph, text);
+        let hidden = hidden_ranges(BlockKind::Paragraph, text, &syntax, None, false, true);
+        assert_eq!(
+            display_lines(BlockKind::Paragraph, text, &syntax, &hidden, None, false)[0].text,
+            text
+        );
+    }
+
+    #[test]
+    fn the_lines_of_a_hidden_comment_take_no_room() {
+        let lines = show(BlockKind::Paragraph, "a <!-- b\n\nc --> d\n", None);
+        assert_eq!(lines[0].text, "a ");
+        assert!(lines[1].is_collapsed());
+        assert_eq!(lines[2].text, " d");
     }
 
     #[test]

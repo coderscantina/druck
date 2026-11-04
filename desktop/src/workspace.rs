@@ -26,7 +26,7 @@ use crate::tokens::{self, Tokens};
 /// Below this window width each side of a split is too narrow to write in, so the app opens on Write.
 const SPLIT_MIN_WIDTH: f32 = 1400.;
 /// Keeps the title clear of the window controls and the canvas switch.
-const TITLE_INSET: gpui::Pixels = px(170.);
+const TITLE_INSET: gpui::Pixels = px(240.);
 /// How long typing must stop before the pages catch up.
 const REFRESH_PAUSE: Duration = Duration::from_millis(150);
 

@@ -57,7 +57,7 @@ use crate::highlight;
 use crate::source_map::{BlockKind, MAPPED_LENGTH, Recorder, Spans};
 use crate::spacing;
 
-mod comments;
+pub mod comments;
 pub mod marks;
 
 /// Parses the Markdown body that starts at 1-based line `first_line` of the document `source`.

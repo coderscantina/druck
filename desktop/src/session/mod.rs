@@ -619,6 +619,38 @@ impl Session {
         }
     }
 
+    /// The text of the bibliography the document names, if it has one.
+    pub fn bibliography_text(&self) -> Option<String> {
+        let file = self.settings.as_ref().ok()?.bibliography.as_ref()?;
+        fs::read_to_string(self.base_dir().join(file)).ok()
+    }
+
+    /// An image in the document's usual folders, written as the engine reads it, from the document's folder. For the
+    /// slash menu.
+    pub fn first_image(&self) -> Option<String> {
+        const IMAGES: [&str; 4] = ["png", "jpg", "jpeg", "svg"];
+        let base = self.base_dir();
+        let chapter_dir = self.active_chapter().path().parent()?.to_owned();
+        for folder in [base.join("assets"), base.join("images"), chapter_dir] {
+            let mut files: Vec<PathBuf> = fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| IMAGES.contains(&extension))
+                })
+                .collect();
+            files.sort();
+            if let Some(file) = files.first() {
+                return Some(relative_path(&base, file));
+            }
+        }
+        None
+    }
+
     /// Where a bare theme name is looked up for this document.
     pub fn theme_dirs(&self) -> ThemeDirs {
         ThemeDirs {
@@ -1082,6 +1114,18 @@ impl Session {
         self.resplit();
         Ok(self.active)
     }
+}
+
+/// `file` as a path from `folder`, with forward slashes, as Markdown writes it.
+fn relative_path(folder: &Path, file: &Path) -> String {
+    let from: Vec<_> = folder.components().collect();
+    let to: Vec<_> = file.components().collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let ups = std::iter::repeat_n("..".to_owned(), from.len() - shared);
+    let downs = to[shared..]
+        .iter()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned());
+    ups.chain(downs).collect::<Vec<_>>().join("/")
 }
 
 /// An offset after edits sorted by position, whose ranges refer to the text before them.

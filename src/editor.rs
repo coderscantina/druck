@@ -5,6 +5,8 @@
 
 /// Citation syntax: the source layer must tint exactly what the parser reads as a citation.
 pub use crate::bibliography::syntax;
+/// Comment finding: the source layer must cut a comment out of a block exactly where the parser does.
+pub use crate::markdown::comments;
 /// Inline mark pairing: the source layer must pair `^x^`, `~x~`, and `{todo:` as the parser does.
 pub use crate::markdown::marks;
 

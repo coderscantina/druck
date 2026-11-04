@@ -41,6 +41,29 @@ impl GalleyStyle {
         }
     }
 
+    /// A line of the source view: the same monospace throughout, with color and weight telling blocks apart.
+    fn source_line_style(&self, kind: BlockKind) -> LineStyle {
+        let (weight, color) = match kind {
+            BlockKind::Heading { .. } => (FontWeight::BOLD, self.ink),
+            BlockKind::Code => (FontWeight::NORMAL, self.link),
+            BlockKind::FrontMatter
+            | BlockKind::Directive
+            | BlockKind::Comment
+            | BlockKind::SceneBreak
+            | BlockKind::Raw => (FontWeight::NORMAL, self.quiet),
+            _ => (FontWeight::NORMAL, self.ink),
+        };
+        LineStyle {
+            font: Font {
+                weight,
+                ..self.mono.clone()
+            },
+            size: self.body_size * 0.85,
+            leading: 1.5,
+            color,
+        }
+    }
+
     /// Takes the theme's body font, its size in points, and its line height.
     pub fn set_body(&mut self, family: &str, size: f32, line_height: f32) {
         self.body = font(SharedString::from(family.to_owned()));
@@ -140,13 +163,17 @@ impl GalleyStyle {
     }
 
     /// A height for a block not yet shaped. Close enough for scrolling, corrected when it comes into view.
-    pub fn estimate_height(&self, kind: BlockKind, text: &str, width: Pixels) -> Pixels {
-        if kind == BlockKind::Blank {
+    pub fn estimate_height(&self, kind: BlockKind, text: &str, width: Pixels, source: bool) -> Pixels {
+        if kind == BlockKind::Blank && !source {
             return self
                 .blank_gap()
                 .max(self.body_size * self.leading * (text.matches('\n').count() as f32 - 1.));
         }
-        let style = self.line_style(kind);
+        let style = if source {
+            self.source_line_style(kind)
+        } else {
+            self.line_style(kind)
+        };
         let scale = style.size / self.body_size;
         let per_line = (width / (self.estimated_char_width() * scale)).max(1.);
         let rows: f32 = text
@@ -222,6 +249,18 @@ pub struct BlockLayout {
     pub hidden: Vec<Range<usize>>,
     pub marked: Option<Range<usize>>,
     pub width: Pixels,
+    /// The whole block takes no room.
+    pub collapsed: bool,
+}
+
+impl BlockLayout {
+    /// The height of the block's first line that shows, for what stands beside it in the gutter.
+    pub fn first_line_height(&self) -> Pixels {
+        self.lines
+            .iter()
+            .find(|line| line.height > px(0.))
+            .map_or(px(0.), |line| line.line_height)
+    }
 }
 
 /// The arrangement of one block's lines. Whether each is a skipped separator comes from the caller, which has the
@@ -230,6 +269,10 @@ pub struct ShapeRequest<'a> {
     pub kind: BlockKind,
     pub lines: Vec<DisplayLine>,
     pub separator: bool,
+    /// The whole block takes no room, as a hidden comment does.
+    pub collapsed: bool,
+    /// The source view: every line in one monospace, at the column's left edge.
+    pub source: bool,
     pub hidden: Vec<Range<usize>>,
     pub marked: Option<Range<usize>>,
     pub width: Pixels,
@@ -241,12 +284,18 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         kind,
         lines,
         separator,
+        collapsed,
+        source,
         hidden,
         marked,
         width,
         style,
     } = request;
-    let base = style.line_style(kind);
+    let base = if source {
+        style.source_line_style(kind)
+    } else {
+        style.line_style(kind)
+    };
     let line_height = base.size * base.leading;
     let hang = style.body_size * 1.25;
     let unit = hang * 0.5;
@@ -255,6 +304,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
     for display in lines {
         let quote_indent = if kind == BlockKind::Quote { hang } else { px(0.) };
         let x = match kind {
+            _ if source => px(0.),
             BlockKind::List => unit * display.nesting as f32 + if display.bullet.is_some() { hang } else { px(0.) },
             _ => quote_indent,
         };
@@ -275,9 +325,10 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             .and_then(|mut lines| lines.pop())
             .unwrap_or_default();
         let rows = rows_of(&shaped);
-        let skipped = separator || display.is_collapsed();
+        let hidden_line = collapsed || display.is_collapsed();
+        let skipped = separator || hidden_line;
         let row_count = rows.len() as f32;
-        let height = if display.is_collapsed() {
+        let height = if hidden_line {
             px(0.)
         } else if separator {
             style.blank_gap()
@@ -307,6 +358,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         hidden,
         marked,
         width,
+        collapsed,
     }
 }
 

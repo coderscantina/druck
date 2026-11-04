@@ -58,6 +58,12 @@ pub fn find(body: &str, options: Options) -> Comments {
 }
 
 impl Comments {
+    /// The byte ranges of the comments in order. An unterminated one runs to the end of the text.
+    #[cfg(feature = "editor")]
+    pub fn ranges(&self) -> &[Range<usize>] {
+        &self.removed
+    }
+
     /// `body` without the comments, and the offset map for it.
     pub fn strip<'a>(&self, body: &'a str) -> (Cow<'a, str>, Cuts) {
         if self.removed.is_empty() {

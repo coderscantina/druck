@@ -37,3 +37,17 @@ Colors, spacing, and type live in one table in the desktop crate. Views never ha
 ## Slots
 
 The window has three places to mount a view without touching the shell, listed in `desktop/src/app.rs`: `toolbar` in the title bar before the canvas switch, `footer` in the strip under the canvas, and `overlays` over the window. Inspector tabs take a panel with `InspectorView::mount`.
+
+## Editor commands
+
+- The floating toolbar is one row on the panel color with a thin border and a shadow: marks, a thin separator, then quotation, lists, and link. A mark that is on inverts its button, text color behind panel color, as in the mockup. A mixed mark shows its icon in the accent color. There is no `Tt` button.
+- It sits below the selection, or above it when there is no room below, and stays over the galley up and down and inside the window sideways. Only a selection taller than the galley gets covered, at its top.
+- A command that selects a placeholder opens no toolbar, and Escape hides it until the selection changes.
+- Lists that float, the slash menu and a block's convert menu, start at the caret's or icon's left edge, not centered on it. Rows are 28 px on the panel color, with a faint icon that turns accent on the chosen row. They show ten rows and scroll.
+- The block gutter sits inside the sheet, left of the text, as in the mockups, so the sheet is wider than the text by the gutter and a right margin. Every block's type icon shows in the quiet color at low opacity, and the active or hovered block's in full ink.
+- A heading's icon is three short lines and its level. A dragged block drops above the block under the pointer, shown by a 2 px accent line, the same rule as a dragged sidebar row.
+- A hidden comment takes no room, and a small speech mark stands right of the type icon on the row it was on. For a comment block it stands beside the next block that shows. Clicking it shows the comment in the flow, in the quiet color.
+- A selection shows its text clean, with no markers revealed. Blank gaps between blocks show no selection.
+- The scrollbar is a 6 px thumb in the pane's right edge, faint, and stronger when the pointer is over it.
+- The source view uses one monospace on the same sheet with no block backgrounds. Markers, comments, directives, and front matter are in the quiet color, headings bold, and code in the link color.
+- The notes panel is the inspector's Notes tab: a section label, then a field for each note holding its text with plain line breaks.
