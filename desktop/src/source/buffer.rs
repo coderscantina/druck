@@ -206,6 +206,35 @@ impl Buffer {
         Ok(splice)
     }
 
+    /// Adds edits to the last undo step, whatever its kind, so one undo takes both back. With no step to add to, they
+    /// start one.
+    pub fn amend(&mut self, edits: Vec<Edit>, after: Selection, now: Instant) -> Result<Splice, EditError> {
+        self.validate(&edits)?;
+        let (splice, backward) = self.apply(&edits);
+        let step = Step {
+            forward: edits,
+            backward,
+        };
+        self.redo.clear();
+        self.revision += 1;
+        self.undo_outside_armed = false;
+        match self.undo.last_mut() {
+            Some(group) => {
+                group.steps.push(step);
+                group.last_edit = now;
+                group.after = after;
+            }
+            None => self.undo.push(Group {
+                steps: vec![step],
+                kind: EditKind::Discrete,
+                last_edit: now,
+                before: after,
+                after,
+            }),
+        }
+        Ok(splice)
+    }
+
     /// Whether the next undo meets a change from outside.
     pub fn undo_is_outside_change(&self) -> bool {
         self.undo.last().is_some_and(|group| group.kind == EditKind::External)

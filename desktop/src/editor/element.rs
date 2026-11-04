@@ -10,6 +10,7 @@ use gpui::{
     Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
 };
 
+use super::display::ChipLook;
 use super::float::prepaint_float;
 use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
 use super::layout::BlockLayout;
@@ -50,10 +51,14 @@ pub struct Frame {
     scrollbar: Option<Scrollbar>,
     scrollbar_strong: bool,
     floats: Vec<AnyElement>,
+    /// The images of visible figures, drawn inside the galley.
+    images: Vec<AnyElement>,
     source: bool,
     pub(super) ink: Hsla,
     pub(super) quiet: Hsla,
-    rule: Hsla,
+    pub(super) rule: Hsla,
+    link: Hsla,
+    error: Hsla,
     code_background: Hsla,
     body_size: Pixels,
     body_font: gpui::Font,
@@ -134,6 +139,7 @@ impl Element for Galley {
             let floats = view.floats(&selection, caret, window, cx);
             (frame, floats)
         });
+        frame.images = self.prepaint_images(&frame, bounds, window, cx);
         frame.floats = floats
             .into_iter()
             .map(|(element, origin)| prepaint_float(element, origin, window, cx))
@@ -183,6 +189,9 @@ impl Element for Galley {
             for block in &frame.blocks {
                 paint_block_text(block, frame, window, cx);
             }
+            for image in &mut frame.images {
+                image.paint(window, cx);
+            }
             paint_gutter(frame, window, cx);
             if let Some(bar) = frame.scrollbar {
                 window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(px(3.)));
@@ -217,11 +226,48 @@ impl Element for Galley {
     }
 }
 
+impl Galley {
+    fn prepaint_images(
+        &self,
+        frame: &Frame,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<AnyElement> {
+        let mut images = Vec::new();
+        for block in &frame.blocks {
+            if let Some(element) = block
+                .layout
+                .whole
+                .as_ref()
+                .and_then(|whole| whole.image_element(point(frame.column.text_left, block.top), bounds, window, cx))
+            {
+                images.push(element);
+            }
+        }
+        images
+    }
+}
+
 fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window) {
     if frame.source {
         return;
     }
     let column = &frame.column;
+    for line in &block.layout.lines {
+        for (chip, look) in &line.chips {
+            let color = match look {
+                ChipLook::Mark => continue,
+                ChipLook::Label => frame.link.opacity(0.12),
+                ChipLook::Error => frame.error.opacity(0.14),
+            };
+            let bounds = Bounds::new(
+                point(column.text_left + chip.origin.x, block.top + chip.origin.y),
+                chip.size,
+            );
+            window.paint_quad(fill(bounds, color).corner_radii(px(3.)));
+        }
+    }
     let height = block.layout.height;
     match block.kind {
         BlockKind::Code => {
@@ -241,11 +287,26 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
 
 fn paint_block_text(block: &FrameBlock, frame: &Frame, window: &mut Window, cx: &mut App) {
     let column = &frame.column;
-    for line in &block.layout.lines {
+    if let Some(whole) = &block.layout.whole {
+        whole.paint(point(column.text_left, block.top), frame, window, cx);
+    }
+    paint_lines(&block.layout, column.text_left, block.top, frame, window, cx);
+}
+
+/// Paints a shaped block's lines with its top left corner at (`left`, `top`).
+pub(super) fn paint_lines(
+    layout: &BlockLayout,
+    left: Pixels,
+    top: Pixels,
+    frame: &Frame,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for line in &layout.lines {
         if line.height == px(0.) {
             continue;
         }
-        let top = block.top + line.y;
+        let top = top + line.y;
         if let Some((bullet, x)) = &line.bullet {
             let run = TextRun {
                 len: bullet.len(),
@@ -258,12 +319,12 @@ fn paint_block_text(block: &FrameBlock, frame: &Frame, window: &mut Window, cx: 
             let shaped = window
                 .text_system()
                 .shape_line(bullet.clone(), frame.body_size, &[run], None);
-            let origin = point(column.text_left + *x, top);
+            let origin = point(left + *x, top);
             shaped
                 .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
                 .ok();
         }
-        let origin = point(column.text_left + line.x, top);
+        let origin = point(left + line.x, top);
         line.shaped
             .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
             .ok();
@@ -286,6 +347,15 @@ impl EditorView {
                     self.slots[index].icon = icon;
                     icon
                 }
+            };
+            // A list table starts with its directive line, and it is a table all the same.
+            let icon = if self
+                .rich_atom(index)
+                .is_some_and(|atom| atom.first == index && atom.is_shown_whole() && block.kind == BlockKind::Directive)
+            {
+                Some("icons/block-table.svg")
+            } else {
+                icon
             };
             blocks.push(FrameBlock {
                 kind: block.kind,
@@ -339,10 +409,13 @@ impl EditorView {
             scrollbar: self.scrollbar,
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             floats: Vec::new(),
+            images: Vec::new(),
             source: self.source,
             ink: self.style.ink,
             quiet: self.style.quiet,
             rule: self.style.rule,
+            link: self.style.link,
+            error: self.style.error,
             code_background: self.style.code_background,
             body_size: self.style.body_size,
             body_font: self.style.body.clone(),
@@ -358,6 +431,16 @@ impl EditorView {
         let mut rectangles = Vec::new();
         for (block, (index, _)) in blocks.iter().zip(&self.visible) {
             let block_start = self.blocks.as_slice()[*index].range.start;
+            // A table or figure the selection takes in whole shows as one rectangle.
+            if let Some(whole) = &block.layout.whole
+                && selection.start <= block_start
+                && selection.end > block_start
+            {
+                rectangles.push(Bounds::new(
+                    point(self.column.text_left, block.top),
+                    size(self.column.text_width, whole.height()),
+                ));
+            }
             for line in &block.layout.lines {
                 if line.height == px(0.) {
                     continue;

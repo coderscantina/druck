@@ -55,7 +55,7 @@ pub fn moved(offset: usize, edits: &[Edit], bias: Bias) -> usize {
 }
 
 /// Sorts edits, joins the ones that touch, and drops any that change nothing.
-fn normalized(mut edits: Vec<Edit>, text: &str) -> Vec<Edit> {
+pub(crate) fn normalized(mut edits: Vec<Edit>, text: &str) -> Vec<Edit> {
     edits.sort_by_key(|edit| (edit.range.start, edit.range.end));
     let mut joined: Vec<Edit> = Vec::with_capacity(edits.len());
     for edit in edits {
@@ -72,7 +72,7 @@ fn normalized(mut edits: Vec<Edit>, text: &str) -> Vec<Edit> {
 }
 
 /// `text` with sorted `edits` applied.
-fn applied(text: &str, edits: &[Edit]) -> String {
+pub(crate) fn applied(text: &str, edits: &[Edit]) -> String {
     let mut result = String::with_capacity(text.len() + 16);
     let mut at = 0;
     for edit in edits {
@@ -86,7 +86,7 @@ fn applied(text: &str, edits: &[Edit]) -> String {
 
 /// The one edit that turns `old`, which stands at `start` in the text, into `new`: everything they share at either end
 /// stays out of it, so a caret there stays with its text.
-fn smallest_edit(start: usize, old: &str, new: &str) -> Edit {
+pub(crate) fn smallest_edit(start: usize, old: &str, new: &str) -> Edit {
     let mut prefix = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
     while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
         prefix -= 1;
@@ -107,7 +107,7 @@ fn smallest_edit(start: usize, old: &str, new: &str) -> Edit {
 }
 
 /// The selection after `edits`, on the same text it was on.
-fn selection_after(selection: Selection, edits: &[Edit]) -> Selection {
+pub(crate) fn selection_after(selection: Selection, edits: &[Edit]) -> Selection {
     let range = selection.range();
     if range.is_empty() {
         return Selection::caret(moved(range.start, edits, Bias::Before));
@@ -128,19 +128,19 @@ fn selection_after(selection: Selection, edits: &[Edit]) -> Selection {
 }
 
 /// The line ending this text uses.
-fn line_ending(text: &str) -> &'static str {
+pub(crate) fn line_ending(text: &str) -> &'static str {
     if text.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
 /// The range of a block without the line endings closing it.
-fn body_range(text: &str, range: &Range<usize>) -> Range<usize> {
+pub(crate) fn body_range(text: &str, range: &Range<usize>) -> Range<usize> {
     let body = text[range.clone()].trim_end_matches(['\n', '\r']);
     range.start..range.start + body.len()
 }
 
 /// Whether two blocks that meet would run together or change each other's meaning without a blank line between them.
 /// A directive line needs none.
-fn needs_gap(blocks: &Blocks, index: usize) -> bool {
+pub(crate) fn needs_gap(blocks: &Blocks, index: usize) -> bool {
     use crate::source::BlockKind::{Blank, Directive};
     !matches!(blocks.as_slice()[index].kind, Blank | Directive)
 }

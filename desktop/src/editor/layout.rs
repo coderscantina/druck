@@ -3,11 +3,12 @@
 use std::ops::Range;
 
 use gpui::{
-    Font, FontStyle, FontWeight, Hsla, Pixels, SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window,
-    WrappedLine, font, px, rgb,
+    Bounds, Font, FontStyle, FontWeight, Hsla, Pixels, SharedString, StrikethroughStyle, TextRun, UnderlineStyle,
+    Window, WrappedLine, font, point, px, rgb, size,
 };
 
-use super::display::{DisplayLine, RunStyle};
+use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
+use super::rich::view::shapes::Whole;
 use crate::source::BlockKind;
 
 /// Logical pixels per point of the theme's sizes. The galley is for reading on screen, larger than the page.
@@ -24,6 +25,8 @@ pub struct GalleyStyle {
     pub link: Hsla,
     pub rule: Hsla,
     pub code_background: Hsla,
+    /// What the book cannot resolve.
+    pub error: Hsla,
 }
 
 impl GalleyStyle {
@@ -38,6 +41,7 @@ impl GalleyStyle {
             link: rgb(0x2f5d8a).into(),
             rule: rgb(0xc9c6c0).into(),
             code_background: rgb(0xf0eee9).into(),
+            error: rgb(0xb5442c).into(),
         }
     }
 
@@ -80,7 +84,7 @@ impl GalleyStyle {
         self.body_size * 0.7
     }
 
-    fn line_style(&self, kind: BlockKind) -> LineStyle {
+    pub(super) fn line_style(&self, kind: BlockKind) -> LineStyle {
         let body = LineStyle {
             font: self.body.clone(),
             size: self.body_size,
@@ -138,7 +142,12 @@ impl GalleyStyle {
             },
             ..family.clone()
         };
-        let color = if style.quiet {
+        let color = if let Some(look) = style.chip {
+            match look {
+                ChipLook::Mark | ChipLook::Label => self.link,
+                ChipLook::Error => self.error,
+            }
+        } else if style.quiet {
             self.quiet
         } else if style.link {
             self.link
@@ -185,11 +194,11 @@ impl GalleyStyle {
 }
 
 #[derive(Clone)]
-struct LineStyle {
-    font: Font,
-    size: Pixels,
-    leading: f32,
-    color: Hsla,
+pub(super) struct LineStyle {
+    pub font: Font,
+    pub size: Pixels,
+    pub leading: f32,
+    pub color: Hsla,
 }
 
 /// One source line, shaped and wrapped.
@@ -206,6 +215,8 @@ pub struct ShapedSourceLine {
     /// A line the caret passes over: the blank between two blocks, or a hidden underline.
     pub skipped: bool,
     pub bullet: Option<(SharedString, Pixels)>,
+    /// Behind each chip on the line, from the block's top and the column's left edge.
+    pub chips: Vec<(Bounds<Pixels>, ChipLook)>,
 }
 
 impl ShapedSourceLine {
@@ -251,11 +262,18 @@ pub struct BlockLayout {
     pub width: Pixels,
     /// The whole block takes no room.
     pub collapsed: bool,
+    /// The chips it was shaped with.
+    pub chips: Vec<Chip>,
+    /// A table or figure drawn in place of its lines.
+    pub whole: Option<Box<Whole>>,
 }
 
 impl BlockLayout {
     /// The height of the block's first line that shows, for what stands beside it in the gutter.
     pub fn first_line_height(&self) -> Pixels {
+        if self.whole.is_some() {
+            return px(20.);
+        }
         self.lines
             .iter()
             .find(|line| line.height > px(0.))
@@ -277,6 +295,8 @@ pub struct ShapeRequest<'a> {
     pub marked: Option<Range<usize>>,
     pub width: Pixels,
     pub style: &'a GalleyStyle,
+    pub chips: Vec<Chip>,
+    pub whole: Option<Box<Whole>>,
 }
 
 pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
@@ -290,6 +310,8 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         marked,
         width,
         style,
+        chips,
+        whole,
     } = request;
     let base = if source {
         style.source_line_style(kind)
@@ -300,7 +322,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
     let hang = style.body_size * 1.25;
     let unit = hang * 0.5;
     let mut shaped_lines = Vec::with_capacity(lines.len());
-    let mut y = px(0.);
+    let mut y = whole.as_deref().map_or(px(0.), Whole::height);
     for display in lines {
         let quote_indent = if kind == BlockKind::Quote { hang } else { px(0.) };
         let x = match kind {
@@ -339,6 +361,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             .bullet
             .clone()
             .map(|text| (SharedString::from(text), unit * display.nesting as f32));
+        let chip_boxes = chip_boxes(&display, &shaped, &rows, x, y, line_height);
         shaped_lines.push(ShapedSourceLine {
             display,
             shaped,
@@ -349,6 +372,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             height,
             skipped,
             bullet,
+            chips: chip_boxes,
         });
         y += height;
     }
@@ -359,7 +383,46 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         marked,
         width,
         collapsed,
+        chips,
+        whole,
     }
+}
+
+/// How far a chip's box stands off its text, and how much of the line it leaves free above and below.
+const CHIP_PAD: Pixels = px(2.);
+const CHIP_INSET: f32 = 0.08;
+
+/// The boxes behind a line's chips. A chip that wraps has one per row.
+fn chip_boxes(
+    display: &DisplayLine,
+    shaped: &WrappedLine,
+    rows: &[Range<usize>],
+    x: Pixels,
+    y: Pixels,
+    line_height: Pixels,
+) -> Vec<(Bounds<Pixels>, ChipLook)> {
+    let layout = &shaped.unwrapped_layout;
+    let mut boxes = Vec::new();
+    for (range, look) in &display.chips {
+        for (row, shown) in rows.iter().enumerate() {
+            let (start, end) = (range.start.max(shown.start), range.end.min(shown.end));
+            if start >= end {
+                continue;
+            }
+            let row_start = layout.x_for_index(shown.start);
+            let left = x + layout.x_for_index(start) - row_start - CHIP_PAD;
+            let right = x + layout.x_for_index(end) - row_start + CHIP_PAD;
+            let inset = line_height * CHIP_INSET;
+            boxes.push((
+                Bounds::new(
+                    point(left, y + line_height * row as f32 + inset),
+                    size(right - left, line_height - inset * 2.),
+                ),
+                *look,
+            ));
+        }
+    }
+    boxes
 }
 
 fn rows_of(shaped: &WrappedLine) -> Vec<Range<usize>> {

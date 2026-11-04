@@ -18,6 +18,7 @@
 //! - **Shell** owns a new `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, sidebar dots, search and word count
 //!   in `footer`, the string tables, and the rest of the menus.
 //! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the inspector rail.
+//! - **Rich blocks** own `editor/rich/`, whose floats the galley draws, and the `Tab::Selection` and `Tab::Images` panels.
 
 use std::path::{Path, PathBuf};
 

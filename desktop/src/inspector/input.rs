@@ -183,6 +183,8 @@ pub struct TextInput {
     /// Whether the text is the author's own or an inherited value shown for reference.
     customized: bool,
     multiline: bool,
+    /// Several lines of writing rather than code: the interface's font, not a monospace.
+    prose: bool,
     /// Enter keeps the focus here, for a field that is used again and again, such as the find bar's.
     keep_focus: bool,
     /// Shown in the quiet color while the field is empty.
@@ -244,6 +246,7 @@ impl TextInput {
             original: String::new(),
             customized: false,
             multiline,
+            prose: false,
             keep_focus: false,
             placeholder: SharedString::default(),
             focus,
@@ -253,6 +256,12 @@ impl TextInput {
             goal_x: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Sets several lines in the interface's font, for writing rather than code.
+    pub fn in_prose(mut self) -> Self {
+        self.prose = true;
+        self
     }
 
     /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
@@ -294,6 +303,25 @@ impl TextInput {
     /// The text as it stands, committed or not.
     pub fn text(&self) -> &str {
         self.buffer.text()
+    }
+
+    pub fn selection(&self) -> Selection {
+        self.selection
+    }
+
+    /// Makes these edits as one undo step, for commands that write the field's text, such as an inline mark.
+    pub fn apply(&mut self, edits: Vec<Edit>, after: Selection, cx: &mut Context<Self>) {
+        if self
+            .buffer
+            .transact(EditKind::Discrete, edits, self.selection, after, Instant::now())
+            .is_ok()
+        {
+            self.selection = after;
+            self.marked = None;
+            self.goal_x = None;
+            cx.emit(Edited);
+            cx.notify();
+        }
     }
 
     fn commit(&mut self, cx: &mut Context<Self>) {
@@ -889,7 +917,11 @@ impl TextInput {
             tokens.text_faint
         }
         .into();
-        let family = if self.multiline { "Menlo" } else { tokens::FONT_UI };
+        let family = if self.multiline && !self.prose {
+            "Menlo"
+        } else {
+            tokens::FONT_UI
+        };
         let font = font(family);
         let size = if self.multiline {
             tokens::TEXT_SMALL + px(1.)

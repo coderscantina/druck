@@ -3,9 +3,9 @@
 //! Typing `/` puts a slash in the text. What follows it is the query. Choosing an entry replaces the slash and the query,
 //! as one undo step, and leaves the text as the writer typed it if the menu is dismissed.
 //!
-//! An entry is offered only where its result is valid Druck: a `toc` once in a book and outside containers, an image only
-//! if the project has one to point at, a citation only if the bibliography has a key. Nothing can be typed into the menu
-//! that the engine would then reject.
+//! An entry is offered only where its result is valid Druck: a `toc` once in a book and outside containers, a citation only
+//! if the bibliography has a key, a cross-reference only if the book has a label. Nothing can be typed into the menu that
+//! the engine would then reject. Footnotes, citations, cross-references, and images open their editors in [`crate::editor::rich`].
 
 use std::ops::Range;
 
@@ -26,12 +26,14 @@ pub enum Action {
     Wrap(&'static str),
     /// A block of its own after the current block.
     Insert(Standalone),
-    /// A reference at the caret, with its definition below the block.
-    Footnote(String),
-    /// A citation of this key at the caret.
-    Citation(String),
-    /// An image at this path, as the engine reads it from the document's folder.
-    Image(String),
+    /// A new footnote at the caret, with its text in the note's popover. The view carries this one out.
+    OpenFootnote,
+    /// The citation picker. The view carries this one out.
+    OpenCitation,
+    /// The cross-reference picker. The view carries this one out.
+    OpenReference,
+    /// The file dialog for an image. The view carries this one out.
+    OpenImage,
     /// A new section from the template with this slug. The session carries this one out.
     Section(&'static str),
 }
@@ -62,11 +64,10 @@ pub struct Context {
     pub open_directives: Vec<String>,
     /// Whether the book has a `::: toc` already.
     pub has_toc: bool,
-    /// A label no chapter of the book uses yet.
-    pub free_footnote: String,
-    pub first_citation_key: Option<String>,
-    /// An image of the document, as the engine reads its path.
-    pub first_image: Option<String>,
+    /// Whether the bibliography holds a work to cite.
+    pub has_works: bool,
+    /// Whether the book has a label to refer to.
+    pub has_labels: bool,
     /// The kind of the block the slash stands in.
     pub block: Option<BlockKind>,
 }
@@ -179,9 +180,7 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         "icons/block-table.svg",
         Action::Insert(Standalone::Table),
     ));
-    if let Some(path) = &context.first_image {
-        items.push(label(Key::Image, "icons/images.svg", Action::Image(path.clone())));
-    }
+    items.push(label(Key::Image, "icons/images.svg", Action::OpenImage));
     if !held {
         items.push(label(Key::Keep, "icons/block-directive.svg", Action::Wrap("keep")));
     }
@@ -206,14 +205,17 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
     let in_note = context.block == Some(BlockKind::FootnoteDefinition);
     let in_heading = matches!(context.block, Some(BlockKind::Heading { .. }));
     if !in_note && !in_heading {
-        items.push(label(
-            Key::Footnote,
-            "icons/block-footnote.svg",
-            Action::Footnote(context.free_footnote.clone()),
-        ));
+        items.push(label(Key::Footnote, "icons/block-footnote.svg", Action::OpenFootnote));
     }
-    if let Some(key) = context.first_citation_key.as_ref().filter(|_| !in_heading) {
-        items.push(label(Key::Citation, "icons/book.svg", Action::Citation(key.clone())));
+    if context.has_works && !in_heading {
+        items.push(label(Key::Citation, "icons/book.svg", Action::OpenCitation));
+    }
+    if context.has_labels && !in_heading {
+        items.push(label(
+            Key::CrossReference,
+            "icons/block-reference.svg",
+            Action::OpenReference,
+        ));
     }
     for template in TEMPLATES {
         items.push(Item {
@@ -277,42 +279,6 @@ pub fn holds_toc(text: &str) -> bool {
         .any(|line| line.starts_with(":::") && line.trim_start_matches(':').trim() == "toc")
 }
 
-/// A footnote label none of these texts uses.
-pub fn free_footnote_label<'a>(texts: impl Iterator<Item = &'a str> + Clone) -> String {
-    (1..)
-        .map(|number| format!("note-{number}"))
-        .find(|label| {
-            let reference = format!("[^{label}]");
-            texts.clone().all(|text| !text.contains(&reference))
-        })
-        .expect("some label is free")
-}
-
-/// The first citation key of a BibTeX text, skipping the entries that are not works.
-pub fn first_citation_key(bibtex: &str) -> Option<String> {
-    let mut from = 0;
-    while let Some(at) = bibtex[from..].find('@') {
-        let start = from + at + 1;
-        let rest = &bibtex[start..];
-        from = start;
-        let Some(open) = rest.find('{') else {
-            break;
-        };
-        let kind = rest[..open].trim().to_ascii_lowercase();
-        if kind.is_empty()
-            || !kind.bytes().all(|byte| byte.is_ascii_alphabetic())
-            || matches!(kind.as_str(), "comment" | "string" | "preamble")
-        {
-            continue;
-        }
-        let key = rest[open + 1..].split([',', '}']).next().unwrap_or("").trim();
-        if !key.is_empty() {
-            return Some(key.to_owned());
-        }
-    }
-    None
-}
-
 /// What an entry writes on an empty line, without a final line ending, and the part of it the writer replaces first.
 fn template(action: &Action, language: Language, eol: &str) -> Option<(String, Range<usize>)> {
     let with_placeholder = |before: String, placeholder: &str, after: &str| {
@@ -373,19 +339,11 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
                 &format!(" | {column} |{eol}| --- | --- |{eol}| {cell} | {cell} |"),
             )
         }
-        Action::Image(path) => {
-            let path = if path.contains(' ') {
-                format!("<{path}>")
-            } else {
-                path.clone()
-            };
-            with_placeholder(
-                "![".to_owned(),
-                Key::PlaceholderCaption.text(language),
-                &format!("]({path})"),
-            )
-        }
-        Action::Footnote(_) | Action::Citation(_) | Action::Section(_) => return None,
+        Action::OpenFootnote
+        | Action::OpenCitation
+        | Action::OpenReference
+        | Action::OpenImage
+        | Action::Section(_) => return None,
     })
 }
 
@@ -397,21 +355,8 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
     let block = &blocks.as_slice()[index];
     let body = body_range(text, &block.range);
     let body = body.start..body.end.max(slash.end);
-    match action {
-        Action::Section(_) => {
-            return finish(text, vec![Edit::new(slash.clone(), "")], Selection::caret(slash.start));
-        }
-        Action::Citation(key) => {
-            let written = format!("[@{key}]");
-            let key_start = slash.start + "[@".len();
-            let selection = Selection {
-                anchor: key_start,
-                head: key_start + key.len(),
-            };
-            return finish(text, vec![Edit::new(slash, written)], selection);
-        }
-        Action::Footnote(label) => return footnote(text, blocks, index, slash, label, language),
-        _ => {}
+    if let Action::Section(_) = action {
+        return finish(text, vec![Edit::new(slash.clone(), "")], Selection::caret(slash.start));
     }
     let line = line_of(text, &body, slash.start);
     let lead = line_markers(block.kind, &text[block.range.clone()])
@@ -548,7 +493,7 @@ fn after_block(
 }
 
 /// The insertion of a new block after block `index`, and how far into the insertion the block's text starts.
-fn block_insert(text: &str, blocks: &Blocks, index: usize, new: &str, eol: &str) -> (Edit, usize) {
+pub(crate) fn block_insert(text: &str, blocks: &Blocks, index: usize, new: &str, eol: &str) -> (Edit, usize) {
     let block = &blocks.as_slice()[index];
     let end = block.range.end;
     let ended = text[..end].ends_with('\n');
@@ -560,28 +505,6 @@ fn block_insert(text: &str, blocks: &Blocks, index: usize, new: &str, eol: &str)
         String::new()
     };
     (Edit::new(end..end, format!("{lead}{new}{trail}")), lead.len())
-}
-
-fn footnote(
-    text: &str,
-    blocks: &Blocks,
-    index: usize,
-    slash: Range<usize>,
-    label: &str,
-    language: Language,
-) -> Option<Command> {
-    let eol = line_ending(text);
-    let definition = format!("[^{label}]: ");
-    let new = format!("{definition}{}", Key::PlaceholderFootnote.text(language));
-    let (insert, start_in_insert) = block_insert(text, blocks, index, &new, eol);
-    let edits = vec![Edit::new(slash, format!("[^{label}]")), insert];
-    let start = moved(edits[1].range.start, &edits, Bias::Before) + start_in_insert + definition.len();
-    let edits = normalized(edits, text);
-    let selection = Selection {
-        anchor: start,
-        head: start + Key::PlaceholderFootnote.text(language).len(),
-    };
-    Some(Command { edits, selection })
 }
 
 #[cfg(test)]
@@ -624,11 +547,6 @@ mod tests {
                 "| Column | Column |\n| --- | --- |\n| Cell | Cell |\n",
                 "Column",
             ),
-            (
-                Action::Image("a b.png".to_owned()),
-                "![Caption](<a b.png>)\n",
-                "Caption",
-            ),
         ] {
             let (result, chosen) = choose("/query\n", &action);
             assert_eq!(result, expected);
@@ -659,20 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn a_footnote_writes_a_reference_and_a_definition_below_the_block() {
-        let (result, chosen) = choose("Word /f| more.\n\nNext\n", &Action::Footnote("note-1".to_owned()));
-        assert_eq!(result, "Word [^note-1] more.\n\n[^note-1]: Footnote text.\n\nNext\n");
-        assert_eq!(chosen, "Footnote text.");
-    }
-
-    #[test]
-    fn a_citation_selects_its_key() {
-        let (result, chosen) = choose("See /c|.\n", &Action::Citation("smith".to_owned()));
-        assert_eq!(result, "See [@smith].\n");
-        assert_eq!(chosen, "smith");
-    }
-
-    #[test]
     fn line_endings_stay_as_written() {
         let (result, _) = choose("a\r\n\r\n/x\r\n", &Action::Turn(BlockType::Quote));
         assert_eq!(result, "a\r\n\r\n> Quotation\r\n");
@@ -698,7 +602,7 @@ mod tests {
         let free = Context::default();
         let all = labels(&free);
         assert!(all.contains(&"Table of contents") && all.contains(&"Two columns"));
-        assert!(!all.contains(&"Image") && !all.contains(&"Citation"));
+        assert!(all.contains(&"Image") && !all.contains(&"Citation") && !all.contains(&"Cross-reference"));
 
         let kept = Context {
             open_directives: vec!["keep".to_owned()],
@@ -757,11 +661,5 @@ mod tests {
         assert!(open_directives(text, &blocks, 9).contains(&"keep".to_owned()));
         assert!(holds_toc("a\n\n::: toc\n"));
         assert!(!holds_toc("toc\n"));
-        assert_eq!(free_footnote_label(["a[^note-1] b", "[^note-2]"].into_iter()), "note-3");
-        assert_eq!(
-            first_citation_key("% c\n@comment{x}\n@string{a=1}\n@book{ smith2020 ,\n title={x}}\n@misc{b,}"),
-            Some("smith2020".to_owned())
-        );
-        assert_eq!(first_citation_key("no entries"), None);
     }
 }

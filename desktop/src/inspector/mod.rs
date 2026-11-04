@@ -13,7 +13,7 @@ mod style_property;
 mod styles;
 mod theme_tabs;
 mod theme_tokens;
-mod widgets;
+pub(crate) mod widgets;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -22,6 +22,8 @@ pub enum SpanKind {
     Link,
     FootnoteReference,
     Citation,
+    /// `@sec:x`, `[@fig:x]`, or `[@tbl:x, page]`.
+    CrossReference,
     /// `<!-- -->` inside a paragraph.
     Comment,
     /// `~~x~~`
@@ -246,7 +248,59 @@ fn marks_in(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &mut 
             });
         }
     }
+    cross_references(text, &gap, spans);
     source_marks(text, gap, paired, spans);
+}
+
+/// Adds the cross-references in `gap`, by the engine's rule: the label's prefix names its kind, and an `@` after a letter
+/// or digit is text.
+fn cross_references(text: &str, gap: &Range<usize>, spans: &mut Vec<InlineSpan>) {
+    let mut from = gap.start;
+    while let Some(found) = text[from..gap.end].find('@') {
+        let sign = from + found;
+        from = sign + 1;
+        if marks::escaped(text, sign) {
+            continue;
+        }
+        let bracket = sign > gap.start && text.as_bytes()[sign - 1] == b'[' && !marks::escaped(text, sign - 1);
+        if !bracket && text[..sign].chars().next_back().is_some_and(char::is_alphanumeric) {
+            continue;
+        }
+        let Some(length) = reference_label(&text[sign + 1..gap.end]) else {
+            continue;
+        };
+        let end = sign + 1 + length;
+        let range = if bracket {
+            let rest = &text[end..gap.end];
+            let close = if rest.starts_with(']') {
+                "]".len()
+            } else if rest.starts_with(", page]") {
+                ", page]".len()
+            } else {
+                continue;
+            };
+            sign - 1..end + close
+        } else {
+            sign..end
+        };
+        spans.push(InlineSpan {
+            kind: SpanKind::CrossReference,
+            open: range.start..range.start,
+            close: range.end..range.end,
+            range,
+        });
+    }
+}
+
+/// The length of the `sec:name`, `fig:name`, or `tbl:name` that `text` starts with.
+fn reference_label(text: &str) -> Option<usize> {
+    let prefix = ["sec:", "fig:", "tbl:"]
+        .into_iter()
+        .find(|prefix| text.starts_with(prefix))?;
+    let name = text[prefix.len()..]
+        .find(|character: char| !(character.is_ascii_alphanumeric() || character == '-' || character == '_'))
+        .unwrap_or(text.len() - prefix.len());
+    (name > 0).then_some(prefix.len() + name)
 }
 
 /// Adds `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, and `{todo: x}` in `gap`, paired as the engine does.

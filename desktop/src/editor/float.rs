@@ -13,6 +13,7 @@ use super::commands::convert::{self, BlockType, TARGETS};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
 use super::place::{self, Rect};
+use super::rich::view::RichFloat;
 use super::strings::Key;
 use super::{EditorView, MenuAccept, MenuDown, MenuUp};
 use crate::inspector::input::{Submitted, TextInput};
@@ -27,6 +28,8 @@ pub(super) enum Float {
     None,
     Menu(Menu),
     Link(Link),
+    /// What the rich blocks float: a note's text, a picker, a table's grid, a figure's card, and what they have to say.
+    Rich(RichFloat),
 }
 
 pub(super) struct Menu {
@@ -138,7 +141,7 @@ impl Render for Tip {
     }
 }
 
-fn tooltip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+pub(super) fn tooltip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = SharedString::from(text);
     move |_, cx| cx.new(|_| Tip(text.clone())).into()
 }
@@ -153,7 +156,7 @@ fn rect(bounds: Bounds<Pixels>) -> Rect {
 }
 
 /// A float's place beside `target`, in `area`.
-fn placed(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pixels> {
+pub(super) fn placed(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pixels> {
     let (x, y) = place::beside(
         rect(target),
         f32::from(wanted.width),
@@ -165,7 +168,7 @@ fn placed(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pix
 }
 
 /// A list's place at a caret or icon, in `area`.
-fn placed_at_caret(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pixels> {
+pub(super) fn placed_at_caret(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pixels> {
     let (x, y) = place::at_caret(
         rect(target),
         f32::from(wanted.width),
@@ -188,8 +191,13 @@ impl EditorView {
         matches!(self.float, Float::Menu(_))
     }
 
-    pub(super) fn link_is_open(&self) -> bool {
-        matches!(self.float, Float::Link(_))
+    /// Whether what floats has the keys: its own field or grid does, so the galley's bindings stand aside.
+    pub(super) fn float_takes_keys(&self) -> bool {
+        match &self.float {
+            Float::Link(_) => true,
+            Float::Rich(float) => float.takes_keys(),
+            Float::None | Float::Menu(_) => false,
+        }
     }
 
     /// Runs a command as one undo step.
@@ -498,11 +506,8 @@ impl EditorView {
         slash::Context {
             open_directives: slash::open_directives(text, &self.blocks, at),
             has_toc: chapters().any(slash::holds_toc),
-            free_footnote: slash::free_footnote_label(chapters().chain(std::iter::once(text))),
-            first_citation_key: session
-                .bibliography_text()
-                .and_then(|bibtex| slash::first_citation_key(&bibtex)),
-            first_image: session.first_image(),
+            has_works: !self.rich.works.is_empty(),
+            has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
         }
     }
@@ -596,6 +601,14 @@ impl EditorView {
     fn apply_slash(&mut self, start: usize, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         let caret = self.selection.head;
         let text = self.session.active_buffer().text();
+        // These open their editor, which writes the text and takes the typed slash with it.
+        match action {
+            Action::OpenFootnote => return self.insert_footnote(Some(start..caret), window, cx),
+            Action::OpenCitation => return self.open_citation_picker(Some(start..caret), window, cx),
+            Action::OpenReference => return self.open_reference_picker(Some(start..caret), window, cx),
+            Action::OpenImage => return self.choose_image(Some(start..caret), window, cx),
+            _ => {}
+        }
         let Some(command) = slash::apply(
             text,
             &self.blocks,
@@ -605,8 +618,12 @@ impl EditorView {
         ) else {
             return;
         };
+        let table_at = matches!(action, Action::Insert(slash::Standalone::Table)).then_some(command.selection.head);
         self.run_command(command, window, cx);
         self.toolbar_dismissed = true;
+        if let Some(at) = table_at {
+            self.open_grid_at(at, window, cx);
+        }
         if let Action::Section(slug) = action
             && let Some(template) = TEMPLATES.iter().find(|template| template.slug == *slug)
         {
@@ -784,6 +801,7 @@ impl EditorView {
                 let origin = placed(target, wanted, area);
                 vec![(self.link_popup(link, cx).into_any_element(), origin)]
             }
+            Float::Rich(_) => self.rich_float(area, window, cx).into_iter().collect(),
         }
     }
 }

@@ -64,6 +64,24 @@ Section labels, field labels, and rows keep the mockups' hierarchy: a small sect
 - A command that selects a placeholder opens no toolbar, and Escape hides it until the selection changes.
 - Lists that float, the slash menu and a block's convert menu, start at the caret's or icon's left edge, not centered on it. Rows are 28 px on the panel color, with a faint icon that turns accent on the chosen row. They show ten rows and scroll.
 
+## Rich blocks
+
+- A footnote's reference shows as a small mark: its number in the book, in superscript digits, in the link color, with no box. A citation or cross-reference is a chip: the engine's text in the link color on a 12 percent tint of it, with a 3 px radius. A key, label, or note the book cannot resolve is the same chip in the error color, showing its source. The tint belongs to the sheet, so it is the same in dark and light.
+- A chip in brackets is one step for the caret and one key for Backspace. A short form, `@key` or `@sec:x`, shows its source while the caret is at its end, since it is being typed. A caret brought inside a chip shows its source.
+- A note's text has no block of its own while a reference names it. It opens in a popover at its mark. A definition with no reference shows as a raw block, in the galley's small size.
+- Floats that have fields are cards on the panel color: a section label or a quiet title, then fields, then small 22 px buttons as in the agent panel. The choice that lets the work go on has accent text. Nothing is filled.
+- A table at rest shows as a grid on the sheet: its caption above it, a rule above and below the header and below the last row, thin rules between rows, the header bold, and the columns' alignment. A click opens the editing grid over it at the same place, a card with its tools above, then its cells, then caption, label, and placement. One field moves between the cells, and the others show their Markdown as written.
+- A figure at rest shows centered, at most as wide as the column and three quarters of that tall, with its caption below. A click opens its card below the image. A missing file is a tinted box with the error color's message.
+- What is refused says why in the accent color, inside the float that asked, in the engine's words. A deleted reference offers to remove its note's text in a small card at the caret, which takes no focus and leaves with the next edit.
+
+### Selection
+
+The tab's title is the block's type. Text alignment is five segments: the theme's own, left, center, right, justify. Choosing one picks or makes a named style `base-align` and writes `{.name}`, and Reset takes it off. Below it the style list shows the theme's own first, then each custom style the block's kind may use as `.name`, then New style and a pencil to the Styles tab. There are no per-block settings.
+
+### Images
+
+A row is a 44 px thumbnail on the raised color, the path as the document writes it, and one quiet line with the size and how often the book uses it. A file the text names that is not there shows the images icon and "File missing" in the accent color. A click goes to the first use. Insert image stands at the panel's foot.
+
 ## Saving state and conflicts
 
 - The saving state is one line at the left of the footer: faint "Saved", "Edited", or "Saving…". It does not move the text or take focus.

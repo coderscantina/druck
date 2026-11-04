@@ -306,9 +306,8 @@ fn every_slash_entry_round_trips_in_every_kind_of_block() {
     for (path, text) in documents() {
         let blocks = Blocks::parse(&text);
         let context = Context {
-            free_footnote: slash::free_footnote_label(std::iter::once(text.as_str())),
-            first_citation_key: Some("key".to_owned()),
-            first_image: Some("image.png".to_owned()),
+            has_works: true,
+            has_labels: true,
             ..Context::default()
         };
         let items = slash::items(&context, Language::English);
@@ -414,9 +413,8 @@ fn context_for(text: &str, blocks: &Blocks, slash_at: usize) -> Context {
     Context {
         open_directives: slash::open_directives(text, blocks, slash_at),
         has_toc: slash::holds_toc(text),
-        free_footnote: slash::free_footnote_label(std::iter::once(text)),
-        first_citation_key: Some("key".to_owned()),
-        first_image: Some("images/chart.svg".to_owned()),
+        has_works: true,
+        has_labels: true,
         block: Some(blocks.as_slice()[blocks.index_at(slash_at)].kind),
     }
 }
@@ -431,7 +429,14 @@ fn check_inserts(document: &str, name: &str, language: Language) {
     assert!(base.is_none(), "the base document renders: {base:?}");
     let mut tried = 0;
     for item in slash::items(&context, language) {
-        if matches!(item.action, Action::Section(_)) {
+        if matches!(
+            item.action,
+            Action::Section(_)
+                | Action::OpenFootnote
+                | Action::OpenCitation
+                | Action::OpenReference
+                | Action::OpenImage
+        ) {
             continue;
         }
         let Some(command) = slash::apply(&text, &blocks, slash_at..slash_at + 1, &item.action, language) else {
@@ -492,20 +497,14 @@ fn an_image_from_a_projects_assets_renders_in_a_chapter() {
     .expect("manifest");
     fs::write(dir.join("manuscript/one.md"), "First.\n\n/\n\nLast.\n").expect("chapter");
     let mut session = Session::open(dir).expect("opens");
-    let path = session.first_image().expect("the project has an image");
-    assert_eq!(path, "assets/chart.svg");
-    assert_eq!(
-        session
-            .bibliography_text()
-            .as_deref()
-            .and_then(slash::first_citation_key)
-            .as_deref(),
-        Some("key")
-    );
+    let path = crate::editor::rich::images::bring_in(&session.base_dir(), true, &dir.join("images/chart.svg"))
+        .expect("the image comes in");
+    assert_eq!(path, "images/chart.svg");
     let text = session.active_buffer().text().to_owned();
     let blocks = Blocks::parse(&text);
     let at = text.find('/').expect("a slash");
-    let command = slash::apply(&text, &blocks, at..at + 1, &Action::Image(path), Language::English).expect("a command");
+    let figure = crate::editor::rich::images::write(&path, "Caption", "", crate::editor::rich::images::Placement::Here);
+    let command = crate::editor::rich::image_command(&text, &blocks, at..at + 1, &figure);
     session
         .active_buffer_mut()
         .transact(

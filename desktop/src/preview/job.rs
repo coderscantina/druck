@@ -196,6 +196,24 @@ impl Typesetter {
         })
     }
 
+    /// The engine's text for chips, for the document as `joined` has it. `None` while it cannot be read.
+    pub fn labels(&self, joined: Joined) -> Option<druck::editor::rich::Labels> {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("druck-labels".into())
+                .stack_size(LAYOUT_STACK)
+                .spawn_scoped(scope, || {
+                    let cancel = Cancel::default();
+                    let (input, _) = self.input(joined).ok()?;
+                    let configured = self.renderer.job(&self.resolver, &input, &cancel).configure().ok()?;
+                    druck::editor::rich::labels(&configured).ok()
+                })
+                .expect("the system starts a thread")
+                .join()
+                .unwrap_or(None)
+        })
+    }
+
     fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;

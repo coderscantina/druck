@@ -2,7 +2,8 @@
 //! edit to it, and what shows is derived from it: blocks, hidden markers, and shaped lines, only for what is on screen.
 //!
 //! [`commands`] writes what the toolbar, slash menu, and gutter ask for, without gpui. [`float`] and [`gutter`] are their
-//! views, [`notes_panel`] the chapter's notes in the inspector, and [`source_toggle`] the source view's button.
+//! views, [`notes_panel`] the chapter's notes in the inspector, and [`source_toggle`] the source view's button. [`rich`] holds
+//! the footnotes, citations, tables, and images, with their floats and the Selection and Images tabs.
 
 mod commands;
 mod display;
@@ -12,6 +13,7 @@ mod gutter;
 mod layout;
 mod notes_panel;
 mod place;
+pub(crate) mod rich;
 mod scrollbar;
 mod source_toggle;
 mod strings;
@@ -61,6 +63,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, cx: &mut Context<Workspace>) {
         inspector.update(cx, |inspector, cx| inspector.show(Tab::Notes, cx));
     })
     .detach();
+    rich::view::mount(parts, cx);
 }
 
 actions!(
@@ -117,6 +120,11 @@ actions!(
         OpenLink,
         ToggleSource,
         Cancel,
+        InsertFootnote,
+        InsertCitation,
+        InsertReference,
+        InsertImage,
+        EditRich,
         MenuUp,
         MenuDown,
         MenuAccept,
@@ -190,7 +198,13 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-k", OpenLink, context),
         KeyBinding::new("cmd-/", ToggleSource, context),
         KeyBinding::new("escape", Cancel, context),
+        KeyBinding::new("cmd-alt-f", InsertFootnote, context),
+        KeyBinding::new("cmd-alt-c", InsertCitation, context),
+        KeyBinding::new("cmd-alt-r", InsertReference, context),
+        KeyBinding::new("cmd-shift-i", InsertImage, context),
+        KeyBinding::new("cmd-enter", EditRich, context),
     ]);
+    rich::view::bind_keys(cx);
     let context = Some(MENU_CONTEXT);
     cx.bind_keys([
         KeyBinding::new("up", MenuUp, context),
@@ -356,6 +370,12 @@ pub struct EditorView {
     blink: Task<()>,
     _focus_subscriptions: Vec<Subscription>,
     trace: Trace,
+    /// What the rich blocks know of the book. See [`rich`].
+    rich: rich::Rich,
+    /// Waits out a pause before reading the book again. Replaced by every edit.
+    rich_pause: Task<()>,
+    /// Reads the engine's text for chips, off the main thread.
+    rich_labels: Task<()>,
     /// The newest revision and body style painted, and when each first was.
     painted_revision: (u64, Instant),
     painted_style: (u64, Instant),
@@ -436,11 +456,16 @@ impl EditorView {
             blink: Task::ready(()),
             _focus_subscriptions: focus_subscriptions,
             trace: Trace::from_env(),
+            rich: rich::Rich::default(),
+            rich_pause: Task::ready(()),
+            rich_labels: Task::ready(()),
             painted_revision: (0, Instant::now()),
             painted_style: (0, Instant::now()),
             style_generation: 0,
         };
+        view.rich.atoms = rich::atoms(view.session.active_buffer().text(), &view.blocks);
         view.restart_blink(window, cx);
+        view.refresh_rich(window, cx);
         view
     }
 
@@ -538,6 +563,7 @@ impl EditorView {
         self.status = chapter.problem().map(SharedString::from).unwrap_or_default();
         self.blocks = Blocks::parse(text);
         self.slots = vec![Slot::default(); self.blocks.as_slice().len()];
+        self.rich.atoms = rich::atoms(text, &self.blocks);
         let last_block = self.blocks.as_slice().len() - 1;
         self.autoscroll = view.scroll.is_none() && view.selection != Selection::default();
         self.scroll = view.scroll.map_or(START_OF_CHAPTER, |(block, offset)| Anchor {
@@ -573,6 +599,7 @@ impl EditorView {
         window.notify_text_input_changed(&self.focus);
         window.notify_text_selection_changed(&self.focus);
         cx.emit(CaretMoved(self.selection.head));
+        self.refresh_rich(window, cx);
         cx.notify();
     }
 
@@ -721,6 +748,7 @@ impl EditorView {
         self.reveal_at = after.head;
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
+        self.schedule_rich(window, cx);
         cx.emit(TextChanged);
         cx.notify();
         true
@@ -811,10 +839,15 @@ impl EditorView {
                 return;
             }
         }
+        // A message over the galley does not outlast the next change.
+        if matches!(&self.float, Float::Rich(float) if !float.takes_keys()) {
+            self.float = Float::None;
+        }
         self.marked = marked;
         self.set_selection(after, false, window, cx);
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
+        self.schedule_rich(window, cx);
         cx.emit(TextChanged);
     }
 
@@ -838,6 +871,7 @@ impl EditorView {
         };
         self.scroll.block = self.blocks.index_at(moved);
         self.hovered = None;
+        self.rich.atoms = rich::atoms(self.session.active_buffer().text(), &self.blocks);
     }
 
     fn set_selection(&mut self, selection: Selection, upstream: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -868,6 +902,8 @@ impl EditorView {
         let range = if self.selection.is_empty() {
             let head = self.selection.head;
             let other = target(self.session.active_buffer().text(), head);
+            // A key deletes a chip whole.
+            let other = self.past_chip(other, other > head);
             // A comment hidden there is not deleted by a key that cannot show it: the caret goes past it.
             let visible = self.skip_hidden(other, other > head);
             if visible != other {
@@ -960,6 +996,7 @@ impl EditorView {
         self.set_selection(restored.selection, false, window, cx);
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
+        self.schedule_rich(window, cx);
         cx.emit(TextChanged);
     }
 
@@ -1038,6 +1075,7 @@ impl EditorView {
             }
         };
         let target = self.skip_hidden(target, target > head);
+        let target = self.past_chip(target, target > head);
         let selection = Selection {
             anchor: if extend { self.selection.anchor } else { target },
             head: target,
@@ -1138,8 +1176,12 @@ impl EditorView {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         self.pointer = event.position;
+        self.commit_rich_float(window, cx);
         self.close_float(cx);
         if self.scrollbar_mouse_down(event.position, cx) || self.gutter_mouse_down(event.position, cx) {
+            return;
+        }
+        if event.click_count == 1 && !event.modifiers.shift && self.rich_mouse_down(event.position, window, cx) {
             return;
         }
         let (offset, upstream) = self.offset_at(event.position, window);
@@ -1424,7 +1466,11 @@ impl EditorView {
             )
         };
         // A hidden comment can show later without this block changing, so only a real estimate lasts.
-        if !matches!(block.kind, BlockKind::Comment | BlockKind::Blank) {
+        if !matches!(
+            block.kind,
+            BlockKind::Comment | BlockKind::Blank | BlockKind::FootnoteDefinition
+        ) && self.rich_atom(index).is_none()
+        {
             slot.estimate.set(Some(estimate));
         }
         estimate
@@ -1445,14 +1491,31 @@ impl EditorView {
             && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
     }
 
-    /// Whether a block takes no room in the galley: a hidden comment and the blank line after it.
+    /// Whether a block takes no room in the galley: a hidden comment, a note's text that its reference shows, the later
+    /// blocks of a table shown whole, and the blank line after any of them.
     fn is_hidden_block(&self, index: usize) -> bool {
         if self.source {
             return false;
         }
+        if self
+            .rich_atom(index)
+            .is_some_and(|atom| index > atom.first && self.atom_is_whole(atom))
+        {
+            return true;
+        }
         match self.blocks.as_slice()[index].kind {
             BlockKind::Comment => self.comment_is_hidden(index),
-            BlockKind::Blank => index > 0 && self.comment_is_hidden(index - 1),
+            BlockKind::FootnoteDefinition => self.definition_is_hidden(index),
+            BlockKind::Blank => {
+                index > 0 && {
+                    let before = &self.blocks.as_slice()[index - 1];
+                    match before.kind {
+                        BlockKind::Comment => self.comment_is_hidden(index - 1),
+                        BlockKind::FootnoteDefinition => self.definition_is_hidden(index - 1),
+                        _ => false,
+                    }
+                }
+            }
             _ => false,
         }
     }
@@ -1460,23 +1523,25 @@ impl EditorView {
     /// `target`, moved past the hidden blocks it falls in, on the side the caret is heading.
     fn skip_hidden(&self, target: usize, forward: bool) -> usize {
         let index = self.blocks.index_at(target);
-        if !self.is_hidden_block(index) {
+        if !self.takes_no_caret(index) || target == self.session.active_buffer().len() && self.ends_in_atom() {
             return target;
         }
         let count = self.blocks.as_slice().len();
         let mut first = index;
-        while first > 0 && self.is_hidden_block(first - 1) {
+        while first > 0 && self.takes_no_caret(first - 1) {
             first -= 1;
         }
         let mut last = index;
-        while last + 1 < count && self.is_hidden_block(last + 1) {
+        while last + 1 < count && self.takes_no_caret(last + 1) {
             last += 1;
         }
         let text = self.session.active_buffer().text();
-        let (before, after) = (
-            self.blocks.as_slice()[first].range.start,
-            self.blocks.as_slice()[last].range.end,
-        );
+        let before = self.blocks.as_slice()[first].range.start;
+        // The blank line after a table is its separator, not a place to stand.
+        let after = match self.blocks.as_slice().get(last + 1) {
+            Some(next) if next.kind == BlockKind::Blank && last + 2 < count => next.range.end,
+            _ => self.blocks.as_slice()[last].range.end,
+        };
         if (forward && after < text.len()) || before == 0 {
             after
         } else {
@@ -1501,9 +1566,13 @@ impl EditorView {
             })
             .clone();
         let collapsed = self.is_hidden_block(index);
+        let whole_atom = self
+            .rich_atom(index)
+            .filter(|atom| !collapsed && !self.source && atom.first == index && self.atom_is_whole(atom))
+            .cloned();
         let hidden = if self.source {
             Vec::new()
-        } else if collapsed {
+        } else if collapsed || whole_atom.is_some() {
             let whole = 0..block_text.len();
             vec![whole]
         } else {
@@ -1526,16 +1595,36 @@ impl EditorView {
             (start < end).then(|| start - block.range.start..end - block.range.start)
         });
         let width = self.column.text_width;
+        let chips = if self.source || collapsed || whole_atom.is_some() || syntax.spans.is_empty() {
+            Vec::new()
+        } else {
+            let caret = self
+                .reveal_offset()
+                .filter(|at| self.blocks.index_at(*at) == index)
+                .map(|at| at - block.range.start);
+            self.rich.chips(block_text, &syntax.spans, caret)
+        };
         if let Some(layout) = &self.slots[index].layout
             && layout.width == width
             && layout.hidden == hidden
             && layout.marked == marked
             && layout.collapsed == collapsed
+            && layout.chips == chips
+            && rich::view::shapes::still_fits(layout.whole.as_deref(), whole_atom.as_ref())
         {
             return layout.clone();
         }
-        let lines = display_lines(block.kind, block_text, &syntax, &hidden, marked.clone(), trailing_line);
+        let lines = display_lines(
+            block.kind,
+            block_text,
+            &syntax,
+            &hidden,
+            marked.clone(),
+            trailing_line,
+            &chips,
+        );
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
+        let whole = whole_atom.as_ref().map(|atom| Box::new(self.shape_atom(atom, window)));
         let layout = Rc::new(shape_block(
             ShapeRequest {
                 kind: block.kind,
@@ -1547,6 +1636,8 @@ impl EditorView {
                 marked,
                 width,
                 style: &self.style,
+                chips,
+                whole,
             },
             window,
         ));
@@ -1769,7 +1860,7 @@ impl Render for EditorView {
         let tokens = Tokens::get(cx);
         let mut context = KeyContext::default();
         // The link field floats inside this pane, and its keys are its own.
-        if !self.link_is_open() {
+        if !self.float_takes_keys() {
             context.add(CONTEXT);
         }
         if self.menu_is_open() {
@@ -1833,6 +1924,14 @@ impl Render for EditorView {
             )
             .on_action(cx.listener(|this, _: &OpenLink, window, cx| this.open_link(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSource, window, cx| this.toggle_source(window, cx)))
+            .on_action(cx.listener(|this, _: &InsertFootnote, window, cx| this.insert_footnote(None, window, cx)))
+            .on_action(cx.listener(|this, _: &InsertCitation, window, cx| this.open_citation_picker(None, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &InsertReference, window, cx| this.open_reference_picker(None, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &InsertImage, window, cx| this.choose_image(None, window, cx)))
+            .on_action(cx.listener(|this, _: &EditRich, window, cx| this.edit_rich_at_caret(window, cx)))
+            .on_drop(cx.listener(Self::drop_paths))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll));
         motions!(

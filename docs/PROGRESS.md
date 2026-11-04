@@ -52,6 +52,7 @@ In the running app:
 - [ ] Input methods: the IME test in the resume note below, in the galley, and once each in a chapter note, a theme field, and the agent's prompt box. Milestone 14 waits for this, and a beta cannot ship without it.
 - [ ] A real mouse. Automated mouse events do not reach the window on this macOS, so every click was dispatched inside gpui: a click on a page, a drag in the sidebar and in the block gutter, hovering a gutter icon and a toolbar button, the conflict line's buttons, and an approval card's buttons.
 - [ ] The native dialogs: Open, New Book, the cover, adding a font, and the prompt before deleting a common theme.
+- [ ] Rich blocks by hand: the image file dialog, a real drop from the Finder, a real click on a chip, a table, and a figure, an input method in a footnote popover and a table cell, and whether the small mark, the chips, and the grid over its table feel right. Also whether "page of Table 1" will do for a page reference's chip, which cannot show a number before layout.
 - [ ] The menu bar in German and English. A script cannot photograph it.
 - [ ] A real Finder launch, once slice 8 has an app bundle: the Agent tab should find the CLI and its login. It was only simulated with launchd's variables.
 - [ ] The accent caret line on the page that follows the galley caret. Nobody has judged its look or weight.
@@ -85,7 +86,7 @@ Follow-ups from the integration, none blocking:
 - A committed theme edit blocks the main thread for about 64 ms, the probe typeset and an fsync. Moving the save and the probe off the main thread would take back the regression from 358 ms to about 380 ms.
 - Every warning makes a sidebar dot, so the book shows a dot on nearly every chapter from its 243 loose-line warnings. The Shell slice decided this deliberately, and on a real book it says little. It could count errors and placeholders only.
 - Engine diagnostics are English in a German window.
-- The Selection and Images tabs are empty until slice 7.
+- Slice 7, rich blocks, is done on `t3/rich-block-editors`, on top of this branch and not merged. See [decisions](DECISIONS.md#2026-11-04-desktop-beta-rich-blocks).
 
 Phase 2, the public crate API, is complete on this machine (macOS) in five steps, each on its own branch, stacked in this order: `t3/design-phase-two-api` (06dafeb, the design), `t3/phase-two-facade` (8195d0e: one package, public modules, `cli` and `editor` features), `t3/phase-two-renderer-resolver` (26bdd73: `Resolver`, content-hashed `Bytes`, `Arc<Face>`, no leaked fonts), `t3/diagnostics-cancellation` (820b351: structured diagnostics and `Cancel`), `t3/phase-two-layout-source-map` (f7d31c7: `Layout`, the source map, click sync in the app), and `t3/phase-two-api-acceptance` (step 5, below). [The API record](PHASE_2_API.md) has the signatures as built, [acceptance](ACCEPTANCE.md#phase-2-contract) lists each contract requirement with its evidence, and every step has a dated entry in [decisions](DECISIONS.md#2026-11-04-phase-2-step-5-choices-beyond-the-design). Nothing is pushed or published; publishing a crate needs its own request.
 

@@ -18,6 +18,29 @@ pub struct RunStyle {
     pub quiet: bool,
     /// Marked text of an input method.
     pub marked: bool,
+    /// Shows a chip in place of its source.
+    pub chip: Option<ChipLook>,
+}
+
+/// How a chip looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChipLook {
+    /// A footnote's small mark.
+    Mark,
+    /// A citation or a cross-reference.
+    Label,
+    /// What the book cannot resolve.
+    Error,
+}
+
+/// A run of a block's source that shows as other text. `range` is relative to the block, on one line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chip {
+    pub range: Range<usize>,
+    pub text: String,
+    pub look: ChipLook,
+    /// The caret passes over it as one step, and a key deletes all of it.
+    pub atomic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +48,8 @@ struct Segment {
     display: usize,
     source: usize,
     len: usize,
+    /// How much source it stands for, which differs from `len` for a chip.
+    source_len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,14 +65,22 @@ pub struct DisplayLine {
     pub nesting: usize,
     /// An empty line inside a hidden comment, which takes no room.
     pub inside_hidden: bool,
+    /// Where each chip on the line shows, as displayed offsets.
+    pub chips: Vec<(Range<usize>, ChipLook)>,
 }
 
 impl DisplayLine {
     /// The displayed offset of a source offset. Inside a hidden range, the place it would appear.
     pub fn to_display(&self, source: usize) -> usize {
         for segment in &self.segments {
-            if source <= segment.source + segment.len {
-                return segment.display + source.saturating_sub(segment.source);
+            if source <= segment.source + segment.source_len {
+                let into = source.saturating_sub(segment.source);
+                return segment.display
+                    + if segment.len == segment.source_len || into == 0 {
+                        into
+                    } else {
+                        segment.len
+                    };
             }
         }
         self.text.len()
@@ -58,7 +91,13 @@ impl DisplayLine {
     pub fn to_source(&self, display: usize) -> usize {
         for segment in &self.segments {
             if display <= segment.display + segment.len {
-                return segment.source + display - segment.display;
+                let into = display - segment.display;
+                return segment.source
+                    + if segment.len == segment.source_len || into == 0 {
+                        into
+                    } else {
+                        segment.source_len
+                    };
             }
         }
         self.source.end
@@ -140,6 +179,15 @@ pub fn hidden_ranges(
             hidden.push(line.start..line.start + spaces);
         }
     }
+    // A label or style at the end of a heading or paragraph, which the Selection tab and the pickers show.
+    if matches!(kind, BlockKind::Heading { .. } | BlockKind::Paragraph)
+        && let Some(line) = lines.iter().rev().find(|line| !line.is_empty())
+        && !line_holds(&lines, caret, line.start)
+        && let Some(group) = super::rich::styles::closing_group(&text[line.clone()])
+    {
+        let before = text[line.start..line.start + group.start].trim_end_matches(' ').len();
+        hidden.push(line.start + before..line.start + group.end);
+    }
     hidden.retain(|range| !range.is_empty());
     hidden.sort_by_key(|range| range.start);
     hidden
@@ -155,7 +203,9 @@ fn span_style(kind: SpanKind, style: &mut RunStyle) {
         SpanKind::Underline => style.underline = true,
         SpanKind::Todo => style.bold = true,
         SpanKind::Superscript | SpanKind::Subscript | SpanKind::SmallCaps => {}
-        SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::Comment => style.quiet = true,
+        SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::CrossReference | SpanKind::Comment => {
+            style.quiet = true;
+        }
     }
 }
 
@@ -167,11 +217,12 @@ pub fn display_lines(
     hidden: &[Range<usize>],
     marked: Option<Range<usize>>,
     trailing_line: bool,
+    chips: &[Chip],
 ) -> Vec<DisplayLine> {
     let lines = lines(text, trailing_line);
     lines
         .iter()
-        .map(|line| display_line(kind, text, line.clone(), syntax, hidden, marked.as_ref()))
+        .map(|line| display_line(kind, text, line.clone(), syntax, hidden, marked.as_ref(), chips))
         .collect()
 }
 
@@ -182,23 +233,58 @@ fn display_line(
     syntax: &Syntax,
     hidden: &[Range<usize>],
     marked: Option<&Range<usize>>,
+    chips: &[Chip],
 ) -> DisplayLine {
-    let segments_source = visible_parts(&line, hidden);
+    let parts = visible_parts(&line, hidden);
     let mut display = String::with_capacity(line.len());
-    let mut segments = Vec::with_capacity(segments_source.len());
+    let mut segments = Vec::with_capacity(parts.len());
     let mut runs: Vec<(usize, RunStyle)> = Vec::new();
-    for part in &segments_source {
-        segments.push(Segment {
-            display: display.len(),
-            source: part.start,
-            len: part.len(),
-        });
-        display.push_str(&text[part.clone()]);
-        for run in style_runs(part.clone(), kind, syntax, marked) {
-            match runs.last_mut() {
-                Some((len, style)) if *style == run.1 => *len += run.0,
-                _ => runs.push(run),
+    let mut shown_chips = Vec::new();
+    for part in &parts {
+        let mut at = part.start;
+        for chip in chips
+            .iter()
+            .filter(|chip| part.start <= chip.range.start && chip.range.end <= part.end)
+        {
+            if chip.range.start > at {
+                let range = at..chip.range.start;
+                push_plain(
+                    text,
+                    range,
+                    kind,
+                    syntax,
+                    marked,
+                    &mut display,
+                    &mut segments,
+                    &mut runs,
+                );
             }
+            segments.push(Segment {
+                display: display.len(),
+                source: chip.range.start,
+                len: chip.text.len(),
+                source_len: chip.range.len(),
+            });
+            shown_chips.push((display.len()..display.len() + chip.text.len(), chip.look));
+            display.push_str(&chip.text);
+            let style = RunStyle {
+                chip: Some(chip.look),
+                ..RunStyle::default()
+            };
+            push_run(&mut runs, (chip.text.len(), style));
+            at = chip.range.end;
+        }
+        if at < part.end {
+            push_plain(
+                text,
+                at..part.end,
+                kind,
+                syntax,
+                marked,
+                &mut display,
+                &mut segments,
+                &mut runs,
+            );
         }
     }
     if segments.is_empty() {
@@ -206,6 +292,7 @@ fn display_line(
             display: 0,
             source: line.end,
             len: 0,
+            source_len: 0,
         });
     }
     let nesting = if kind == BlockKind::List {
@@ -229,11 +316,43 @@ fn display_line(
     DisplayLine {
         source: line,
         inside_hidden,
+        chips: shown_chips,
         text: display,
         segments,
         runs,
         bullet,
         nesting,
+    }
+}
+
+fn push_run(runs: &mut Vec<(usize, RunStyle)>, run: (usize, RunStyle)) {
+    match runs.last_mut() {
+        Some((len, style)) if *style == run.1 => *len += run.0,
+        _ => runs.push(run),
+    }
+}
+
+/// Adds a part of the source that shows as written.
+#[allow(clippy::too_many_arguments, reason = "the pieces of one line under construction")]
+fn push_plain(
+    text: &str,
+    range: Range<usize>,
+    kind: BlockKind,
+    syntax: &Syntax,
+    marked: Option<&Range<usize>>,
+    display: &mut String,
+    segments: &mut Vec<Segment>,
+    runs: &mut Vec<(usize, RunStyle)>,
+) {
+    segments.push(Segment {
+        display: display.len(),
+        source: range.start,
+        len: range.len(),
+        source_len: range.len(),
+    });
+    display.push_str(&text[range.clone()]);
+    for run in style_runs(range, kind, syntax, marked) {
+        push_run(runs, run);
     }
 }
 
@@ -327,7 +446,7 @@ mod tests {
     fn show(kind: BlockKind, text: &str, caret: Option<usize>) -> Vec<DisplayLine> {
         let syntax = syntax(kind, text);
         let hidden = hidden_ranges(kind, text, &syntax, caret, false, false);
-        display_lines(kind, text, &syntax, &hidden, None, false)
+        display_lines(kind, text, &syntax, &hidden, None, false, &[])
     }
 
     const HEADING: BlockKind = BlockKind::Heading { level: 1 };
@@ -398,7 +517,7 @@ mod tests {
         let syntax = syntax(BlockKind::Paragraph, text);
         let hidden = hidden_ranges(BlockKind::Paragraph, text, &syntax, None, false, true);
         assert_eq!(
-            display_lines(BlockKind::Paragraph, text, &syntax, &hidden, None, false)[0].text,
+            display_lines(BlockKind::Paragraph, text, &syntax, &hidden, None, false, &[])[0].text,
             text
         );
     }
@@ -432,10 +551,46 @@ mod tests {
     }
 
     #[test]
+    fn a_closing_label_or_style_hides_until_the_caret_is_on_its_line() {
+        assert_eq!(show(HEADING, "# Title {#sec:a}\n", None)[0].text, "Title");
+        assert_eq!(show(HEADING, "# Title {#sec:a}\n", Some(3))[0].text, "# Title {#sec:a}");
+        let lines = show(BlockKind::Paragraph, "One\ntwo {.lead}\n", None);
+        assert_eq!((lines[0].text.as_str(), lines[1].text.as_str()), ("One", "two"));
+        assert_eq!(
+            show(BlockKind::Paragraph, "One\ntwo {.lead}\n", Some(5))[1].text,
+            "two {.lead}"
+        );
+        assert_eq!(show(BlockKind::Paragraph, "a {b} c\n", None)[0].text, "a {b} c");
+    }
+
+    #[test]
+    fn a_chip_shows_in_place_of_its_source_and_maps_to_its_edges() {
+        let text = "a [@k] b";
+        let syntax = syntax(BlockKind::Paragraph, text);
+        let chips = [Chip {
+            range: 2..6,
+            text: "(K 1)".to_owned(),
+            look: ChipLook::Label,
+            atomic: true,
+        }];
+        let line = &display_lines(BlockKind::Paragraph, text, &syntax, &[], None, false, &chips)[0];
+        assert_eq!(line.text, "a (K 1) b");
+        assert_eq!(line.chips, [(2..7, ChipLook::Label)]);
+        assert_eq!(line.to_display(2), 2);
+        assert_eq!(line.to_display(4), 7);
+        assert_eq!(line.to_display(6), 7);
+        assert_eq!(line.to_display(7), 8);
+        assert_eq!(line.to_source(2), 2);
+        assert_eq!(line.to_source(4), 6);
+        assert_eq!(line.to_source(7), 6);
+        assert_eq!(line.to_source(8), 7);
+    }
+
+    #[test]
     fn a_trailing_line_is_empty_and_marked_text_is_flagged() {
         let text = "ab\n";
         let syntax = syntax(BlockKind::Paragraph, text);
-        let lines = display_lines(BlockKind::Paragraph, text, &syntax, &[], Some(1..2), true);
+        let lines = display_lines(BlockKind::Paragraph, text, &syntax, &[], Some(1..2), true, &[]);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1].source, 3..3);
         assert!(lines[0].runs[1].1.marked);

@@ -109,6 +109,28 @@ const FILES: &[(&str, &[u8])] = &[
     ("icons/notes.svg", include_bytes!("../assets/icons/notes.svg")),
     ("icons/source.svg", include_bytes!("../assets/icons/source.svg")),
     ("icons/agent.svg", include_bytes!("../assets/icons/agent.svg")),
+    (
+        "icons/block-reference.svg",
+        include_bytes!("../assets/icons/block-reference.svg"),
+    ),
+    (
+        "icons/align-default.svg",
+        include_bytes!("../assets/icons/align-default.svg"),
+    ),
+    ("icons/align-left.svg", include_bytes!("../assets/icons/align-left.svg")),
+    (
+        "icons/align-center.svg",
+        include_bytes!("../assets/icons/align-center.svg"),
+    ),
+    (
+        "icons/align-right.svg",
+        include_bytes!("../assets/icons/align-right.svg"),
+    ),
+    (
+        "icons/align-justify.svg",
+        include_bytes!("../assets/icons/align-justify.svg"),
+    ),
+    ("icons/pencil.svg", include_bytes!("../assets/icons/pencil.svg")),
 ];
 
 pub struct Assets;

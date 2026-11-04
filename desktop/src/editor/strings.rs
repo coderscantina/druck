@@ -37,6 +37,7 @@ crate::strings! {
         Toc => ("Table of contents", "Inhaltsverzeichnis"),
         Footnote => ("Footnote", "Fußnote"),
         Citation => ("Citation", "Quellenangabe"),
+        CrossReference => ("Cross-reference", "Querverweis"),
         NewSection => ("New section", "Neuer Abschnitt"),
         SourceView => ("Source", "Quelltext"),
         NotesTitle => ("NOTES", "NOTIZEN"),
