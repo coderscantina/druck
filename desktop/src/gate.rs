@@ -234,6 +234,7 @@ impl Gate {
     async fn theme_edits(&self, cx: &mut AsyncApp) {
         let mut pages = Vec::new();
         let mut galley = Vec::new();
+        let mut blocked = Vec::new();
         for sample in 0..THEME_SAMPLES {
             self.settle(cx).await;
             let generation = self.editor.read_with(cx, |editor, _| editor.style_generation());
@@ -242,7 +243,11 @@ impl Gate {
             let start = Instant::now();
             self.inspector
                 .update(cx, |inspector, cx| inspector.set_body_size(&size, cx));
-            self.sleep(Duration::from_millis(5), cx).await;
+            blocked.push(start.elapsed());
+            // The write runs on its own thread, and the pages are requested once it has landed.
+            while start.elapsed() < GIVE_UP && self.preview.read_with(cx, |preview, _| preview.painted_at()).is_some() {
+                self.sleep(POLL, cx).await;
+            }
             pages.push(self.wait_for_pages(cx).await.saturating_duration_since(start));
             loop {
                 let painted = self
@@ -259,6 +264,7 @@ impl Gate {
                 self.sleep(POLL, cx).await;
             }
         }
+        report("theme edit, window thread busy with the change", blocked);
         report("theme edit to painted pages", pages);
         report("theme edit to painted galley", galley);
     }

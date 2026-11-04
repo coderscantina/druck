@@ -137,7 +137,7 @@ impl InspectorView {
     /// `theme` is the JSON file the theme tabs edit, and `dirs` the folders themes may be changed in.
     pub fn new(theme: Option<PathBuf>, dirs: Dirs, window: &mut Window, cx: &mut Context<Self>) -> Self {
         input::bind_keys(cx);
-        let model = cx.new(|_| ThemeModel::new(theme.as_deref(), dirs));
+        let model = cx.new(|cx| ThemeModel::new(theme.as_deref(), dirs, cx));
         let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
         let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
         let geometry = cx.new(|cx| GeometryPanel::new(model.clone(), window, cx));

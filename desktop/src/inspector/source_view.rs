@@ -228,7 +228,10 @@ impl SourceView {
             let shown = lines.into_iter().take(DEFAULT_LINES).collect::<Vec<_>>().join("\n");
             if more { format!("{shown}\n…") } else { shown }
         });
-        let message = self.message.clone();
+        let message = self.message.clone().or_else(|| {
+            let rejection = self.model.read(cx).rejection()?;
+            Some(crate::t!(Key::JsonInvalid, value = &rejection.to_string()))
+        });
         let panel = SECTIONS
             .iter()
             .find(|(name, _)| *name == section)

@@ -385,11 +385,12 @@ impl StylesPanel {
         if let Selected::Custom(name) = selected {
             fields.push(self.custom_header(name, tokens, cx).into_any_element());
         }
-        if let Some(message) = &self.notice {
+        let rejection = self.model.read(cx).rejection().map(ToString::to_string);
+        if let Some(message) = self.notice.clone().or(rejection) {
             fields.push(
                 div()
                     .px(chrome::SPACE_3)
-                    .child(widgets::error_line(tokens, message.clone()))
+                    .child(widgets::error_line(tokens, message))
                     .into_any_element(),
             );
         }
