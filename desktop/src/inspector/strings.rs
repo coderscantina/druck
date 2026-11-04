@@ -74,7 +74,7 @@ crate::strings! {
         Customized => ("CUSTOM", "EIGEN"),
         NoTheme => (
             "No theme file is open. Start the app with --theme PATH or name a theme in the document.",
-            "Keine Themendatei geöffnet. Starte die App mit --theme PFAD oder nenne ein Thema im Dokument."
+            "Keine Theme-Datei geöffnet. Starte die App mit --theme PFAD oder nenne ein Theme im Dokument."
         ),
         Cancel => ("Cancel", "Abbrechen"),
         Delete => ("Delete", "Löschen"),
@@ -184,6 +184,7 @@ crate::strings! {
         GroupSpacing => ("Spacing", "Abstände"),
         GroupColors => ("Colors", "Farben"),
         NewTokenHint => ("Name, such as accent", "Name, etwa akzent"),
+        TokenUsedOnce => ("Used in 1 place", "An 1 Stelle verwendet"),
         TokenUsed => ("Used in {value} places", "An {value} Stellen verwendet"),
         TokenUnused => ("Not used", "Nicht verwendet"),
         TokenBlocked => (
@@ -194,7 +195,7 @@ crate::strings! {
         // Page geometry
         GeometryTitle => ("PAGE", "SEITE"),
         PageSize => ("Page size", "Seitenformat"),
-        CustomSize => ("Custom", "Eigenes"),
+        CustomSize => ("Custom", "Eigen"),
         Width => ("Width", "Breite"),
         Height => ("Height", "Höhe"),
         Margins => ("MARGINS", "RÄNDER"),
@@ -202,7 +203,7 @@ crate::strings! {
         MarginBottom => ("Bottom", "Unten"),
         MarginInner => ("Inner", "Innen"),
         MarginOuter => ("Outer", "Außen"),
-        Mirror => ("Mirror margins on even pages", "Ränder auf geraden Seiten spiegeln"),
+        Mirror => ("Mirror margins on even pages", "Gerade Seiten spiegeln"),
         Columns => ("TEXT", "TEXT"),
         ColumnGap => ("Column gap", "Spaltenabstand"),
         TextWidth => ("Narrower prose width", "Schmalere Textbreite"),
@@ -211,14 +212,14 @@ crate::strings! {
         PaperA4 => ("A4", "A4"),
         PaperA5 => ("A5", "A5"),
         PaperB5 => ("B5", "B5"),
-        PaperLetter => ("Letter", "US-Letter"),
-        PaperLegal => ("Legal", "US-Legal"),
+        PaperLetter => ("Letter", "Letter"),
+        PaperLegal => ("Legal", "Legal"),
         LengthNote => ("{mm} mm · {pt} pt", "{mm} mm · {pt} pt"),
         FrameSize => ("Frame {value}", "Satzspiegel {value}"),
         Decimal => (".", ","),
 
         // JSON view
-        JsonTitle => ("THEME SOURCE", "THEMENQUELLE"),
+        JsonTitle => ("THEME SOURCE", "THEME-QUELLE"),
         JsonValid => ("Valid. Changes apply as you type.", "Gültig. Änderungen gelten sofort."),
         JsonInvalid => ("Not applied: {value}", "Nicht übernommen: {value}"),
         JsonDesigned => ("Own panel", "Eigenes Panel"),
@@ -229,32 +230,32 @@ crate::strings! {
         ),
 
         // Picker
-        Theme => ("Theme", "Thema"),
+        Theme => ("Theme", "Theme"),
         ProjectThemes => ("PROJECT", "PROJEKT"),
-        CommonThemes => ("COMMON", "ALLGEMEIN"),
-        NewCommonTheme => ("New common theme", "Neues allgemeines Thema"),
+        CommonThemes => ("COMMON", "GEMEINSAM"),
+        NewCommonTheme => ("New common theme", "Neues gemeinsames Theme"),
         Duplicate => ("Duplicate", "Duplizieren"),
         DefaultTheme => ("Built-in default", "Eingebaute Vorgabe"),
-        DeleteTheme => ("Delete the common theme \"{value}\"?", "Das allgemeine Thema „{value}“ löschen?"),
+        DeleteTheme => ("Delete the common theme \"{value}\"?", "Das gemeinsame Theme „{value}“ löschen?"),
         DeleteThemeDetail => (
             "Documents that name it fall back to errors until they name another theme. This cannot be undone.",
-            "Dokumente, die es nennen, melden Fehler, bis sie ein anderes Thema nennen. Das lässt sich nicht rückgängig machen."
+            "Dokumente, die es nennen, melden Fehler, bis sie ein anderes Theme nennen. Das lässt sich nicht rückgängig machen."
         ),
         DeleteThemeOpen => ("The open document uses it.", "Das geöffnete Dokument nutzt es."),
         Specimen => ("Specimen", "Muster"),
 
         // Fork
-        ForkTitle => ("Change a shared theme", "Gemeinsames Thema ändern"),
+        ForkTitle => ("Change a shared theme", "Gemeinsames Theme ändern"),
         ForkBody => (
             "\"{value}\" is a common theme. Other documents may use it too.",
-            "„{value}“ ist ein allgemeines Thema. Auch andere Dokumente können es nutzen."
+            "„{value}“ ist ein gemeinsames Theme. Auch andere Dokumente können es nutzen."
         ),
         ForkCopy => ("Copy it into this project (recommended)", "In dieses Projekt kopieren (empfohlen)"),
         ForkCopyNote => (
             "The copy is changed. The shared theme and its other documents stay as they are.",
-            "Die Kopie wird geändert. Das gemeinsame Thema und seine anderen Dokumente bleiben wie sie sind."
+            "Die Kopie wird geändert. Das gemeinsame Theme und seine anderen Dokumente bleiben wie sie sind."
         ),
-        ForkShared => ("Change the shared theme", "Gemeinsames Thema ändern"),
+        ForkShared => ("Change the shared theme", "Gemeinsames Theme ändern"),
         ForkSharedNote => ("Every document that uses it changes.", "Jedes Dokument, das es nutzt, ändert sich."),
         ForkAffected => ("Documents known to use it: {value}.", "Bekannte Dokumente, die es nutzen: {value}."),
         ForkUnknown => ("Others on this machine are not known.", "Weitere auf diesem Rechner sind nicht bekannt."),

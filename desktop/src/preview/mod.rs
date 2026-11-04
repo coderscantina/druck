@@ -431,7 +431,10 @@ impl PreviewView {
             Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
             Err(Failure::Cancelled) => {}
         }
-        cx.emit(Laid);
+        // The specimen's warnings and errors are about the specimen, not the document the diagnostics list shows.
+        if !specimen {
+            cx.emit(Laid);
+        }
         cx.notify();
     }
 

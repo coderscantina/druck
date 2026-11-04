@@ -41,8 +41,8 @@ crate::strings! {
             "Claude Code meldet, dass niemand angemeldet ist. Vor dem ersten Prompt mit einem API-Schlüssel einrichten."
         ),
         Intro => (
-            "Ask Claude Code about this project. It works in the project folder and reads its CLAUDE.md, skills, and MCP servers as in a terminal. Every change is asked about first, and shown here.",
-            "Frag Claude Code zu diesem Projekt. Es arbeitet im Projektordner und liest CLAUDE.md, Skills und MCP-Server wie im Terminal. Jede Änderung wird erst erfragt und hier gezeigt."
+            "Ask Claude Code about this project. It works in the project folder and reads its CLAUDE.md, skills, and MCP servers as in a terminal. What it changes shows here, and you can take it back.",
+            "Frag Claude Code zu diesem Projekt. Es arbeitet im Projektordner und liest CLAUDE.md, Skills und MCP-Server wie im Terminal. Was es ändert, steht hier, und du kannst es zurücknehmen."
         ),
         AllowOnce => ("Allow once", "Einmal erlauben"),
         Deny => ("Deny", "Ablehnen"),
@@ -84,7 +84,7 @@ crate::strings! {
             "Claude Code {version} gehört nicht zu den getesteten Versionen. Es kann trotzdem funktionieren."
         ),
         LoginSubscription => ("a Claude subscription login", "eine Claude-Abo-Anmeldung"),
-        LoginApiKey => ("an API key", "ein API-Schlüssel"),
+        LoginApiKey => ("an API key", "einen API-Schlüssel"),
         LoginReports => ("Claude Code reports {what}{plan}.", "Claude Code meldet {what}{plan}."),
         LoginUnknown => (
             "Claude Code did not say which login it uses.",

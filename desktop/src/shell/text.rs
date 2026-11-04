@@ -111,7 +111,7 @@ crate::strings! {
             "Use letters, digits, - and _ for the name.",
             "Für den Namen Buchstaben, Ziffern, - und _ verwenden."
         ),
-        ExportExists => ("An export with this name exists.", "Ein Export mit diesem Namen gibt es schon."),
+        ExportExists => ("An export with this name exists.", "Einen Export mit diesem Namen gibt es schon."),
         FieldTheme => ("Theme", "Theme"),
         FieldOutput => ("Output file", "Ausgabedatei"),
         FieldBleed => ("Bleed", "Beschnitt"),

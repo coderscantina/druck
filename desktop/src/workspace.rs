@@ -700,7 +700,12 @@ impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let switch = self.canvas_switch(&tokens, cx);
-        let title = self.parts.editor.read(cx).session().location().display().to_string();
+        let location = self.parts.editor.read(cx).session().location();
+        // Only the name: three slices' toolbar needs the room, and the window's own title has the whole path.
+        let title = location.file_name().map_or_else(
+            || location.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         let bar_end = div()
             .flex()
             .items_center()

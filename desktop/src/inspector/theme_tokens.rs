@@ -274,7 +274,11 @@ impl TokensPanel {
             if uses == 0 {
                 crate::t!(Key::TokenUnused).to_owned()
             } else {
-                crate::t!(Key::TokenUsed, value = &uses.to_string())
+                if uses == 1 {
+                    crate::t!(Key::TokenUsedOnce).to_owned()
+                } else {
+                    crate::t!(Key::TokenUsed, value = &uses.to_string())
+                }
             },
         ));
         if own && !inherited {

@@ -17,11 +17,11 @@ crate::strings! {
         Unreadable => ("Not readable", "Nicht lesbar"),
         Overlap => (
             "changed outside where you are writing. Nothing is lost, whichever you choose:",
-            "wurde von außen an der Stelle geändert, an der du schreibst. Nichts geht verloren, was du auch wählst:"
+            "wurde von außen dort geändert, wo du schreibst. Nichts geht verloren:"
         ),
         Deleted => (
             "was deleted outside, but has text not saved yet. Nothing is lost, whichever you choose:",
-            "wurde von außen gelöscht, enthält aber noch nicht gesicherten Text. Nichts geht verloren, was du auch wählst:"
+            "wurde von außen gelöscht, hat aber ungesicherten Text. Nichts geht verloren:"
         ),
         KeepMine => ("Keep mine", "Meins behalten"),
         TakeTheirs => ("Take theirs", "Das andere nehmen"),

@@ -398,6 +398,9 @@ impl Hub {
     /// The report of the latest layout and of a failed export, shown in the panel and as the sidebar's dots.
     fn refresh_report(&mut self, cx: &mut Context<Self>) {
         let preview = self.parts.preview.read(cx);
+        if preview.is_specimen() {
+            return;
+        }
         let mut errors: Vec<Diagnostic> = preview.diagnostics().to_vec();
         // Warnings of pages that are no longer the latest text say nothing.
         let warnings = if errors.is_empty() {

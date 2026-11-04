@@ -72,7 +72,7 @@ impl Tab {
         Self::TOP
             .into_iter()
             .chain(Self::BOTTOM)
-            .find(|tab| tab.label().eq_ignore_ascii_case(&name))
+            .find(|tab| tab.id().strip_prefix("tab-") == Some(name.as_str()))
     }
 
     fn id(self) -> &'static str {

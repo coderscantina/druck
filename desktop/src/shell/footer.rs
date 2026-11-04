@@ -44,13 +44,11 @@ impl Render for Footer {
             (Some(chapter), None) => crate::t!(Key::WordsChapterOnly, chapter = grouped(chapter)),
             _ => String::new(),
         };
+        // Takes only what it needs: a conflict in the same strip needs the room for its sentence.
         div()
-            .flex_1()
-            .min_w_0()
+            .flex_none()
+            .ml_auto()
             .px(tokens::SPACE_3)
-            .flex()
-            .justify_end()
-            .truncate()
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_faint)
             .child(text)
