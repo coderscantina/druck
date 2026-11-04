@@ -39,3 +39,24 @@ pub mod resolved_config {
 pub mod engine {
     pub use crate::pipeline::{document_theme, theme_file};
 }
+
+/// Word counts: the footer counts a chapter and the book the way `{words}` counts a document, from the text alone.
+pub mod statistics {
+    use std::path::PathBuf;
+
+    use crate::config::source::InputSource;
+    use crate::config::theme::Lang;
+
+    pub use crate::statistics::Statistics;
+
+    /// The statistics of Markdown text with no front matter, read as `lang` (`"en"` or `"de"`, anything else is
+    /// English). `None` when the text alone does not parse, such as a chapter that closes a directive another opened.
+    pub fn count(markdown: &str, lang: &str) -> Option<Statistics> {
+        let lang = if lang == "de" { Lang::De } else { Lang::En };
+        let source = InputSource::Overrides {
+            working_dir: PathBuf::new(),
+        };
+        let document = crate::markdown::parse_with(markdown, 1, &source, lang, false).ok()?;
+        Some(Statistics::count(&document, lang))
+    }
+}

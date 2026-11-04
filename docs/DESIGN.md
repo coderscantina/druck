@@ -37,3 +37,14 @@ Colors, spacing, and type live in one table in the desktop crate. Views never ha
 ## Slots
 
 The window has three places to mount a view without touching the shell, listed in `desktop/src/app.rs`: `toolbar` in the title bar before the canvas switch, `footer` in the strip under the canvas, and `overlays` over the window. Inspector tabs take a panel with `InspectorView::mount`.
+
+## Shell panels
+
+- The diagnostics list groups by chapter in book order, with what belongs to no chapter, such as settings and themes, first under the project's name. A row is a dot, a quiet line with the kind and the line number, then the message in up to two lines. The dots match the sidebar's: filled accent for an error, filled quiet for a warning, hollow for an open placeholder. A click opens the chapter at the line.
+- A sidebar dot is derived from that list and never stored: a problem dot if the chapter has an error or a warning, else a placeholder dot if one is open.
+- The export panel lists each named export as a collapsed card: name, then one quiet line of its output and switches, then the run button. A card opens to its theme, output, and bleed fields and its three switches. Progress is three segments, one per stage, with the stage's name above and Cancel beside it.
+- The search panel and the find bar are cards over the galley's corner, not modal: the card draws no backdrop, so the pages stay usable while it is open. Settings is a modal card with a backdrop, like the section dialog.
+- The footer's word count is right-aligned and faint, with a thin space between thousands.
+- Every string is in English and German. A German label must fit the same width as its English one: the sidebar is 256 px and the inspector 296 px, so prefer the short word.
+- With the keys in the sidebar, the selected row has a 2 px accent bar at its left edge. Up and down move, Home and End jump, Enter or Escape return to the galley.
+

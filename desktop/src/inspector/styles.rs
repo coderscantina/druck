@@ -8,7 +8,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, EventEmitter, FontWeight, SharedString, Subscription, Window, div};
 
 use super::input::{Committed, TextInput};
-use super::strings;
+use super::strings::{self, Key};
 use super::style_property::{ALIGNMENTS, Property, style_label};
 use crate::theme_file::ThemeFile;
 use crate::tokens::{self, Tokens};
@@ -36,7 +36,7 @@ impl StylesPanel {
     pub fn new(theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let theme = match theme {
             Some(path) => ThemeFile::open(&path),
-            None => Err(strings::NO_THEME.to_owned()),
+            None => Err(crate::t!(Key::NoTheme).to_owned()),
         };
         let mut inputs = HashMap::new();
         let mut subscriptions = Vec::new();
@@ -104,7 +104,7 @@ impl StylesPanel {
         match property.parse(text) {
             Ok(value) => self.apply(property, Some(value), cx),
             Err(message) => {
-                self.errors.insert(property, message.to_owned());
+                self.errors.insert(property, crate::t!(message).to_owned());
                 cx.notify();
             }
         }
@@ -143,7 +143,7 @@ impl StylesPanel {
             Ok(()) => match file.save() {
                 Err(error) => {
                     self.errors
-                        .insert(property, format!("{}: {error}", strings::SAVE_FAILED));
+                        .insert(property, format!("{}: {error}", crate::t!(Key::SaveFailed)));
                 }
                 Ok(()) => {
                     self.errors.remove(&property);
@@ -177,7 +177,7 @@ impl StylesPanel {
                         .id("styles-back")
                         .cursor_pointer()
                         .hover(|back| back.text_color(tokens.text))
-                        .child(format!("‹ {}", strings::BACK.to_uppercase()))
+                        .child(format!("‹ {}", crate::t!(Key::Back).to_uppercase()))
                         .on_click(cx.listener(|panel, _, _, cx| panel.select(None, cx))),
                 )
             })
@@ -189,6 +189,7 @@ impl StylesPanel {
             .iter()
             .map(|&(key, label)| {
                 let customized = Self::is_customized(file, key);
+                let label = crate::t!(label);
                 div()
                     .id(key)
                     .h(tokens::ROW_HEIGHT)
@@ -205,11 +206,7 @@ impl StylesPanel {
                         div()
                             .text_size(tokens::TEXT_SMALL)
                             .text_color(if customized { tokens.accent } else { tokens.text_faint })
-                            .child(if customized {
-                                strings::CUSTOMIZED
-                            } else {
-                                strings::INHERITED
-                            }),
+                            .child(crate::t!(if customized { Key::Customized } else { Key::Inherited })),
                     )
                     .on_click(cx.listener(move |panel, _, _, cx| panel.select(Some(key), cx)))
             })
@@ -245,7 +242,7 @@ impl StylesPanel {
                         .text_size(tokens::TEXT_SMALL)
                         .text_color(tokens.accent)
                         .cursor_pointer()
-                        .child(strings::RESET)
+                        .child(crate::t!(Key::Reset))
                         .on_click(cx.listener(move |panel, _, _, cx| panel.reset(property, cx))),
                 )
             });
@@ -289,6 +286,7 @@ impl StylesPanel {
             .iter()
             .map(|&(value, label)| {
                 let active = current.as_deref() == Some(value);
+                let label = crate::t!(label);
                 div()
                     .id(value)
                     .flex_1()
@@ -325,17 +323,19 @@ impl Render for StylesPanel {
         let file = match &self.theme {
             Ok(file) => file,
             Err(message) => {
-                return column.child(self.header(strings::STYLES_TITLE, tokens, cx)).child(
-                    div()
-                        .p(tokens::SPACE_3)
-                        .text_color(tokens.text_quiet)
-                        .child(SharedString::from(message.clone())),
-                );
+                return column
+                    .child(self.header(crate::t!(Key::StylesTitle), tokens, cx))
+                    .child(
+                        div()
+                            .p(tokens::SPACE_3)
+                            .text_color(tokens.text_quiet)
+                            .child(SharedString::from(message.clone())),
+                    );
             }
         };
         let Some(style) = self.selected else {
             return column
-                .child(self.header(strings::STYLES_TITLE, tokens, cx))
+                .child(self.header(crate::t!(Key::StylesTitle), tokens, cx))
                 .child(self.list(file, tokens, cx));
         };
         let fields: Vec<_> = Property::ALL

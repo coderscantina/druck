@@ -22,14 +22,16 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, Entity, KeyBinding, Menu, MenuItem, PathPromptOptions, Pixels, PromptLevel, Subscription,
-    TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, actions, div, point, px, size,
+    App, Bounds, Context, Entity, KeyBinding, PathPromptOptions, Pixels, PromptLevel, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowKind, WindowOptions, actions, div, point, px, size,
 };
 
 use crate::agent::AgentView;
 use crate::editor::Save;
 use crate::launch::{LaunchEvent, LaunchView};
 use crate::session::{STARTERS, Session, Starter};
+use crate::shell::text::Key;
+use crate::shell::{self, menus};
 use crate::tokens::{self, Scheme, Tokens};
 use crate::workspace::{Parts, ShowPages, ShowSplit, ShowWrite, Slots, Workspace, titlebar};
 
@@ -41,7 +43,8 @@ const WINDOW_SIZE: (f32, f32) = (1680., 1000.);
 const SCREEN_MARGIN: f32 = 80.;
 
 /// Mounts what later slices own into the workspace's slots and tabs. One line per view.
-pub fn mount(_parts: &Parts, slots: &mut Slots, _window: &mut Window, cx: &mut Context<Workspace>) {
+pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
+    shell::mount(parts, slots, window, cx);
     slots.footer.push(cx.new(|_| AgentView::new()).into());
 }
 
@@ -55,6 +58,7 @@ pub fn open(
     scheme: Option<Scheme>,
     cx: &mut App,
 ) {
+    shell::init(scheme, cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
@@ -65,27 +69,22 @@ pub fn open(
         KeyBinding::new("cmd-3", ShowSplit, None),
     ]);
     crate::editor::bind_keys(cx);
-    cx.set_menus([
-        Menu::new("Druck").items([MenuItem::action("Quit Druck", Quit)]),
-        Menu::new("File").items([
-            MenuItem::action("Open\u{2026}", Open),
-            MenuItem::separator(),
-            MenuItem::action("New Book\u{2026}", NewBook),
-            MenuItem::action("New Report\u{2026}", NewReport),
-            MenuItem::action("New Offer\u{2026}", NewOffer),
-            MenuItem::separator(),
-            MenuItem::action("Save", Save),
-        ]),
-    ]);
+    shell::install(cx);
+    cx.on_app_quit(|cx| {
+        shell::save_at_exit(cx);
+        async {}
+    })
+    .detach();
     cx.on_window_closed(|cx, _| cx.quit()).detach();
 
     let display = cx.primary_display().map(|display| display.bounds().size);
     let fit = |wanted: f32, available: Option<Pixels>| {
         available.map_or(wanted, |available| wanted.min(f32::from(available) - SCREEN_MARGIN))
     };
+    let (wanted_width, wanted_height) = shell::prefs(cx).window_size().unwrap_or(WINDOW_SIZE);
     let window_size = size(
-        px(fit(WINDOW_SIZE.0, display.map(|display| display.width))),
-        px(fit(WINDOW_SIZE.1, display.map(|display| display.height))),
+        px(fit(wanted_width, display.map(|display| display.width))),
+        px(fit(wanted_height, display.map(|display| display.height))),
     );
     let measuring = std::env::var_os("DRUCK_GATE").is_some();
     // Macs stop painting a covered window. A measurement run floats on the last display without taking focus.
@@ -115,8 +114,8 @@ pub fn open(
         ..Default::default()
     };
     let window = cx.open_window(options, |window, cx| {
-        cx.set_global(Tokens::new(scheme.unwrap_or_else(|| window.appearance().into())));
-        cx.new(|cx| Shell::new(session, error, theme, scheme, window, cx))
+        cx.set_global(Tokens::new(shell::current_scheme(window, cx)));
+        cx.new(|cx| Shell::new(session, error, theme, window, cx))
     });
     if let Err(error) = window {
         eprintln!("cannot open a window: {error}");
@@ -140,18 +139,16 @@ impl Shell {
         session: Option<Session>,
         error: Option<String>,
         theme: Option<PathBuf>,
-        scheme: Option<Scheme>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        if scheme.is_none() {
-            cx.observe_window_appearance(window, |_, window, cx| {
-                cx.set_global(Tokens::new(window.appearance().into()));
-                // Cached panes hold colors of the old appearance.
-                window.refresh();
-            })
+        // Cached panes hold colors of the old appearance, so this repaints them too.
+        cx.observe_window_appearance(window, |_, window, cx| shell::apply_appearance(window, cx))
             .detach();
-        }
+        window.on_window_should_close(cx, |_, cx| {
+            shell::save_at_exit(cx);
+            true
+        });
         let launch = cx.new(|_| LaunchView::new(error));
         let subscriptions = vec![
             cx.subscribe_in(&launch, window, |shell, _, event, window, cx| match event {
@@ -172,6 +169,7 @@ impl Shell {
 
     fn show_session(&mut self, session: Session, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         window.set_window_title(&session.location().display().to_string());
+        shell::document_opened(session.location(), cx);
         self.workspace = Some(cx.new(|cx| Workspace::new(session, theme, window, cx)));
         cx.notify();
     }
@@ -181,7 +179,7 @@ impl Shell {
             files: true,
             directories: true,
             multiple: false,
-            prompt: Some("Open".into()),
+            prompt: Some(crate::t!(Key::OpenPrompt).into()),
         });
         cx.spawn_in(window, async move |shell, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
@@ -218,22 +216,49 @@ impl Shell {
 
     /// Opens a document in this window, asking first if the one open has unsaved text.
     fn open_path(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let path = path.to_owned();
+        self.after_saving(Key::SaveBeforeOpening, window, cx, move |shell, window, cx| {
+            shell.replace_document(&path, window, cx);
+        });
+    }
+
+    /// Closes the document and shows the launch screen, asking first if it has unsaved text. With no document it
+    /// closes the window.
+    fn close_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workspace.is_none() {
+            window.remove_window();
+            return;
+        }
+        self.after_saving(Key::SaveBeforeClosing, window, cx, |shell, window, cx| {
+            shell.workspace = None;
+            window.set_window_title("Druck");
+            cx.notify();
+        });
+    }
+
+    /// Runs `then`, after asking whether to save if the document has unsaved text. Cancel runs nothing.
+    fn after_saving(
+        &mut self,
+        message: Key,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
         let dirty = self
             .workspace
             .as_ref()
             .is_some_and(|workspace| workspace.read(cx).is_dirty(cx));
         if !dirty {
-            self.replace_document(path, window, cx);
+            then(self, window, cx);
             return;
         }
         let answer = window.prompt(
             PromptLevel::Warning,
-            "Save your changes before opening another document?",
+            crate::t!(message),
             None,
-            &["Save", "Discard", "Cancel"],
+            &[crate::t!(Key::Save), crate::t!(Key::Discard), crate::t!(Key::Cancel)],
             cx,
         );
-        let path = path.to_owned();
         cx.spawn_in(window, async move |shell, cx| {
             let Ok(answer) = answer.await else {
                 return;
@@ -246,12 +271,19 @@ impl Shell {
                         workspace.update(cx, |workspace, cx| workspace.save(window, cx));
                     }
                     if answer != 2 {
-                        shell.replace_document(&path, window, cx);
+                        then(shell, window, cx);
                     }
                 })
                 .ok();
         })
         .detach();
+    }
+
+    /// Opens the recent document at `index` of the menu.
+    fn open_recent(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = shell::recent(index, cx) {
+            self.open_path(&path, window, cx);
+        }
     }
 
     fn replace_document(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
@@ -282,8 +314,10 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
+        let bounds = window.bounds().size;
+        shell::remember_window((f32::from(bounds.width), f32::from(bounds.height)), cx);
         div()
             .size_full()
             .flex()
@@ -296,6 +330,17 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &NewBook, window, cx| shell.new_project("book", window, cx)))
             .on_action(cx.listener(|shell, _: &NewReport, window, cx| shell.new_project("report", window, cx)))
             .on_action(cx.listener(|shell, _: &NewOffer, window, cx| shell.new_project("offer", window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::CloseDocument, window, cx| shell.close_document(window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent0, window, cx| shell.open_recent(0, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent1, window, cx| shell.open_recent(1, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent2, window, cx| shell.open_recent(2, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent3, window, cx| shell.open_recent(3, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent4, window, cx| shell.open_recent(4, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent5, window, cx| shell.open_recent(5, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent6, window, cx| shell.open_recent(6, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent7, window, cx| shell.open_recent(7, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent8, window, cx| shell.open_recent(8, window, cx)))
+            .on_action(cx.listener(|shell, _: &menus::Recent9, window, cx| shell.open_recent(9, window, cx)))
             .map(|root| match self.workspace.clone() {
                 Some(workspace) => root.child(workspace),
                 None => root

@@ -7,6 +7,7 @@ mod cache;
 pub(crate) mod job;
 mod raster;
 mod sheets;
+mod strings;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ pub use self::job::BodyStyle;
 use self::job::{Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
+use self::strings::Key;
 use crate::session::{Joined, Kind};
 use crate::tokens::{self, Tokens};
 
@@ -68,6 +70,11 @@ struct Placed {
 pub struct Typeset(pub BodyStyle);
 
 impl EventEmitter<Typeset> for PreviewView {}
+
+/// A layout finished and its result counts, whether it made pages or only errors. The shell reads the diagnostics.
+pub struct Laid;
+
+impl EventEmitter<Laid> for PreviewView {}
 
 /// A click on a page landed on text written at this byte of this file.
 pub struct PageClicked {
@@ -258,7 +265,6 @@ impl PreviewView {
     }
 
     /// What the pages on screen broke, such as typesetting rules.
-    #[allow(dead_code, reason = "for the diagnostics panel of the integration wave")]
     pub fn warnings(&self) -> &[Diagnostic] {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
     }
@@ -302,6 +308,18 @@ impl PreviewView {
             Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
             Err(Failure::Cancelled) => {}
         }
+        cx.emit(Laid);
+        cx.notify();
+    }
+
+    /// One zoom level larger for a positive `direction`, smaller for a negative one. For the View menu.
+    pub fn zoom_by(&mut self, direction: isize, cx: &mut Context<Self>) {
+        self.zoom_step(direction, cx);
+    }
+
+    /// Fits the sheets to the width of the pane. For the View menu.
+    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
+        self.zoom = Zoom::FitWidth;
         cx.notify();
     }
 
@@ -479,15 +497,15 @@ impl PreviewView {
     fn status(&self) -> String {
         let Some(layout) = &self.layout else {
             return if self.diagnostics.is_empty() {
-                "No pages yet".to_owned()
+                crate::t!(Key::NoPagesYet).to_owned()
             } else {
-                "No pages".to_owned()
+                crate::t!(Key::NoPages).to_owned()
             };
         };
         let pages = layout.laid.pages().len();
         let page = (self.page + 1).min(pages);
         let percent = (self.current_zoom * 100.0).round();
-        format!("Page {page} of {pages} \u{00b7} {percent}%")
+        crate::t!(Key::PageOf, page = page, pages = pages, percent = percent)
     }
 }
 
@@ -581,10 +599,7 @@ impl Render for PreviewView {
             .on_scroll(cx.listener(Self::on_scroll))
             .on_action(cx.listener(|view, _: &ZoomIn, _, cx| view.zoom_step(1, cx)))
             .on_action(cx.listener(|view, _: &ZoomOut, _, cx| view.zoom_step(-1, cx)))
-            .on_action(cx.listener(|view, _: &ZoomToFit, _, cx| {
-                view.zoom = Zoom::FitWidth;
-                cx.notify();
-            }))
+            .on_action(cx.listener(|view, _: &ZoomToFit, _, cx| view.zoom_to_fit(cx)))
             .on_action(cx.listener(|view, _: &NextScreen, _, cx| {
                 view.scroll.1 += view.view.1 * 0.9;
                 cx.notify();

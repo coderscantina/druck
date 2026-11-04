@@ -15,6 +15,12 @@ pub struct Committed(pub String);
 /// The author pressed Enter in the field.
 pub struct Submitted;
 
+/// The text changed by typing, before it is committed. Fields that search as they are typed listen to this.
+pub struct Edited;
+
+/// The author pressed Escape in the field.
+pub struct Cancelled;
+
 pub struct TextInput {
     text: String,
     /// What the field held when editing began, so an unchanged field commits nothing.
@@ -25,12 +31,18 @@ pub struct TextInput {
     customized: bool,
     /// The next typed character replaces everything, as after a focus or select all.
     replace_all: bool,
+    /// Enter keeps the focus here, for a field that is used again and again, such as the find bar's.
+    keep_focus: bool,
+    /// Shown in the quiet color while the field is empty.
+    placeholder: SharedString,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<Committed> for TextInput {}
 impl EventEmitter<Submitted> for TextInput {}
+impl EventEmitter<Edited> for TextInput {}
+impl EventEmitter<Cancelled> for TextInput {}
 
 impl Focusable for TextInput {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
@@ -57,9 +69,27 @@ impl TextInput {
             caret: 0,
             customized: false,
             replace_all: false,
+            keep_focus: false,
+            placeholder: SharedString::default(),
             focus,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Makes Enter submit without leaving the field, and selecting the field's text on focus is kept.
+    pub fn keep_focus_on_enter(mut self) -> Self {
+        self.keep_focus = true;
+        self
+    }
+
+    pub fn with_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+
+    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.placeholder = placeholder.into();
+        cx.notify();
     }
 
     pub fn set_value(&mut self, text: String, customized: bool, cx: &mut Context<Self>) {
@@ -67,6 +97,12 @@ impl TextInput {
         self.original.clone_from(&text);
         self.text = text;
         self.customized = customized;
+        cx.notify();
+    }
+
+    /// Selects the whole text, so the next typed character replaces it.
+    pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.replace_all = true;
         cx.notify();
     }
 
@@ -107,6 +143,14 @@ impl TextInput {
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.text.clone();
+        self.key_down(event, window, cx);
+        if self.text != before {
+            cx.emit(Edited);
+        }
+    }
+
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let command = keystroke.modifiers.platform || keystroke.modifiers.control;
         if command {
@@ -127,10 +171,16 @@ impl TextInput {
                 self.replace_all = false;
                 self.commit(cx);
                 cx.emit(Submitted);
-                window.blur(cx);
+                if !self.keep_focus {
+                    window.blur(cx);
+                }
                 return;
             }
             "escape" => {
+                if self.keep_focus {
+                    cx.emit(Cancelled);
+                    return;
+                }
                 self.text.clone_from(&self.original);
                 self.caret = self.text.len();
                 self.replace_all = false;
@@ -180,7 +230,14 @@ impl Render for TextInput {
         };
         let (before, after) = self.text.split_at(self.caret);
         let text = |text: &str| div().flex_none().child(SharedString::from(text.to_owned()));
-        let content = if focused && self.replace_all && !self.text.is_empty() {
+        let content = if self.text.is_empty() && !self.placeholder.is_empty() {
+            div()
+                .flex()
+                .when(focused, |row| {
+                    row.child(div().flex_none().w(px(1.)).h(tokens::TEXT_BODY).bg(tokens.accent))
+                })
+                .child(div().text_color(tokens.text_faint).child(self.placeholder.clone()))
+        } else if focused && self.replace_all && !self.text.is_empty() {
             div().flex().bg(tokens.raised).child(text(&self.text))
         } else {
             div()

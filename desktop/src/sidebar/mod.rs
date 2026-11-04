@@ -3,13 +3,18 @@
 //! It holds no document. The workspace gives it [`SidebarData`] and hears [`SidebarEvent`]s.
 
 pub mod dialogs;
+mod strings;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{Context, ElementId, EventEmitter, FontWeight, MouseButton, ObjectFit, SharedString, Window, div, img, svg};
+use gpui::{
+    Context, ElementId, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton, ObjectFit,
+    SharedString, Window, div, img, svg,
+};
 
+use self::strings::Key;
 use crate::session::{ChapterId, Contents, Row, RowKind};
 use crate::tokens::{self, Tokens};
 
@@ -35,6 +40,8 @@ pub struct SidebarData {
 
 pub enum SidebarEvent {
     Select(ChapterId),
+    /// Show a chapter in the galley while the keys stay in the sidebar, for arrowing through the list.
+    Browse(ChapterId),
     /// Move a chapter so it stands before the one now at this place in the book.
     Move(ChapterId, usize),
     AddToBook(ChapterId),
@@ -53,6 +60,10 @@ enum Fold {
 }
 
 pub struct SidebarView {
+    focus: FocusHandle,
+    /// Whether the keys are in the sidebar, as of the last paint. Shows as a bar at the selected row.
+    keyed: bool,
+    _subscriptions: Vec<gpui::Subscription>,
     data: SidebarData,
     marks: HashMap<ChapterId, Mark>,
     notice: Option<SharedString>,
@@ -85,14 +96,82 @@ impl Render for DraggedRow {
     }
 }
 
+/// The chapter a navigation key moves to from `current`: one step up or down, or the first or last of `ids`. Going
+/// past either end stays on it.
+fn neighbour(ids: &[ChapterId], current: Option<ChapterId>, key: &str) -> Option<ChapterId> {
+    let at = current.and_then(|current| ids.iter().position(|id| *id == current));
+    let target = match (key, at) {
+        ("home", _) => 0,
+        ("end", _) => ids.len().checked_sub(1)?,
+        ("up", Some(at)) => at.saturating_sub(1),
+        ("down", Some(at)) => (at + 1).min(ids.len().checked_sub(1)?),
+        ("up" | "down", None) => 0,
+        _ => return None,
+    };
+    ids.get(target).copied()
+}
+
+impl Focusable for SidebarView {
+    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
 impl SidebarView {
-    pub fn new() -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
+        let subscriptions = vec![
+            cx.on_focus_in(&focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus_out(&focus, window, |_, _, _, cx| cx.notify()),
+        ];
         Self {
+            focus,
+            keyed: false,
+            _subscriptions: subscriptions,
             data: SidebarData::default(),
             marks: HashMap::new(),
             notice: None,
             folded: HashSet::new(),
         }
+    }
+
+    /// The chapters the arrow keys visit, top to bottom: the book, files not in it, and the notes and research that
+    /// are not folded.
+    fn visible(&self) -> Vec<ChapterId> {
+        let contents = &self.data.contents;
+        let notes = (!self.folded.contains(&Fold::Notes)).then_some(&contents.notes);
+        let research = (!self.folded.contains(&Fold::Research)).then_some(&contents.research);
+        [Some(&contents.book), Some(&contents.not_in_book), notes, research]
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|row| row.id)
+            .collect()
+    }
+
+    fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.visible();
+        match event.keystroke.key.as_str() {
+            "enter" | "escape" => {
+                if let Some(id) = self.data.active {
+                    cx.emit(SidebarEvent::Select(id));
+                }
+            }
+            key @ ("up" | "down" | "home" | "end") => {
+                let target = if event.keystroke.modifiers.platform && key == "up" {
+                    "home"
+                } else if event.keystroke.modifiers.platform && key == "down" {
+                    "end"
+                } else {
+                    key
+                };
+                if let Some(id) = neighbour(&ids, self.data.active, target) {
+                    cx.emit(SidebarEvent::Browse(id));
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     pub fn set_data(&mut self, data: SidebarData, cx: &mut Context<Self>) {
@@ -176,6 +255,7 @@ impl SidebarView {
     fn row(&self, row: &Row, plain_file: bool, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let id = row.id;
         let selected = self.data.active == Some(id);
+        let keyed = selected && self.keyed;
         let color = if row.broken {
             tokens.accent
         } else if selected {
@@ -195,6 +275,18 @@ impl SidebarView {
             .border_b_1()
             .border_color(tokens.divider)
             .when(selected, |row| row.bg(tokens.raised))
+            .relative()
+            .when(keyed, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .w(gpui::px(2.))
+                        .bg(tokens.accent),
+                )
+            })
             .hover(|row| row.bg(tokens.raised))
             .cursor_pointer()
             .text_color(color)
@@ -306,8 +398,9 @@ impl SidebarView {
 }
 
 impl Render for SidebarView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
+        self.keyed = self.focus.is_focused(window);
         let contents = self.data.contents.clone();
         let identity = div()
             .id("identity")
@@ -373,12 +466,18 @@ impl Render for SidebarView {
             .map(|row| self.file_row(row, &tokens, cx).into_any_element())
             .collect();
         let notes_label = (!contents.notes.is_empty()).then(|| {
-            self.fold_label(Fold::Notes, "NOTES", contents.notes.len(), &tokens, cx)
+            self.fold_label(Fold::Notes, crate::t!(Key::Notes), contents.notes.len(), &tokens, cx)
                 .into_any_element()
         });
         let research_label = (!contents.research.is_empty()).then(|| {
-            self.fold_label(Fold::Research, "RESEARCH", contents.research.len(), &tokens, cx)
-                .into_any_element()
+            self.fold_label(
+                Fold::Research,
+                crate::t!(Key::Research),
+                contents.research.len(),
+                &tokens,
+                cx,
+            )
+            .into_any_element()
         });
         let list = div()
             .id("contents")
@@ -388,13 +487,15 @@ impl Render for SidebarView {
             .flex()
             .flex_col()
             .when(!manifest.is_empty(), |list| {
-                list.child(Self::label(&tokens, "MANIFEST")).children(manifest)
+                list.child(Self::label(&tokens, crate::t!(Key::Manifest)))
+                    .children(manifest)
             })
-            .child(Self::label(&tokens, "CONTENTS"))
+            .child(Self::label(&tokens, crate::t!(Key::Contents)))
             .children(book)
             .child(drop_at_end)
             .when(!unlisted.is_empty(), |list| {
-                list.child(Self::label(&tokens, "NOT IN BOOK")).children(unlisted)
+                list.child(Self::label(&tokens, crate::t!(Key::NotInBook)))
+                    .children(unlisted)
             })
             .children(notes_label)
             .children(notes)
@@ -443,6 +544,9 @@ impl Render for SidebarView {
             .h_full()
             .flex()
             .flex_col()
+            .key_context("Sidebar")
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::on_key))
             .bg(tokens.panel)
             .border_r_1()
             .border_color(tokens.divider)
@@ -450,5 +554,31 @@ impl Render for SidebarView {
             .child(list)
             .children(notice)
             .child(bottom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::Session;
+
+    fn ids() -> Vec<ChapterId> {
+        let file = std::env::temp_dir().join(format!("druck-sidebar-{}.md", std::process::id()));
+        std::fs::write(&file, "# A\n\n# B\n\n# C\n").expect("file");
+        let session = Session::open(&file).expect("opens");
+        std::fs::remove_file(&file).ok();
+        session.book().to_vec()
+    }
+
+    #[test]
+    fn arrows_step_and_stop_at_the_ends_and_home_and_end_jump() {
+        let ids = ids();
+        assert_eq!(neighbour(&ids, Some(ids[1]), "down"), Some(ids[2]));
+        assert_eq!(neighbour(&ids, Some(ids[2]), "down"), Some(ids[2]));
+        assert_eq!(neighbour(&ids, Some(ids[1]), "up"), Some(ids[0]));
+        assert_eq!(neighbour(&ids, Some(ids[0]), "up"), Some(ids[0]));
+        assert_eq!(neighbour(&ids, Some(ids[1]), "end"), Some(ids[2]));
+        assert_eq!(neighbour(&ids, None, "down"), Some(ids[0]));
+        assert_eq!(neighbour(&[], None, "home"), None);
     }
 }

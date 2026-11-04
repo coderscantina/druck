@@ -414,6 +414,22 @@ impl EditorView {
         self.set_selection(Selection::caret(offset), false, window, cx);
     }
 
+    /// Selects `range` of the active chapter and brings it into view, for the find bar.
+    pub fn select(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.session.active_buffer().text();
+        let start = text.floor_char_boundary(range.start.min(text.len()));
+        let end = text.floor_char_boundary(range.end.min(text.len()));
+        self.set_selection(
+            Selection {
+                anchor: start,
+                head: end,
+            },
+            false,
+            window,
+            cx,
+        );
+    }
+
     /// Sets the galley's body from the theme. Every block is shaped again as it comes into view.
     pub fn set_body(&mut self, family: &str, size: f32, line_height: f32, cx: &mut Context<Self>) {
         self.style.set_body(family, size, line_height);

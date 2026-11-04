@@ -9,6 +9,7 @@ mod inspector;
 mod launch;
 mod preview;
 mod session;
+mod shell;
 mod sidebar;
 mod source;
 mod theme_file;

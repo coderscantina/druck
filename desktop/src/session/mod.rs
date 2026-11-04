@@ -18,7 +18,7 @@ mod outline;
 pub mod templates;
 #[cfg(test)]
 mod tests;
-mod yaml;
+pub(crate) mod yaml;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -119,7 +119,6 @@ impl Chapter {
         }
     }
 
-    #[allow(dead_code, reason = "search and autosave read it")]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -148,6 +147,11 @@ impl Chapter {
 
     pub fn is_dirty(&self) -> bool {
         self.buffer.revision() != self.saved
+    }
+
+    /// Whether the buffer holds the file's text. A note or research file is read when first opened.
+    pub fn is_read(&self) -> bool {
+        self.read != Read::Later
     }
 }
 
@@ -723,6 +727,12 @@ impl Session {
 
     /// Makes `id` the active chapter, reading its file if that is still to do.
     pub fn set_active(&mut self, id: ChapterId) {
+        self.load(id);
+        self.active = id;
+    }
+
+    /// Reads a note's or research file if that is still to do, so its text can be edited without opening it.
+    pub fn load(&mut self, id: ChapterId) {
         if self.known(id).read == Read::Later {
             let listed = self.known(id).listed.clone();
             let path = self.known(id).path.clone();
@@ -733,7 +743,6 @@ impl Session {
             chapter.read = read;
             chapter.outline = outline(chapter.buffer.text());
         }
-        self.active = id;
     }
 
     /// Applies edits to a chapter as one undo step, moving its saved caret with the text. For anything outside the

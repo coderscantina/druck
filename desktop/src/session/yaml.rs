@@ -9,20 +9,20 @@ use std::ops::Range;
 use crate::source::Edit;
 
 /// One `key: value` of a mapping: the key's line and whatever belongs to its value below it.
-struct Entry {
-    key: String,
+pub(crate) struct Entry {
+    pub(crate) key: String,
     /// The start of the key's line.
-    start: usize,
+    pub(crate) start: usize,
     /// Just after the colon.
-    colon_end: usize,
+    pub(crate) colon_end: usize,
     /// The end of the key's own line, with its line ending.
-    line_end: usize,
+    pub(crate) line_end: usize,
     /// The end of the entry's last line, with its line ending. Comments and blank lines after it are not part of it.
-    end: usize,
+    pub(crate) end: usize,
 }
 
 /// The entries of the mapping in `range`, whose keys sit at `indent`.
-fn entries(text: &str, range: Range<usize>, indent: usize) -> Result<Vec<Entry>, String> {
+pub(crate) fn entries(text: &str, range: Range<usize>, indent: usize) -> Result<Vec<Entry>, String> {
     let mut found: Vec<Entry> = Vec::new();
     let mut at = range.start;
     for line in text[range].split_inclusive('\n') {
@@ -78,12 +78,12 @@ fn split_key(line: &str) -> Option<(String, usize)> {
 }
 
 /// The line ending the text uses.
-fn newline(text: &str) -> &'static str {
+pub(crate) fn newline(text: &str) -> &'static str {
     if text.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
 /// Where a one-line value ends: before a trailing comment and spaces.
-fn value_end(text: &str, from: usize, line_end: usize) -> usize {
+pub(crate) fn value_end(text: &str, from: usize, line_end: usize) -> usize {
     let line = &text[from..line_end];
     let bytes = line.as_bytes();
     let mut quote = None;
@@ -150,7 +150,7 @@ pub fn set(text: &str, key: &str, value: &str, order: &[&str]) -> Result<Edit, S
     }
 }
 
-fn replace_value(text: &str, entry: &Entry, value: &str) -> Edit {
+pub(crate) fn replace_value(text: &str, entry: &Entry, value: &str) -> Edit {
     if entry.end == entry.line_end {
         let end = value_end(text, entry.colon_end, entry.line_end);
         return Edit::new(entry.colon_end..end, format!(" {value}"));
@@ -159,7 +159,7 @@ fn replace_value(text: &str, entry: &Entry, value: &str) -> Edit {
 }
 
 /// Inserts whole lines for a new key, without their final line ending.
-fn insert(text: &str, found: &[Entry], key: &str, lines: &str, order: &[&str]) -> Edit {
+pub(crate) fn insert(text: &str, found: &[Entry], key: &str, lines: &str, order: &[&str]) -> Edit {
     let newline = newline(text);
     let wanted = order.iter().position(|name| *name == key).unwrap_or(order.len());
     let before = found
@@ -189,7 +189,7 @@ pub fn remove(text: &str, key: &str) -> Result<Option<Edit>, String> {
 }
 
 /// The children of a nested mapping entry and their indent. An inline value is an error: it would need rewriting.
-fn children(text: &str, entry: &Entry) -> Result<(Vec<Entry>, usize), String> {
+pub(crate) fn children(text: &str, entry: &Entry) -> Result<(Vec<Entry>, usize), String> {
     let inline = text[entry.colon_end..value_end(text, entry.colon_end, entry.line_end)].trim();
     if !inline.is_empty() {
         return Err(format!(
@@ -280,7 +280,7 @@ fn list_items(text: &str, entry: &Entry) -> Option<Vec<Item>> {
     Some(items)
 }
 
-fn unquote(value: &str) -> String {
+pub(crate) fn unquote(value: &str) -> String {
     let inner = value
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))

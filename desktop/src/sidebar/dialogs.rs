@@ -6,6 +6,7 @@ use gpui::{
     div, svg,
 };
 
+use super::strings::Key;
 use crate::inspector::input::{Submitted, TextInput};
 use crate::session::templates::Group;
 use crate::session::{ChapterId, TEMPLATES, Template};
@@ -144,8 +145,8 @@ impl Render for SectionDialog {
             return div().into_any_element();
         }
         let heading: SharedString = match &state {
-            State::Edit { title, .. } => format!("Edit \"{title}\"").into(),
-            _ => "New section".into(),
+            State::Edit { title, .. } => crate::t!(Key::EditSection, title = title).into(),
+            _ => crate::t!(Key::NewSection).into(),
         };
         let name_row = div()
             .px(tokens::SPACE_3)
@@ -153,7 +154,12 @@ impl Render for SectionDialog {
             .flex()
             .items_center()
             .gap(tokens::SPACE_3)
-            .child(div().flex_none().text_color(tokens.text_quiet).child("Name"))
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(tokens.text_quiet)
+                    .child(crate::t!(Key::Name)),
+            )
             .child(div().flex_1().min_w_0().child(self.name.clone()));
         let body = match state {
             State::NewSection => {
@@ -194,7 +200,7 @@ impl Render for SectionDialog {
                 .gap(tokens::SPACE_2)
                 .child(div().when(removable, |left| {
                     left.child(
-                        Self::button(&tokens, "remove", "Remove from book").on_click(cx.listener(
+                        Self::button(&tokens, "remove", crate::t!(Key::RemoveFromBook)).on_click(cx.listener(
                             move |dialog, _, _, cx| {
                                 dialog.close(cx);
                                 cx.emit(DialogEvent::Remove(id));
@@ -203,7 +209,8 @@ impl Render for SectionDialog {
                     )
                 }))
                 .child(
-                    Self::button(&tokens, "rename", "Save").on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx))),
+                    Self::button(&tokens, "rename", crate::t!(Key::Save))
+                        .on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx))),
                 )
                 .into_any_element(),
             State::Closed => div().into_any_element(),
