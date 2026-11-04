@@ -988,15 +988,6 @@ impl EditorView {
         cx.emit(SaveRequested);
     }
 
-    /// Writes every chapter that changed and waits for it. Autosave is the way text reaches disk: this is for when the
-    /// document is about to go. Returns whether it all went, and shows why not.
-    pub fn save_all(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let saved = self.update_session(Session::save, window, cx);
-        self.status = saved.as_ref().err().cloned().unwrap_or_default().into();
-        cx.notify();
-        saved.is_ok() && !self.session.is_dirty()
-    }
-
     fn show_character_palette(&mut self, _: &ShowCharacterPalette, window: &mut Window, _: &mut Context<Self>) {
         window.show_character_palette();
     }

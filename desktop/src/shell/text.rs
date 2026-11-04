@@ -7,16 +7,16 @@ crate::strings! {
         Write => ("Write", "Schreiben"),
         Pages => ("Pages", "Seiten"),
         Split => ("Split", "Geteilt"),
-        SaveBeforeOpening => (
-            "Save your changes before opening another document?",
-            "Änderungen sichern, bevor ein anderes Dokument geöffnet wird?"
+        CannotSaveBeforeOpening => (
+            "Your changes could not be saved. Open another document anyway?",
+            "Die Änderungen konnten nicht gesichert werden. Trotzdem ein anderes Dokument öffnen?"
         ),
-        SaveBeforeClosing => (
-            "Save your changes before closing the document?",
-            "Änderungen sichern, bevor das Dokument geschlossen wird?"
+        CannotSaveBeforeClosing => (
+            "Your changes could not be saved. Close the document anyway?",
+            "Die Änderungen konnten nicht gesichert werden. Das Dokument trotzdem schließen?"
         ),
-        Save => ("Save", "Sichern"),
-        Discard => ("Discard", "Verwerfen"),
+        TryAgain => ("Try again", "Erneut versuchen"),
+        Discard => ("Discard changes", "Änderungen verwerfen"),
         Cancel => ("Cancel", "Abbrechen"),
         OpenPrompt => ("Open", "Öffnen"),
 
@@ -27,6 +27,8 @@ crate::strings! {
         MenuWindow => ("Window", "Fenster"),
         MenuHelp => ("Help", "Hilfe"),
         About => ("About Druck", "Über Druck"),
+        AboutVersion => ("Version {version}", "Version {version}"),
+        Notices => ("Third-party notices", "Lizenzhinweise"),
         Settings => ("Settings\u{2026}", "Einstellungen\u{2026}"),
         Services => ("Services", "Dienste"),
         HideApp => ("Hide Druck", "Druck ausblenden"),

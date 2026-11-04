@@ -28,8 +28,8 @@ use self::atomic::Outcome;
 use self::merge::Choice;
 use self::recovery::{Copies, data_dir};
 use self::strings::Key;
-pub use self::sync::FileChange;
 use self::sync::{ChangeKind, FileSync, Next, Pacer, Problem};
+pub use self::sync::{Closing, FileChange};
 use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
@@ -98,6 +98,13 @@ fn open_theme(model: &Entity<ThemeModel>, cx: &App) -> Option<PathBuf> {
     model.read(cx).file().ok().map(|file| file.path().to_owned())
 }
 
+/// Writes everything now for a document that is about to go, and says what is left: see [`Closing`]. Without a document
+/// there is nothing to write. The answer comes once any save that was running has landed.
+pub fn settle(window: &mut Window, cx: &mut App) -> Option<futures::channel::oneshot::Receiver<Closing>> {
+    let view = cx.try_global::<Current>()?.view.upgrade()?;
+    Some(view.update(cx, |view, cx| view.settle(window, cx)))
+}
+
 /// Clears what is kept for a document's unsaved text, when a person chose to discard it.
 pub fn forget_unsaved(location: &Path) {
     if let Some(data) = data_dir() {
@@ -126,6 +133,8 @@ pub struct PersistView {
     writing: Option<Task<()>>,
     /// Another save was asked for while one was running.
     write_again: bool,
+    /// Callers of [`settle`] that wait for the running save to land first.
+    settling: Vec<futures::channel::oneshot::Sender<Closing>>,
     waiting: Waiting,
     /// The channel the watcher reports to, kept to start it anew if the folder comes back.
     signals: futures::channel::mpsc::UnboundedSender<Signal>,
@@ -210,6 +219,7 @@ impl PersistView {
             write_lock: Arc::new(Mutex::new(())),
             writing: None,
             write_again: false,
+            settling: Vec::new(),
             waiting: Waiting::default(),
             signals,
             watcher: None,
@@ -462,6 +472,14 @@ impl PersistView {
             self.edited(window, cx);
         }
         self.refresh_shown(cx);
+        if !self.settling.is_empty() {
+            self.write_again = false;
+            let closing = self.settle_now(window, cx);
+            for waiting in std::mem::take(&mut self.settling) {
+                waiting.send(closing.clone()).ok();
+            }
+            return;
+        }
         if std::mem::take(&mut self.write_again) {
             self.flush(window, cx);
         }
@@ -471,25 +489,35 @@ impl PersistView {
     fn flush_blocking(&mut self, cx: &mut Context<Self>) {
         let lock = self.write_lock.clone();
         let _writing = lock.lock();
-        let copies = self.sync.copies().cloned();
-        self.editor.update(cx, |editor, _| {
-            let session = editor.session_quietly();
-            for outgoing in session.outgoing() {
-                if let Ok(Outcome::Written) = outgoing.write() {
-                    session.written(&outgoing);
-                    if let Some(copies) = &copies {
-                        copies.clear(&outgoing.path);
-                    }
-                }
-            }
-            if let Some(copies) = &copies {
-                for unsaved in session.unsaved() {
-                    if let Err(error) = copies.store(&unsaved.path, &unsaved.base, &unsaved.text) {
-                        eprintln!("cannot keep a copy of {}: {error}", unsaved.path.display());
-                    }
-                }
-            }
+        let sync = &mut self.sync;
+        self.editor
+            .update(cx, |editor, _| sync.write_all(editor.session_quietly()));
+        // Theme edits are written on a thread of their own, which a quitting app would not wait for.
+        self.inspector.read(cx).model().read(cx).flush();
+    }
+
+    /// For a document that is about to close or be replaced: writes what changed and says what is left. A save that is
+    /// running lands first, because it tells the session what it wrote.
+    fn settle(&mut self, window: &mut Window, cx: &mut Context<Self>) -> futures::channel::oneshot::Receiver<Closing> {
+        let (reply, answer) = futures::channel::oneshot::channel();
+        if self.writing.is_some() {
+            self.settling.push(reply);
+        } else {
+            reply.send(self.settle_now(window, cx)).ok();
+        }
+        answer
+    }
+
+    fn settle_now(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Closing {
+        let lock = self.write_lock.clone();
+        let _writing = lock.lock();
+        self.retry_conflicts(window, cx);
+        let sync = &mut self.sync;
+        let closing = self.editor.update(cx, |editor, cx| {
+            editor.update_session(|session| sync.write_all(session), window, cx)
         });
+        self.refresh_shown(cx);
+        closing
     }
 
     /// Stores a recovery copy of every file with unsaved text that changed since its last copy, on another thread.

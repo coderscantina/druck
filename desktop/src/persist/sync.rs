@@ -134,6 +134,19 @@ pub enum Problem {
     Gone,
 }
 
+/// What is left to say about unsaved text after everything that can be written has been, for a document that is about to
+/// go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Closing {
+    /// Nothing is unsaved.
+    Saved,
+    /// Text waits for a decision about a conflict, which the footer holds, and a recovery copy keeps it with the file's
+    /// other version still on disk. Nothing is lost by going on.
+    Held,
+    /// Text could not be written, so going on would lose it.
+    Failed { file: PathBuf, reason: String },
+}
+
 /// A batch's result, for the view.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -373,6 +386,48 @@ impl FileSync {
                     .insert(outgoing.path.clone(), Problem::Save(error.to_string()));
                 false
             }
+        }
+    }
+
+    /// Writes every file that changed, now, and keeps recovery copies of what is left. A file someone else wrote in the
+    /// meantime is taken in first, which merges it or makes it a conflict, and the merge is written. For a document that
+    /// is about to close, and for the app quitting.
+    pub fn write_all(&mut self, session: &mut Session) -> Closing {
+        for _ in 0..2 {
+            let mut changed = false;
+            for outgoing in session.outgoing() {
+                let result = outgoing.write();
+                if let (Ok(Outcome::Written), Some(copies)) = (&result, &self.copies) {
+                    copies.clear(&outgoing.path);
+                }
+                if self.finish_write(session, &outgoing, result) {
+                    changed = true;
+                    let disk = fs::read(&outgoing.path).ok();
+                    self.on_disk(session, &outgoing.path, disk);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let unsaved = session.unsaved();
+        if let Some(copies) = &self.copies {
+            for file in &unsaved {
+                if let Err(error) = copies.store(&file.path, &file.base, &file.text) {
+                    eprintln!("cannot keep a copy of {}: {error}", file.path.display());
+                }
+            }
+        }
+        match unsaved.iter().find(|file| !self.pending.contains_key(&file.path)) {
+            None if unsaved.is_empty() => Closing::Saved,
+            None => Closing::Held,
+            Some(file) => Closing::Failed {
+                file: file.path.clone(),
+                reason: match self.problems.get(&file.path) {
+                    Some(Problem::Save(reason) | Problem::Unreadable(reason)) => reason.clone(),
+                    _ => "the file is not as the app last saw it".to_owned(),
+                },
+            },
         }
     }
 
