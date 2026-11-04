@@ -93,7 +93,7 @@ pub fn resolve(
 }
 
 /// Adds the indexes of the citations in `blocks` in reading order, with a footnote's at its reference.
-fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) {
+pub(crate) fn reading_order(blocks: &[Block], document: &Document, order: &mut Vec<usize>) {
     let inlines = |content: &[Inline], order: &mut Vec<usize>| {
         for inline in content {
             match inline {

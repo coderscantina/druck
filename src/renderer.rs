@@ -134,7 +134,7 @@ impl<'r> Job<'r> {
 
 /// A document with its configuration resolved and its resources read.
 pub struct Configured<'r> {
-    job: JobContext<'r>,
+    pub(crate) job: JobContext<'r>,
     pub(crate) config: Config,
     pub(crate) document: DocumentFile,
     today: Date,

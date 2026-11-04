@@ -197,7 +197,7 @@ pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel)
 }
 
 /// Parses the BibTeX file the configuration names, if any.
-fn load_bibliography(job: &JobContext, config: &Config) -> Result<Option<Bibliography>, Failure> {
+pub(crate) fn load_bibliography(job: &JobContext, config: &Config) -> Result<Option<Bibliography>, Failure> {
     let Some(resource) = &config.bibliography_file else {
         return Ok(None);
     };

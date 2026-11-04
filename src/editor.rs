@@ -68,3 +68,111 @@ pub mod statistics {
         Some(Statistics::count(&document, lang))
     }
 }
+
+/// What the galley's rich blocks ask of the engine, so a chip, a picker, or a refused edit says what the pages say.
+pub mod rich {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use crate::bibliography::Citations;
+    use crate::bibliography::syntax::Citation;
+    use crate::config::source::InputSource;
+    use crate::config::theme::Lang;
+    use crate::{Configured, Failure, citations, layout, markdown, pipeline};
+
+    /// The engine's text for what a document cites and refers to.
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub struct Labels {
+        /// By [`citation_key`]. A citation with a key the bibliography lacks is not here.
+        pub citations: HashMap<String, String>,
+        /// By label with its prefix, such as `sec:intro`: "Section 2", or an unnumbered heading's text.
+        pub references: HashMap<String, String>,
+    }
+
+    /// What two citations must share to read the same, whatever their place in the text.
+    pub fn citation_key(citation: &Citation) -> String {
+        use std::fmt::Write;
+        let mut key = format!("{:?}", citation.form);
+        for item in &citation.items {
+            write!(
+                key,
+                ";{:?}|{}|{:?}|{:?}",
+                item.prefix, item.key, item.locator, item.suffix
+            )
+            .expect("writing to a string works");
+        }
+        key
+    }
+
+    /// Reads the labels of a configured document. A citation of an unknown key is left out here and still fails the
+    /// layout, so the other chips keep their text while that one is wrong.
+    pub fn labels(configured: &Configured<'_>) -> Result<Labels, Failure> {
+        let document = pipeline::parse(&configured.config, &configured.document)?;
+        let bibliography = pipeline::load_bibliography(&configured.job, &configured.config)?;
+        let mut labels = Labels::default();
+        let mut references = Vec::new();
+        if let Some(bibliography) = &bibliography {
+            let mut order = Vec::with_capacity(document.citations.len());
+            citations::reading_order(&document.blocks, &document, &mut order);
+            let mut cited = Citations::new(bibliography);
+            let mut added = Vec::with_capacity(order.len());
+            for index in order {
+                let syntax = &document.citations[index].syntax;
+                if let Ok(id) = cited.add(syntax) {
+                    added.push((citation_key(syntax), id));
+                }
+            }
+            let rendered = cited.finish(
+                configured.config.document.citation_style,
+                configured.config.document.lang,
+            );
+            for (key, id) in added {
+                let text = rendered.citation(id).iter().map(|part| part.text.as_str()).collect();
+                labels.citations.insert(key, text);
+            }
+            references = rendered.into_references();
+        }
+        let structure = layout::structure::Structure::new(&document, &configured.config, &references);
+        labels.references = structure
+            .label_texts()
+            .map(|(label, text)| (label.to_owned(), text.to_owned()))
+            .collect();
+        Ok(labels)
+    }
+
+    /// What the parser says is wrong with Markdown text with no front matter, read as `lang`, as messages without a
+    /// place. References to labels and notes outside the text count, so a caller checks whole documents.
+    pub fn parse_problems(markdown: &str, lang: &str) -> Vec<String> {
+        let lang = if lang == "de" { Lang::De } else { Lang::En };
+        let source = InputSource::Overrides {
+            working_dir: PathBuf::new(),
+        };
+        match markdown::parse_with(markdown, 1, &source, lang, false) {
+            Ok(_) => Vec::new(),
+            Err(problems) => problems.into_iter().map(|problem| problem.message).collect(),
+        }
+    }
+
+    /// The natural size in points of an image's bytes, or why the engine would refuse it. `extension` is the file's.
+    pub fn image_size(bytes: Vec<u8>, extension: &str) -> Result<(f32, f32), String> {
+        let image = crate::image::Image::decode(bytes, extension)?;
+        let (width, height) = image.size();
+        Ok((width.0 as f32, height.0 as f32))
+    }
+
+    /// One work of a bibliography, for a picker to search.
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub struct Work {
+        pub key: String,
+        /// Family names, as a citation names them.
+        pub authors: String,
+        pub title: String,
+        pub year: String,
+    }
+
+    /// The works of a BibTeX text in file order, as far as it can be read. A file with problems still lists the rest:
+    /// the diagnostics report them, and the picker should not go empty over one bad entry.
+    pub fn works(bibtex: &str) -> Vec<Work> {
+        crate::bibliography::read_works(bibtex)
+    }
+}

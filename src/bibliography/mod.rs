@@ -44,6 +44,32 @@ pub struct Bibliography {
     index: BTreeMap<String, usize>,
 }
 
+/// The works of a BibTeX text, as far as it can be read, with their authors, title, and year as plain text.
+#[cfg(feature = "editor")]
+pub(crate) fn read_works(text: &str) -> Vec<crate::editor::rich::Work> {
+    let plain = |entry: &bibtex::RawEntry, name: &str| {
+        let value = entry.field(name).map_or("", |field| field.value.as_str());
+        latex::text(value).unwrap_or_else(|_| value.to_owned())
+    };
+    let (entries, _) = bibtex::read(text);
+    entries
+        .iter()
+        .map(|entry| {
+            let raw = entry
+                .field("author")
+                .or_else(|| entry.field("editor"))
+                .map_or("", |field| field.value.as_str());
+            let names = names::Names::parse(raw).unwrap_or_default();
+            crate::editor::rich::Work {
+                key: entry.key.clone(),
+                authors: names.short(crate::config::theme::Lang::En),
+                title: plain(entry, "title"),
+                year: plain(entry, "year"),
+            }
+        })
+        .collect()
+}
+
 impl Bibliography {
     /// Reads and validates a bibliography. All problems are reported together, in file order, each with the path and
     /// the line and column.

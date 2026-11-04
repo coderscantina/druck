@@ -163,6 +163,14 @@ impl Structure {
         let (anchor, text) = &self.labels[label];
         (*anchor, text)
     }
+
+    /// Every label with the text a reference to it shows.
+    #[cfg(feature = "editor")]
+    pub fn label_texts(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.labels
+            .iter()
+            .map(|(label, (_, text))| (label.as_str(), text.as_str()))
+    }
 }
 
 struct Walk<'a> {
