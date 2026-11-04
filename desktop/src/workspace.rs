@@ -99,11 +99,16 @@ impl Workspace {
     /// `theme` is the file the preview typesets with and the inspector edits, if not the document's.
     pub fn new(session: Session, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let kind = session.kind().clone();
-        let theme = theme.or_else(|| session.theme_file());
         let asked = theme.clone();
+        let theme = theme.or_else(|| session.theme_file());
+        let dirs = session.theme_dirs();
+        let dirs = crate::theme_file::editor::Dirs {
+            project: dirs.project,
+            common: dirs.shared,
+        };
         let editor = cx.new(|cx| EditorView::new(session, window, cx));
         let preview = cx.new(|cx| PreviewView::new(kind, asked, cx));
-        let inspector = cx.new(|cx| InspectorView::new(theme, window, cx));
+        let inspector = cx.new(|cx| InspectorView::new(theme, dirs, window, cx));
         let sidebar = cx.new(|_| SidebarView::new());
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));

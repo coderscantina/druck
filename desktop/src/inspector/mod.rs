@@ -2,9 +2,11 @@
 
 pub mod details;
 pub mod input;
+mod model;
 mod strings;
 mod style_property;
 mod styles;
+mod widgets;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,9 +14,10 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
 
+pub use model::{ThemeChanged, ThemeModel, ThemeSwitched};
 use styles::StylesPanel;
-pub use styles::ThemeChanged;
 
+use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
 
 /// A tab of the rail. A panel takes one with [`InspectorView::mount`].
@@ -75,23 +78,35 @@ pub struct InspectorView {
     /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
     panels: HashMap<Tab, AnyView>,
     styles: Entity<StylesPanel>,
-    _subscription: Subscription,
+    model: Entity<ThemeModel>,
+    _subscriptions: Vec<Subscription>,
 }
 
 /// The inspector announces what its panels change, for the shell to pass on to the galley and the preview.
 impl EventEmitter<ThemeChanged> for InspectorView {}
 
 impl InspectorView {
-    /// `theme` is the JSON file the Styles tab edits.
-    pub fn new(theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let styles = cx.new(|cx| StylesPanel::new(theme, window, cx));
-        let subscription = cx.subscribe(&styles, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone()));
+    /// `theme` is the JSON file the theme tabs edit, and `dirs` the folders themes may be changed in.
+    pub fn new(theme: Option<PathBuf>, dirs: Dirs, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        input::bind_keys(cx);
+        let model = cx.new(|_| ThemeModel::new(theme.as_deref(), dirs));
+        let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
+        let subscriptions = vec![
+            cx.subscribe(&model, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone())),
+            cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
+        ];
         Self {
             active: Tab::Details,
             panels: HashMap::from([(Tab::Styles, styles.clone().into())]),
             styles,
-            _subscription: subscription,
+            model,
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// The theme the panels edit.
+    pub fn model(&self) -> &Entity<ThemeModel> {
+        &self.model
     }
 
     /// Gives a tab its panel.

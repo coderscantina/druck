@@ -1,13 +1,11 @@
 //! A theme JSON file the app edits. Changes are partial: only the touched member changes in the text, and
 //! every change is checked through the engine before it can reach disk. Holds no gpui types.
 
-#![allow(
-    dead_code,
-    reason = "the theme picker and the JSON view of the integration wave use the rest"
-)]
-
+pub mod editor;
+pub mod font_info;
 pub mod library;
-mod patch;
+pub mod patch;
+pub mod tokens;
 mod validate;
 
 use std::fs;
@@ -82,6 +80,28 @@ impl ThemeFile {
         self.replace(text, path, Some(&value))
     }
 
+    /// The file's own value: what it sets, nothing inherited.
+    pub fn value(&self) -> &Value {
+        &self.own
+    }
+
+    /// The file merged over the bundled default.
+    pub fn merged(&self) -> &Value {
+        &self.effective
+    }
+
+    /// Takes the text a change produces from the current text, if it is valid JSON that adds no problem the
+    /// file did not have. For changes that touch more than one property, such as renaming a token.
+    pub fn rewrite(&mut self, change: impl FnOnce(&str) -> Result<String, String>) -> Result<(), Vec<Problem>> {
+        let text = change(&self.text).map_err(Problem::internal)?;
+        self.accept(text)
+    }
+
+    /// Replaces the whole text, as the JSON view does. It must be a JSON object that adds no problem.
+    pub fn replace_text(&mut self, text: &str) -> Result<(), Vec<Problem>> {
+        self.accept(text.to_owned())
+    }
+
     /// Removes one property, which returns it to the inherited value.
     pub fn remove(&mut self, path: &[&str]) -> Result<(), Vec<Problem>> {
         let text = patch::remove(&self.text, path).map_err(Problem::internal)?;
@@ -103,13 +123,31 @@ impl ThemeFile {
 
     /// Takes new text if it parses, holds `expected` at `path`, and adds no problem the old text did not have.
     fn replace(&mut self, text: String, path: &[&str], expected: Option<&Value>) -> Result<(), Vec<Problem>> {
-        let own: Value = serde_json::from_str(&text).map_err(|e| Problem::internal(e.to_string()))?;
+        let own = Self::parse(&text)?;
         if lookup(&own, path) != expected {
             return Err(Problem::internal(format!(
                 "the edit of {} did not apply",
                 path.join(".")
             )));
         }
+        self.take(text, own)
+    }
+
+    fn accept(&mut self, text: String) -> Result<(), Vec<Problem>> {
+        let own = Self::parse(&text)?;
+        self.take(text, own)
+    }
+
+    fn parse(text: &str) -> Result<Value, Vec<Problem>> {
+        let own: Value = serde_json::from_str(text).map_err(|e| Problem::internal(e.to_string()))?;
+        if own.is_object() {
+            Ok(own)
+        } else {
+            Err(Problem::internal("a theme must be a JSON object".to_owned()))
+        }
+    }
+
+    fn take(&mut self, text: String, own: Value) -> Result<(), Vec<Problem>> {
         let introduced = validate::introduced(&self.path, &self.own, &own);
         if !introduced.is_empty() {
             return Err(introduced);

@@ -20,6 +20,8 @@ struct Member {
     key: String,
     /// Byte offset of the opening quote of the key.
     start: usize,
+    /// Byte offset after the closing quote of the key.
+    key_end: usize,
     value: Node,
 }
 
@@ -62,6 +64,106 @@ pub fn set(text: &str, path: &[&str], value: &Value) -> Result<String, String> {
 pub fn remove(text: &str, path: &[&str]) -> Result<String, String> {
     let root = parse(text)?;
     Ok(plan_remove(&root, path).map_or_else(|| text.to_owned(), |edit| edit.apply(text)))
+}
+
+/// Renames the last key of an object path in place, so the member keeps its position and its value. A
+/// path that is not there leaves the text unchanged.
+pub fn rename_key(text: &str, path: &[&str], to: &str) -> Result<String, String> {
+    let root = parse(text)?;
+    let mut node = &root;
+    let mut found = None;
+    for key in path {
+        let Node::Object(object) = node else { return Ok(text.to_owned()) };
+        let Some(index) = object.position(key) else {
+            return Ok(text.to_owned());
+        };
+        found = Some(&object.members[index]);
+        node = &object.members[index].value;
+    }
+    Ok(found.map_or_else(
+        || text.to_owned(),
+        |member| {
+            Edit {
+                range: member.start..member.key_end,
+                text: quote(to),
+            }
+            .apply(text)
+        },
+    ))
+}
+
+/// A string in JSON text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Literal {
+    pub range: Range<usize>,
+    pub value: String,
+    /// The key of the member this string is the value of, if it is one.
+    pub member: Option<String>,
+    pub is_key: bool,
+}
+
+/// Every string of the text in order, found without building the tree, so strings inside arrays are seen.
+pub fn literals(text: &str) -> Vec<Literal> {
+    let bytes = text.as_bytes();
+    let mut found = Vec::new();
+    let mut at = 0;
+    let mut last_key: Option<String> = None;
+    // The key a string would be the value of, once the colon after it is seen.
+    let mut awaiting: Option<String> = None;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'"' => {
+                let start = at;
+                at += 1;
+                while at < bytes.len() && bytes[at] != b'"' {
+                    at += if bytes[at] == b'\\' { 2 } else { 1 };
+                }
+                at = (at + 1).min(bytes.len());
+                let range = start..at;
+                let Ok(value) = serde_json::from_str::<String>(&text[range.clone()]) else {
+                    continue;
+                };
+                let rest = text[at..].trim_start();
+                let is_key = rest.starts_with(':');
+                let member = if is_key { None } else { awaiting.take() };
+                if is_key {
+                    last_key = Some(value.clone());
+                    awaiting = None;
+                }
+                found.push(Literal {
+                    range,
+                    value,
+                    member,
+                    is_key,
+                });
+            }
+            b':' => {
+                awaiting = last_key.take();
+                at += 1;
+            }
+            b' ' | b'\t' | b'\n' | b'\r' => at += 1,
+            _ => {
+                awaiting = None;
+                at += 1;
+            }
+        }
+    }
+    found
+}
+
+/// Replaces every string value equal to `from`, wherever it is, with `to`. Keys stay. With `members`, only
+/// values of members with one of these keys change.
+pub fn rename_values(text: &str, from: &str, to: &str, members: Option<&[&str]>) -> String {
+    let mut out = text.to_owned();
+    let hits: Vec<_> = literals(text)
+        .into_iter()
+        .filter(|lit| !lit.is_key && lit.value == from)
+        .filter(|lit| members.is_none_or(|keys| lit.member.as_deref().is_some_and(|key| keys.contains(&key))))
+        .collect();
+    for lit in hits.into_iter().rev() {
+        out.replace_range(lit.range, &quote(to));
+    }
+    out
 }
 
 fn plan_set(text: &str, node: &Node, path: &[&str], value: &Value) -> Result<Edit, String> {
@@ -287,12 +389,13 @@ impl Parser<'_> {
                 return Err(format!("expected a key at byte {}", self.at));
             }
             let member_start = self.at;
-            let (_, key) = self.string()?;
+            let (key_span, key) = self.string()?;
             self.expect(b':')?;
             let value = self.value()?;
             members.push(Member {
                 key,
                 start: member_start,
+                key_end: key_span.end,
                 value,
             });
             self.skip_space();
