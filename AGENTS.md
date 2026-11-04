@@ -4,7 +4,7 @@
 
 Read [progress](docs/PROGRESS.md), then the brief for the milestone relevant to the requested work. Use [the milestone index](docs/PHASE_1_MILESTONES.md) to find it. Load related source, tests, configuration, and the product briefing sections named by that milestone before changing code.
 
-[The phase 1 briefing](docs/BRIEFING.md) is the product contract. Read it in full when establishing architecture or changing scope. Read [the phase 2 contract](docs/RUST_CRATE_API_PHASE_2.md) only when working on the public crate or checking a design choice that could obstruct it. Phase 2 is deferred.
+[The phase 1 briefing](docs/BRIEFING.md) is the product contract. Read it in full when establishing architecture or changing scope. The public crate exists: [the phase 2 API](docs/PHASE_2_API.md) records it, and read that when working on the crate or checking a design choice that could obstruct it. The app built on it follows [the desktop briefing](docs/DESKTOP_BRIEFING.md).
 
 Read [decisions](docs/DECISIONS.md) when choosing dependencies, configuration syntax, interfaces, or layout behavior. Record concrete choices there when made, with their reason and consequences. Source and manifests remain authoritative for installed dependencies and runnable commands.
 

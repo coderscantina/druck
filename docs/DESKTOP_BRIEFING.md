@@ -16,7 +16,8 @@ It serves books, reports, articles, and offers equally. There is no document kin
 2. [Engine amendment](milestones/15-engine-amendment.md): project folders, comments, inline marks, placeholders, named exports.
 3. [Milestone 10](milestones/10-release-acceptance.md): accept and release the CLI with them.
 4. [Phase 2](RUST_CRATE_API_PHASE_2.md): the public crate, with the app as its first client.
-5. The app, on the crate. Public betas ship once the composer, projects, exports, and core theme sections work. 1.0 requires every theme section hand-designed.
+5. [Desktop public beta](milestones/16-desktop-beta.md): the app on the crate. Public betas ship once the composer, projects, exports, and core theme sections work.
+6. [Desktop 1.0](milestones/17-desktop-1-0.md): every theme section hand-designed.
 
 ## Project model
 
