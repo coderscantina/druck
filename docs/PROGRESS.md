@@ -36,8 +36,56 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
 - [x] 15: Engine amendment.
 - [x] Phase 2: the public crate API, steps 1 to 5, outside the milestone plan. Complete on macOS; Linux and Windows wait for the first CI run. Nothing is published ([record](PHASE_2_API.md), [evidence](ACCEPTANCE.md#phase-2-contract)).
+- [ ] 16: Desktop public beta. Slices 1 to 6 are integrated on `t3/integrate-desktop-beta-slices`, which nothing has merged. Slices 7 and 8 remain.
+  - [x] Slice 2: Persistence.
+  - [x] Slice 3: Editor commands.
+  - [x] Slice 4: Theme core.
+  - [x] Slice 5: Shell.
+  - [x] Slice 6: Agent panel.
+
+## Owner's checklist
+
+Everything only a person can do or decide, in one place. Run the app with `cargo run --release -p druck-desktop -- --open <project folder>`, on a copy of a real book.
+
+In the running app:
+
+- [ ] Input methods: the IME test in the resume note below, in the galley, and once each in a chapter note, a theme field, and the agent's prompt box. Milestone 14 waits for this, and a beta cannot ship without it.
+- [ ] A real mouse. Automated mouse events do not reach the window on this macOS, so every click was dispatched inside gpui: a click on a page, a drag in the sidebar and in the block gutter, hovering a gutter icon and a toolbar button, the conflict line's buttons, and an approval card's buttons.
+- [ ] The native dialogs: Open, New Book, the cover, adding a font, and the prompt before deleting a common theme.
+- [ ] The menu bar in German and English. A script cannot photograph it.
+- [ ] A real Finder launch, once slice 8 has an app bundle: the Agent tab should find the CLI and its login. It was only simulated with launchd's variables.
+- [ ] The accent caret line on the page that follows the galley caret. Nobody has judged its look or weight.
+- [ ] A long theme field in the Source panel: it does not scroll to keep its caret in view, a known limit. Say if that is too much for a beta.
+- [ ] Autosave's feel while typing, and a real agent turn with your own settings, where `defaultMode: auto` asks nothing and the change only shows in the panel.
+- [ ] The German text. Each overflow was fixed, but the tone mixes "du" (saving state, agent, theme panels) with plain infinitives (shell). Engine diagnostics stay English in a German window.
+
+To decide:
+
+- [ ] Anthropic's written answer on spawning the user's own CLI with a subscription login. It must be in hand before a public build includes the agent panel with that login documented.
+- [ ] Whether to keep the Save, Discard, Cancel question when closing or opening a document in the 800 ms before an autosave. A flush that only asks when it fails would be simpler. I left it as it is.
+- [ ] When kept copies in `kept/` get cleaned up, before 1.0.
+- [ ] Whether `API_VERSION` and a CalVer package version are enough once an outside client exists, or a semver library crate is split off.
+- [ ] Two corpus findings from milestone 10: a sample that shows a continuing footnote, and `report.md` pages 4 and 5.
+- [ ] Whether to migrate the book to a `druck.yaml`.
+
+Outside this machine:
+
+- [ ] Push, and let CI run for the first time: `check`, `render`, `compare`, `desktop`, `Examples`, and `Documentation`. Nothing has run on Linux or Windows.
+- [ ] The visual review of the samples. The pass recorded below does not replace it.
+- [ ] veraPDF, epubcheck, and Windows offline checks. Desktop notices need license texts for 41 crates and a decision on the MPL-2.0 `option-ext`.
 
 ## Resume note
+
+The desktop beta's slices 2 to 6 (Persistence, Editor commands, Theme core, Shell, Agent panel) are integrated on `t3/integrate-desktop-beta-slices`, on top of slice 1's `t3/desktop-beta-session-sidebar`. Nothing is merged or pushed. The branch's [decisions](DECISIONS.md#2026-11-04-desktop-beta-integrating-slices-2-to-6) say what each seam became, with the numbers. All strings are on the Shell's table, the agent sees files through Persistence and reverts by merge, theme changes on disk take effect while running, and release builds have no hidden environment hooks. [The design document](DESIGN.md) is one coherent text.
+
+Next action: the owner walks the [checklist](#owners-checklist) and decides whether to merge this branch. Then slices 7 (rich blocks) and 8 (beta gate). Milestone 16's own soak of an hour's scripted edits has not run: the longest combined soak here is 300 s.
+
+Follow-ups from the integration, none blocking:
+
+- A committed theme edit blocks the main thread for about 64 ms, the probe typeset and an fsync. Moving the save and the probe off the main thread would take back the regression from 358 ms to about 380 ms.
+- Every warning makes a sidebar dot, so the book shows a dot on nearly every chapter from its 243 loose-line warnings. The Shell slice decided this deliberately, and on a real book it says little. It could count errors and placeholders only.
+- Engine diagnostics are English in a German window.
+- The Selection and Images tabs are empty until slice 7.
 
 Phase 2, the public crate API, is complete on this machine (macOS) in five steps, each on its own branch, stacked in this order: `t3/design-phase-two-api` (06dafeb, the design), `t3/phase-two-facade` (8195d0e: one package, public modules, `cli` and `editor` features), `t3/phase-two-renderer-resolver` (26bdd73: `Resolver`, content-hashed `Bytes`, `Arc<Face>`, no leaked fonts), `t3/diagnostics-cancellation` (820b351: structured diagnostics and `Cancel`), `t3/phase-two-layout-source-map` (f7d31c7: `Layout`, the source map, click sync in the app), and `t3/phase-two-api-acceptance` (step 5, below). [The API record](PHASE_2_API.md) has the signatures as built, [acceptance](ACCEPTANCE.md#phase-2-contract) lists each contract requirement with its evidence, and every step has a dated entry in [decisions](DECISIONS.md#2026-11-04-phase-2-step-5-choices-beyond-the-design). Nothing is pushed or published; publishing a crate needs its own request.
 
@@ -50,20 +98,10 @@ Step 5 routes the CLI through the public modules only (`grep -nE 'editor|doc\(hi
 
 Not done, and why: Linux and Windows (no CI has run, and no machine was at hand); an automated check that the core never prints or touches the filesystem (a grep run by hand stands in); a second painter that draws from a `Layout`; the desktop's project opening, which is the next wave.
 
-What the owner must do, from phase 2 (the lists for milestones 10 and 14 follow and still stand):
-
-- Try a real mouse click on a page in the desktop app. Automated mouse events did not reach the window on macOS, so the click was proven through gpui's `dispatch_event`, not by a pointer. Keys sent to the app's PID do arrive.
-- Review the accent caret line on the page that follows the galley caret. Its look and weight have not been seen by you.
-- Decide whether `API_VERSION` and a CalVer package version are enough once an outside client exists, or whether a semver library crate is split off. The design left this open.
-- Push, so that the new `Examples` and `Documentation` steps of CI run on Linux and Windows too.
-
 Release acceptance (milestone 10) is prepared on branch `t3/druck-milestone-10-acceptance`, on top of `t3/finish-druck-milestone-15`, and is **not complete**. The evidence matrix is [acceptance](ACCEPTANCE.md), with its gaps and the boundaries phase 2 will expose. The limits are in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci). What remains, in order:
 
-1. Push, and let CI run for the first time: the `check`, `render`, `compare`, and new `desktop` jobs. Nothing has run on Linux or Windows, so cross-platform layout identity, `cargo test` there, and `check-pdfs.sh` across three OSes are unverified. Docker is installed here but its daemon (OrbStack) was not running, so the Linux suite was not run. To run it: start OrbStack, then `docker run --rm -v "$PWD":/src -w /src rust:latest cargo test --locked` and compare `scripts/render-samples.sh` output with `scripts/check-pdfs.sh`.
-2. The owner's visual review of the samples. The pass recorded below does not replace it.
-3. Decide the two corpus findings below: a sample that shows a continuing footnote, and `report.md` pages 4 and 5.
-4. Merge `t3/desktop-spike-integration` consequences: the layout thread fix is in `desktop/src/preview/job.rs`, which that branch shares unfixed.
-5. veraPDF, epubcheck, and Windows offline checks, which no one has run. Desktop notices need license texts for 41 crates and a decision on the MPL-2.0 `option-ext`.
+- What only the owner can do is in the [checklist](#owners-checklist).
+- Merge `t3/desktop-spike-integration` consequences: the layout thread fix is in `desktop/src/preview/job.rs`, which that branch shares unfixed.
 
 Then check milestone 10. The previous resume note follows.
 
@@ -109,6 +147,20 @@ Next: milestone 10, release acceptance. The project is now named Druck and MIT l
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Desktop beta integration, 2026-11-04, on the owner's M1 Pro, head of `t3/integrate-desktop-beta-slices`. Numbers and method are in [decisions](DECISIONS.md#2026-11-04-desktop-beta-integrating-slices-2-to-6).
+
+- `cargo fmt --all --check`: clean. `cargo clippy --all-targets -- -D warnings` with no flags, `--all-features`, `-p druck-desktop`, and `-p druck-desktop --features measure`, and `cargo clippy --no-default-features --lib -- -D warnings`: clean.
+- `cargo test -q -p druck-desktop`: 450 passed, 1 ignored (needs the installed CLI). `cargo test -q`: 444 unit tests and all integration tests and doctests passed.
+- `python3 scripts/notices.py --check` and `--desktop --check`: current.
+- `scripts/render-samples.sh` with this branch's `druck` against a build of `t3/phase-two-api-acceptance`: all 16 PDFs byte-identical.
+- Typing 15.4 and 15.0 ms median, pause to pages 504 ms, theme edit 386 and 371 ms, live heap 180 MB flat over 200 refreshes, in `DRUCK_GATE=1 DRUCK_CANVAS=split DRUCK_TAB=agent DRUCK_GATE_REFRESHES=200` with `--features measure`.
+- Combined soak, 300 s: 202 outside writes, 319 typed words, and an exact text comparison passed.
+- A plain release build with `DRUCK_GATE=1 DRUCK_TRACE=1 DRUCK_PREVIEW_BENCH=1 DRUCK_TAB=agent DRUCK_PICKER=1` kept running, printed nothing, and opened on Details with the picker closed.
+- With only launchd's variables and a system `PATH`, the panel found the CLI and reported its login. Without `USER` in the environment, the CLI reports nobody logged in. A real Finder launch needs an app bundle and waits for slice 8.
+- Inspected on screen, in dark and light, English and German, on the book in split: every inspector tab, the theme panels, the fork question, the toolbar, the slash menu, the conflict line, and an approval card, from a fake CLI playing the recorded stream. A live run of two `haiku` turns also showed the card, hunks, marks, and a revert. A theme edited on disk, a `theme:` changed on disk, a fork into the project with the common file unchanged, and a single file's Details under autosave were each watched live.
+
+Not verified: anything in the [checklist](#owners-checklist). Clicks went through gpui's `dispatch_event` from a probe that is not committed.
 
 Phase 2 step 5, on 2026-11-04 on the owner's M1 Pro (macOS 27, other work running), on `t3/phase-two-api-acceptance`:
 
@@ -228,7 +280,7 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 - Phase 2: a long-lived process holds about five times the memory of one job on macOS (the allocator keeps freed memory; the program's own heap is flat). Measure it on Linux, and consider a note for service authors or an allocator choice.
 - Phase 2: `Overrides::parse`, `Project::open`, and `DocumentText::read` return `Vec<Diagnostic>` rather than `Failure`, so `?` into a `Failure` works but a plain `Box<dyn Error>` needs `map_err`. Unify if an outside client complains.
 - Phase 2: only `druck-desktop` draws from a `Layout`, and the core's "no printing, no filesystem" rule has no automated check.
-- Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders.
+- Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme.
 - Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
 
 - Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).
