@@ -736,7 +736,7 @@ impl PersistView {
         let tokens = Tokens::get(cx);
         div()
             .id(id)
-            .button(&tokens, label)
+            .button(tokens, label)
             .flex_none()
             .px(tokens::SPACE_2)
             .rounded(tokens::RADIUS)

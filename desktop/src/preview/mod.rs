@@ -155,7 +155,7 @@ impl PreviewView {
     pub fn new(kind: Kind, theme: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
         let mut view = Self {
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             scheduler: Scheduler::new(),
             specimen_typesetter: Arc::new(Mutex::new(Typesetter::new(
                 Kind::Single {

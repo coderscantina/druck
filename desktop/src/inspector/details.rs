@@ -276,6 +276,7 @@ impl DetailsPanel {
             .map_or(row.key.clone(), |&(_, label)| crate::t!(label).to_owned());
         let remove = div()
             .id(SharedString::from(format!("meta-remove-{key}")))
+            .button(tokens, format!("{key}: {}", crate::t!(Key::Remove)))
             .flex_none()
             .cursor_pointer()
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(DetailsEdit::RemoveMeta(key.clone()))))
@@ -356,6 +357,7 @@ impl Render for DetailsPanel {
                 let label = crate::t!(label);
                 div()
                     .id(key)
+                    .button(&tokens, label)
                     .flex()
                     .items_center()
                     .gap(tokens::SPACE_1)
@@ -374,6 +376,7 @@ impl Render for DetailsPanel {
             .collect();
         let add = div()
             .id("meta-add")
+            .button(&tokens, crate::t!(Key::Other))
             .flex()
             .items_center()
             .gap(tokens::SPACE_1)

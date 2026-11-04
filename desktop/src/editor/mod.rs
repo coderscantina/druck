@@ -423,7 +423,7 @@ const START_OF_CHAPTER: Anchor = Anchor {
 impl EditorView {
     /// Shows the session's active chapter.
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle();
+        let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
         let spelling_folder = session.base_dir();
         let blocks = Blocks::parse(session.active_buffer().text());
@@ -674,6 +674,8 @@ impl EditorView {
             window,
             cx,
         );
+        // The find bar has the keys: no toolbar over the text it found.
+        self.toolbar_dismissed = true;
     }
 
     /// Sets the galley's body from the theme. Every block is shaped again as it comes into view.

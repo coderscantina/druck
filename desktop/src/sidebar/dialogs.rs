@@ -7,6 +7,7 @@ use gpui::{
 };
 
 use super::strings::Key;
+use crate::a11y::Control as _;
 use crate::inspector::input::{Submitted, TextInput};
 use crate::session::templates::Group;
 use crate::session::{ChapterId, TEMPLATES, Template};
@@ -91,6 +92,7 @@ impl SectionDialog {
     fn template_row(template: &'static Template, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         div()
             .id(template.slug)
+            .button(tokens, crate::t!(template.name))
             .px(tokens::SPACE_3)
             .py(tokens::SPACE_1)
             .flex()
@@ -246,6 +248,7 @@ impl Render for SectionDialog {
                     .child(
                         div()
                             .id(ElementId::from("dialog-close"))
+                            .button(&tokens, crate::t!(Key::CloseDialog))
                             .cursor_pointer()
                             .on_click(cx.listener(|dialog, _, _, cx| dialog.close(cx)))
                             .child(

@@ -12,6 +12,7 @@ use super::model::ThemeModel;
 use super::strings::Key;
 use super::styles::parse_color;
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::theme_file::editor::Change;
 use crate::theme_file::tokens::{self, Group};
 use crate::tokens::{self as chrome, Tokens};
@@ -217,6 +218,7 @@ impl TokensPanel {
                 (
                     div()
                         .id(SharedString::from(format!("group-{}", group.key())))
+                        .control(tokens, gpui::Role::Tab, group_label(group))
                         .child(group_label(group))
                         .on_click(cx.listener(move |panel, _, _, cx| {
                             panel.group = group;

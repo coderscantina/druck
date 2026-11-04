@@ -34,6 +34,7 @@ pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<Shared
         .px(tokens::SPACE_3)
         .flex()
         .items_center()
+        .justify_center()
         .rounded(tokens::RADIUS)
         .border_1()
         .border_color(tokens.divider)

@@ -7,6 +7,7 @@ use gpui::{Context, Entity, FontWeight, KeyDownEvent, MouseButton, Subscription,
 use super::model::ThemeModel;
 use super::strings::Key;
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::editor::EditorView;
 use crate::tokens::{self, Tokens};
 
@@ -64,6 +65,7 @@ impl Render for ForkPrompt {
         let option = |id: &'static str, title: Key, note: Key, recommended: bool, fork: bool| {
             div()
                 .id(id)
+                .button(&tokens, crate::t!(title))
                 .px(tokens::SPACE_3)
                 .py(tokens::SPACE_2)
                 .flex()

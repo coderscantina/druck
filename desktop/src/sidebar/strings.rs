@@ -10,6 +10,7 @@ crate::strings! {
 
         NewSection => ("New section", "Neuer Abschnitt"),
         Details => ("Details", "Angaben"),
+        CloseDialog => ("Close", "Schließen"),
         TheContents => ("Contents", "Inhalt"),
         EditSection => ("Edit \"{title}\"", "\u{201e}{title}\u{201c} bearbeiten"),
         Name => ("Name", "Name"),

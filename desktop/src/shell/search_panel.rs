@@ -13,6 +13,7 @@ use gpui::{
 use super::search::{FileHits, Options};
 use super::text::Key;
 use super::ui;
+use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
 use crate::session::ChapterId;
 use crate::tokens::{self, Tokens};
@@ -197,6 +198,7 @@ impl SearchPanel {
                 rows.push(
                     div()
                         .id(("hit", id.number() * 100_000 + at))
+                        .button(tokens, format!("{}{}", hit.before, hit.after))
                         .px(tokens::SPACE_3)
                         .py(px(3.))
                         .flex()
@@ -310,6 +312,7 @@ impl Render for SearchPanel {
                     .child(
                         div()
                             .id("search-close")
+                            .button(&tokens, crate::t!(Key::Dismiss))
                             .cursor_pointer()
                             .on_click(cx.listener(|panel, _, _, cx| panel.close(cx)))
                             .child(

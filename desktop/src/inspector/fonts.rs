@@ -10,6 +10,7 @@ use super::model::ThemeModel;
 use super::strings::Key;
 use super::style_property::style_label;
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::preview::fonts::{FontUse, INLINE_CODE, Source};
 use crate::theme_file::editor::Change;
 use crate::theme_file::font_info::{Embedding, FontInfo, Format};
@@ -362,6 +363,7 @@ impl FontsPanel {
             .child(
                 div()
                     .id("font-back")
+                    .button(tokens, crate::t!(Key::Back))
                     .flex_none()
                     .size(tokens::ICON_SIZE + tokens::SPACE_2)
                     .flex()

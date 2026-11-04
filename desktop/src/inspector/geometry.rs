@@ -9,6 +9,7 @@ use super::input::{Committed, TextInput};
 use super::model::ThemeModel;
 use super::strings::Key;
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::theme_file::editor::Change;
 use crate::theme_file::geometry::{self, Geometry, Rect, Sheet};
 use crate::theme_file::tokens::{self, Group};
@@ -194,6 +195,7 @@ impl GeometryPanel {
             .map(|&(name, label)| {
                 let item = div()
                     .id(SharedString::from(format!("paper-{name}")))
+                    .button(tokens, label)
                     .child(label)
                     .on_click(cx.listener(move |panel, _, _, cx| {
                         panel.apply(key.to_owned(), Change::set(&["page", "size"], name.into()), cx)
@@ -211,6 +213,7 @@ impl GeometryPanel {
         items.push((
             div()
                 .id("paper-custom")
+                .toggle(tokens, crate::t!(Key::CustomSize), custom)
                 .child(crate::t!(Key::CustomSize))
                 .on_click(cx.listener(move |panel, _, _, cx| {
                     if !custom {
@@ -240,6 +243,7 @@ impl GeometryPanel {
             .map(|(value, label)| {
                 let item = div()
                     .id(SharedString::from(format!("mirror-{value}")))
+                    .button(tokens, crate::t!(label))
                     .child(label)
                     .on_click(cx.listener(move |panel, _, _, cx| {
                         let change = Change::set(&["page", "margins", "mirror"], Value::Bool(value));

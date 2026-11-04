@@ -5,7 +5,8 @@
 //! Types into the middle of the open document on a timer, through the same input path as the keyboard, while pages
 //! refresh in the background, then prints typing latency, pause to painted pages, theme edit to updated pages, and
 //! memory over many refreshes, and quits. `DRUCK_GATE_THEME_EDITS=0` skips the theme edits, for a read-only theme.
-//! `DRUCK_GATE_PRINT=1` measures with the print-composer lines on.
+//! `DRUCK_GATE_PRINT=1` measures with the print-composer lines on. `DRUCK_SOAK_MEMORY=1` only reports, for a run driven from
+//! outside.
 //!
 //! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
 //! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
@@ -59,6 +60,10 @@ pub fn start(
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
+    if var("DRUCK_SOAK_MEMORY").is_some() {
+        soak(preview, cx);
+        return;
+    }
     if var("DRUCK_GATE").as_deref() != Some("1") {
         return;
     }
@@ -72,6 +77,42 @@ pub fn start(
     cx.spawn(async move |cx| {
         gate.run(cx).await;
         cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
+/// For a long run driven from outside: prints the memory each minute and, for each batch of keys, how long after the last
+/// key its pages were painted. `DRUCK_SOAK_MEMORY=1` turns it on.
+fn soak(preview: Entity<PreviewView>, cx: &mut App) {
+    let started = Instant::now();
+    cx.spawn(async move |cx| {
+        let mut printed = Instant::now();
+        let mut asked: Option<Instant> = None;
+        loop {
+            cx.background_executor().timer(Duration::from_millis(20)).await;
+            let (painted, laying_out) =
+                preview.read_with(cx, |preview, _| (preview.painted_at(), preview.is_laying_out()));
+            match (asked, painted) {
+                (None, None) => asked = Some(Instant::now()),
+                (Some(from), Some(painted)) => {
+                    eprintln!(
+                        "soak: pages {:?} after the request, at {} s",
+                        painted.saturating_duration_since(from),
+                        started.elapsed().as_secs()
+                    );
+                    asked = None;
+                }
+                _ => {}
+            }
+            if printed.elapsed() >= Duration::from_secs(60) {
+                printed = Instant::now();
+                eprintln!(
+                    "soak: {} s; {}; laying out {laying_out}",
+                    started.elapsed().as_secs(),
+                    memory()
+                );
+            }
+        }
     })
     .detach();
 }

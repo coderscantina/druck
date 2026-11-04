@@ -491,6 +491,7 @@ impl EditorView {
                 let chosen = index == selected;
                 div()
                     .id(("picker-row", index))
+                    .role(gpui::Role::MenuItem)
                     .flex_none()
                     .h(ROW_HEIGHT)
                     .px(tokens::SPACE_2)

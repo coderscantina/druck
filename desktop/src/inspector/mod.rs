@@ -230,7 +230,7 @@ impl InspectorView {
         let attention = self.attention.contains(&tab) && !active;
         div()
             .id(tab.id())
-            .control(&tokens, Role::Tab, tab.label())
+            .control(tokens, Role::Tab, tab.label())
             .aria_selected(active)
             .relative()
             .flex_none()

@@ -217,7 +217,11 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::FindNext, cx| with_hub(cx, |hub, window, cx| hub.step_find(false, window, cx)));
     cx.on_action(|_: &menus::FindPrevious, cx| with_hub(cx, |hub, window, cx| hub.step_find(true, window, cx)));
     cx.on_action(|_: &menus::FindInProject, cx| with_hub(cx, Hub::search_project));
-    cx.on_action(|_: &menus::ShowSettings, cx| with_hub(cx, |hub, _, cx| hub.settings.update(cx, |s, cx| s.open(cx))));
+    cx.on_action(|_: &menus::ShowSettings, cx| {
+        with_hub(cx, |hub, window, cx| {
+            hub.settings.update(cx, |s, cx| s.open(window, cx))
+        })
+    });
     cx.on_action(|_: &menus::ShowExport, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Export, w, cx)));
     cx.on_action(|_: &menus::ShowSelection, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Selection, w, cx)));
     cx.on_action(|_: &menus::ShowStyles, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Styles, w, cx)));
@@ -352,7 +356,7 @@ impl Hub {
             let prefs = cx.global::<Prefs>();
             (prefs.state.appearance, prefs.state.language)
         };
-        let settings = cx.new(|_| SettingsPanel::new(appearance, language));
+        let settings = cx.new(|cx| SettingsPanel::new(appearance, language, cx));
         let footer = cx.new(|_| Footer::default());
         parts.inspector.update(cx, |inspector, _| {
             inspector.mount(Tab::Diagnostics, diagnostics.clone().into());

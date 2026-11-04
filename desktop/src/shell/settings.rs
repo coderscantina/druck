@@ -1,12 +1,13 @@
 //! The settings card: the appearance and the language. A choice applies at once and is kept by the shell.
 
 use gpui::prelude::*;
-use gpui::{Context, EventEmitter, FontWeight, Window, div, px, relative, svg};
+use gpui::{Context, EventEmitter, FocusHandle, FontWeight, Window, div, px, relative, svg};
 
 use super::state::Appearance;
 use super::strings::LanguageSetting;
 use super::text::Key;
 use super::ui;
+use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 pub enum SettingsEvent {
@@ -17,6 +18,9 @@ pub enum SettingsEvent {
 impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
 pub struct SettingsPanel {
+    focus: FocusHandle,
+    /// What had the keys when the card opened, which get them back.
+    before: Option<FocusHandle>,
     open: bool,
     appearance: Appearance,
     language: LanguageSetting,
@@ -25,21 +29,29 @@ pub struct SettingsPanel {
 const CARD_WIDTH: gpui::Pixels = px(360.);
 
 impl SettingsPanel {
-    pub fn new(appearance: Appearance, language: LanguageSetting) -> Self {
+    pub fn new(appearance: Appearance, language: LanguageSetting, cx: &mut Context<Self>) -> Self {
         Self {
+            focus: cx.focus_handle(),
+            before: None,
             open: false,
             appearance,
             language,
         }
     }
 
-    pub fn open(&mut self, cx: &mut Context<Self>) {
+    /// Opens the card with the keys, so Escape closes it.
+    pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = true;
+        self.before = window.focused(cx);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
-    pub fn close(&mut self, cx: &mut Context<Self>) {
+    pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
+        if let Some(before) = self.before.take() {
+            window.focus(&before, cx);
+        }
         cx.notify();
     }
 
@@ -112,8 +124,9 @@ impl Render for SettingsPanel {
                     .child(
                         div()
                             .id("settings-close")
+                            .button(&tokens, crate::t!(Key::Dismiss))
                             .cursor_pointer()
-                            .on_click(cx.listener(|panel, _, _, cx| panel.close(cx)))
+                            .on_click(cx.listener(|panel, _, window, cx| panel.close(window, cx)))
                             .child(
                                 svg()
                                     .path("icons/close.svg")
@@ -138,12 +151,16 @@ impl Render for SettingsPanel {
             .left_0()
             .size_full()
             .occlude()
-            .on_key_down(cx.listener(|panel, event: &gpui::KeyDownEvent, _, cx| {
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|panel, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
-                    panel.close(cx);
+                    panel.close(window, cx);
                 }
             }))
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|panel, _, _, cx| panel.close(cx)))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|panel, _, window, cx| panel.close(window, cx)),
+            )
             .child(card)
             .into_any_element()
     }
