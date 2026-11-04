@@ -6,11 +6,11 @@ mod strings;
 mod style_property;
 mod styles;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
+use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, px, svg};
 
 use styles::StylesPanel;
 pub use styles::ThemeChanged;
@@ -27,11 +27,12 @@ pub enum Tab {
     Details,
     Diagnostics,
     Export,
+    Agent,
 }
 
 impl Tab {
     const TOP: [Self; 5] = [Self::Selection, Self::Styles, Self::Fonts, Self::Images, Self::Details];
-    const BOTTOM: [Self; 2] = [Self::Diagnostics, Self::Export];
+    const BOTTOM: [Self; 3] = [Self::Agent, Self::Diagnostics, Self::Export];
 
     fn id(self) -> &'static str {
         match self {
@@ -42,6 +43,7 @@ impl Tab {
             Self::Details => "tab-details",
             Self::Diagnostics => "tab-diagnostics",
             Self::Export => "tab-export",
+            Self::Agent => "tab-agent",
         }
     }
 
@@ -54,6 +56,7 @@ impl Tab {
             Self::Details => "icons/details.svg",
             Self::Diagnostics => "icons/diagnostics.svg",
             Self::Export => "icons/export.svg",
+            Self::Agent => "icons/agent.svg",
         }
     }
 
@@ -66,6 +69,7 @@ impl Tab {
             Self::Details => "DETAILS",
             Self::Diagnostics => "DIAGNOSTICS",
             Self::Export => "EXPORT",
+            Self::Agent => "AGENT",
         }
     }
 }
@@ -74,6 +78,8 @@ pub struct InspectorView {
     active: Tab,
     /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
     panels: HashMap<Tab, AnyView>,
+    /// Tabs that want the author's eye while another tab is open, shown as a dot on the rail.
+    attention: HashSet<Tab>,
     styles: Entity<StylesPanel>,
     _subscription: Subscription,
 }
@@ -89,6 +95,7 @@ impl InspectorView {
         Self {
             active: Tab::Details,
             panels: HashMap::from([(Tab::Styles, styles.clone().into())]),
+            attention: HashSet::new(),
             styles,
             _subscription: subscription,
         }
@@ -97,6 +104,18 @@ impl InspectorView {
     /// Gives a tab its panel.
     pub fn mount(&mut self, tab: Tab, panel: AnyView) {
         self.panels.insert(tab, panel);
+    }
+
+    /// Puts a dot on a tab's rail button, or takes it off.
+    pub fn set_attention(&mut self, tab: Tab, wanted: bool, cx: &mut Context<Self>) {
+        let changed = if wanted {
+            self.attention.insert(tab)
+        } else {
+            self.attention.remove(&tab)
+        };
+        if changed {
+            cx.notify();
+        }
     }
 
     /// Shows a tab.
@@ -113,8 +132,10 @@ impl InspectorView {
     fn rail_button(&self, tab: Tab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx);
         let active = tab == self.active;
+        let attention = self.attention.contains(&tab) && !active;
         div()
             .id(tab.id())
+            .relative()
             .flex_none()
             .h(tokens::RAIL_WIDTH)
             .flex()
@@ -127,6 +148,17 @@ impl InspectorView {
             } else {
                 tokens.text_quiet
             }))
+            .when(attention, |button| {
+                button.child(
+                    div()
+                        .absolute()
+                        .top(px(10.))
+                        .right(px(10.))
+                        .size(tokens::DOT_SIZE)
+                        .rounded_full()
+                        .bg(tokens.accent),
+                )
+            })
             .on_click(cx.listener(move |view, _, _, cx| {
                 view.active = tab;
                 cx.notify();

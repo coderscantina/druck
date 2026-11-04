@@ -21,8 +21,13 @@ const STDERR_LIMIT: u64 = 8 * 1024;
 /// What the host sees from the CLI.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// The CLI initialised the session.
-    Started { session_id: String, model: String },
+    /// The CLI initialised the session. `login` is the CLI's own name for where its credentials come from, such as
+    /// `none` or `ANTHROPIC_API_KEY`. Never a credential.
+    Started {
+        session_id: String,
+        model: String,
+        login: String,
+    },
     /// A piece of the assistant's reply text.
     TextDelta(String),
     /// The assistant asked to run a tool. The input is complete.
@@ -36,15 +41,19 @@ pub enum Event {
     },
     /// The CLI waits for the host to allow or deny a tool call.
     Permission(PermissionRequest),
-    /// The turn ended.
+    /// The turn ended. `total_cost_usd` counts everything this CLI process has spent, not just this turn.
     TurnFinished {
         session_id: String,
-        cost_usd: Option<f64>,
+        total_cost_usd: Option<f64>,
         is_error: bool,
+        /// The turn was cut short by an interrupt.
+        stopped: bool,
         result: String,
     },
-    /// Something went wrong outside the model's turn.
+    /// A line from the CLI that is not JSON. The stream goes on.
     Error(String),
+    /// The CLI process ended without being asked to, with what it wrote to stderr.
+    Exited(String),
     /// Any other event, kept as received so a CLI update does not break the stream.
     Raw(Value),
 }
@@ -55,6 +64,8 @@ pub struct PermissionRequest {
     pub tool_use_id: Option<String>,
     pub tool_name: String,
     pub input: Value,
+    /// Updates the CLI offers to remember this answer, as sent. Each names where it would be kept.
+    pub suggestions: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -129,6 +140,20 @@ impl Session {
         self.respond(
             request,
             json!({"behavior": "allow", "updatedInput": request.input, "toolUseID": request.tool_use_id}),
+        )
+    }
+
+    /// Lets the tool call run and applies one of the request's own suggestions, such as accepting edits for the
+    /// rest of the CLI process. Only a suggestion the CLI sent for this request is passed back.
+    pub fn allow_with(&mut self, request: &PermissionRequest, update: &Value) -> io::Result<()> {
+        self.respond(
+            request,
+            json!({
+                "behavior": "allow",
+                "updatedInput": request.input,
+                "updatedPermissions": [update],
+                "toolUseID": request.tool_use_id,
+            }),
         )
     }
 
@@ -217,7 +242,7 @@ fn read_events(
     }
     if !closing.load(Ordering::Relaxed) {
         let tail = stderr_tail.join().unwrap_or_default();
-        let _ = tx.send(Event::Error(format!("claude stopped unexpectedly. {}", tail.trim())));
+        let _ = tx.send(Event::Exited(tail.trim().to_owned()));
     }
 }
 
@@ -235,6 +260,7 @@ pub fn parse_line(line: &str) -> Vec<Event> {
         (Some("system"), Some("init")) => vec![Event::Started {
             session_id: text(&value["session_id"]),
             model: text(&value["model"]),
+            login: text(&value["apiKeySource"]),
         }],
         (Some("stream_event"), _) => match &value["event"]["delta"] {
             delta if delta["type"] == "text_delta" => vec![Event::TextDelta(text(&delta["text"]))],
@@ -258,12 +284,19 @@ pub fn parse_line(line: &str) -> Vec<Event> {
                 tool_use_id: request["tool_use_id"].as_str().map(str::to_owned),
                 tool_name: text(&request["tool_name"]),
                 input: request["input"].clone(),
+                suggestions: request["permission_suggestions"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
             })]
         }
         (Some("result"), _) => vec![Event::TurnFinished {
             session_id: text(&value["session_id"]),
-            cost_usd: value["total_cost_usd"].as_f64(),
+            total_cost_usd: value["total_cost_usd"].as_f64(),
             is_error: value["is_error"].as_bool().unwrap_or(false),
+            stopped: value["terminal_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.starts_with("aborted")),
             result: text(&value["result"]),
         }],
         _ => Vec::new(),
@@ -364,12 +397,12 @@ mod tests {
             .filter_map(|e| {
                 if let Event::TurnFinished {
                     session_id,
-                    cost_usd,
+                    total_cost_usd,
                     is_error,
                     ..
                 } = e
                 {
-                    Some((session_id, cost_usd, is_error))
+                    Some((session_id, total_cost_usd, is_error))
                 } else {
                     None
                 }
@@ -450,6 +483,58 @@ mod tests {
         std::fs::remove_file(config.program).expect("cleanup");
     }
 
+    /// What the CLI got on stdin for one call, through a stand-in that echoes its first line.
+    fn echoed(name: &str, call: impl FnOnce(&mut Session, &PermissionRequest)) -> Value {
+        let request = CAPTURE
+            .lines()
+            .find(|l| l.contains("can_use_tool"))
+            .expect("captured request");
+        let config = fake_cli(
+            name,
+            &format!("echo '{request}'\nread line\necho \"{{\\\"type\\\":\\\"echo\\\",\\\"line\\\":$line}}\""),
+        );
+        let (mut session, events) = Session::spawn(&config).expect("spawn");
+        let Event::Permission(request) = events.recv_timeout(Duration::from_secs(5)).expect("event") else {
+            panic!("not a permission")
+        };
+        call(&mut session, &request);
+        let Event::Raw(echo) = events.recv_timeout(Duration::from_secs(5)).expect("echo") else {
+            panic!("not raw")
+        };
+        drop(session);
+        std::fs::remove_file(config.program).expect("cleanup");
+        echo["line"].clone()
+    }
+
+    #[test]
+    fn stop_sends_an_interrupt_request() {
+        let line = echoed("interrupt", |session, _| session.cancel().expect("cancel"));
+        assert_eq!(line["type"], "control_request");
+        assert_eq!(line["request"]["subtype"], "interrupt");
+    }
+
+    #[test]
+    fn a_session_choice_passes_back_the_clis_own_suggestion() {
+        let line = echoed("session-choice", |session, request| {
+            assert_eq!(request.suggestions[0]["mode"], "acceptEdits");
+            session.allow_with(request, &request.suggestions[0]).expect("answer");
+        });
+        let response = &line["response"]["response"];
+        assert_eq!(response["behavior"], "allow");
+        assert_eq!(response["updatedPermissions"][0]["destination"], "session");
+    }
+
+    #[test]
+    fn the_cli_runs_with_its_own_settings_and_tools() {
+        let args = build_args(&SessionConfig::default());
+        for flag in ["--tools", "--setting-sources", "--strict-mcp-config", "--settings"] {
+            assert!(
+                !args.iter().any(|arg| arg == flag),
+                "{flag} would change what a terminal does"
+            );
+        }
+    }
+
     #[test]
     fn dropping_the_session_ends_the_child() {
         let config = fake_cli("shutdown", "sleep 60");
@@ -470,8 +555,8 @@ mod tests {
     fn unexpected_exit_reports_an_error() {
         let config = fake_cli("exit", "echo boom >&2\nexit 3");
         let (_session, events) = Session::spawn(&config).expect("spawn");
-        let Event::Error(message) = events.recv_timeout(Duration::from_secs(5)).expect("event") else {
-            panic!("not an error")
+        let Event::Exited(message) = events.recv_timeout(Duration::from_secs(5)).expect("event") else {
+            panic!("not an exit")
         };
         assert!(message.contains("boom"));
     }

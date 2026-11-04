@@ -214,6 +214,8 @@ pub struct EditorView {
     /// At a soft wrap, whether the caret shows at the end of the upper row.
     upstream: bool,
     marked: Option<Range<usize>>,
+    /// Passages of the active chapter another slice marks, such as an agent's changes. See [`EditorView::set_marks`].
+    marks: Vec<Range<usize>>,
     /// The column up and down keep to, kept across lines that are too short for it.
     goal_x: Option<Pixels>,
     /// Where markers reveal. Follows the caret, but stays put during a drag, so text does not jump under the pointer.
@@ -268,6 +270,7 @@ impl EditorView {
             selection: Selection::default(),
             upstream: false,
             marked: None,
+            marks: Vec::new(),
             goal_x: None,
             reveal_at: 0,
             drag: None,
@@ -397,6 +400,20 @@ impl EditorView {
 
     pub fn text(&self) -> &str {
         self.session.active_buffer().text()
+    }
+
+    /// The selected bytes of the active chapter; empty for a caret.
+    pub fn selection_range(&self) -> Range<usize> {
+        self.selection.range()
+    }
+
+    /// Tints these byte ranges of the active chapter. They replace the earlier ones, and an empty list clears them.
+    /// The caller keeps them true to the text, since the galley does not move them as the text changes.
+    pub fn set_marks(&mut self, marks: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        if self.marks != marks {
+            self.marks = marks;
+            cx.notify();
+        }
     }
 
     /// The session's revision: it changes with the text the pages are set from.

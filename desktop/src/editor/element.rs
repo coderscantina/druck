@@ -37,6 +37,7 @@ pub struct Frame {
     blocks: Vec<FrameBlock>,
     sheet: Bounds<Pixels>,
     selection: Vec<Bounds<Pixels>>,
+    marks: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
     hitbox: Hitbox,
     ink: Hsla,
@@ -130,12 +131,16 @@ impl Element for Galley {
         let tokens = Tokens::get(cx);
         let sheet_color = tokens.sheet;
         let selection_color = Hsla::from(tokens.accent).opacity(0.25);
+        let mark_color = Hsla::from(tokens.added).opacity(0.2);
         let label_color = tokens.text_faint;
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             window.paint_quad(fill(frame.sheet, sheet_color));
             for block in &frame.blocks {
                 paint_block_background(block, frame, window);
+            }
+            for rectangle in &frame.marks {
+                window.paint_quad(fill(*rectangle, mark_color));
             }
             for rectangle in &frame.selection {
                 window.paint_quad(fill(*rectangle, selection_color));
@@ -297,7 +302,12 @@ impl EditorView {
             point(column.sheet_left, sheet_top),
             size(column.sheet_width, sheet_bottom - sheet_top),
         );
-        let selection = self.selection_rectangles(&blocks);
+        let selection = self.range_rectangles(self.selection.range(), &blocks);
+        let marks = self
+            .marks
+            .iter()
+            .flat_map(|mark| self.range_rectangles(mark.clone(), &blocks))
+            .collect();
         let caret = if self.selection.is_empty() {
             self.caret_bounds(window)
         } else {
@@ -308,6 +318,7 @@ impl EditorView {
             blocks,
             sheet,
             selection,
+            marks,
             caret,
             hitbox,
             ink: self.style.ink,
@@ -319,11 +330,11 @@ impl EditorView {
         }
     }
 
-    fn selection_rectangles(&self, blocks: &[FrameBlock]) -> Vec<Bounds<Pixels>> {
-        if self.selection.is_empty() {
+    /// The rectangles that cover `selection` in the visible blocks.
+    fn range_rectangles(&self, selection: std::ops::Range<usize>, blocks: &[FrameBlock]) -> Vec<Bounds<Pixels>> {
+        if selection.is_empty() {
             return Vec::new();
         }
-        let selection = self.selection.range();
         let newline_width = self.style.body_size * 0.4;
         let mut rectangles = Vec::new();
         for (block, (index, _)) in blocks.iter().zip(&self.visible) {
