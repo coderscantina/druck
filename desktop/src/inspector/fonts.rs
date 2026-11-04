@@ -309,7 +309,7 @@ impl FontsPanel {
                 .map(|&(face, label)| {
                     let item = div()
                         .id(SharedString::from(format!("font-face-{face}")))
-                        .button(&tokens, label)
+                        .button(tokens, label)
                         .child(label)
                         .on_click(cx.listener(move |panel, _, _, cx| {
                             if let Some(adding) = &mut panel.adding {
