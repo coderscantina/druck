@@ -202,6 +202,18 @@ pub struct SessionChanged;
 
 impl EventEmitter<SessionChanged> for EditorView {}
 
+/// A person asked for the text to be on disk now.
+pub struct SaveRequested;
+
+impl EventEmitter<SaveRequested> for EditorView {}
+
+/// An undo reached a change that came from outside. `done` says whether it took it back, or stopped there first.
+pub struct ExternalUndo {
+    pub done: bool,
+}
+
+impl EventEmitter<ExternalUndo> for EditorView {}
+
 pub struct EditorView {
     focus: FocusHandle,
     /// The document. It lives here because every key needs the active buffer. See [`crate::session`].
@@ -309,6 +321,17 @@ impl EditorView {
         cx.emit(SessionChanged);
         cx.notify();
         result
+    }
+
+    /// The session for bookkeeping that changes no text and nothing on screen, such as recording a finished save. Sends
+    /// no event and leaves the galley alone.
+    pub fn session_quietly(&mut self) -> &mut Session {
+        &mut self.session
+    }
+
+    /// Whether an input method has text in progress, which an outside change must not move under it.
+    pub fn is_composing(&self) -> bool {
+        self.marked.is_some()
     }
 
     /// Opens a chapter in the galley, where the caret last was in it, with its own undo history.
@@ -585,7 +608,14 @@ impl EditorView {
 
     fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
-            let restored = self.session.active_buffer_mut().undo();
+            let buffer = self.session.active_buffer_mut();
+            let outside = buffer.undo_is_outside_change();
+            let restored = buffer.undo();
+            if outside {
+                cx.emit(ExternalUndo {
+                    done: restored.is_some(),
+                });
+            }
             self.restore(restored, window, cx);
         }
     }
@@ -635,18 +665,17 @@ impl EditorView {
         }
     }
 
-    fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
-        self.save_all(window, cx);
+    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(SaveRequested);
     }
 
-    /// Writes every chapter that changed, for now. Autosave replaces this as the way text reaches disk.
-    pub fn save_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Writes every chapter that changed and waits for it. Autosave is the way text reaches disk: this is for when the
+    /// document is about to go. Returns whether it all went, and shows why not.
+    pub fn save_all(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let saved = self.update_session(Session::save, window, cx);
-        self.status = match saved {
-            Ok(_) => "Saved".into(),
-            Err(problem) => problem.into(),
-        };
+        self.status = saved.as_ref().err().cloned().unwrap_or_default().into();
         cx.notify();
+        saved.is_ok() && !self.session.is_dirty()
     }
 
     fn show_character_palette(&mut self, _: &ShowCharacterPalette, window: &mut Window, _: &mut Context<Self>) {

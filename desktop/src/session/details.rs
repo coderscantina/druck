@@ -9,6 +9,7 @@ use druck::input::MANIFEST;
 
 use super::yaml;
 use super::{Kind, Session};
+use crate::persist::atomic::{self, Outcome, content_hash};
 use crate::source::{Edit, EditKind};
 
 /// Where a new key goes among the keys already written.
@@ -255,7 +256,13 @@ impl Session {
         if !check(&settings) {
             return Err(format!("cannot change {MANIFEST} here. Edit the file directly."));
         }
-        fs::write(manifest, &patched).map_err(|error| format!("cannot write {MANIFEST}: {error}"))?;
+        let expected = Some(content_hash(text.as_bytes()));
+        match atomic::write_if(manifest, patched.as_bytes(), expected) {
+            Ok(Outcome::Written) => {}
+            Ok(Outcome::Changed(_)) => return Err(format!("{MANIFEST} just changed on disk. Try again.")),
+            Err(error) => return Err(format!("cannot write {MANIFEST}: {error}")),
+        }
+        self.set_synced(manifest, patched.into(), true);
         self.bump_revision();
         self.settings = Ok(settings);
         Ok(())

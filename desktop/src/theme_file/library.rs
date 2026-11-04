@@ -116,7 +116,8 @@ pub fn create(common: &Path, name: &str) -> Result<PathBuf, String> {
         return Err(format!("a theme named \"{name}\" already exists"));
     }
     fs::create_dir_all(common).map_err(|e| format!("cannot create {}: {e}", common.display()))?;
-    fs::write(&path, "{\n  \"version\": 1\n}\n").map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    crate::persist::atomic::write(&path, b"{\n  \"version\": 1\n}\n")
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -199,7 +200,8 @@ pub fn fork(project: &Path, common: &Path, theme: &str, name: &str) -> Result<Fo
         fs::copy(from, &to).map_err(|e| format!("cannot copy {}: {e}", from.display()))?;
     }
     fs::create_dir_all(&folder).map_err(|e| format!("cannot create {}: {e}", folder.display()))?;
-    fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    crate::persist::atomic::write(&path, text.as_bytes())
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(Forked { path, missing })
 }
 

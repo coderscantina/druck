@@ -105,6 +105,11 @@ impl InspectorView {
         cx.notify();
     }
 
+    /// Reads the theme file again after it changed outside the app.
+    pub fn reload_theme(&mut self, cx: &mut Context<Self>) {
+        self.styles.update(cx, |styles, cx| styles.reload_theme(cx));
+    }
+
     /// Sets the body size as if typed into its field. For measurements.
     pub fn set_body_size(&mut self, text: &str, cx: &mut Context<Self>) {
         self.styles.update(cx, |styles, cx| styles.set_body_size(text, cx));

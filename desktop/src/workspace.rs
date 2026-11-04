@@ -14,7 +14,7 @@ use gpui::{
     div, px,
 };
 
-use crate::editor::{CaretMoved, EditorView, Save, SessionChanged, TextChanged};
+use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, Tab, ThemeChanged};
 use crate::preview::{BodyStyle, PageClicked, PreviewView, Typeset};
@@ -175,9 +175,14 @@ impl Workspace {
         self.parts.editor.read(cx).session().is_dirty()
     }
 
-    /// Writes everything that changed, for now. Autosave replaces this as the way text reaches disk.
-    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.parts.editor.update(cx, |editor, cx| editor.save_all(window, cx));
+    /// Where the document is.
+    pub fn location(&self, cx: &gpui::App) -> PathBuf {
+        self.parts.editor.read(cx).session().location().to_owned()
+    }
+
+    /// Writes everything that changed and waits for it, before the document is replaced. Returns whether it all went.
+    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.parts.editor.update(cx, |editor, cx| editor.save_all(window, cx))
     }
 
     /// Gives the side panels what the session says now.
@@ -562,7 +567,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|workspace, _: &ShowWrite, window, cx| workspace.show(Canvas::Write, window, cx)))
             .on_action(cx.listener(|workspace, _: &ShowPages, window, cx| workspace.show(Canvas::Pages, window, cx)))
             .on_action(cx.listener(|workspace, _: &ShowSplit, window, cx| workspace.show(Canvas::Split, window, cx)))
-            .on_action(cx.listener(|workspace, _: &Save, window, cx| workspace.save(window, cx)))
+            .on_action(cx.listener(|workspace, _: &Save, _, cx| {
+                workspace.parts.editor.update(cx, |_, cx| cx.emit(SaveRequested));
+            }))
             .child(titlebar(title, &tokens, bar_end))
             .child(
                 div()
