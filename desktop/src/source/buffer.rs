@@ -36,15 +36,20 @@ pub enum EditKind {
     Composing,
     /// Always its own undo step: paste, cut, a new paragraph.
     Discrete,
+    /// A change that came from outside the app, as its own undo step. See [`Buffer::undo`].
+    External,
 }
 
 impl EditKind {
     fn joins(self, previous: Self, pause: Duration) -> bool {
-        use EditKind::{Composing, Deleting, Discrete, Typing};
+        use EditKind::{Composing, Deleting, Discrete, External, Typing};
         match (previous, self) {
             (Composing, Composing) => true,
             (Typing | Composing, Typing | Composing) | (Deleting, Deleting) => pause < GROUP_PAUSE,
-            (Discrete, _) | (_, Discrete) | (Typing | Composing, Deleting) | (Deleting, Typing | Composing) => false,
+            (Discrete | External, _)
+            | (_, Discrete | External)
+            | (Typing | Composing, Deleting)
+            | (Deleting, Typing | Composing) => false,
         }
     }
 }
@@ -130,6 +135,8 @@ pub struct Buffer {
     undo: Vec<Group>,
     redo: Vec<Group>,
     revision: u64,
+    /// The last undo stopped at a change from outside, so the next one takes it back.
+    undo_outside_armed: bool,
 }
 
 impl Buffer {
@@ -139,6 +146,7 @@ impl Buffer {
             undo: Vec::new(),
             redo: Vec::new(),
             revision: 0,
+            undo_outside_armed: false,
         }
     }
 
@@ -179,6 +187,7 @@ impl Buffer {
         };
         self.redo.clear();
         self.revision += 1;
+        self.undo_outside_armed = false;
         match self.undo.last_mut() {
             Some(group) if group.after == before && kind.joins(group.kind, now - group.last_edit) => {
                 group.steps.push(step);
@@ -197,7 +206,20 @@ impl Buffer {
         Ok(splice)
     }
 
+    /// Whether the next undo meets a change from outside.
+    pub fn undo_is_outside_change(&self) -> bool {
+        self.undo.last().is_some_and(|group| group.kind == EditKind::External)
+    }
+
+    /// Takes back the last undo step. A change from outside is one step too, but taking it back takes someone else's
+    /// text off the disk at the next save. So the first undo that reaches one stops there and does nothing, and only
+    /// the next one takes it back.
     pub fn undo(&mut self) -> Option<Restored> {
+        if self.undo_is_outside_change() && !self.undo_outside_armed {
+            self.undo_outside_armed = true;
+            return None;
+        }
+        self.undo_outside_armed = false;
         let group = self.undo.pop()?;
         let splice = self.replay(group.steps.iter().rev().map(|step| &step.backward));
         let selection = group.before;
@@ -206,6 +228,7 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> Option<Restored> {
+        self.undo_outside_armed = false;
         let group = self.redo.pop()?;
         let splice = self.replay(group.steps.iter().map(|step| &step.forward));
         let selection = group.after;
@@ -490,6 +513,29 @@ mod tests {
         insert(&mut buffer, 1, "c", EditKind::Typing, now);
         assert!(buffer.redo().is_none());
         assert_eq!(buffer.text(), "ac");
+    }
+
+    #[test]
+    fn undo_stops_once_at_a_change_from_outside() {
+        let (mut buffer, now) = buffer("");
+        insert(&mut buffer, 0, "typed ", EditKind::Typing, now);
+        insert(&mut buffer, 6, "outside ", EditKind::External, now);
+        insert(&mut buffer, 14, "more", EditKind::Typing, now);
+
+        buffer.undo();
+        assert_eq!(buffer.text(), "typed outside ");
+        assert!(buffer.undo().is_none());
+        assert_eq!(buffer.text(), "typed outside ");
+
+        assert!(buffer.undo().is_some());
+        assert_eq!(buffer.text(), "typed ");
+        buffer.redo();
+        assert_eq!(buffer.text(), "typed outside ");
+
+        assert!(buffer.undo().is_none(), "a new undo stops again");
+        buffer.undo();
+        buffer.undo();
+        assert_eq!(buffer.text(), "");
     }
 
     #[test]

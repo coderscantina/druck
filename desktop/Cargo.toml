@@ -22,3 +22,11 @@ unicode-segmentation = "1.13.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 resvg = { version = "0.47", default-features = false, features = ["text", "raster-images"] }
 skrifa = "0.42"
+# Persistence: the folder watcher and the diffs under its three-way merge. notify is CC0-1.0, similar Apache-2.0.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+notify = "8.2"
+similar = { version = "3.2", default-features = false, features = ["std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# renamex_np, so an autosave cannot overwrite a file another program wrote a moment before.
+libc = "0.2"

@@ -13,6 +13,7 @@
 //! `EditorView::session` and change it through `EditorView::update_session`, which keeps the view in step.
 
 pub mod details;
+pub mod disk;
 mod joined;
 mod outline;
 pub mod templates;
@@ -20,7 +21,7 @@ pub mod templates;
 mod tests;
 pub(crate) mod yaml;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -31,10 +32,12 @@ use druck::input::{MANIFEST, ThemeDirs};
 use druck::resource::{FileResolver, Origin, Resolver, normalize};
 
 pub use self::details::{Details, Field, LANGUAGES, MetaRow};
+use self::disk::Synced;
 pub use self::joined::{ChapterMap, Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
 pub use self::templates::{STARTERS, Starter, TEMPLATES, Template};
+use crate::persist::atomic::{self, Outcome};
 use crate::source::buffer::EditError;
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -199,6 +202,10 @@ pub struct Session {
     /// A single file whose split changed has text on no buffer's undo stack that is not on disk.
     resplit_unsaved: bool,
     resolver: FileResolver,
+    /// What each file last agreed with, the base of a merge. See [`disk`].
+    synced: HashMap<PathBuf, Synced>,
+    /// Files whose text must not reach the disk yet: a person is deciding about them.
+    held: HashSet<PathBuf>,
 }
 
 impl Session {
@@ -234,12 +241,17 @@ impl Session {
             details: Details::default(),
             resplit_unsaved: false,
             resolver: FileResolver::new(),
+            synced: HashMap::new(),
+            held: HashSet::new(),
         }
     }
 
     fn add(&mut self, chapter: Chapter) -> ChapterId {
         let id = ChapterId(self.next_id);
         self.next_id += 1;
+        self.synced
+            .entry(chapter.path.clone())
+            .or_insert_with(|| Synced::new(chapter.text(), matches!(chapter.read, Read::Done | Read::Later)));
         self.chapters.insert(id, chapter);
         id
     }
@@ -248,6 +260,7 @@ impl Session {
         let bytes = fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let text = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 text.", path.display()))?;
         let mut session = Self::empty(Kind::Single { path: path.to_owned() });
+        session.synced.insert(path.to_owned(), Synced::new(&text, true));
         session.split_into_sections(&text);
         session.active = session.book[0];
         session.refresh_details();
@@ -295,7 +308,16 @@ impl Session {
         let dir = dir.clone();
         let manifest = dir.join(MANIFEST);
         let before = self.revision();
-        self.settings = fs::read_to_string(&manifest)
+        let text = fs::read_to_string(&manifest);
+        match &text {
+            Ok(text) => self.set_synced(&manifest, text.as_str().into(), true),
+            Err(_) => {
+                if let Some(synced) = self.file_base(&manifest) {
+                    self.set_synced(&manifest, synced.base, false);
+                }
+            }
+        }
+        self.settings = text
             .map_err(|error| format!("cannot read {MANIFEST}: {error}"))
             .and_then(|text| details::parse(&text, &manifest));
         let listed: Vec<String> = match &self.settings {
@@ -774,6 +796,8 @@ impl Session {
             chapter.buffer = buffer;
             chapter.read = read;
             chapter.outline = outline(chapter.buffer.text());
+            let synced = Synced::new(chapter.buffer.text(), chapter.read == Read::Done);
+            self.synced.insert(path.clone(), synced);
         }
     }
 
@@ -808,46 +832,23 @@ impl Session {
         self.resplit_unsaved || self.chapters.values().any(Chapter::is_dirty)
     }
 
-    /// Writes what changed. Each file that changed is written whole, and no other file is touched. Returns how many
-    /// files were written.
+    /// Writes what changed, now. Each file that changed is written whole, and no other file is touched. A file that
+    /// changed on disk since it was read is not overwritten: this is an error, and the merge deals with it. Returns how
+    /// many files were written.
     pub fn save(&mut self) -> Result<usize, String> {
         self.resplit();
-        match self.kind.clone() {
-            Kind::Single { path } => {
-                if !self.is_dirty() {
-                    return Ok(0);
-                }
-                let text = self.joined().text;
-                fs::write(&path, text).map_err(|error| format!("cannot save {}: {error}", path.display()))?;
-                self.resplit_unsaved = false;
-                for chapter in self.chapters.values_mut() {
-                    chapter.saved = chapter.buffer.revision();
-                }
-                Ok(1)
+        let mut written = 0;
+        for outgoing in self.outgoing() {
+            let path = outgoing.path.display();
+            match outgoing.write() {
+                Ok(Outcome::Written) => {}
+                Ok(Outcome::Changed(_)) => return Err(format!("{path} changed on disk, so it was not saved.")),
+                Err(error) => return Err(format!("cannot save {path}: {error}")),
             }
-            Kind::Project { .. } => {
-                let mut written = 0;
-                let mut manifest_changed = false;
-                for chapter in self.chapters.values_mut() {
-                    if !chapter.is_dirty() || matches!(chapter.read, Read::Failed(_)) {
-                        continue;
-                    }
-                    if let Some(parent) = chapter.path.parent() {
-                        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-                    }
-                    fs::write(&chapter.path, chapter.buffer.text())
-                        .map_err(|error| format!("cannot save {}: {error}", chapter.path.display()))?;
-                    chapter.saved = chapter.buffer.revision();
-                    chapter.read = Read::Done;
-                    manifest_changed |= chapter.group == Group::Manifest;
-                    written += 1;
-                }
-                if manifest_changed {
-                    self.read_manifest();
-                }
-                Ok(written)
-            }
+            self.written(&outgoing);
+            written += 1;
         }
+        Ok(written)
     }
 
     /// Brings a single file's sections in line with its level 1 headings, once a heading came or went. A section whose
@@ -1016,6 +1017,7 @@ impl Session {
             .to_string_lossy()
             .into_owned();
         fs::rename(&old, &target).map_err(|error| format!("cannot rename {}: {error}", old.display()))?;
+        self.move_synced(&old, &target);
         let chapter = self.known_mut(id);
         chapter.path = target.clone();
         chapter.listed = listed;
@@ -1024,6 +1026,7 @@ impl Session {
         }
         self.write_chapter_list().inspect_err(|_| {
             fs::rename(&target, &old).ok();
+            self.move_synced(&target, &old);
             let chapter = self.known_mut(id);
             chapter.path = old.clone();
             chapter.listed = old_listed.clone();
@@ -1057,7 +1060,8 @@ impl Session {
             .find(|(path, _)| !path.exists())
             .expect("some name is free");
         fs::create_dir_all(&folder).map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
-        fs::write(&path, &markdown).map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+        atomic::write(&path, markdown.as_bytes())
+            .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
         let before = self.revision();
         let id = self.add(Chapter::new(
             path.clone(),
@@ -1075,6 +1079,7 @@ impl Session {
         if let Err(error) = self.write_chapter_list() {
             self.book.remove(at);
             self.chapters.remove(&id);
+            self.synced.remove(&path);
             fs::remove_file(&path).ok();
             return Err(error);
         }
@@ -1099,6 +1104,12 @@ impl Session {
             }
         }
         markdown
+    }
+
+    fn move_synced(&mut self, from: &Path, to: &Path) {
+        if let Some(synced) = self.synced.remove(from) {
+            self.synced.insert(to.to_owned(), synced);
+        }
     }
 
     fn insert_in_file(&mut self, markdown: &str, after: ChapterId) -> Result<ChapterId, String> {

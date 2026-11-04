@@ -7,6 +7,7 @@ mod editor;
 mod gate;
 mod inspector;
 mod launch;
+mod persist;
 mod preview;
 mod session;
 mod shell;

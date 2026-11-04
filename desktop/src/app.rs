@@ -10,8 +10,8 @@
 //!
 //! The later slices of [the beta milestone](../../docs/milestones/16-desktop-beta.md):
 //!
-//! - **Persistence** owns a new `persist/`: autosave, the watcher, and merges, on `Session::save`,
-//!   `Session::edit_chapter`, and `Session::read_manifest`. It replaces the Cmd+S handling.
+//! - **Persistence** owns `persist/`, with `session/disk.rs` for what the session knows of its files: autosave, the
+//!   watcher, merges, and the recovery copies. Cmd+S asks it for an immediate save through `SaveRequested`.
 //! - **Editor commands** own `editor/`, whose galley draws its own floats, the source toggle in `toolbar`, and the
 //!   `Tab::Notes` panel.
 //! - **Theme core** owns `theme_file/` and new panels on the `Tab::Fonts` tab and a theme picker in `toolbar`.
@@ -45,6 +45,7 @@ const SCREEN_MARGIN: f32 = 80.;
 
 /// Mounts what later slices own into the workspace's slots and tabs. One line per view.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
+    crate::persist::mount(parts, slots, window, cx);
     shell::mount(parts, slots, window, cx);
     slots.footer.push(cx.new(|_| AgentView::new()).into());
     crate::editor::mount(parts, slots, cx);
@@ -71,6 +72,7 @@ pub fn open(
         KeyBinding::new("cmd-3", ShowSplit, None),
     ]);
     crate::editor::bind_keys(cx);
+    crate::persist::bind_keys(cx);
     shell::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
@@ -267,12 +269,17 @@ impl Shell {
             };
             shell
                 .update_in(cx, |shell, window, cx| {
-                    if answer == 0
-                        && let Some(workspace) = shell.workspace.clone()
-                    {
-                        workspace.update(cx, |workspace, cx| workspace.save(window, cx));
-                    }
-                    if answer != 2 {
+                    let workspace = shell.workspace.clone();
+                    let saved = match (answer, workspace) {
+                        (0, Some(workspace)) => workspace.update(cx, |workspace, cx| workspace.save(window, cx)),
+                        (1, Some(workspace)) => {
+                            crate::persist::forget_unsaved(&workspace.read(cx).location(cx));
+                            true
+                        }
+                        _ => answer == 1,
+                    };
+                    // Text that could not be saved stays open rather than be lost with the window's document.
+                    if answer != 2 && saved {
                         then(shell, window, cx);
                     }
                 })

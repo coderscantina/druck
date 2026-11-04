@@ -34,6 +34,7 @@ const FILES: &[(&str, &[u8])] = &[
         "icons/chevron-right.svg",
         include_bytes!("../assets/icons/chevron-right.svg"),
     ),
+    (
         "icons/block-break.svg",
         include_bytes!("../assets/icons/block-break.svg"),
     ),

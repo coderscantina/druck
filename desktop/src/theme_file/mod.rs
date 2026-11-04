@@ -88,15 +88,12 @@ impl ThemeFile {
         self.replace(text, path, None)
     }
 
-    /// Writes the text if it changed, through a temporary file so a crash cannot leave half a theme.
+    /// Writes the text if it changed, so that a crash cannot leave half a theme.
     pub fn save(&mut self) -> io::Result<()> {
         if self.saved {
             return Ok(());
         }
-        let name = self.path.file_name().unwrap_or_default().to_string_lossy();
-        let temporary = self.path.with_file_name(format!(".{name}.druck-tmp"));
-        fs::write(&temporary, &self.text)?;
-        fs::rename(&temporary, &self.path)?;
+        crate::persist::atomic::write(&self.path, self.text.as_bytes())?;
         self.saved = true;
         Ok(())
     }

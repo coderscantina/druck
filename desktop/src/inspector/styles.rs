@@ -82,6 +82,28 @@ impl StylesPanel {
         cx.notify();
     }
 
+    /// Reads the file again if another program changed it. Its own saves change nothing here. A file that does not
+    /// parse just now keeps the last good text in the panel.
+    pub fn reload_theme(&mut self, cx: &mut Context<Self>) {
+        let Ok(file) = &self.theme else {
+            return;
+        };
+        let path = file.path().to_owned();
+        let same = std::fs::read_to_string(&path).is_ok_and(|text| text == file.text());
+        if same {
+            return;
+        }
+        if let Ok(file) = ThemeFile::open(&path) {
+            self.theme = Ok(file);
+            self.sync_inputs(cx);
+            cx.notify();
+        }
+        cx.emit(ThemeChanged {
+            path,
+            property: String::new(),
+        });
+    }
+
     /// Shows the effective value in every field, marked as the theme's own when it sets it.
     fn sync_inputs(&mut self, cx: &mut Context<Self>) {
         let (Some(style), Ok(file)) = (self.selected, &self.theme) else {

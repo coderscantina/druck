@@ -62,3 +62,9 @@ The window has three places to mount a view without touching the shell, listed i
 - The scrollbar is a 6 px thumb in the pane's right edge, faint, and stronger when the pointer is over it.
 - The source view uses one monospace on the same sheet with no block backgrounds. Markers, comments, directives, and front matter are in the quiet color, headings bold, and code in the link color.
 - The notes panel is the inspector's Notes tab: a section label, then a field for each note holding its text with plain line breaks.
+
+## Saving state
+
+- The saving state is one line at the left of the footer: faint "Saved", "Edited", or "Saving…". It does not move the text or take focus.
+- A note, such as a merge that happened, uses the quiet text color and leaves after 6 seconds. A problem or a conflict uses the accent color and stays until it is over.
+- A conflict never opens a dialog. It is a line in the footer with its choices as small raised buttons, and the galley keeps the focus and keeps taking keys. A modal prompt would catch keys typed while it appeared, and agents can cause many of these. The keys are Ctrl+Cmd+M, T, and B.
