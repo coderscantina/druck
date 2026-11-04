@@ -510,7 +510,7 @@ fn rows_fit(shaped: &WrappedLine, forced: &[Forced], width: Pixels) -> bool {
 }
 
 /// How much wider than the column a row can be before the engine's breaks are taken to be for another size.
-const OVERFLOW: f32 = 0.06;
+const OVERFLOW: f32 = 0.10;
 
 /// What each space of a row gains so that it reaches the measure, or nothing if it need not.
 fn row_step(
@@ -588,4 +588,111 @@ fn rows_of(shaped: &WrappedLine) -> Vec<Range<usize>> {
     }
     rows.push(start..shaped.len());
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{FontId, GlyphId, ShapedGlyph, ShapedRun};
+
+    use super::*;
+    use crate::editor::display::{Syntax, display_lines};
+
+    /// A line shaped by hand: every byte is a glyph 10 px wide.
+    fn shaped(text: &str) -> WrappedLine {
+        let glyphs = (0..text.len())
+            .map(|index| ShapedGlyph {
+                id: GlyphId(0),
+                position: point(px(index as f32 * 10.), px(0.)),
+                index,
+                is_emoji: false,
+            })
+            .collect();
+        let layout = LineLayout {
+            font_size: px(20.),
+            width: px(text.len() as f32 * 10.),
+            runs: vec![ShapedRun {
+                font_id: FontId(0),
+                glyphs,
+            }],
+            len: text.len(),
+            ..LineLayout::default()
+        };
+        let mut wrapped = WrappedLine::default();
+        wrapped.text = text.to_owned().into();
+        *wrapped = Arc::new(WrappedLineLayout {
+            unwrapped_layout: Arc::new(layout),
+            wrap_boundaries: Default::default(),
+            wrap_width: None,
+        });
+        wrapped
+    }
+
+    fn source_line(text: &str, forced: &[Forced], indent: Pixels, width: Pixels, hyphen: Pixels) -> ShapedSourceLine {
+        let mut line = shaped(text);
+        force_rows(&mut line, forced, indent, width, hyphen);
+        let display = display_lines(BlockKind::Paragraph, text, &Syntax::default(), &[], None, false, &[]).remove(0);
+        ShapedSourceLine {
+            rows: rows_of(&line),
+            display,
+            shaped: line,
+            y: px(0.),
+            x: px(0.),
+            line_height: px(20.),
+            height: px(40.),
+            skipped: false,
+            bullet: None,
+            chips: Vec::new(),
+            indent,
+            hyphens: None,
+        }
+    }
+
+    const CUT: [Forced; 1] = [Forced {
+        at: 9,
+        hyphen: true,
+        fills: true,
+    }];
+
+    #[test]
+    fn a_row_ends_where_the_engine_ended_it_and_the_caret_keeps_its_place_on_both_sides() {
+        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(200.), px(10.));
+        assert_eq!(line.rows, [0..9, 9..13]);
+        // At the cut, the upper row's end and the lower row's start are one offset.
+        assert_eq!(line.row_of(9, false), 1);
+        assert_eq!(line.row_of(9, true), 0);
+        assert_eq!(line.x_in_row(9, 1), px(0.));
+        for (at, row) in [(0, 0), (2, 0), (9, 0), (9, 1), (11, 1)] {
+            assert_eq!(
+                line.display_at_x(row, line.x_in_row(at, row)),
+                at,
+                "offset {at} in row {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_row_starts_at_its_indent_and_a_row_that_fills_reaches_the_measure() {
+        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(130.), px(10.));
+        assert_eq!(line.x_in_row(0, 0), px(30.));
+        // "aaa bbbb" is 80 px with one space. It has 130 px, less the indent and the hyphen's 10, so the space gains 10.
+        assert_eq!(line.x_in_row(8, 0), px(120.));
+    }
+
+    #[test]
+    fn positions_rise_from_row_to_row_so_lookups_stay_ordered() {
+        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(200.), px(10.));
+        let glyphs: Vec<_> = line.shaped.unwrapped_layout.runs[0]
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.position.x)
+            .collect();
+        assert!(glyphs.windows(2).all(|pair| pair[0] < pair[1]), "{glyphs:?}");
+    }
+
+    #[test]
+    fn a_row_too_wide_for_the_column_is_not_forced() {
+        let line = shaped("aaa bbbb cccc");
+        assert!(rows_fit(&line, &CUT, px(90.)));
+        assert!(!rows_fit(&line, &CUT, px(70.)));
+    }
 }

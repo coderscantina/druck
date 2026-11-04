@@ -467,6 +467,29 @@ fn style_at(at: usize, kind: BlockKind, syntax: &Syntax, marked: Option<&Range<u
 }
 
 #[cfg(test)]
+mod join_tests {
+    use super::*;
+
+    #[test]
+    fn joined_lines_show_a_space_for_a_line_ending_and_map_both_ways() {
+        let text = "one *two*\nthree";
+        let syntax = Syntax {
+            spans: crate::source::inline::inline_spans(BlockKind::Paragraph, text),
+            markers: Vec::new(),
+        };
+        let hidden = hidden_ranges(BlockKind::Paragraph, text, &syntax, None, false, false);
+        let lines = display_lines(BlockKind::Paragraph, text, &syntax, &hidden, None, false, &[]);
+        let joined = join_lines(lines);
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].text, "one two three");
+        assert_eq!(joined[0].source, 0..text.len());
+        let three = text.find("three").expect("in the text");
+        assert_eq!(joined[0].to_display(three), "one two ".len());
+        assert_eq!(joined[0].to_source("one two ".len()), three);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::inline::{inline_spans, line_markers};
