@@ -36,7 +36,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
 - [x] 15: Engine amendment.
 - [x] Phase 2: the public crate API, steps 1 to 5, outside the milestone plan. Complete on macOS; Linux and Windows wait for the first CI run. Nothing is published ([record](PHASE_2_API.md), [evidence](ACCEPTANCE.md#phase-2-contract)).
-- [ ] 16: Desktop public beta. All eight slices are built and integrated on `t3/b959cc56`, which nothing has merged. It stays unchecked: what is left needs a person, see [the criteria](#milestone-16-criteria).
+- [ ] 16: Desktop public beta. All eight slices are built and integrated on `t3/finish-desktop-beta-gate`, which nothing has merged. It stays unchecked: what is left needs a person, see [the criteria](#milestone-16-criteria).
   - [x] Slice 2: Persistence.
   - [x] Slice 3: Editor commands.
   - [x] Slice 4: Theme core.
@@ -87,7 +87,7 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
-The desktop beta is finished on `t3/b959cc56`, on top of `t3/rich-block-editors` and `t3/desktop-beta-gate`. Nothing is merged, pushed, tagged, or signed with an identity. This branch adds print-composer lines, the spell checker, the accessibility and keyboard pass, the Insert menu, and a fix for footnote text lost to outside changes, which the soak found. See [the criteria](#milestone-16-criteria) and [decisions](DECISIONS.md#2026-11-04-desktop-beta-finishing-the-gate).
+The desktop beta is finished on `t3/finish-desktop-beta-gate`, on top of `t3/rich-block-editors` and `t3/desktop-beta-gate`. Nothing is merged, pushed, tagged, or signed with an identity. This branch adds print-composer lines, the spell checker, the accessibility and keyboard pass, the Insert menu, and a fix for footnote text lost to outside changes, which the soak found. See [the criteria](#milestone-16-criteria) and [decisions](DECISIONS.md#2026-11-04-desktop-beta-finishing-the-gate).
 
 Next action: the owner walks the [checklist](#owners-checklist), starting with input methods, and decides whether to merge. Milestone 16 stays unchecked until then.
 
@@ -164,7 +164,7 @@ For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10
 
 ## Verification
 
-Desktop beta, finished on `t3/b959cc56`, on this M1 Pro, release builds. `cargo test -q` (444 unit tests, the integration tests, and two doctests), `DRUCK_BOOK=<project> cargo test --release --features editor --test composer` (2), `cargo test -q -p druck-desktop` (537, 1 ignored), `cargo clippy --all-targets -q -- -D warnings` on the root, with `--all-features`, with `--no-default-features --lib`, and on `-p druck-desktop`, `cargo fmt --all --check`, both `scripts/notices.py --check` runs, and `actionlint`: all clean. `python3 scripts/package-desktop.py` builds, and the ad-hoc bundle launches through `open` and quits by Command+Q. 15 sample renders are byte-identical to `t3/phase-two-api-acceptance` with `SOURCE_DATE_EPOCH=0`; `src/` has not changed since that comparison. Not verified: anything needing a person, in the checklist above, and Linux and Windows.
+Desktop beta, finished on `t3/finish-desktop-beta-gate`, on this M1 Pro, release builds. `cargo test -q` (444 unit tests, the integration tests, and two doctests), `DRUCK_BOOK=<project> cargo test --release --features editor --test composer` (2), `cargo test -q -p druck-desktop` (537, 1 ignored), `cargo clippy --all-targets -q -- -D warnings` on the root, with `--all-features`, with `--no-default-features --lib`, and on `-p druck-desktop`, `cargo fmt --all --check`, both `scripts/notices.py --check` runs, and `actionlint`: all clean. `python3 scripts/package-desktop.py` builds, and the ad-hoc bundle launches through `open` and quits by Command+Q. 15 sample renders are byte-identical to `t3/phase-two-api-acceptance` with `SOURCE_DATE_EPOCH=0`; `src/` has not changed since that comparison. Not verified: anything needing a person, in the checklist above, and Linux and Windows.
 
 
 Desktop beta integration, 2026-11-04, on the owner's M1 Pro, head of `t3/integrate-desktop-beta-slices`. Numbers and method are in [decisions](DECISIONS.md#2026-11-04-desktop-beta-integrating-slices-2-to-6).
