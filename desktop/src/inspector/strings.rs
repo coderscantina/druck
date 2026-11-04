@@ -174,6 +174,15 @@ strings! {
     FACE_NAME = "Face" / "Schnitt";
     FONT_ADDED = "Added {}" / "{} hinzugefügt";
     NOT_A_FONT = "Not a font file" / "Keine Schriftdatei";
+    BOLD_ITALIC = "Bold italic" / "Fett kursiv";
+    INLINE_CODE = "Inline code" / "Code im Text";
+    ADD = "Add" / "Hinzufügen";
+    ADD_AS_FAMILY = "Adds a family named {}." / "Fügt eine Familie namens {} hinzu.";
+    ADD_TO_FAMILY = "Adds the file as a face of {}." / "Fügt die Datei als Schnitt von {} hinzu.";
+    NO_FONTS = "The fonts appear after the first layout." / "Die Schriften erscheinen nach dem ersten Satz.";
+    SIZE_KB = "{} kB" / "{} kB";
+    SIZE_MB = "{} MB" / "{} MB";
+    DECIMAL_POINT = "." / ",";
 
     // Tokens
     TOKENS_TITLE = "TOKENS" / "TOKENS";
