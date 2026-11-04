@@ -4,6 +4,7 @@
 
 mod bench;
 mod cache;
+pub mod fonts;
 pub(crate) mod job;
 mod raster;
 mod sheets;
