@@ -5,8 +5,10 @@
 //! The folder must hold `notes.md`. This spends plan credit, so it uses `haiku`
 //! and short prompts. It never touches anything outside the given folder.
 
+#[allow(dead_code)]
 #[path = "../src/agent/cli.rs"]
 mod cli;
+#[allow(dead_code)]
 #[path = "../src/agent/session.rs"]
 mod session;
 
@@ -126,19 +128,20 @@ fn turn(session: &mut Session, events: &Receiver<Event>, text: &str, policy: Pol
                     details.is_some()
                 );
             }
-            Event::Started { session_id, model } => println!("  [{ms:>5} ms] started {session_id} {model}"),
+            Event::Started { session_id, model, .. } => println!("  [{ms:>5} ms] started {session_id} {model}"),
             Event::TurnFinished {
                 session_id,
-                cost_usd,
+                total_cost_usd: cost_usd,
                 is_error,
                 result,
+                ..
             } => {
                 println!(
                     "  [{ms:>5} ms] finished error={is_error} cost={cost_usd:?} first_token={first_token:?} {result:?}"
                 );
                 return session_id;
             }
-            Event::Error(message) => panic!("{message}"),
+            Event::Error(message) | Event::Exited(message) => panic!("{message}"),
             Event::Raw(value) => println!("  [{ms:>5} ms] raw {}", value["type"]),
         }
     }

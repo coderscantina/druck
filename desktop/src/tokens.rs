@@ -5,6 +5,8 @@ use clap::ValueEnum;
 use gpui::{App, Global, Pixels, Rgba, WindowAppearance, px, rgb};
 
 pub const FONT_UI: &str = ".SystemUIFont";
+/// For code and diffs.
+pub const FONT_MONO: &str = "Menlo";
 
 pub const TEXT_SMALL: Pixels = px(11.);
 pub const TEXT_BODY: Pixels = px(13.);
@@ -86,6 +88,10 @@ pub struct Tokens {
     pub text_quiet: Rgba,
     pub text_faint: Rgba,
     pub accent: Rgba,
+    /// Text an edit added, and the tint behind it.
+    pub added: Rgba,
+    /// Text an edit removed.
+    pub removed: Rgba,
 }
 
 impl Tokens {
@@ -101,6 +107,8 @@ impl Tokens {
                 text_quiet: rgb(0xa2a6ad),
                 text_faint: rgb(0x71767e),
                 accent: rgb(0xe06c4f),
+                added: rgb(0x6fcf8a),
+                removed: rgb(0xe5766b),
             },
             Scheme::Light => Self {
                 canvas: rgb(0xd9dce0),
@@ -112,6 +120,8 @@ impl Tokens {
                 text_quiet: rgb(0x555a62),
                 text_faint: rgb(0x7f848c),
                 accent: rgb(0xb54226),
+                added: rgb(0x1f7a3d),
+                removed: rgb(0xb42318),
             },
         }
     }

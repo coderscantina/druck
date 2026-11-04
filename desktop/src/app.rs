@@ -17,7 +17,7 @@
 //! - **Theme core** owns `theme_file/` and new panels on the `Tab::Fonts` tab and a theme picker in `toolbar`.
 //! - **Shell** owns a new `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, sidebar dots, search and word count
 //!   in `footer`, the string tables, and the rest of the menus.
-//! - **Agent** owns `agent/`, whose view is mounted in `footer` until its panel has a place.
+//! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the inspector rail.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,6 @@ use gpui::{
     Window, WindowBounds, WindowKind, WindowOptions, actions, div, point, px, size,
 };
 
-use crate::agent::AgentView;
 use crate::editor::Save;
 use crate::launch::{LaunchEvent, LaunchView};
 use crate::session::{STARTERS, Session, Starter};
@@ -48,7 +47,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     crate::persist::mount(parts, slots, window, cx);
     shell::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
-    slots.footer.push(cx.new(|_| AgentView::new()).into());
+    crate::agent::mount(parts, window, cx);
     crate::editor::mount(parts, slots, cx);
 }
 

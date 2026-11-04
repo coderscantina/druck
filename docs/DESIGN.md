@@ -77,3 +77,11 @@ The window has three places to mount a view without touching the shell, listed i
 - The engine's refusal shows under the field in the accent color. A field the engine refused keeps what was typed.
 - The theme picker and the specimen switch sit in the title bar before the canvas switch. The picker's menu hangs from its button, lists the project themes, then the common ones, and keeps a `⋯` on each common row for rename, duplicate, and delete. Deleting asks first, in the system's dialog.
 - The question about a common theme is a card near the sidebar, like the section dialog. The recommended choice, a copy in the project, has the accent border.
+
+## Agent panel
+
+- The panel is the Agent tab at the bottom of the right rail, above Diagnostics. It has the inspector's width. The conversation scrolls, and the approval, the chips, and the prompt stay at the foot, so a waiting approval is always on screen. While one waits and another tab is open, the rail button carries an accent dot.
+- Replies show as plain text on the panel. The author's prompts sit on the raised color. A tool call is one quiet line with its name and target, collapsed until clicked, with a word at its end only when it waits, was denied, or failed.
+- Diffs use Menlo at the small size, one row per line with the line number, a sign, and the text. Added and removed rows are tinted at 14 percent in the `added` and `removed` colors, and the same colors tint the passages an agent changed in the galley at 20 percent. A deleted passage has no mark in the galley, only its row in the panel.
+- Buttons in the panel are 22 px high with a thin divider border and quiet text. The choice that lets the work go on has accent text. Nothing is filled and nothing is a pill. Chips are 22 px with a 4 px radius on the raised color, and end in a close icon.
+- The setup text names an API key as the way to set Claude Code up and says what the login line reports. It never offers a login of its own.

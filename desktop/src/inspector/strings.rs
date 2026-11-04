@@ -12,6 +12,7 @@ crate::strings! {
         TabNotes => ("NOTES", "NOTIZEN"),
         TabDiagnostics => ("DIAGNOSTICS", "DIAGNOSE"),
         TabExport => ("EXPORT", "EXPORT"),
+        TabAgent => ("AGENT", "AGENT"),
 
         StyleBody => ("Regular text", "Fließtext"),
         StyleHeading1 => ("Heading 1", "Überschrift 1"),
