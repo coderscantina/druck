@@ -257,11 +257,26 @@ pub fn install(cx: &mut App) {
     refresh_menus(cx);
 }
 
+/// The licenses of the fonts and crates in the app, which travel with it in `Contents/Resources`. A build run from
+/// cargo is not in a bundle and has none beside it.
+fn notices_file() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let file = exe.parent()?.parent()?.join("Resources/THIRD_PARTY_NOTICES.md");
+    file.is_file().then_some(file)
+}
+
 fn about(window: &mut Window, cx: &mut App) {
-    let detail = format!("Druck {}", env!("CARGO_PKG_VERSION"));
-    let answer = window.prompt(PromptLevel::Info, "Druck", Some(&detail), &["OK"], cx);
-    cx.spawn(async move |_| {
-        answer.await.ok();
+    let detail = crate::t!(Key::AboutVersion, version = druck::editor::VERSION);
+    let notices = notices_file();
+    let mut buttons = vec!["OK"];
+    if notices.is_some() {
+        buttons.push(crate::t!(Key::Notices));
+    }
+    let answer = window.prompt(PromptLevel::Info, "Druck", Some(&detail), &buttons, cx);
+    cx.spawn(async move |cx| {
+        if let (Ok(1), Some(file)) = (answer.await, notices) {
+            cx.update(|cx| cx.open_with_system(&file));
+        }
     })
     .detach();
 }

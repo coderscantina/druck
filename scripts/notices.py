@@ -42,6 +42,11 @@ DESKTOP_TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 OVERRIDES = {"krilla": "krilla", "krilla-svg": "krilla"}
 OVERRIDE_DIR = ROOT / "scripts" / "license-overrides"
 
+# Standard texts (SPDX) for a crate that declares one of these licenses but ships no license file. Only the licenses a
+# crate declares are used, never a guess. Zlib asks for no notice with a binary, so it has no text here.
+SPDX_DIR = OVERRIDE_DIR / "spdx"
+SPDX_IDS = ("MIT", "Apache-2.0")
+
 LICENSE_FILE = re.compile(r"^(licen[sc]e|copying|notice|unlicense)([-_.].*)?$", re.I)
 
 # Pattern licenses for the hypher features we build ("english" and "german"),
@@ -137,12 +142,20 @@ def license_files(pkg: dict) -> list[tuple[str, str]]:
     return files
 
 
+def declared(expression: str) -> list[str]:
+    """The SPDX ids in a license expression, with `/` read as `OR` as older crates write it."""
+    return [part for part in re.split(r"[\s/()]+", expression) if part and part not in ("OR", "AND", "WITH")]
+
+
 def render(desktop: bool) -> tuple[str, list[str]]:
     targets = DESKTOP_TARGETS if desktop else TARGETS
     crates = collect(targets, "druck-desktop" if desktop else None)
     warnings: list[str] = []
     rows = []
     texts: dict[str, dict] = {}
+    # Crates with no license file: their declared licenses and authors, and the standard texts of those licenses.
+    bare: list[str] = []
+    standard: dict[str, list[str]] = {}
 
     for name, version in sorted(crates):
         pkg = crates[(name, version)]
@@ -152,7 +165,13 @@ def render(desktop: bool) -> tuple[str, list[str]]:
         rows.append(f"| {name} | {version} | {license} |")
         files = license_files(pkg)
         if not files:
-            warnings.append(f"{name} {version} ships no license file ({license})")
+            ids = [i for i in declared(pkg["license"] or "") if i in SPDX_IDS]
+            note = f"; standard text of {', '.join(ids)} added" if ids else ""
+            warnings.append(f"{name} {version} ships no license file ({license}){note}")
+            authors = ", ".join(a.split("<")[0].strip() for a in pkg["authors"]) or "(none declared)"
+            bare.append(f"| {name} | {version} | {license} | {authors} |")
+            for spdx in ids:
+                standard.setdefault(spdx, []).append(f"{name} {version}")
         for filename, text in files:
             sha = hashlib.sha256(text.encode()).hexdigest()
             entry = texts.setdefault(sha, {"text": text, "names": set(), "crates": []})
@@ -203,6 +222,23 @@ def render(desktop: bool) -> tuple[str, list[str]]:
         "| --- | --- | --- |",
         *rows,
         "",
+        *(
+            [
+                "## Crates without a license file",
+                "",
+                f"{len(bare)} crates declare a license in their manifest but ship no license text. Their copyright",
+                "holders are the authors their manifests name, or the contributors of the repository they list.",
+                "The standard texts of the licenses they declare follow the other license texts. These are not copies",
+                "from the crates.",
+                "",
+                "| Crate | Version | License | Authors |",
+                "| --- | --- | --- | --- |",
+                *bare,
+                "",
+            ]
+            if bare
+            else []
+        ),
         "## License texts",
         "",
         "Texts are copied from each crate's source. Identical texts are shown once.",
@@ -213,6 +249,11 @@ def render(desktop: bool) -> tuple[str, list[str]]:
         label = ", ".join(sorted(entry["names"]))
         used_by = ", ".join(sorted(entry["crates"]))
         out += [f"### {label}", "", f"Used by: {used_by}", "", "```text", entry["text"], "```", ""]
+    for spdx in SPDX_IDS:
+        if spdx in standard:
+            text = (SPDX_DIR / f"{spdx}.txt").read_text(encoding="utf-8").strip()
+            used_by = ", ".join(sorted(standard[spdx]))
+            out += [f"### {spdx} (standard text)", "", f"Declared by: {used_by}", "", "```text", text, "```", ""]
     return "\n".join(out).rstrip() + "\n", warnings
 
 

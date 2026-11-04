@@ -16,7 +16,7 @@ Run `scripts/release.sh` on an up-to-date `main` with a clean working tree. It:
 
 The tag push starts `.github/workflows/release.yml`. It builds and packages five targets, checks that the tag matches the version and commit, and creates the GitHub release with the archives, their checksums, and the newest changelog section as notes. Check that the workflow finished before announcing the release.
 
-Before releasing, make sure CI is green on the commit, including the cross-OS PDF comparison, and that the notices are current: run `python3 scripts/notices.py` after dependency changes and commit the result. CI fails when the file is stale (`--check`).
+Before releasing, make sure CI is green on the commit, including the cross-OS PDF comparison, and that the notices are current: run `python3 scripts/notices.py` and `python3 scripts/notices.py --desktop` after dependency changes and commit the result. CI fails when the file is stale (`--check`).
 
 ## Prerequisites
 
@@ -63,12 +63,81 @@ druck-<version>-<hash>-<target>/
 | `x86_64-apple-darwin` | `macos-latest`, cross-built and not run |
 | `x86_64-pc-windows-msvc` | `windows-latest` |
 
-The macOS and Windows binaries are not signed or notarized. Expect Gatekeeper and SmartScreen warnings until that is set up.
+The macOS and Windows command line binaries are not signed or notarized. Expect Gatekeeper and SmartScreen warnings until that is set up. The desktop app has its own script, below.
+
+## Desktop app (macOS)
+
+`scripts/package-desktop.py` builds `Druck.app` and a DMG. It runs on macOS only and uses nothing but Python's standard
+library and the tools macOS ships (`codesign`, `hdiutil`, `iconutil`, `xcrun`). It never publishes, tags, or pushes.
+
+```
+python3 scripts/package-desktop.py [--outdir dist-desktop] [--binary PATH]
+```
+
+It builds `druck-desktop` in release mode (or takes `--binary`), then writes `Druck.app`, signs it, and writes
+`druck-desktop-<version>-<hash>-aarch64-apple-darwin.dmg` with a `.sha256` file. The last lines it prints say plainly
+whether the result is ad-hoc signed, signed but not notarized, or notarized and stapled.
+
+The bundle holds:
+
+- `Contents/MacOS/Druck`, the app. Its fonts (Libertinus) and icons are compiled into it.
+- `Contents/Info.plist`: name `Druck`, identifier `com.coderscantina.druck`, the version of the root `Cargo.toml` (the
+  calendar version, without the hash), the minimum macOS read from the binary, and two document types, Markdown
+  (`.md`, `.markdown`) and folders. Both are `Alternate`, so Druck is offered under Open With and takes drops on the
+  Dock icon, and it does not become the default editor.
+- `Contents/Resources`: `Druck.icns`, `THIRD_PARTY_NOTICES.md` (the About box has a button that opens it), `OFL.txt`, and
+  `LICENSE`.
+
+The icon is a placeholder drawn by the script. Ship a real `Druck.icns` before a release that reaches other people.
+
+### Signing and notarizing
+
+Nothing secret is in the repository. The script reads two environment variables:
+
+| Variable | Holds |
+| --- | --- |
+| `DRUCK_SIGN_IDENTITY` | The name of a "Developer ID Application" certificate in a keychain `codesign` can reach, such as `Developer ID Application: Name (TEAMID)`. |
+| `DRUCK_NOTARY_PROFILE` | The name of a keychain profile made with `xcrun notarytool store-credentials`. |
+
+With neither, the app is signed ad hoc with the hardened runtime. It runs on the Mac that built it and on others only
+after right-click, Open. The script says so.
+
+The owner's steps, once:
+
+1. Have an Apple Developer Program membership and a "Developer ID Application" certificate with its private key in the
+   login keychain. `security find-identity -v -p codesigning` lists it.
+2. Make an app-specific password at account.apple.com, then store the credentials once:
+   `xcrun notarytool store-credentials druck-notary --apple-id <apple id> --team-id <TEAMID>` (it asks for the password).
+
+For each release:
+
+```
+export DRUCK_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"
+export DRUCK_NOTARY_PROFILE=druck-notary
+python3 scripts/package-desktop.py
+```
+
+The script then signs the app with `codesign --options runtime --timestamp` and the entitlements in
+`scripts/desktop.entitlements`, which hold none: the app is not sandboxed and generates no code at run time. It zips the
+app, submits it with `notarytool submit --wait`, and staples the ticket. It builds the DMG from that app, signs the
+DMG, notarizes it, and staples it. It stops on the first step that is not accepted. Check the result by hand:
+
+```
+spctl --assess --type execute --verbose dist-desktop/Druck.app
+xcrun stapler validate dist-desktop/druck-desktop-*.dmg
+```
+
+`spctl` must say `accepted, source=Notarized Developer ID`. Open the DMG on a Mac that did not build it, from a
+download, to see that Gatekeeper opens the app with no warning.
+
+The release workflow builds the app in a `desktop` job on every tag and manual run, ad-hoc signed, and keeps it as the
+workflow artifact `desktop-aarch64-apple-darwin`. The publish job does not take it. Signing in CI needs the certificate
+and the notary credentials as secrets and a step that imports them into a temporary keychain. That is not set up.
 
 ## Not automated
 
 - Publishing to crates.io.
-- Signing, notarization, Homebrew or other package manager entries.
+- Signing and notarizing the desktop app (a script does it, the owner runs it), Homebrew or other package manager entries.
 - Running the manual visual review and recording it in `docs/PROGRESS.md`.
 
 ## If PDF comparison across OSes fails
