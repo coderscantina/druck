@@ -14,7 +14,8 @@ use super::context::ChipKind;
 use super::conversation::{Entry, Status, ToolCall, ToolState};
 use super::diff::{DiffLine, Mark};
 use super::markdown::{self, Block, Inline};
-use super::{AgentView, HunkKey, MODELS, Standing, strings};
+use super::strings::{self, Key};
+use super::{AgentView, HunkKey, MODELS, Standing};
 use crate::tokens::{self, Tokens};
 
 /// The tallest a diff in an approval grows before it scrolls.
@@ -39,7 +40,7 @@ impl Render for AgentView {
 
 impl AgentView {
     fn header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let model = self.model.map_or(strings::MODEL_DEFAULT.get(), |model| model);
+        let model = self.model.map_or(crate::t!(Key::ModelDefault), |model| model);
         let busy = !self.conversation.is_idle();
         div()
             .flex_none()
@@ -52,14 +53,14 @@ impl AgentView {
             .border_color(tokens.divider)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_quiet)
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(strings::TITLE.get()))
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::t!(Key::Title)))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(tokens::SPACE_1)
                     .child(
-                        small_button("agent-model", format!("{}: {model}", strings::MODEL.get()), tokens)
+                        small_button("agent-model", format!("{}: {model}", crate::t!(Key::Model)), tokens)
                             .when(busy, |button| button.opacity(0.5))
                             .when(!busy, |button| {
                                 button.on_click(cx.listener(|view, _, _, cx| {
@@ -69,7 +70,7 @@ impl AgentView {
                             }),
                     )
                     .child(
-                        small_button("agent-new", strings::NEW_CONVERSATION.get().to_owned(), tokens)
+                        small_button("agent-new", crate::t!(Key::NewConversation).to_owned(), tokens)
                             .when(busy, |button| button.opacity(0.5))
                             .when(!busy, |button| {
                                 button.on_click(cx.listener(|view, _, _, cx| view.new_conversation(cx)))
@@ -83,7 +84,7 @@ impl AgentView {
             .iter()
             .copied()
             .map(|model| {
-                let label = model.map_or(strings::MODEL_DEFAULT.get(), |model| model);
+                let label = model.map_or(crate::t!(Key::ModelDefault), |model| model);
                 div()
                     .id(label)
                     .h(tokens::LIST_ROW_HEIGHT)
@@ -119,9 +120,9 @@ impl AgentView {
                 rows.push(quiet(
                     tokens,
                     if self.resumable {
-                        strings::RESUMED.get()
+                        crate::t!(Key::Resumed)
                     } else {
-                        strings::INTRO.get()
+                        crate::t!(Key::Intro)
                     },
                 ));
             }
@@ -130,9 +131,9 @@ impl AgentView {
             }
             match self.conversation.status() {
                 Status::Working if self.conversation.approvals().next().is_none() => {
-                    rows.push(faint(tokens, strings::WORKING.get()));
+                    rows.push(faint(tokens, crate::t!(Key::Working)));
                 }
-                Status::Stopping => rows.push(faint(tokens, strings::STOPPING.get())),
+                Status::Stopping => rows.push(faint(tokens, crate::t!(Key::Stopping))),
                 _ => {}
             }
         }
@@ -153,26 +154,26 @@ impl AgentView {
     /// What the panel says about the CLI: being looked for, missing, or what version and login it has.
     fn status_rows(&self, tokens: &Tokens) -> Vec<AnyElement> {
         let Some(cli) = &self.cli else {
-            return vec![faint(tokens, strings::CHECKING.get())];
+            return vec![faint(tokens, crate::t!(Key::Checking))];
         };
         let mut rows = Vec::new();
         match &cli.state {
             CliState::Missing => {
                 rows.push(card(
                     tokens,
-                    strings::SETUP_TITLE.get(),
+                    crate::t!(Key::SetupTitle),
                     &[
-                        strings::SETUP_MISSING.get(),
-                        strings::SETUP_STEPS.get(),
-                        strings::SETUP_OWNER.get(),
+                        crate::t!(Key::SetupMissing),
+                        crate::t!(Key::SetupSteps),
+                        crate::t!(Key::SetupOwner),
                     ],
                 ));
             }
             CliState::Unreadable(_) => {
                 rows.push(card(
                     tokens,
-                    strings::SETUP_TITLE.get(),
-                    &[strings::CLI_UNREADABLE.get(), strings::SETUP_STEPS.get()],
+                    crate::t!(Key::SetupTitle),
+                    &[crate::t!(Key::CliUnreadable), crate::t!(Key::SetupSteps)],
                 ));
             }
             CliState::Untested(version) => {
@@ -190,12 +191,12 @@ impl AgentView {
     /// Which login the CLI reports, in plain words, and what is not settled about a subscription.
     fn login_rows(&self, login: &Login, tokens: &Tokens) -> Vec<AnyElement> {
         match login {
-            Login::LoggedOut => vec![quiet(tokens, strings::LOGGED_OUT.get())],
-            Login::Unknown => vec![faint_owned(tokens, strings::login_unknown())],
+            Login::LoggedOut => vec![quiet(tokens, crate::t!(Key::LoggedOut))],
+            Login::Unknown => vec![faint_owned(tokens, crate::t!(Key::LoginUnknown).to_owned())],
             Login::LoggedIn { method, plan } => {
                 let mut rows = vec![faint_owned(tokens, strings::login_line(method, plan.as_deref()))];
                 if method == "claude.ai" {
-                    rows.push(faint(tokens, strings::SUBSCRIPTION_NOTE.get()));
+                    rows.push(faint(tokens, crate::t!(Key::SubscriptionNote)));
                 }
                 rows
             }
@@ -241,7 +242,7 @@ impl AgentView {
                 .child(message.clone())
                 .into_any_element(),
             Entry::Notice(message) => quiet_owned(tokens, message.clone()),
-            Entry::Stopped => faint(tokens, strings::STOPPED.get()),
+            Entry::Stopped => faint(tokens, crate::t!(Key::Stopped)),
             Entry::TurnEnd { cost_usd, changes } => {
                 let cost = (*cost_usd).map(strings::turn_cost);
                 div()
@@ -265,9 +266,9 @@ impl AgentView {
     fn tool_row(&self, index: usize, tool: &ToolCall, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let (state, color) = match tool.state {
             ToolState::Running | ToolState::Done => ("", tokens.text_faint),
-            ToolState::Waiting => (strings::TOOL_WAITING.get(), tokens.accent),
-            ToolState::Failed => (strings::TOOL_FAILED.get(), tokens.removed),
-            ToolState::Denied => (strings::TOOL_DENIED.get(), tokens.removed),
+            ToolState::Waiting => (crate::t!(Key::ToolWaiting), tokens.accent),
+            ToolState::Failed => (crate::t!(Key::ToolFailed), tokens.removed),
+            ToolState::Denied => (crate::t!(Key::ToolDenied), tokens.removed),
         };
         let open = self.expanded.contains(&index);
         let has_output = !tool.output.is_empty();
@@ -389,9 +390,9 @@ impl AgentView {
         let hunk = &tracked.hunk;
         let note = match standing {
             Standing::Applied => None,
-            Standing::Reverted => Some(strings::HUNK_REVERTED.get()),
-            Standing::Moved => Some(strings::HUNK_MOVED.get()),
-            Standing::NotOpen => Some(strings::HUNK_NOT_OPEN.get()),
+            Standing::Reverted => Some(crate::t!(Key::HunkReverted)),
+            Standing::Moved => Some(crate::t!(Key::HunkMoved)),
+            Standing::NotOpen => Some(crate::t!(Key::HunkNotOpen)),
         };
         let shown: Vec<_> = hunk
             .lines
@@ -435,13 +436,13 @@ impl AgentView {
                     )))
                     .when(standing != Standing::NotOpen && standing != Standing::Moved, |row| {
                         row.child(
-                            small_button(("hunk-show", id), strings::SHOW.get().to_owned(), tokens)
+                            small_button(("hunk-show", id), crate::t!(Key::Show).to_owned(), tokens)
                                 .on_click(cx.listener(move |view, _, window, cx| view.reveal(key, window, cx))),
                         )
                     })
                     .when(standing == Standing::Applied, |row| {
                         row.child(
-                            small_button(("hunk-revert", id), strings::REVERT.get().to_owned(), tokens)
+                            small_button(("hunk-revert", id), crate::t!(Key::Revert).to_owned(), tokens)
                                 .on_click(cx.listener(move |view, _, window, cx| view.revert(key, window, cx))),
                         )
                     }),
@@ -518,12 +519,12 @@ impl AgentView {
                             String::new()
                         })
                         .child(if busy {
-                            small_button("agent-stop", strings::STOP.get().to_owned(), tokens)
+                            small_button("agent-stop", crate::t!(Key::Stop).to_owned(), tokens)
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(|view, _, _, cx| view.stop(cx)))
                                 .into_any_element()
                         } else {
-                            small_button("agent-send", strings::SEND.get().to_owned(), tokens)
+                            small_button("agent-send", crate::t!(Key::Send).to_owned(), tokens)
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(|view, _, window, cx| view.send(window, cx)))
                                 .into_any_element()
@@ -585,7 +586,7 @@ impl AgentView {
         let preview = match &approval.preview {
             Preview::Diff(lines) => Some(diff_view(lines, tokens).into_any_element()),
             Preview::Text(text) => Some(mono_block(tokens, text.clone()).into_any_element()),
-            Preview::Nothing => Some(faint(tokens, strings::NEW_FILE.get())),
+            Preview::Nothing => Some(faint(tokens, crate::t!(Key::NewFile))),
         };
         let (once_id, deny_id, session_id, reason_id) = (id.clone(), id.clone(), id.clone(), id.clone());
         div()
@@ -599,7 +600,7 @@ impl AgentView {
             .border_color(tokens.accent)
             .bg(tokens.raised)
             .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-            .when(dirty, |card| card.child(quiet(tokens, strings::UNSAVED_WARNING.get())))
+            .when(dirty, |card| card.child(quiet(tokens, crate::t!(Key::UnsavedWarning))))
             .when_some(preview, |card, preview| card.child(preview))
             .when(!denying, |card| {
                 card.child(
@@ -608,21 +609,22 @@ impl AgentView {
                         .flex_wrap()
                         .gap(tokens::SPACE_1)
                         .child(
-                            small_button("approve-once", strings::ALLOW_ONCE.get().to_owned(), tokens)
+                            small_button("approve-once", crate::t!(Key::AllowOnce).to_owned(), tokens)
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(move |view, _, _, cx| view.allow(&once_id, false, cx))),
                         )
                         .child(
-                            small_button("approve-deny", strings::DENY.get().to_owned(), tokens)
+                            small_button("approve-deny", crate::t!(Key::Deny).to_owned(), tokens)
                                 .on_click(cx.listener(move |view, _, _, cx| view.deny(&deny_id, "", cx))),
                         )
                         .child(
-                            small_button("approve-reason", strings::DENY_WITH_REASON.get().to_owned(), tokens)
-                                .on_click(cx.listener(move |view, _, window, cx| {
+                            small_button("approve-reason", crate::t!(Key::DenyWithReason).to_owned(), tokens).on_click(
+                                cx.listener(move |view, _, window, cx| {
                                     view.denying = Some(reason_id.clone());
                                     window.focus(&gpui::Focusable::focus_handle(view.reason.read(cx), cx), cx);
                                     cx.notify();
-                                })),
+                                }),
+                            ),
                         )
                         .when_some(rule, |row, rule| {
                             row.child(
@@ -633,14 +635,14 @@ impl AgentView {
                 )
             })
             .when(denying, |card| {
-                card.child(faint(tokens, strings::REASON_LABEL.get()))
+                card.child(faint(tokens, crate::t!(Key::ReasonLabel)))
                     .child(self.reason.clone())
                     .child(
                         div()
                             .flex()
                             .gap(tokens::SPACE_1)
                             .child(
-                                small_button("approve-send-denial", strings::SEND_DENIAL.get().to_owned(), tokens)
+                                small_button("approve-send-denial", crate::t!(Key::SendDenial).to_owned(), tokens)
                                     .text_color(tokens.accent)
                                     .on_click(cx.listener(move |view, _, _, cx| {
                                         let reason = view.reason.read(cx).text().to_owned();
@@ -650,7 +652,7 @@ impl AgentView {
                                     })),
                             )
                             .child(
-                                small_button("approve-back", strings::BACK.get().to_owned(), tokens).on_click(
+                                small_button("approve-back", crate::t!(Key::Back).to_owned(), tokens).on_click(
                                     cx.listener(|view, _, _, cx| {
                                         view.denying = None;
                                         cx.notify();
@@ -662,9 +664,9 @@ impl AgentView {
             .child(faint(
                 tokens,
                 if approval.session_rule.is_some() {
-                    strings::SCOPE_SESSION.get()
+                    crate::t!(Key::ScopeSession)
                 } else {
-                    strings::SCOPE_ONCE.get()
+                    crate::t!(Key::ScopeOnce)
                 },
             ))
             .when(more > 0, |card| {
@@ -677,9 +679,10 @@ impl AgentView {
     fn is_unsaved(&self, file: &std::path::Path, cx: &Context<Self>) -> bool {
         let editor = self.editor.read(cx);
         let session = editor.session();
-        super::carry::chapters_at(session, file)
-            .into_iter()
-            .any(|id| session.chapter(id).is_some_and(|chapter| chapter.is_dirty()))
+        super::file_in_session(session, file)
+            .and_then(|known| session.chapter_of_file(&known))
+            .and_then(|id| session.chapter(id))
+            .is_some_and(|chapter| chapter.is_dirty())
     }
 }
 

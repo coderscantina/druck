@@ -142,6 +142,21 @@ impl Session {
         })
     }
 
+    /// The chapter holding a place in a file's text, and the place in that chapter. A single file's sections each hold
+    /// part of its text.
+    pub fn place_in_file(&self, path: &Path, at: usize) -> Option<(ChapterId, usize)> {
+        let ids = self.ids_of(path);
+        let mut start = 0;
+        for (index, id) in ids.iter().enumerate() {
+            let length = self.known(*id).buffer.len();
+            if at < start + length || index + 1 == ids.len() {
+                return Some((*id, at - start));
+            }
+            start += length;
+        }
+        None
+    }
+
     pub fn file_base(&self, path: &Path) -> Option<FileBase> {
         let synced = self.synced.get(path)?;
         Some(FileBase {

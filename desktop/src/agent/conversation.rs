@@ -78,6 +78,8 @@ pub enum Effect {
     SessionId(String),
     /// A tool reported a patch for this file, now in the turn's changes.
     Patched(PathBuf),
+    /// The turn is over: what it did to the files is on disk by now.
+    TurnEnded,
     /// A tool created this file.
     Created(PathBuf),
     /// The process ended; a new prompt starts a new one.
@@ -268,16 +270,6 @@ impl Conversation {
                     tool.output = clip(&content);
                 }
                 if !is_error {
-                    let writes = self
-                        .tool(&tool_use_id)
-                        .is_some_and(|tool| matches!(tool.name.as_str(), "Edit" | "Write" | "MultiEdit"));
-                    let patch = details
-                        .as_ref()
-                        .is_some_and(|details| details["structuredPatch"].is_array() || details["type"] == "create");
-                    if writes && !patch {
-                        // A CLI that stops sending patches would leave the editor behind without a word.
-                        self.entries.push(Entry::Notice(strings::NO_PATCH.get().to_owned()));
-                    }
                     if let Some(details) = details {
                         effects.extend(self.record_changes(&details));
                     }
@@ -307,12 +299,11 @@ impl Conversation {
                 } else if is_error {
                     self.entries.push(Entry::Error(result));
                 }
-                let turn = self.turns.len().checked_sub(1);
-                let changes = turn.filter(|turn| self.changes(*turn).is_some());
                 self.entries.push(Entry::TurnEnd {
                     cost_usd: cost,
-                    changes,
+                    changes: self.turns.len().checked_sub(1),
                 });
+                effects.push(Effect::TurnEnded);
                 if !session_id.is_empty() {
                     self.session_id = Some(session_id.clone());
                     effects.push(Effect::SessionId(session_id));
@@ -561,27 +552,6 @@ mod tests {
         let pending = c.stop();
         assert_eq!(pending.len(), 1);
         assert_eq!(c.approvals().count(), 0);
-    }
-
-    #[test]
-    fn a_write_without_a_patch_is_said_not_hidden() {
-        let mut c = conversation();
-        c.begin_turn("x".into(), None);
-        let events = vec![
-            Event::ToolUse {
-                id: "t1".into(),
-                name: "Edit".into(),
-                input: serde_json::json!({"file_path": "/work/project/notes.md"}),
-            },
-            Event::ToolResult {
-                tool_use_id: "t1".into(),
-                content: "updated".into(),
-                is_error: false,
-                details: Some(serde_json::json!({"filePath": "/work/project/notes.md"})),
-            },
-        ];
-        run(&mut c, events);
-        assert!(c.entries().contains(&Entry::Notice(strings::NO_PATCH.get().to_owned())));
     }
 
     #[test]

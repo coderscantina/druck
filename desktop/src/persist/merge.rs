@@ -247,6 +247,15 @@ fn settle(base: &[&str], mine: &[&str], theirs: &[&str], refine: bool, merged: &
     merged.chunks.push(Chunk::Conflict { mine, theirs });
 }
 
+/// Which lines changed from `old` to `new`, as pairs of line ranges, for showing whole lines. See [`edits_between`] for
+/// the same changes as small as words.
+pub fn line_changes(old: &str, new: &str) -> Vec<(Range<usize>, Range<usize>)> {
+    hunks(&lines(old), &lines(new))
+        .into_iter()
+        .map(|hunk| (hunk.base, hunk.other))
+        .collect()
+}
+
 /// The edits that turn `old` into `new`, as small as words, for an undo step that keeps the caret in place.
 pub fn edits_between(old: &str, new: &str) -> Vec<Edit> {
     let (old_lines, new_lines) = (lines(old), lines(new));

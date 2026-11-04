@@ -44,10 +44,10 @@ const SCREEN_MARGIN: f32 = 80.;
 
 /// Mounts what later slices own into the workspace's slots and tabs. One line per view.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
-    crate::persist::mount(parts, slots, window, cx);
+    let persist = crate::persist::mount(parts, slots, window, cx);
     shell::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
-    crate::agent::mount(parts, window, cx);
+    crate::agent::mount(parts, persist, window, cx);
     crate::editor::mount(parts, slots, cx);
 }
 

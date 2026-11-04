@@ -81,8 +81,14 @@ impl Render for LaunchView {
                     "report" => "icons/contents.svg",
                     _ => "icons/file.svg",
                 };
-                Self::row(&tokens, starter.slug, icon, starter.name, starter.description)
-                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(LaunchEvent::New(starter))))
+                Self::row(
+                    &tokens,
+                    starter.slug,
+                    icon,
+                    crate::t!(starter.name),
+                    crate::t!(starter.description),
+                )
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(LaunchEvent::New(starter))))
             })
             .collect();
         div()

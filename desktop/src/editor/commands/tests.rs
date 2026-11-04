@@ -10,9 +10,9 @@ use super::convert::{self, BlockType, TARGETS};
 use super::marks::{self, Mark};
 use super::slash::{self, Action, Context, Standalone};
 use super::{Command, applied, moves, notes};
-use crate::editor::strings::{DE, EN, Strings};
 use crate::preview::job::Typesetter;
 use crate::session::{Session, TEMPLATES};
+use crate::shell::strings::Language;
 use crate::source::{BlockKind, Blocks, Buffer, EditKind, Selection};
 
 const CORPUS: &str = "Development/books/ttp404-gott-nicht-gefunden/buch-1-ttp404/manuscript";
@@ -311,7 +311,7 @@ fn every_slash_entry_round_trips_in_every_kind_of_block() {
             first_image: Some("image.png".to_owned()),
             ..Context::default()
         };
-        let items = slash::items(&context, &EN);
+        let items = slash::items(&context, Language::English);
         for (index, selection) in samples_of(&text, &blocks) {
             let kind = blocks.as_slice()[index].kind;
             if !selection.is_empty() || !slash::opens_at(kind, " /", 1) {
@@ -323,7 +323,9 @@ fn every_slash_entry_round_trips_in_every_kind_of_block() {
             let typed_blocks = Blocks::parse(&typed);
             let block = typed_blocks.index_at(caret);
             for item in &items {
-                let Some(command) = slash::apply(&typed, &typed_blocks, caret..caret + 1, &item.action, &EN) else {
+                let Some(command) =
+                    slash::apply(&typed, &typed_blocks, caret..caret + 1, &item.action, Language::English)
+                else {
                     continue;
                 };
                 let reach = typed_blocks.as_slice()[block].range.clone();
@@ -419,7 +421,7 @@ fn context_for(text: &str, blocks: &Blocks, slash_at: usize) -> Context {
     }
 }
 
-fn check_inserts(document: &str, name: &str, strings: &'static Strings) {
+fn check_inserts(document: &str, name: &str, language: Language) {
     let scratch = Scratch::new(name);
     let text = document.replace("/QUERY", "/");
     let slash_at = text.find("/\n").expect("a slash");
@@ -428,11 +430,11 @@ fn check_inserts(document: &str, name: &str, strings: &'static Strings) {
     let base = scratch.problem(&text.replace("/\n", "\n"));
     assert!(base.is_none(), "the base document renders: {base:?}");
     let mut tried = 0;
-    for item in slash::items(&context, strings) {
+    for item in slash::items(&context, language) {
         if matches!(item.action, Action::Section(_)) {
             continue;
         }
-        let Some(command) = slash::apply(&text, &blocks, slash_at..slash_at + 1, &item.action, strings) else {
+        let Some(command) = slash::apply(&text, &blocks, slash_at..slash_at + 1, &item.action, language) else {
             panic!("{}: no command in {name}", item.label);
         };
         let result = applied(&text, &command.edits);
@@ -446,22 +448,22 @@ fn check_inserts(document: &str, name: &str, strings: &'static Strings) {
 
 #[test]
 fn every_insert_renders_through_the_engine_with_text_on_the_line() {
-    check_inserts(DOCUMENT, "paragraph", &EN);
+    check_inserts(DOCUMENT, "paragraph", Language::English);
 }
 
 #[test]
 fn every_insert_renders_through_the_engine_on_an_empty_line_in_both_languages() {
-    check_inserts(EMPTY_LINE, "empty", &EN);
-    check_inserts(EMPTY_LINE, "empty-de", &DE);
+    check_inserts(EMPTY_LINE, "empty", Language::English);
+    check_inserts(EMPTY_LINE, "empty-de", Language::German);
 }
 
 #[test]
 fn every_insert_renders_through_the_engine_inside_other_blocks() {
-    check_inserts(IN_LIST, "list", &EN);
-    check_inserts(IN_HEADING, "heading", &EN);
-    check_inserts(IN_QUOTE, "quote", &EN);
-    check_inserts(IN_KEEP, "keep", &EN);
-    check_inserts(IN_NOTE, "note", &EN);
+    check_inserts(IN_LIST, "list", Language::English);
+    check_inserts(IN_HEADING, "heading", Language::English);
+    check_inserts(IN_QUOTE, "quote", Language::English);
+    check_inserts(IN_KEEP, "keep", Language::English);
+    check_inserts(IN_NOTE, "note", Language::English);
 }
 
 #[test]
@@ -470,7 +472,7 @@ fn a_second_table_of_contents_is_not_offered() {
     let blocks = Blocks::parse(text);
     let context = context_for(text, &blocks, 9);
     assert!(
-        !slash::items(&context, &EN)
+        !slash::items(&context, Language::English)
             .iter()
             .any(|item| item.action == Action::Insert(Standalone::Toc))
     );
@@ -503,7 +505,7 @@ fn an_image_from_a_projects_assets_renders_in_a_chapter() {
     let text = session.active_buffer().text().to_owned();
     let blocks = Blocks::parse(&text);
     let at = text.find('/').expect("a slash");
-    let command = slash::apply(&text, &blocks, at..at + 1, &Action::Image(path), &EN).expect("a command");
+    let command = slash::apply(&text, &blocks, at..at + 1, &Action::Image(path), Language::English).expect("a command");
     session
         .active_buffer_mut()
         .transact(
@@ -522,7 +524,7 @@ fn an_image_from_a_projects_assets_renders_in_a_chapter() {
 
 #[test]
 fn every_template_is_on_the_list() {
-    let items = slash::items(&Context::default(), &EN);
+    let items = slash::items(&Context::default(), Language::English);
     for template in TEMPLATES {
         assert!(items.iter().any(|item| item.action == Action::Section(template.slug)));
     }

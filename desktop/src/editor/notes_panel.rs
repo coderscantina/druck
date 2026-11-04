@@ -13,7 +13,7 @@ use gpui::{
 };
 
 use super::commands::notes::{Note, leading_notes};
-use super::strings::strings;
+use super::strings::Key;
 use super::{
     Backspace, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView, Left, LineEnd,
     LineStart, NewBlock, NewLine, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectLineEnd,
@@ -74,7 +74,6 @@ impl NotesPanel {
 impl Render for NotesPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
-        let strings = strings();
         let header = div()
             .flex_none()
             .h(tokens::SECTION_HEIGHT)
@@ -86,7 +85,7 @@ impl Render for NotesPanel {
             .text_size(tokens::TEXT_SMALL)
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(tokens.text_quiet)
-            .child(strings.notes_title);
+            .child(crate::t!(Key::NotesTitle));
         let body = div()
             .id("notes")
             .flex_1()
@@ -102,7 +101,7 @@ impl Render for NotesPanel {
                     div()
                         .text_size(tokens::TEXT_SMALL)
                         .text_color(tokens.text_faint)
-                        .child(strings.notes_empty),
+                        .child(crate::t!(Key::NotesEmpty)),
                 )
             })
             .children(self.fields.iter().cloned());
@@ -315,7 +314,6 @@ impl Focusable for NoteField {
 impl Render for NoteField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
-        let strings = strings();
         let text = self.shown(cx);
         let color = tokens.text;
         let run = TextRun {
@@ -460,7 +458,7 @@ impl Render for NoteField {
                     div()
                         .text_size(tokens::TEXT_SMALL)
                         .text_color(tokens.accent)
-                        .child(strings.notes_refused),
+                        .child(crate::t!(Key::NotesRefused)),
                 )
             })
             .child(field)

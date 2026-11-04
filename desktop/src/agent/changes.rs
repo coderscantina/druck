@@ -5,16 +5,23 @@
 //! second edit shifts lines. So a hunk is never held as a position. It is found again by its lines, nearest to where
 //! it was last seen, and a hunk whose lines are gone is reported as such and offers nothing.
 //!
-//! This is the seam to the Persistence slice. It takes a hunk and the buffer's current text and answers where the
-//! hunk is, what undoes it, and what applies it, without knowing how text reached the buffer.
+//! Hunks come from what Persistence sees on disk, `base` to `theirs` of each [`FileChange`](crate::persist::FileChange),
+//! so an edit through Bash has them too. Persistence takes the text into the buffer. This module answers where a hunk
+//! is now and what the author's text would be without it. A file the session does not have keeps the hunks of the CLI's
+//! own patch, which can only be shown.
 
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use super::diff::{Mark, lines};
+use crate::persist::merge::{Choice, line_changes, three_way};
 use crate::session::ChapterId;
+
+/// Unchanged lines kept around a change, to find it again by.
+const CONTEXT: usize = 2;
 
 /// One line of a patch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,29 +210,6 @@ fn locate(hunk: &Hunk, side: Side, text: &Text, near: usize) -> Option<Place> {
     Some(Place { range, line: first })
 }
 
-/// Lines to write over `range` of `text`, each ended by a line break unless it is the text's last line and had none.
-fn join(lines: &[&str], text: &Text, range: &Range<usize>) -> String {
-    let unterminated = range.end == text.text.len() && !text.text.is_empty() && !text.text.ends_with('\n');
-    let mut out = lines.join("\n");
-    if lines.is_empty() {
-        return out;
-    }
-    if range.is_empty() && unterminated {
-        // The lines go after a last line that has no line break yet.
-        out.insert(0, '\n');
-    } else if range.is_empty() || !unterminated {
-        out.push('\n');
-    }
-    out
-}
-
-/// A change to make to a text: replace `range` with `text`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Replacement {
-    pub range: Range<usize>,
-    pub text: String,
-}
-
 /// The hunk as the author sees it in their text now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Presence {
@@ -237,12 +221,22 @@ pub enum Presence {
     Moved,
 }
 
+/// One file's change on disk, for taking a hunk of it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OnDisk {
+    base: Arc<str>,
+    theirs: Arc<str>,
+    /// The hunk's bytes in `base` and in `theirs`.
+    old: Range<usize>,
+    new: Range<usize>,
+}
+
 /// A hunk together with where it was last seen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tracked {
     pub hunk: Hunk,
-    /// The chapter whose buffer holds the file, once a merge found it open.
-    pub chapter: Option<ChapterId>,
+    /// The change this hunk is part of. Only a file the session has can be taken back from.
+    on_disk: Option<OnDisk>,
     /// The line, counting from 0, to look nearest to. It follows the hunk as it is found.
     near: usize,
 }
@@ -252,7 +246,7 @@ impl Tracked {
         let near = hunk.first_changed_line(Side::New);
         Self {
             hunk,
-            chapter: None,
+            on_disk: None,
             near,
         }
     }
@@ -269,73 +263,76 @@ impl Tracked {
         }
     }
 
-    /// What puts the lines from before the change back, if the changed lines are in the text.
-    pub fn revert(&mut self, text: &str) -> Option<Replacement> {
-        let Presence::Applied(place) = self.presence(text) else {
+    /// What the author's text `mine` becomes with this hunk taken back, keeping everything else in it. `None` when the
+    /// hunk's lines are not as the agent left them, since a revert must not touch the author's words.
+    pub fn revert(&mut self, mine: &str) -> Option<String> {
+        if !matches!(self.presence(mine), Presence::Applied(_)) {
             return None;
-        };
-        let sides = self.hunk.sides(Side::Old);
-        let text = Text::new(text);
-        Some(Replacement {
-            text: join(&sides.core, &text, &place.range),
-            range: place.range,
-        })
-    }
-
-    /// What makes the changed lines appear, if the lines from before the change are in the text. A text that
-    /// already has them needs nothing, and a text that has neither is a conflict, both reported by [`Self::presence`].
-    pub fn apply(&mut self, text: &str) -> Option<Replacement> {
-        let Presence::Absent(place) = self.presence(text) else {
-            return None;
-        };
-        let sides = self.hunk.sides(Side::New);
-        let text = Text::new(text);
-        Some(Replacement {
-            text: join(&sides.core, &text, &place.range),
-            range: place.range,
-        })
+        }
+        let disk = self.on_disk.as_ref()?;
+        let without = format!(
+            "{}{}{}",
+            &disk.theirs[..disk.new.start],
+            &disk.base[disk.old.clone()],
+            &disk.theirs[disk.new.end..]
+        );
+        let merged = three_way(&disk.theirs, mine, &without);
+        merged.is_clean().then(|| merged.text(Choice::Mine))
     }
 }
 
-/// What carrying one hunk of an agent's patch into a text came to.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Outcome {
-    /// Make this change. All of a text's replacements apply in one transaction, in order and without overlap.
-    Replace(Replacement),
-    /// The text already has the hunk.
-    Already,
-    /// The lines the hunk changed were edited since: the text keeps the author's version.
-    Conflict,
-}
-
-/// Plans carrying `hunks` into `text` without touching anything else in it. Used until the Persistence slice
-/// merges files on disk into buffers itself.
-pub fn merge(hunks: &mut [Tracked], text: &str) -> Vec<Outcome> {
-    let mut planned: Vec<Range<usize>> = Vec::new();
-    hunks
-        .iter_mut()
-        .map(|tracked| match tracked.presence(text) {
-            Presence::Applied(_) => Outcome::Already,
-            Presence::Moved => Outcome::Conflict,
-            Presence::Absent(_) => match tracked.apply(text) {
-                Some(replacement)
-                    if !planned
-                        .iter()
-                        .any(|other| replacement.range.start < other.end && other.start < replacement.range.end) =>
-                {
-                    planned.push(replacement.range.clone());
-                    Outcome::Replace(replacement)
-                }
-                _ => Outcome::Conflict,
-            },
+/// The hunks that turn `base` into `theirs`, by whole lines.
+fn hunks_between(base: &Arc<str>, theirs: &Arc<str>) -> Vec<Tracked> {
+    let (old_text, new_text) = (Text::new(base), Text::new(theirs));
+    line_changes(base, theirs)
+        .into_iter()
+        .map(|(old, new)| {
+            let before = old.start.saturating_sub(CONTEXT)..old.start;
+            let after = old.end..(old.end + CONTEXT).min(old_text.lines.len());
+            let line = |mark, text: &&str| PatchLine {
+                mark,
+                text: (*text).to_owned(),
+            };
+            let lines = (old_text.lines[before.clone()]
+                .iter()
+                .map(|text| line(Mark::Context, text)))
+            .chain(old_text.lines[old.clone()].iter().map(|text| line(Mark::Removed, text)))
+            .chain(new_text.lines[new.clone()].iter().map(|text| line(Mark::Added, text)))
+            .chain(old_text.lines[after].iter().map(|text| line(Mark::Context, text)))
+            .collect();
+            let hunk = Hunk {
+                old_start: before.start + 1,
+                new_start: new.start - before.len() + 1,
+                lines,
+            };
+            Tracked {
+                near: new.start,
+                hunk,
+                on_disk: Some(OnDisk {
+                    base: base.clone(),
+                    theirs: theirs.clone(),
+                    old: old_text.start_of(old.start)..old_text.start_of(old.end),
+                    new: new_text.start_of(new.start)..new_text.start_of(new.end),
+                }),
+            }
         })
         .collect()
+}
+
+/// A change on disk from one text to another. Changes that follow each other in a turn count as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Step {
+    base: Arc<str>,
+    theirs: Arc<str>,
 }
 
 /// The changes one turn made to one file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileChanges {
     pub path: PathBuf,
+    /// The chapter holding the file, once its change was seen on disk. It survives a rename.
+    pub chapter: Option<ChapterId>,
+    steps: Vec<Step>,
     pub hunks: Vec<Tracked>,
 }
 
@@ -356,28 +353,67 @@ impl TurnChanges {
         self.files.iter().map(|file| file.hunks.len()).sum()
     }
 
-    /// Adds a patch to a file, which a second edit in the turn does again.
+    /// Adds the CLI's patch to a file the session does not have, which a second edit in the turn does again.
     pub fn add(&mut self, path: PathBuf, hunks: Vec<Hunk>) {
         let tracked = hunks.into_iter().map(Tracked::new);
         match self.files.iter_mut().find(|file| file.path == path) {
             Some(file) => file.hunks.extend(tracked),
             None => self.files.push(FileChanges {
                 path,
+                chapter: None,
+                steps: Vec::new(),
                 hunks: tracked.collect(),
             }),
         }
     }
 
-    pub fn file_mut(&mut self, path: &std::path::Path) -> Option<&mut FileChanges> {
-        self.files.iter_mut().find(|file| file.path == path)
+    /// Forgets the CLI's patch of a file the session has: what is on disk tells more, also about other tools.
+    pub fn forget_patch(&mut self, path: &std::path::Path) {
+        self.files
+            .retain(|file| file.path != path || file.chapter.is_some() || !file.steps.is_empty());
+    }
+
+    /// Takes in a change seen on disk. Returns whether it was news, as an unresolved one is told again.
+    pub fn observe(&mut self, path: PathBuf, chapter: Option<ChapterId>, base: Arc<str>, theirs: Arc<str>) -> bool {
+        let same = |file: &FileChanges| (chapter.is_some() && file.chapter == chapter) || file.path == path;
+        let at = self.files.iter().position(same).unwrap_or_else(|| {
+            self.files.push(FileChanges {
+                path: path.clone(),
+                chapter,
+                steps: Vec::new(),
+                hunks: Vec::new(),
+            });
+            self.files.len() - 1
+        });
+        let file = &mut self.files[at];
+        file.path = path;
+        file.chapter = chapter;
+        match file.steps.last_mut() {
+            Some(last) if last.base == base && last.theirs == theirs => return false,
+            Some(last) if last.theirs == base => last.theirs = theirs,
+            _ => file.steps.push(Step { base, theirs }),
+        }
+        file.steps.retain(|step| step.base != step.theirs);
+        file.hunks = file
+            .steps
+            .iter()
+            .flat_map(|step| hunks_between(&step.base, &step.theirs))
+            .collect();
+        true
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+
     use serde_json::json;
 
     use super::*;
+    use crate::persist::sync::{ChangeKind, FileSync};
+    use crate::session::Session;
+    use crate::source::{Edit, EditKind};
 
     const NOTES: &str = "# Notes\n\nHello world.\n\nA second line.\n";
 
@@ -387,10 +423,11 @@ mod tests {
         Tracked::new(Hunk::parse_all(&patch).remove(0))
     }
 
-    fn applied(text: &str, replacement: &Replacement) -> String {
-        let mut out = text.to_owned();
-        out.replace_range(replacement.range.clone(), &replacement.text);
-        out
+    /// The one hunk between two texts.
+    fn only_hunk(base: &str, theirs: &str) -> Tracked {
+        let mut hunks = hunks_between(&base.into(), &theirs.into());
+        assert_eq!(hunks.len(), 1);
+        hunks.remove(0)
     }
 
     #[test]
@@ -408,25 +445,23 @@ mod tests {
     }
 
     #[test]
-    fn a_hunk_is_found_and_put_back() {
-        let mut hunk = hello_patch();
-        let after = "# Notes\n\nHowdy world.\n\nA second line.\n";
-        let Presence::Applied(place) = hunk.presence(after) else {
-            panic!("applied")
-        };
-        assert_eq!(&after[place.range.clone()], "Howdy world.\n");
-        let revert = hunk.revert(after).expect("revert");
-        assert_eq!(applied(after, &revert), NOTES);
+    fn a_change_on_disk_gives_the_same_hunk_as_the_clis_patch() {
+        let theirs = "# Notes\n\nHowdy world.\n\nA second line.\n";
+        let tracked = only_hunk(NOTES, theirs);
+        assert_eq!(tracked.hunk, hello_patch().hunk);
     }
 
     #[test]
-    fn a_hunk_follows_text_typed_above_it() {
-        let mut hunk = hello_patch();
-        let moved = "A new opening paragraph.\n\nAnd another one.\n\n# Notes\n\nHowdy world.\n\nA second line.\n";
-        let revert = hunk.revert(moved).expect("still found");
+    fn a_hunk_is_found_after_text_moved_it() {
+        let mut hunk = only_hunk(NOTES, "# Notes\n\nHowdy world.\n\nA second line.\n");
+        let moved = "A new opening.\n\n# Notes\n\nHowdy world.\n\nA second line.\n";
+        let Presence::Applied(place) = hunk.presence(moved) else {
+            panic!("applied")
+        };
+        assert_eq!(&moved[place.range.clone()], "Howdy world.\n");
         assert_eq!(
-            applied(moved, &revert),
-            "A new opening paragraph.\n\nAnd another one.\n\n# Notes\n\nHello world.\n\nA second line.\n"
+            hunk.revert(moved).as_deref(),
+            Some("A new opening.\n\n# Notes\n\nHello world.\n\nA second line.\n")
         );
     }
 
@@ -450,7 +485,7 @@ mod tests {
 
     #[test]
     fn a_hunk_the_author_rewrote_offers_nothing() {
-        let mut hunk = hello_patch();
+        let mut hunk = only_hunk(NOTES, "# Notes\n\nHowdy world.\n\nA second line.\n");
         let rewritten = "# Notes\n\nHowdy there, world.\n\nA second line.\n";
         assert_eq!(hunk.presence(rewritten), Presence::Moved);
         assert_eq!(hunk.revert(rewritten), None);
@@ -458,70 +493,204 @@ mod tests {
 
     #[test]
     fn edited_lines_around_a_hunk_do_not_stop_its_revert() {
-        let mut hunk = hello_patch();
+        let mut hunk = only_hunk(NOTES, "# Notes\n\nHowdy world.\n\nA second line.\n");
         let edited = "# My notes\n\nHowdy world.\n\nA second line, edited.\n";
-        let revert = hunk.revert(edited).expect("the changed line is still there once");
         assert_eq!(
-            applied(edited, &revert),
-            "# My notes\n\nHello world.\n\nA second line, edited.\n"
+            hunk.revert(edited).as_deref(),
+            Some("# My notes\n\nHello world.\n\nA second line, edited.\n")
         );
     }
 
     #[test]
-    fn a_reverted_hunk_is_absent_and_can_come_back() {
-        let mut hunk = hello_patch();
+    fn a_reverted_hunk_reads_as_absent() {
+        let mut hunk = only_hunk(NOTES, "# Notes\n\nHowdy world.\n\nA second line.\n");
         assert!(matches!(hunk.presence(NOTES), Presence::Absent(_)));
-        let apply = hunk.apply(NOTES).expect("apply");
-        assert_eq!(applied(NOTES, &apply), "# Notes\n\nHowdy world.\n\nA second line.\n");
+        assert_eq!(hunk.revert(NOTES), None);
     }
 
     #[test]
     fn removed_lines_come_back_at_their_place() {
-        let patch = json!([{"oldStart": 1, "oldLines": 4, "newStart": 1, "newLines": 2, "lines": [
-            " one", "-two", "-three", " four"]}]);
-        let mut hunk = Tracked::new(Hunk::parse_all(&patch).remove(0));
-        let after = "one\nfour\n";
-        let revert = hunk.revert(after).expect("revert");
-        assert_eq!(applied(after, &revert), "one\ntwo\nthree\nfour\n");
+        let mut hunk = only_hunk("one\ntwo\nthree\nfour\n", "one\nfour\n");
+        assert_eq!(hunk.revert("one\nfour\n").as_deref(), Some("one\ntwo\nthree\nfour\n"));
     }
 
     #[test]
-    fn added_lines_at_the_end_of_a_file_without_a_line_break_revert_cleanly() {
-        let patch = json!([{"oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 2, "lines": [
-            " one", "+two"]}]);
-        let mut hunk = Tracked::new(Hunk::parse_all(&patch).remove(0));
-        let after = "one\ntwo";
-        let revert = hunk.revert(after).expect("revert");
-        assert_eq!(applied(after, &revert), "one\n");
+    fn added_lines_at_the_end_of_a_file_without_a_line_break_revert_exactly() {
+        let mut hunk = only_hunk("one\n", "one\ntwo");
+        assert_eq!(hunk.revert("one\ntwo").as_deref(), Some("one\n"));
     }
 
     #[test]
-    fn merging_keeps_the_authors_other_edits() {
-        let mut hunks = [hello_patch()];
-        // The author typed in another paragraph, unsaved, while the agent edited the file on disk.
-        let buffer = "# Notes\n\nHello world.\n\nA second line, written by the author.\n";
-        let [Outcome::Replace(replacement)] = &merge(&mut hunks, buffer)[..] else {
-            panic!("a replacement")
-        };
-        assert_eq!(
-            applied(buffer, replacement),
-            "# Notes\n\nHowdy world.\n\nA second line, written by the author.\n"
+    fn crlf_lines_keep_their_line_ends_through_a_revert() {
+        let base = "a\r\nb\r\nc\r\n";
+        let mut hunk = only_hunk(base, "a\r\nB\r\nc\r\n");
+        assert_eq!(hunk.revert("a\r\nB\r\nc\r\n").as_deref(), Some(base));
+    }
+
+    #[test]
+    fn of_two_hunks_one_can_be_taken_back_and_the_other_stays() {
+        let base = "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix\n";
+        let theirs = "ONE\n\ntwo\n\nthree\n\nfour\n\nfive\n\nSIX\n";
+        let mut hunks = hunks_between(&base.into(), &theirs.into());
+        assert_eq!(hunks.len(), 2);
+        let without_first = hunks[0].revert(theirs).expect("revert");
+        assert_eq!(without_first, "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nSIX\n");
+        assert_eq!(hunks[1].revert(&without_first).as_deref(), Some(base));
+    }
+
+    #[test]
+    fn writes_that_follow_each_other_in_a_turn_count_as_one() {
+        let mut turn = TurnChanges::default();
+        let path = PathBuf::from("chapter.md");
+        assert!(turn.observe(path.clone(), None, "a\n".into(), "b\n".into()));
+        assert!(turn.observe(path.clone(), None, "b\n".into(), "c\n".into()));
+        assert_eq!(turn.hunk_count(), 1);
+        assert_eq!(turn.files[0].hunks[0].hunk.lines[0].text, "a");
+    }
+
+    #[test]
+    fn the_same_change_told_twice_is_not_news() {
+        let mut turn = TurnChanges::default();
+        let path = PathBuf::from("chapter.md");
+        assert!(turn.observe(path.clone(), None, "a\n".into(), "b\n".into()));
+        assert!(!turn.observe(path, None, "a\n".into(), "b\n".into()));
+    }
+
+    #[test]
+    fn a_write_back_to_where_the_turn_began_leaves_no_hunk() {
+        let mut turn = TurnChanges::default();
+        let path = PathBuf::from("chapter.md");
+        turn.observe(path.clone(), None, "a\n".into(), "b\n".into());
+        turn.observe(path, None, "b\n".into(), "a\n".into());
+        assert_eq!(turn.hunk_count(), 0);
+    }
+
+    #[test]
+    fn a_clis_patch_makes_way_for_what_the_session_sees() {
+        let mut turn = TurnChanges::default();
+        let path = PathBuf::from("/project/chapter.md");
+        turn.add(path.clone(), vec![hello_patch().hunk]);
+        turn.forget_patch(&path);
+        assert!(turn.files.is_empty());
+    }
+
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("druck-changes-{name}-{}", std::process::id()));
+            fs::remove_dir_all(&dir).ok();
+            fs::create_dir_all(dir.join("manuscript")).expect("folder");
+            fs::write(dir.join("druck.yaml"), "chapters:\n  - manuscript/one.md\n").expect("manifest");
+            fs::write(dir.join("manuscript/one.md"), CHAPTER).expect("chapter");
+            Self(dir)
+        }
+
+        fn chapter(&self) -> PathBuf {
+            self.0.join("manuscript/one.md")
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    const CHAPTER: &str = "# One\n\nFirst paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n";
+
+    /// What a tool wrote to the file arrives in the session as Persistence takes it, and in the turn's changes.
+    fn agent_writes(session: &mut Session, path: &Path, text: &str, turn: &mut TurnChanges) -> ChangeKind {
+        fs::write(path, text).expect("write");
+        let mut sync = FileSync::new(None);
+        let change = sync
+            .on_disk(session, path, Some(text.as_bytes().to_vec()))
+            .expect("a change");
+        turn.observe(
+            change.path.clone(),
+            change.chapter,
+            change.base.clone(),
+            change.theirs.clone().expect("the file is there"),
         );
+        change.kind
     }
 
     #[test]
-    fn merging_leaves_a_line_the_author_also_edited() {
-        let mut hunks = [hello_patch()];
-        let buffer = "# Notes\n\nHello, dear world.\n\nA second line.\n";
-        assert_eq!(merge(&mut hunks, buffer), [Outcome::Conflict]);
+    fn a_write_through_any_tool_arrives_as_hunks_and_the_authors_unsaved_edit_stays() {
+        let folder = Folder::new("both");
+        let mut session = Session::open(&folder.0).expect("opens");
+        let id = session.book()[0];
+        // The author types at the top while the agent works on the file on disk.
+        session
+            .edit_chapter(id, vec![Edit::new(0..0, "Typed by the author. ")], EditKind::Typing)
+            .expect("edit");
+        let mut turn = TurnChanges::default();
+        let theirs = CHAPTER.replace("Second paragraph.", "Second paragraph, rewritten.");
+        let kind = agent_writes(&mut session, &folder.chapter(), &theirs, &mut turn);
+        assert_eq!(kind, ChangeKind::Merged);
+        let expected = format!("Typed by the author. {theirs}");
+        assert_eq!(session.buffer(id).text(), expected);
+        assert_eq!(turn.hunk_count(), 1);
+        assert_eq!(turn.files[0].chapter, Some(id));
+        assert!(matches!(
+            turn.files[0].hunks[0].presence(session.buffer(id).text()),
+            Presence::Applied(_)
+        ));
     }
 
     #[test]
-    fn merging_skips_a_text_that_already_has_the_change() {
-        let mut hunks = [hello_patch()];
-        assert_eq!(
-            merge(&mut hunks, "# Notes\n\nHowdy world.\n\nA second line.\n"),
-            [Outcome::Already]
-        );
+    fn a_hunk_on_lines_the_author_edited_is_left_alone() {
+        let folder = Folder::new("overlap");
+        let mut session = Session::open(&folder.0).expect("opens");
+        let id = session.book()[0];
+        let at = session.buffer(id).text().find("Second").expect("text");
+        session
+            .edit_chapter(id, vec![Edit::new(at..at + 6, "My own second")], EditKind::Typing)
+            .expect("edit");
+        let before = session.buffer(id).text().to_owned();
+        let mut turn = TurnChanges::default();
+        let theirs = CHAPTER.replace("Second paragraph.", "Another paragraph.");
+        let kind = agent_writes(&mut session, &folder.chapter(), &theirs, &mut turn);
+        assert_eq!(kind, ChangeKind::Conflict);
+        assert_eq!(session.buffer(id).text(), before);
+        // The hunk reads as changed since, so the panel offers no revert over the author's words.
+        assert_eq!(turn.files[0].hunks[0].presence(&before), Presence::Moved);
+        assert_eq!(turn.files[0].hunks[0].revert(&before), None);
+    }
+
+    #[test]
+    fn a_revert_keeps_the_authors_text_is_one_undo_step_and_undo_brings_the_change_back() {
+        let folder = Folder::new("revert");
+        let mut session = Session::open(&folder.0).expect("opens");
+        let id = session.book()[0];
+        let mut turn = TurnChanges::default();
+        let theirs = CHAPTER.replace("Second paragraph.", "Second paragraph, rewritten.");
+        agent_writes(&mut session, &folder.chapter(), &theirs, &mut turn);
+        session
+            .edit_chapter(id, vec![Edit::new(0..0, "Typed later. ")], EditKind::Typing)
+            .expect("edit");
+        let agent_text = session.buffer(id).text().to_owned();
+        let reverted = turn.files[0].hunks[0].revert(&agent_text).expect("revert");
+        assert_eq!(reverted, format!("Typed later. {CHAPTER}"));
+        let edits = crate::persist::merge::edits_between(&agent_text, &reverted);
+        session
+            .apply_to_file(&folder.chapter(), &edits, EditKind::Discrete)
+            .expect("applies");
+        assert_eq!(session.buffer(id).text(), reverted);
+        session.active_buffer_mut().undo().expect("one step to undo");
+        assert_eq!(session.buffer(id).text(), agent_text);
+    }
+
+    #[test]
+    fn a_rename_keeps_a_chapters_hunks_together() {
+        let folder = Folder::new("rename");
+        let session = Session::open(&folder.0).expect("opens");
+        let chapter = session.book().first().copied();
+        let mut turn = TurnChanges::default();
+        turn.observe(PathBuf::from("old.md"), chapter, "a\n".into(), "b\n".into());
+        turn.observe(PathBuf::from("new.md"), chapter, "b\n".into(), "c\n".into());
+        assert_eq!(turn.files.len(), 1);
+        assert_eq!(turn.files[0].path, PathBuf::from("new.md"));
+        assert_eq!(turn.hunk_count(), 1);
     }
 }

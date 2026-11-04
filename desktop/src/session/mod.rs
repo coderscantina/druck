@@ -16,6 +16,7 @@ pub mod details;
 pub mod disk;
 mod joined;
 mod outline;
+mod strings;
 pub mod templates;
 #[cfg(test)]
 mod tests;

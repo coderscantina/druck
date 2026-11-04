@@ -4,7 +4,7 @@
 use gpui::prelude::*;
 use gpui::{Context, Entity, Subscription, div, svg};
 
-use super::strings::strings;
+use super::strings::Key;
 use super::{EditorView, SessionChanged, SourceViewChanged};
 use crate::tokens::{self, Tokens};
 
@@ -48,6 +48,6 @@ impl Render for SourceToggle {
                 toggle.editor.update(cx, |editor, cx| editor.toggle_source(window, cx));
             }))
             .child(svg().path("icons/source.svg").size(tokens::SPACE_3).text_color(color))
-            .child(strings().source_view)
+            .child(crate::t!(Key::SourceView))
     }
 }

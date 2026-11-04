@@ -13,7 +13,7 @@ use super::commands::convert::{self, BlockType, TARGETS};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
 use super::place::{self, Rect};
-use super::strings::{Strings, strings};
+use super::strings::Key;
 use super::{EditorView, MenuAccept, MenuDown, MenuUp};
 use crate::inspector::input::{Submitted, TextInput};
 use crate::session::TEMPLATES;
@@ -107,16 +107,16 @@ fn toolbar_size() -> Size<Pixels> {
     )
 }
 
-fn mark_label(mark: Mark, strings: &Strings) -> &'static str {
-    match mark {
-        Mark::Bold => strings.bold,
-        Mark::Italic => strings.italic,
-        Mark::Underline => strings.underline,
-        Mark::Strike => strings.strike,
-        Mark::Superscript => strings.superscript,
-        Mark::Subscript => strings.subscript,
-        Mark::SmallCaps => strings.small_caps,
-    }
+fn mark_label(mark: Mark) -> &'static str {
+    crate::t!(match mark {
+        Mark::Bold => Key::Bold,
+        Mark::Italic => Key::Italic,
+        Mark::Underline => Key::Underline,
+        Mark::Strike => Key::Strike,
+        Mark::Superscript => Key::Superscript,
+        Mark::Subscript => Key::Subscript,
+        Mark::SmallCaps => Key::SmallCaps,
+    })
 }
 
 /// A short label on hover.
@@ -277,7 +277,6 @@ impl EditorView {
         let ToolbarState {
             marks: states, block, ..
         } = self.toolbar_state();
-        let strings = strings();
         let mut row = div()
             .occlude()
             .h(tokens::TOOLBAR_HEIGHT)
@@ -297,7 +296,7 @@ impl EditorView {
         };
         let mut id = 0;
         for (mark, icon, keys) in MARK_BUTTONS {
-            let tip = hint(mark_label(mark, strings), keys);
+            let tip = hint(mark_label(mark), keys);
             row = row.child(self.toolbar_button(Button::Mark(mark), icon, tip, states.of(mark), id, cx));
             id += 1;
         }
@@ -315,11 +314,11 @@ impl EditorView {
             } else {
                 MarkState::Off
             };
-            let tip = hint(type_label(target, strings), keys);
+            let tip = hint(type_label(target, crate::shell::strings::language()), keys);
             row = row.child(self.toolbar_button(Button::Block(target), icon, tip, state, id, cx));
             id += 1;
         }
-        let tip = hint(strings.link, "\u{2318}K");
+        let tip = hint(crate::t!(Key::Link), "\u{2318}K");
         row.child(self.toolbar_button(Button::Link, "icons/mark-link.svg", tip, states.link, id, cx))
     }
 
@@ -417,7 +416,6 @@ impl EditorView {
 
     fn link_popup(&self, link: &Link, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx).clone();
-        let strings = strings();
         let has_link = link.has_link;
         div()
             .occlude()
@@ -456,7 +454,7 @@ impl EditorView {
                         .text_color(tokens.text_quiet)
                         .hover(|button| button.bg(tokens.raised))
                         .on_click(cx.listener(|this, _, window, cx| this.submit_link("", window, cx)))
-                        .child(strings.remove_link),
+                        .child(crate::t!(Key::RemoveLink)),
                 )
             })
     }
@@ -471,7 +469,7 @@ impl EditorView {
             return;
         }
         let context = self.slash_context(at);
-        let all = slash::items(&context, strings());
+        let all = slash::items(&context, crate::shell::strings::language());
         if all.is_empty() {
             return;
         }
@@ -598,7 +596,13 @@ impl EditorView {
     fn apply_slash(&mut self, start: usize, action: &Action, window: &mut Window, cx: &mut Context<Self>) {
         let caret = self.selection.head;
         let text = self.session.active_buffer().text();
-        let Some(command) = slash::apply(text, &self.blocks, start..caret, action, strings()) else {
+        let Some(command) = slash::apply(
+            text,
+            &self.blocks,
+            start..caret,
+            action,
+            crate::shell::strings::language(),
+        ) else {
             return;
         };
         self.run_command(command, window, cx);
@@ -641,7 +645,6 @@ impl EditorView {
     }
 
     fn menu_rows(&self, menu: &Menu) -> Vec<(SharedString, Option<SharedString>, &'static str)> {
-        let strings = strings();
         match &menu.kind {
             MenuKind::Slash { items, .. } => items
                 .iter()
@@ -649,7 +652,13 @@ impl EditorView {
                 .collect(),
             MenuKind::Convert { targets, .. } => targets
                 .iter()
-                .map(|target| (type_label(*target, strings).into(), None, type_icon(*target)))
+                .map(|target| {
+                    (
+                        type_label(*target, crate::shell::strings::language()).into(),
+                        None,
+                        type_icon(*target),
+                    )
+                })
                 .collect(),
         }
     }

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use super::outline;
+use super::strings::Key;
 use super::yaml;
 
 macro_rules! text {
@@ -25,18 +26,18 @@ impl Group {
     pub const ALL: [Self; 3] = [Self::Front, Self::Body, Self::Back];
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Front => "Front matter",
-            Self::Body => "Body",
-            Self::Back => "Back matter",
-        }
+        crate::t!(match self {
+            Self::Front => Key::GroupFront,
+            Self::Body => Key::GroupBody,
+            Self::Back => Key::GroupBack,
+        })
     }
 }
 
 pub struct Template {
     pub slug: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: Key,
+    pub description: Key,
     pub group: Group,
     pub icon: &'static str,
     pub text: &'static str,
@@ -57,80 +58,80 @@ impl Template {
 pub const TEMPLATES: &[Template] = &[
     Template {
         slug: "half-title",
-        name: "Half title",
-        description: "Only the title, before the full title page",
+        name: Key::HalfTitleName,
+        description: Key::HalfTitleDescription,
         group: Group::Front,
         icon: "icons/title.svg",
         text: text!("half-title"),
     },
     Template {
         slug: "title-page",
-        name: "Title page",
-        description: "The title, subtitle, and author",
+        name: Key::TitlePageName,
+        description: Key::TitlePageDescription,
         group: Group::Front,
         icon: "icons/title.svg",
         text: text!("title-page"),
     },
     Template {
         slug: "imprint",
-        name: "Imprint",
-        description: "Copyright and edition, at the bottom of the page",
+        name: Key::ImprintName,
+        description: Key::ImprintDescription,
         group: Group::Front,
         icon: "icons/file.svg",
         text: text!("imprint"),
     },
     Template {
         slug: "dedication",
-        name: "Dedication",
-        description: "A line for someone, on its own page",
+        name: Key::DedicationName,
+        description: Key::DedicationDescription,
         group: Group::Front,
         icon: "icons/file.svg",
         text: text!("dedication"),
     },
     Template {
         slug: "contents",
-        name: "Contents",
-        description: "The table of contents, built from the headings",
+        name: Key::ContentsName,
+        description: Key::ContentsDescription,
         group: Group::Front,
         icon: "icons/contents.svg",
         text: text!("contents"),
     },
     Template {
         slug: "abstract",
-        name: "Abstract",
-        description: "A brief summary of what this is about",
+        name: Key::AbstractName,
+        description: Key::AbstractDescription,
         group: Group::Front,
         icon: "icons/book.svg",
         text: text!("abstract"),
     },
     Template {
         slug: "chapter",
-        name: "Chapter",
-        description: "A numbered chapter with its heading",
+        name: Key::ChapterName,
+        description: Key::ChapterDescription,
         group: Group::Body,
         icon: "icons/file.svg",
         text: text!("chapter"),
     },
     Template {
         slug: "part",
-        name: "Part",
-        description: "An unnumbered heading that opens a part",
+        name: Key::PartName,
+        description: Key::PartDescription,
         group: Group::Body,
         icon: "icons/book.svg",
         text: text!("part"),
     },
     Template {
         slug: "bibliography",
-        name: "Bibliography",
-        description: "The works cited, placed here instead of at the end",
+        name: Key::BibliographyName,
+        description: Key::BibliographyDescription,
         group: Group::Back,
         icon: "icons/contents.svg",
         text: text!("bibliography"),
     },
     Template {
         slug: "index",
-        name: "Index",
-        description: "The marked terms, placed here instead of at the end",
+        name: Key::IndexName,
+        description: Key::IndexDescription,
         group: Group::Back,
         icon: "icons/contents.svg",
         text: text!("index"),
@@ -140,8 +141,8 @@ pub const TEMPLATES: &[Template] = &[
 /// A whole project to start from.
 pub struct Starter {
     pub slug: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: Key,
+    pub description: Key,
     /// Paths in the new folder, with their contents.
     pub files: &'static [(&'static str, &'static [u8])],
 }
@@ -158,8 +159,8 @@ macro_rules! file {
 pub const STARTERS: &[Starter] = &[
     Starter {
         slug: "book",
-        name: "Book",
-        description: "Chapters, a title page, and print and ebook exports",
+        name: Key::BookName,
+        description: Key::BookDescription,
         files: &[
             file!("book", "druck.yaml"),
             file!("book", "manuscript/00-front.md"),
@@ -171,8 +172,8 @@ pub const STARTERS: &[Starter] = &[
     },
     Starter {
         slug: "report",
-        name: "Report",
-        description: "Numbered headings, contents, and references",
+        name: Key::ReportName,
+        description: Key::ReportDescription,
         files: &[
             file!("report", "druck.yaml"),
             file!("report", "references.bib"),
@@ -184,8 +185,8 @@ pub const STARTERS: &[Starter] = &[
     },
     Starter {
         slug: "offer",
-        name: "Offer",
-        description: "A cover with the client's address and a price table",
+        name: Key::OfferName,
+        description: Key::OfferDescription,
         files: &[
             file!("offer", "druck.yaml"),
             file!("offer", "manuscript/01-offer.md"),

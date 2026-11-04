@@ -27,6 +27,7 @@ use gpui::{
 use self::atomic::Outcome;
 use self::merge::Choice;
 use self::recovery::{Copies, data_dir};
+use self::strings::Key;
 pub use self::sync::FileChange;
 use self::sync::{ChangeKind, FileSync, Next, Pacer, Problem};
 use self::watch::{Ready, Signal, Waiting, Watcher};
@@ -227,9 +228,13 @@ impl PersistView {
     }
 
     /// Reads every file the session has now and takes in what changed, without waiting for the watcher. Anything that
-    /// wants all changes up to now calls this first.
-    #[allow(dead_code, reason = "the Agent slice calls this at the end of a turn")]
+    /// wants all changes up to now calls this first. While a save is running or an input method composes, the look
+    /// waits for them.
     pub fn scan_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing.is_some() || self.editor.read(cx).is_composing() {
+            self.signals.unbounded_send(Signal::Everything).ok();
+            return;
+        }
         self.process(
             Ready {
                 paths: Vec::new(),
@@ -307,7 +312,7 @@ impl PersistView {
             );
         });
         if !names.is_empty() {
-            let text = format!("{} {}", strings::get().restored, names.join(", "));
+            let text = format!("{} {}", crate::t!(Key::Restored), names.join(", "));
             self.show_note(text, window, cx);
             self.edited(window, cx);
         }
@@ -589,11 +594,10 @@ impl PersistView {
         let name = change
             .chapter
             .map_or_else(|| file_name(&change.path), |chapter| self.session(cx).title_of(chapter));
-        let strings = strings::get();
         match change.kind {
-            ChangeKind::Merged => self.show_note(format!("{} {name}", strings.merged), window, cx),
-            ChangeKind::Reloaded => self.show_note(format!("{} {name}", strings.reloaded), window, cx),
-            ChangeKind::Removed => self.show_note(format!("{name} {}", strings.removed), window, cx),
+            ChangeKind::Merged => self.show_note(format!("{} {name}", crate::t!(Key::Merged)), window, cx),
+            ChangeKind::Reloaded => self.show_note(format!("{} {name}", crate::t!(Key::Reloaded)), window, cx),
+            ChangeKind::Removed => self.show_note(format!("{name} {}", crate::t!(Key::Removed)), window, cx),
             ChangeKind::Conflict | ChangeKind::Unchanged => {}
         }
         cx.emit(change);
@@ -619,9 +623,8 @@ impl PersistView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let strings = strings::get();
         if !event.done {
-            self.show_note(strings.undo_stopped.to_owned(), window, cx);
+            self.show_note(crate::t!(Key::UndoStopped).to_owned(), window, cx);
             return;
         }
         // The file still holds what the undo just took out of the buffer.
@@ -633,8 +636,8 @@ impl PersistView {
             Some(copies.kept_folder().display().to_string())
         });
         let text = match kept {
-            Some(folder) => format!("{} {} {folder}", strings.undo_done, strings.copy_in),
-            None => strings.undo_done.to_owned(),
+            Some(folder) => format!("{} {} {folder}", crate::t!(Key::UndoDone), crate::t!(Key::CopyIn)),
+            None => crate::t!(Key::UndoDone).to_owned(),
         };
         self.show_note(text, window, cx);
     }
@@ -652,15 +655,14 @@ impl PersistView {
         let result = self.editor.update(cx, |editor, cx| {
             editor.update_session(|session| sync.resolve(session, path, choice), window, cx)
         });
-        let strings = strings::get();
         match result {
             Ok(Some(kept)) => {
                 let folder = kept.parent().unwrap_or(&kept).display().to_string();
-                self.show_note(format!("{} {folder}", strings.copy_in), window, cx);
+                self.show_note(format!("{} {folder}", crate::t!(Key::CopyIn)), window, cx);
             }
             Ok(None) => {}
             Err(error) => {
-                self.show_note(format!("{}: {error}", strings.cannot_save), window, cx);
+                self.show_note(format!("{}: {error}", crate::t!(Key::CannotSave)), window, cx);
                 return;
             }
         }
@@ -714,7 +716,6 @@ impl PersistView {
 impl Render for PersistView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
-        let strings = strings::get();
         let session = self.session(cx);
         let root = div()
             .h_full()
@@ -729,28 +730,32 @@ impl Render for PersistView {
                 .chapter_of_file(path)
                 .map_or_else(|| file_name(path), |chapter| session.title_of(chapter));
             let removal = self.sync.conflict_is_removal(path);
-            let says = if removal { strings.deleted } else { strings.overlap };
+            let says = if removal {
+                crate::t!(Key::Deleted)
+            } else {
+                crate::t!(Key::Overlap)
+            };
             return root
                 .flex_1()
                 .text_color(tokens.accent)
                 .child(div().min_w_0().truncate().child(format!("{name} {says}")))
-                .child(self.button("keep-mine", strings.keep_mine, Choice::Mine, cx))
-                .child(self.button("take-theirs", strings.take_theirs, Choice::Theirs, cx))
+                .child(self.button("keep-mine", crate::t!(Key::KeepMine), Choice::Mine, cx))
+                .child(self.button("take-theirs", crate::t!(Key::TakeTheirs), Choice::Theirs, cx))
                 .when(!removal, |root| {
-                    root.child(self.button("see-both", strings.see_both, Choice::Both, cx))
+                    root.child(self.button("see-both", crate::t!(Key::SeeBoth), Choice::Both, cx))
                 })
                 .into_any_element();
         }
         if let Some((path, problem)) = self.sync.problems().next() {
             let text = match problem {
-                Problem::Gone => strings.folder_gone.to_owned(),
+                Problem::Gone => crate::t!(Key::FolderGone).to_owned(),
                 Problem::Save(reason) => format!(
                     "{} {}: {reason}. {}",
-                    strings.cannot_save,
+                    crate::t!(Key::CannotSave),
                     file_name(path),
-                    strings.kept_in_memory
+                    crate::t!(Key::KeptInMemory)
                 ),
-                Problem::Unreadable(reason) => format!("{}: {reason}", strings.unreadable),
+                Problem::Unreadable(reason) => format!("{}: {reason}", crate::t!(Key::Unreadable)),
             };
             return root
                 .flex_1()
@@ -766,9 +771,9 @@ impl Render for PersistView {
                 .into_any_element();
         }
         let state = match self.shown {
-            Shown::Saved => strings.saved,
-            Shown::Edited => strings.edited,
-            Shown::Saving => strings.saving,
+            Shown::Saved => crate::t!(Key::Saved),
+            Shown::Edited => crate::t!(Key::Edited),
+            Shown::Saving => crate::t!(Key::Saving),
         };
         root.flex_none()
             .text_color(tokens.text_faint)

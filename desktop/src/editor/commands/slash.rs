@@ -11,8 +11,9 @@ use std::ops::Range;
 
 use super::convert::{BlockType, Callout, gapped_edit, rewritten, type_of};
 use super::{Bias, Command, body_range, line_ending, moved, needs_gap, normalized};
-use crate::editor::strings::{DE, EN, Strings};
+use crate::editor::strings::Key;
 use crate::session::TEMPLATES;
+use crate::shell::strings::{Language, Table};
 use crate::source::inline::line_markers;
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
@@ -103,30 +104,34 @@ pub fn type_icon(target: BlockType) -> &'static str {
 }
 
 /// The label of a block type in one language.
-pub fn type_label(target: BlockType, strings: &'static Strings) -> &'static str {
-    match target {
-        BlockType::Paragraph => strings.paragraph,
-        BlockType::Heading(1) => strings.heading_1,
-        BlockType::Heading(2) => strings.heading_2,
-        BlockType::Heading(3) => strings.heading_3,
-        BlockType::Heading(4) => strings.heading_4,
-        BlockType::Heading(5) => strings.heading_5,
-        BlockType::Heading(_) => strings.heading_6,
-        BlockType::Bullets => strings.bullets,
-        BlockType::Numbers => strings.numbers,
-        BlockType::Quote => strings.quote,
-        BlockType::Callout(Callout::Note) => strings.note,
-        BlockType::Callout(Callout::Tip) => strings.tip,
-        BlockType::Callout(Callout::Important) => strings.important,
-        BlockType::Callout(Callout::Warning) => strings.warning,
-        BlockType::Callout(Callout::Caution) => strings.caution,
-        BlockType::Code => strings.code,
-    }
+pub fn type_label(target: BlockType, language: Language) -> &'static str {
+    let key = match target {
+        BlockType::Paragraph => Key::Paragraph,
+        BlockType::Heading(1) => Key::Heading1,
+        BlockType::Heading(2) => Key::Heading2,
+        BlockType::Heading(3) => Key::Heading3,
+        BlockType::Heading(4) => Key::Heading4,
+        BlockType::Heading(5) => Key::Heading5,
+        BlockType::Heading(_) => Key::Heading6,
+        BlockType::Bullets => Key::Bullets,
+        BlockType::Numbers => Key::Numbers,
+        BlockType::Quote => Key::Quote,
+        BlockType::Callout(Callout::Note) => Key::Note,
+        BlockType::Callout(Callout::Tip) => Key::Tip,
+        BlockType::Callout(Callout::Important) => Key::Important,
+        BlockType::Callout(Callout::Warning) => Key::Warning,
+        BlockType::Callout(Callout::Caution) => Key::Caution,
+        BlockType::Code => Key::Code,
+    };
+    key.text(language)
 }
 
-/// Every entry valid in `context`, in the menu's order, in the language of `strings`.
-pub fn items(context: &Context, strings: &'static Strings) -> Vec<Item> {
-    let other: &'static Strings = if std::ptr::eq(strings, &EN) { &DE } else { &EN };
+/// Every entry valid in `context`, in the menu's order, in `language`.
+pub fn items(context: &Context, language: Language) -> Vec<Item> {
+    let other = match language {
+        Language::English => Language::German,
+        Language::German => Language::English,
+    };
     let mut items = Vec::new();
     let open = &context.open_directives;
     // Only a list belongs in a list table.
@@ -134,9 +139,9 @@ pub fn items(context: &Context, strings: &'static Strings) -> Vec<Item> {
         return items;
     }
     let held = open.iter().any(|name| name == "keep" || name == "bottom");
-    let label = |of: fn(&Strings) -> &'static str, icon, action| Item {
-        label: of(strings),
-        other_label: of(other),
+    let label = |key: Key, icon, action| Item {
+        label: key.text(language),
+        other_label: key.text(other),
         group: None,
         icon,
         action,
@@ -157,7 +162,7 @@ pub fn items(context: &Context, strings: &'static Strings) -> Vec<Item> {
         BlockType::Code,
     ] {
         items.push(Item {
-            label: type_label(target, strings),
+            label: type_label(target, language),
             other_label: type_label(target, other),
             group: None,
             icon: type_icon(target),
@@ -165,56 +170,56 @@ pub fn items(context: &Context, strings: &'static Strings) -> Vec<Item> {
         });
     }
     items.push(label(
-        |s| s.scene_break,
+        Key::SceneBreak,
         "icons/block-break.svg",
         Action::Insert(Standalone::SceneBreak),
     ));
     items.push(label(
-        |s| s.table,
+        Key::Table,
         "icons/block-table.svg",
         Action::Insert(Standalone::Table),
     ));
     if let Some(path) = &context.first_image {
-        items.push(label(|s| s.image, "icons/images.svg", Action::Image(path.clone())));
+        items.push(label(Key::Image, "icons/images.svg", Action::Image(path.clone())));
     }
     if !held {
-        items.push(label(|s| s.keep, "icons/block-directive.svg", Action::Wrap("keep")));
+        items.push(label(Key::Keep, "icons/block-directive.svg", Action::Wrap("keep")));
     }
     if open.is_empty() {
         items.push(label(
-            |s| s.columns,
+            Key::Columns,
             "icons/block-directive.svg",
             Action::Wrap("columns"),
         ));
-        items.push(label(|s| s.bottom, "icons/block-directive.svg", Action::Wrap("bottom")));
+        items.push(label(Key::Bottom, "icons/block-directive.svg", Action::Wrap("bottom")));
     }
     if !held {
         items.push(label(
-            |s| s.page_break,
+            Key::PageBreak,
             "icons/block-directive.svg",
             Action::Insert(Standalone::PageBreak),
         ));
     }
     if open.is_empty() && !context.has_toc {
-        items.push(label(|s| s.toc, "icons/contents.svg", Action::Insert(Standalone::Toc)));
+        items.push(label(Key::Toc, "icons/contents.svg", Action::Insert(Standalone::Toc)));
     }
     let in_note = context.block == Some(BlockKind::FootnoteDefinition);
     let in_heading = matches!(context.block, Some(BlockKind::Heading { .. }));
     if !in_note && !in_heading {
         items.push(label(
-            |s| s.footnote,
+            Key::Footnote,
             "icons/block-footnote.svg",
             Action::Footnote(context.free_footnote.clone()),
         ));
     }
     if let Some(key) = context.first_citation_key.as_ref().filter(|_| !in_heading) {
-        items.push(label(|s| s.citation, "icons/book.svg", Action::Citation(key.clone())));
+        items.push(label(Key::Citation, "icons/book.svg", Action::Citation(key.clone())));
     }
     for template in TEMPLATES {
         items.push(Item {
-            label: template.name,
-            other_label: strings.new_section,
-            group: Some(strings.new_section),
+            label: template.name.text(language),
+            other_label: template.name.text(other),
+            group: Some(Key::NewSection.text(language)),
             icon: template.icon,
             action: Action::Section(template.slug),
         });
@@ -222,7 +227,7 @@ pub fn items(context: &Context, strings: &'static Strings) -> Vec<Item> {
     items
 }
 
-/// The entries matching a query: all its words in either language's label, the ones starting with it first.
+/// The entries matching a query: all its words in either language's label or the group, the ones starting with it first.
 pub fn filtered(items: Vec<Item>, query: &str) -> Vec<Item> {
     let query = query.to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
@@ -231,7 +236,10 @@ pub fn filtered(items: Vec<Item>, query: &str) -> Vec<Item> {
         .filter(|item| {
             let label = item.label.to_lowercase();
             let other = item.other_label.to_lowercase();
-            words.iter().all(|word| label.contains(word) || other.contains(word))
+            let group = item.group.unwrap_or_default().to_lowercase();
+            words
+                .iter()
+                .all(|word| label.contains(word) || other.contains(word) || group.contains(word))
         })
         .partition(|item| {
             item.label.to_lowercase().starts_with(&query) || item.other_label.to_lowercase().starts_with(&query)
@@ -306,7 +314,7 @@ pub fn first_citation_key(bibtex: &str) -> Option<String> {
 }
 
 /// What an entry writes on an empty line, without a final line ending, and the part of it the writer replaces first.
-fn template(action: &Action, strings: &Strings, eol: &str) -> Option<(String, Range<usize>)> {
+fn template(action: &Action, language: Language, eol: &str) -> Option<(String, Range<usize>)> {
     let with_placeholder = |before: String, placeholder: &str, after: &str| {
         let start = before.len();
         (
@@ -317,22 +325,26 @@ fn template(action: &Action, strings: &Strings, eol: &str) -> Option<(String, Ra
     Some(match action {
         Action::Turn(BlockType::Heading(level)) => with_placeholder(
             format!("{} ", "#".repeat(usize::from(*level))),
-            strings.placeholder_heading,
+            Key::PlaceholderHeading.text(language),
             "",
         ),
-        Action::Turn(BlockType::Bullets) => with_placeholder("- ".to_owned(), strings.placeholder_item, ""),
-        Action::Turn(BlockType::Numbers) => with_placeholder("1. ".to_owned(), strings.placeholder_item, ""),
-        Action::Turn(BlockType::Quote) => with_placeholder("> ".to_owned(), strings.placeholder_quote, ""),
-        Action::Turn(BlockType::Callout(callout)) => {
-            with_placeholder(format!("> {}{eol}> ", callout.marker()), strings.placeholder_text, "")
-        }
-        Action::Turn(BlockType::Code) => {
-            with_placeholder(format!("```{eol}"), strings.placeholder_code, &format!("{eol}```"))
-        }
-        Action::Turn(BlockType::Paragraph) => with_placeholder(String::new(), strings.placeholder_text, ""),
+        Action::Turn(BlockType::Bullets) => with_placeholder("- ".to_owned(), Key::PlaceholderItem.text(language), ""),
+        Action::Turn(BlockType::Numbers) => with_placeholder("1. ".to_owned(), Key::PlaceholderItem.text(language), ""),
+        Action::Turn(BlockType::Quote) => with_placeholder("> ".to_owned(), Key::PlaceholderQuote.text(language), ""),
+        Action::Turn(BlockType::Callout(callout)) => with_placeholder(
+            format!("> {}{eol}> ", callout.marker()),
+            Key::PlaceholderText.text(language),
+            "",
+        ),
+        Action::Turn(BlockType::Code) => with_placeholder(
+            format!("```{eol}"),
+            Key::PlaceholderCode.text(language),
+            &format!("{eol}```"),
+        ),
+        Action::Turn(BlockType::Paragraph) => with_placeholder(String::new(), Key::PlaceholderText.text(language), ""),
         Action::Wrap(name) => with_placeholder(
             format!("::: {name}{eol}"),
-            strings.placeholder_text,
+            Key::PlaceholderText.text(language),
             &format!("{eol}:::"),
         ),
         Action::Insert(Standalone::SceneBreak) => {
@@ -351,7 +363,10 @@ fn template(action: &Action, strings: &Strings, eol: &str) -> Option<(String, Ra
             (text, end..end)
         }
         Action::Insert(Standalone::Table) => {
-            let (column, cell) = (strings.placeholder_column, strings.placeholder_cell);
+            let (column, cell) = (
+                Key::PlaceholderColumn.text(language),
+                Key::PlaceholderCell.text(language),
+            );
             with_placeholder(
                 "| ".to_owned(),
                 column,
@@ -364,7 +379,11 @@ fn template(action: &Action, strings: &Strings, eol: &str) -> Option<(String, Ra
             } else {
                 path.clone()
             };
-            with_placeholder("![".to_owned(), strings.placeholder_caption, &format!("]({path})"))
+            with_placeholder(
+                "![".to_owned(),
+                Key::PlaceholderCaption.text(language),
+                &format!("]({path})"),
+            )
         }
         Action::Footnote(_) | Action::Citation(_) | Action::Section(_) => return None,
     })
@@ -372,7 +391,7 @@ fn template(action: &Action, strings: &Strings, eol: &str) -> Option<(String, Ra
 
 /// The command for choosing `action` with `slash..caret` as the typed slash and query. A new section is the session's to
 /// make, so here it only takes the typed text away.
-pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, strings: &Strings) -> Option<Command> {
+pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, language: Language) -> Option<Command> {
     let eol = line_ending(text);
     let index = blocks.index_at(slash.start);
     let block = &blocks.as_slice()[index];
@@ -391,7 +410,7 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
             };
             return finish(text, vec![Edit::new(slash, written)], selection);
         }
-        Action::Footnote(label) => return footnote(text, blocks, index, slash, label, strings),
+        Action::Footnote(label) => return footnote(text, blocks, index, slash, label, language),
         _ => {}
     }
     let line = line_of(text, &body, slash.start);
@@ -408,13 +427,13 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
 
     if !others_on_line && only_line {
         // The block is nothing but the slash: the entry takes its place.
-        let (new, placeholder) = template(action, strings, eol)?;
+        let (new, placeholder) = template(action, language, eol)?;
         let edit = gapped_edit(text, blocks, index, body.clone(), new);
         return placed(text, edit, placeholder);
     }
     if !others_on_line {
         // A line of its own in a longer block: it goes, and the entry follows the block.
-        let (new, placeholder) = template(action, strings, eol)?;
+        let (new, placeholder) = template(action, language, eol)?;
         let removed = if line.start == body.start {
             line.start..line.end + eol.len()
         } else {
@@ -434,7 +453,7 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
                 let selection = after_edit_end(&edit);
                 return finish(text, vec![edit], selection);
             }
-            let (new, placeholder) = template(action, strings, eol)?;
+            let (new, placeholder) = template(action, language, eol)?;
             after_block(text, blocks, index, slash, "", new, placeholder)
         }
         Action::Wrap(name) => {
@@ -444,7 +463,7 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
             finish(text, vec![edit], selection)
         }
         _ => {
-            let (new, placeholder) = template(action, strings, eol)?;
+            let (new, placeholder) = template(action, language, eol)?;
             after_block(text, blocks, index, slash, "", new, placeholder)
         }
     }
@@ -549,18 +568,18 @@ fn footnote(
     index: usize,
     slash: Range<usize>,
     label: &str,
-    strings: &Strings,
+    language: Language,
 ) -> Option<Command> {
     let eol = line_ending(text);
     let definition = format!("[^{label}]: ");
-    let new = format!("{definition}{}", strings.placeholder_footnote);
+    let new = format!("{definition}{}", Key::PlaceholderFootnote.text(language));
     let (insert, start_in_insert) = block_insert(text, blocks, index, &new, eol);
     let edits = vec![Edit::new(slash, format!("[^{label}]")), insert];
     let start = moved(edits[1].range.start, &edits, Bias::Before) + start_in_insert + definition.len();
     let edits = normalized(edits, text);
     let selection = Selection {
         anchor: start,
-        head: start + strings.placeholder_footnote.len(),
+        head: start + Key::PlaceholderFootnote.text(language).len(),
     };
     Some(Command { edits, selection })
 }
@@ -577,7 +596,7 @@ mod tests {
             .map_or(text.len(), |at| slash + at);
         let source = text.replace('|', "");
         let blocks = Blocks::parse(&source);
-        let command = apply(&source, &blocks, slash..end, action, &EN).expect("a command");
+        let command = apply(&source, &blocks, slash..end, action, Language::English).expect("a command");
         let result = applied(&source, &command.edits);
         let selected = result[command.selection.range()].to_owned();
         (result, selected)
@@ -671,7 +690,10 @@ mod tests {
     #[test]
     fn the_list_offers_only_what_is_valid_here() {
         let labels = |context: &Context| -> Vec<&'static str> {
-            items(context, &EN).into_iter().map(|item| item.label).collect()
+            items(context, Language::English)
+                .into_iter()
+                .map(|item| item.label)
+                .collect()
         };
         let free = Context::default();
         let all = labels(&free);
@@ -711,7 +733,7 @@ mod tests {
 
     #[test]
     fn the_query_matches_words_in_either_language_and_prefixes_lead() {
-        let all = items(&Context::default(), &EN);
+        let all = items(&Context::default(), Language::English);
         let labels = |query: &str| -> Vec<&'static str> {
             filtered(all.clone(), query)
                 .into_iter()

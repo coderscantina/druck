@@ -105,19 +105,15 @@ pub enum ChangeKind {
     Unchanged,
 }
 
-/// A file changed outside the app. Everything a per-turn diff needs: `before` and `after` are the buffer around this
-/// change, `base` and `theirs` are what the other program started from and wrote.
+/// A file changed outside the app. `base` and `theirs` are what the other program started from and wrote, which is what
+/// a per-turn diff needs.
 #[derive(Debug, Clone)]
-#[allow(dead_code, reason = "the Agent slice's per-turn diff reads these")]
 pub struct FileChange {
     pub path: PathBuf,
     pub chapter: Option<ChapterId>,
     pub kind: ChangeKind,
     pub base: Arc<str>,
     pub theirs: Option<Arc<str>>,
-    pub before: Arc<str>,
-    pub after: Arc<str>,
-    pub at: Instant,
 }
 
 /// A conflict waiting for a person.
@@ -219,19 +215,15 @@ impl FileSync {
         }
         let mine = session.file_text(path)?;
         let theirs: Arc<str> = theirs.into();
-        let before: Arc<str> = mine.as_str().into();
-        let change = |kind, base: Arc<str>, after: Arc<str>| FileChange {
+        let change = |kind, base: Arc<str>| FileChange {
             path: path.to_owned(),
             chapter: session.chapter_of_file(path),
             kind,
             base,
             theirs: Some(theirs.clone()),
-            before: before.clone(),
-            after,
-            at: Instant::now(),
         };
         if mine == *theirs {
-            let change = change(ChangeKind::Unchanged, known.base.clone(), before.clone());
+            let change = change(ChangeKind::Unchanged, known.base.clone());
             session.set_synced(path, theirs.clone(), true);
             session.mark_clean(path);
             self.release(session, path);
@@ -240,7 +232,7 @@ impl FileSync {
         let base: Arc<str> = starting_point(&known.base, &known.earlier, &theirs).into();
         let merged = three_way(&base, &mine, &theirs);
         if !merged.is_clean() {
-            let change = change(ChangeKind::Conflict, base.clone(), before.clone());
+            let change = change(ChangeKind::Conflict, base.clone());
             self.pending.insert(
                 path.to_owned(),
                 Pending {
@@ -257,7 +249,7 @@ impl FileSync {
         } else {
             ChangeKind::Merged
         };
-        let change = change(kind, base, text.as_str().into());
+        let change = change(kind, base);
         self.take_text(session, path, &mine, &text, &theirs);
         Some(change)
     }
@@ -288,7 +280,6 @@ impl FileSync {
     fn on_removed(&mut self, session: &mut Session, path: &Path, base: Arc<str>) -> Option<FileChange> {
         let chapter = session.chapter_of_file(path)?;
         let dirty = session.chapter(chapter).is_some_and(|chapter| chapter.is_dirty()) || session_dirty_single(session);
-        let before: Arc<str> = session.file_text(path).unwrap_or_default().into();
         let change = FileChange {
             path: path.to_owned(),
             chapter: Some(chapter),
@@ -299,9 +290,6 @@ impl FileSync {
             },
             base: base.clone(),
             theirs: None,
-            before: before.clone(),
-            after: before,
-            at: Instant::now(),
         };
         if dirty {
             self.pending.insert(path.to_owned(), Pending { base, theirs: None });

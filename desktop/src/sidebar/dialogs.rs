@@ -112,12 +112,16 @@ impl SectionDialog {
                     .text_color(tokens.accent),
             )
             .child(
-                div().flex_1().min_w_0().child(div().child(template.name)).child(
-                    div()
-                        .text_size(tokens::TEXT_SMALL)
-                        .text_color(tokens.text_quiet)
-                        .child(template.description),
-                ),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().child(crate::t!(template.name)))
+                    .child(
+                        div()
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_quiet)
+                            .child(crate::t!(template.description)),
+                    ),
             )
     }
 

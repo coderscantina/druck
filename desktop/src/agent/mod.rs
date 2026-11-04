@@ -14,13 +14,12 @@
 //! - `session`, `cli`: the child process and the CLI lookup.
 //! - `conversation`: events in, rows and approvals out.
 //! - `approval`, `diff`: what is shown before a tool is allowed.
-//! - `changes`: hunks of a turn, found again in text that moved. This is the seam to the Persistence slice.
+//! - `changes`: hunks of a turn from what Persistence saw on disk, found again in text that moved.
 //! - `context`, `store`, `markdown`, `strings`: chips, the remembered session, replies, and the two languages.
 //!
 //! The gpui parts are `AgentView` here, `view` for drawing it, and `prompt` for the box the prompt is written in.
 
 mod approval;
-mod carry;
 mod changes;
 mod cli;
 mod context;
@@ -46,8 +45,12 @@ use gpui::{Context, Entity, Focusable, ScrollHandle, Subscription, Task, Window,
 use crate::editor::{EditorView, SessionChanged, TextChanged};
 use crate::inspector::input::{Submitted as ReasonSubmitted, TextInput};
 use crate::inspector::{InspectorView, Tab};
+use crate::persist::merge::edits_between;
+use crate::persist::sync::ChangeKind;
+use crate::persist::{FileChange, PersistView};
 use crate::preview::PreviewView;
-use crate::source::{Edit, EditKind};
+use crate::session::Session as Document;
+use crate::source::EditKind;
 use crate::workspace::{Parts, Workspace};
 use changes::Presence;
 use cli::{CliState, Login};
@@ -55,20 +58,23 @@ use context::{ChipKind, Context as PromptContext, Selected};
 use conversation::{Answer, Conversation, Effect, SentContext};
 use session::{Event, Session as Child, SessionConfig};
 use store::{Remembered, Store};
+use strings::Key;
 
 /// How often the CLI's output is looked at while a turn runs, and while it waits for the author.
 const BUSY_POLL: Duration = Duration::from_millis(16);
 const IDLE_POLL: Duration = Duration::from_millis(250);
 /// How long the text must rest before marks and revert buttons catch up with it.
 const SETTLE: Duration = Duration::from_millis(150);
+/// How long after a turn a change on disk still counts as the turn's: a save running at its end holds the last look back.
+const TURN_GRACE: Duration = Duration::from_millis(500);
 
 /// The models the selector offers, as the CLI's own `--model` aliases. The first is the CLI's own choice.
 const MODELS: [Option<&str>; 4] = [None, Some("haiku"), Some("sonnet"), Some("opus")];
 
 /// Mounts the panel as a tab of the inspector rail.
-pub fn mount(parts: &Parts, window: &mut Window, cx: &mut Context<Workspace>) {
+pub fn mount(parts: &Parts, persist: Entity<PersistView>, window: &mut Window, cx: &mut Context<Workspace>) {
     prompt::bind_keys(cx);
-    let view = cx.new(|cx| AgentView::new(parts, window, cx));
+    let view = cx.new(|cx| AgentView::new(parts, persist, window, cx));
     parts
         .inspector
         .update(cx, |inspector, _| inspector.mount(Tab::Agent, view.into()));
@@ -108,6 +114,7 @@ pub struct AgentView {
     editor: Entity<EditorView>,
     preview: Entity<PreviewView>,
     inspector: Entity<InspectorView>,
+    persist: Entity<PersistView>,
     /// The folder or file the document was opened from. Remembered sessions are keyed by it.
     project: PathBuf,
     /// The folder the CLI works in.
@@ -135,6 +142,9 @@ pub struct AgentView {
     standing: HashMap<HunkKey, Standing>,
     marks_shown: bool,
     settle: Task<()>,
+    /// The turn that files changing on disk belong to, from its prompt until shortly after its end.
+    collecting: Option<usize>,
+    collecting_end: Task<()>,
     /// When the last prompt was sent, and how long the CLI took to start and to show its first text, for measurements.
     sent_at: Option<Instant>,
     first_event: Option<Duration>,
@@ -143,7 +153,7 @@ pub struct AgentView {
 }
 
 impl AgentView {
-    fn new(parts: &Parts, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(parts: &Parts, persist: Entity<PersistView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (project, base) = {
             let session = parts.editor.read(cx).session();
             (session.location().to_owned(), session.base_dir())
@@ -156,7 +166,7 @@ impl AgentView {
             .model
             .as_deref()
             .and_then(|model| MODELS.iter().copied().flatten().find(|known| *known == model));
-        let prompt = cx.new(|cx| prompt::PromptInput::new(strings::PLACEHOLDER.get(), cx));
+        let prompt = cx.new(|cx| prompt::PromptInput::new(crate::t!(Key::Placeholder), cx));
         let reason = cx.new(|cx| TextInput::new(window, cx));
         let prompt_focus = prompt.read(cx).focus_handle(cx);
         let subscriptions = vec![
@@ -177,6 +187,7 @@ impl AgentView {
             cx.subscribe_in(&parts.editor, window, |view, _, _: &TextChanged, window, cx| {
                 view.text_changed(window, cx);
             }),
+            cx.subscribe_in(&persist, window, Self::file_changed),
             cx.on_app_quit(|view, _| {
                 // The child must not outlive the app, even when the app exits without dropping its views.
                 view.running = None;
@@ -187,6 +198,7 @@ impl AgentView {
             editor: parts.editor.clone(),
             preview: parts.preview.clone(),
             inspector: parts.inspector.clone(),
+            persist,
             project,
             base,
             store,
@@ -209,6 +221,8 @@ impl AgentView {
             standing: HashMap::new(),
             marks_shown: false,
             settle: Task::ready(()),
+            collecting: None,
+            collecting_end: Task::ready(()),
             sent_at: None,
             first_event: None,
             first_text: None,
@@ -370,8 +384,9 @@ impl AgentView {
     fn take(&mut self, effect: Effect, window: &mut Window, cx: &mut Context<Self>) {
         match effect {
             Effect::SessionId(_) => self.remember(),
-            Effect::Patched(path) => self.carry_into_editor(&path, window, cx),
+            Effect::Patched(path) => self.forget_patch_of_open_file(&path, cx),
             Effect::Created(_) => {}
+            Effect::TurnEnded => self.end_turn(window, cx),
             Effect::ProcessEnded => {
                 let never_started = self.running.as_ref().is_some_and(|running| !running.started);
                 self.running = None;
@@ -417,6 +432,8 @@ impl AgentView {
             return;
         }
         self.conversation.begin_turn(text, context);
+        self.collecting = self.conversation.current_turn();
+        self.collecting_end = Task::ready(());
         self.prompt.update(cx, |prompt, cx| prompt.clear(cx));
         self.removed.clear();
         self.resumable = false;
@@ -567,27 +584,49 @@ impl AgentView {
 
     // The turn's changes in the editor
 
-    /// TEMPORARY, until the Persistence slice merges files that change on disk into their buffers. See [`carry`].
-    fn carry_into_editor(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(turn) = self.conversation.current_turn() else {
-            return;
-        };
-        let Some(file) = self
-            .conversation
-            .changes_mut(turn)
-            .and_then(|changes| changes.file_mut(path))
-        else {
-            return;
-        };
-        let carried = self.editor.update(cx, |editor, cx| {
-            editor.update_session(|session| carry::carry(session, path, &mut file.hunks), window, cx)
-        });
-        for error in carried.errors {
-            self.conversation.note(error);
+    /// A file the session has shows what happened to it on disk, whichever tool wrote it. The CLI's patch is for the rest.
+    fn forget_patch_of_open_file(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let session = self.editor.read(cx).session();
+        let open = file_in_session(session, path).is_some_and(|known| session.file_text(&known).is_some());
+        if open
+            && let Some(changes) = self
+                .conversation
+                .current_turn()
+                .and_then(|turn| self.conversation.changes_mut(turn))
+        {
+            changes.forget_patch(path);
         }
-        if carried.conflicts > 0 {
-            self.conversation
-                .note(strings::merge_conflict(carried.conflicts, &relative(&self.base, path)));
+    }
+
+    /// Everything the turn wrote is on disk now, so the last look needs no wait for the watcher.
+    fn end_turn(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.persist.update(cx, |persist, cx| persist.scan_now(window, cx));
+        self.collecting_end = cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor().timer(TURN_GRACE).await;
+            view.update(cx, |view, _| view.collecting = None).ok();
+        });
+    }
+
+    /// Takes in a file that changed on disk during a turn. The buffer has it already, or Persistence asks about it.
+    fn file_changed(
+        &mut self,
+        _: &Entity<PersistView>,
+        change: &FileChange,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(changes) = self.collecting.and_then(|turn| self.conversation.changes_mut(turn)) else {
+            return;
+        };
+        let name = relative(&self.base, &change.path);
+        match &change.theirs {
+            Some(theirs) => {
+                let news = changes.observe(change.path.clone(), change.chapter, change.base.clone(), theirs.clone());
+                if news && change.kind == ChangeKind::Conflict {
+                    self.conversation.note(strings::merge_conflict(&name));
+                }
+            }
+            None => self.conversation.note(strings::deleted_file(&name)),
         }
         self.refresh_changes(window, cx);
     }
@@ -608,13 +647,24 @@ impl AgentView {
                 continue;
             };
             for (file_at, file) in changes.files.iter_mut().enumerate() {
+                // The chapter's path now, since a rename keeps the chapter.
+                if let Some(chapter) = file.chapter.and_then(|id| session.chapter(id)) {
+                    file.path = chapter.path().to_owned();
+                }
+                let text = file
+                    .chapter
+                    .filter(|id| session.chapter(*id).is_some())
+                    .and_then(|_| session.file_text(&file.path));
                 for (hunk_at, tracked) in file.hunks.iter_mut().enumerate() {
-                    let state = match tracked.chapter.filter(|id| session.chapter(*id).is_some()) {
+                    let state = match &text {
                         None => Standing::NotOpen,
-                        Some(id) => match tracked.presence(session.buffer(id).text()) {
+                        Some(text) => match tracked.presence(text) {
                             Presence::Applied(place) => {
-                                if Some(turn) == latest && id == active {
-                                    marks.push(place.range);
+                                if Some(turn) == latest
+                                    && let Some((id, at)) = session.place_in_file(&file.path, place.range.start)
+                                    && id == active
+                                {
+                                    marks.push(at..at + place.range.len());
                                 }
                                 Standing::Applied
                             }
@@ -648,28 +698,29 @@ impl AgentView {
         });
     }
 
-    /// Puts the lines from before a hunk back, as one undo step in the editor.
+    /// Takes a hunk back as one undo step in the editor: a merge with the author's text, so nothing else in it moves.
     fn revert(&mut self, key: HunkKey, window: &mut Window, cx: &mut Context<Self>) {
         let (turn, file_at, hunk_at) = key;
-        let Some(tracked) = self
+        let Some(file) = self
             .conversation
             .changes_mut(turn)
             .and_then(|changes| changes.files.get_mut(file_at))
-            .and_then(|file| file.hunks.get_mut(hunk_at))
         else {
             return;
         };
-        let Some(id) = tracked.chapter else {
+        let path = file.path.clone();
+        let Some(mine) = self.editor.read(cx).session().file_text(&path) else {
             return;
         };
-        let text = self.editor.read(cx).session().buffer(id).text().to_owned();
-        let Some(replacement) = tracked.revert(&text) else {
+        let Some(reverted) = file.hunks.get_mut(hunk_at).and_then(|tracked| tracked.revert(&mine)) else {
+            self.conversation.note(crate::t!(Key::HunkConflict).to_owned());
+            cx.notify();
             return;
         };
-        let edit = Edit::new(replacement.range, replacement.text);
+        let edits = edits_between(&mine, &reverted);
         let result = self.editor.update(cx, |editor, cx| {
             editor.update_session(
-                |session| session.edit_chapter(id, vec![edit], EditKind::Discrete),
+                |session| session.apply_to_file(&path, &edits, EditKind::Discrete),
                 window,
                 cx,
             )
@@ -683,26 +734,37 @@ impl AgentView {
     /// Opens the chapter a hunk is in and puts the caret on it.
     fn reveal(&mut self, key: HunkKey, window: &mut Window, cx: &mut Context<Self>) {
         let (turn, file_at, hunk_at) = key;
-        let Some(tracked) = self
+        let Some(file) = self
             .conversation
             .changes_mut(turn)
             .and_then(|changes| changes.files.get_mut(file_at))
-            .and_then(|file| file.hunks.get_mut(hunk_at))
         else {
             return;
         };
-        let Some(id) = tracked.chapter else {
+        let session = self.editor.read(cx).session();
+        let Some(text) = session.file_text(&file.path) else {
             return;
         };
-        let text = self.editor.read(cx).session().buffer(id).text().to_owned();
-        let at = match tracked.presence(&text) {
-            Presence::Applied(place) | Presence::Absent(place) => place.range.start,
-            Presence::Moved => return,
+        let at = match file.hunks.get_mut(hunk_at).map(|tracked| tracked.presence(&text)) {
+            Some(Presence::Applied(place) | Presence::Absent(place)) => place.range.start,
+            _ => return,
+        };
+        let Some((id, at)) = session.place_in_file(&file.path, at) else {
+            return;
         };
         self.editor
             .update(cx, |editor, cx| editor.show_place(id, at, window, cx));
         self.refresh_changes(window, cx);
     }
+}
+
+/// The session's name for a file the CLI names: the same file may be reached through a link, as `/tmp` is on macOS.
+fn file_in_session(session: &Document, path: &Path) -> Option<PathBuf> {
+    let wanted = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    session
+        .files()
+        .into_iter()
+        .find(|file| std::fs::canonicalize(file).as_deref().unwrap_or(file) == wanted)
 }
 
 /// `path` relative to the project folder where it lies inside it.
