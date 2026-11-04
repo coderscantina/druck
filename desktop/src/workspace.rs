@@ -19,6 +19,7 @@ use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, Tab, ThemeChanged};
 use crate::preview::{BodyStyle, PageClicked, PreviewView, Typeset};
 use crate::session::{Group, Session};
+use crate::shell::text::Key;
 use crate::sidebar::dialogs::{DialogEvent, SectionDialog};
 use crate::sidebar::{SidebarData, SidebarEvent, SidebarView};
 use crate::tokens::{self, Tokens};
@@ -41,7 +42,11 @@ enum Canvas {
 }
 
 impl Canvas {
-    const ALL: [(Self, &'static str); 3] = [(Self::Write, "Write"), (Self::Pages, "Pages"), (Self::Split, "Split")];
+    const ALL: [(Self, Key); 3] = [
+        (Self::Write, Key::Write),
+        (Self::Pages, Key::Pages),
+        (Self::Split, Key::Split),
+    ];
 
     fn from_env() -> Option<Self> {
         match std::env::var("DRUCK_CANVAS").ok()?.as_str() {
@@ -69,15 +74,16 @@ pub struct Slots {
 #[derive(Clone)]
 pub struct Parts {
     pub editor: Entity<EditorView>,
-    #[allow(dead_code, reason = "the later slices read it")]
     pub preview: Entity<PreviewView>,
-    #[allow(dead_code, reason = "the Shell slice sets the dots")]
     pub sidebar: Entity<SidebarView>,
     pub inspector: Entity<InspectorView>,
 }
 
 pub struct Workspace {
     canvas: Canvas,
+    /// Whether the sidebar and the inspector are shown. The View menu hides them for a wider galley.
+    sidebar_shown: bool,
+    inspector_shown: bool,
     parts: Parts,
     details: Entity<DetailsPanel>,
     dialog: Entity<SectionDialog>,
@@ -104,7 +110,7 @@ impl Workspace {
         let editor = cx.new(|cx| EditorView::new(session, window, cx));
         let preview = cx.new(|cx| PreviewView::new(kind, asked, cx));
         let inspector = cx.new(|cx| InspectorView::new(theme, window, cx));
-        let sidebar = cx.new(|_| SidebarView::new());
+        let sidebar = cx.new(|cx| SidebarView::new(window, cx));
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
         inspector.update(cx, |inspector, _| inspector.mount(Tab::Details, details.clone().into()));
@@ -147,6 +153,8 @@ impl Workspace {
         });
         let mut workspace = Self {
             canvas,
+            sidebar_shown: true,
+            inspector_shown: true,
             parts,
             details,
             dialog,
@@ -168,6 +176,37 @@ impl Workspace {
             cx,
         );
         workspace
+    }
+
+    pub fn sidebar_shown(&self) -> bool {
+        self.sidebar_shown
+    }
+
+    pub fn inspector_shown(&self) -> bool {
+        self.inspector_shown
+    }
+
+    /// Show a canvas, for the View menu when no pane holds the focus.
+    pub fn show_write(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show(Canvas::Write, window, cx);
+    }
+
+    pub fn show_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show(Canvas::Pages, window, cx);
+    }
+
+    pub fn show_split(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show(Canvas::Split, window, cx);
+    }
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_shown = !self.sidebar_shown;
+        cx.notify();
+    }
+
+    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
+        self.inspector_shown = !self.inspector_shown;
+        cx.notify();
     }
 
     /// Whether anything is not on disk yet.
@@ -284,6 +323,9 @@ impl Workspace {
                 if self.canvas != Canvas::Pages {
                     window.focus(&editor.focus_handle(cx), cx);
                 }
+            }
+            SidebarEvent::Browse(id) => {
+                editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
             }
             SidebarEvent::Move(id, to) => {
                 let (id, to) = (*id, *to);
@@ -458,7 +500,8 @@ impl Workspace {
     fn canvas_switch(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let buttons: Vec<_> = Canvas::ALL
             .iter()
-            .map(|&(canvas, label)| {
+            .map(|&(canvas, key)| {
+                let label = crate::t!(key);
                 let active = canvas == self.canvas;
                 div()
                     .id(label)
@@ -570,21 +613,25 @@ impl Render for Workspace {
                     .min_h_0()
                     .flex()
                     // Cached, so a key repaints the galley and not every row and field beside it.
-                    .child(
-                        self.parts
-                            .sidebar
-                            .clone()
-                            .cached(StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full()),
-                    )
+                    .when(self.sidebar_shown, |row| {
+                        row.child(
+                            self.parts
+                                .sidebar
+                                .clone()
+                                .cached(StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full()),
+                        )
+                    })
                     .child(canvas)
-                    .child(
-                        self.parts.inspector.clone().cached(
-                            StyleRefinement::default()
-                                .flex_none()
-                                .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
-                                .h_full(),
-                        ),
-                    ),
+                    .when(self.inspector_shown, |row| {
+                        row.child(
+                            self.parts.inspector.clone().cached(
+                                StyleRefinement::default()
+                                    .flex_none()
+                                    .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
+                                    .h_full(),
+                            ),
+                        )
+                    }),
             )
             .children(self.slots.overlays.clone())
     }

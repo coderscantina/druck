@@ -2,13 +2,13 @@
 
 use serde_json::{Number, Value};
 
-use super::strings;
+use super::strings::{self, Key};
 
 pub fn style_label(key: &str) -> &str {
     strings::STYLES
         .iter()
         .find(|(k, _)| *k == key)
-        .map_or(key, |(_, label)| label)
+        .map_or(key, |&(_, label)| crate::t!(label))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -48,20 +48,20 @@ impl Property {
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Font => strings::FONT,
-            Self::Size => strings::SIZE,
-            Self::Weight => strings::WEIGHT,
-            Self::LineHeight => strings::LINE_HEIGHT,
-            Self::Align => strings::ALIGN_LABEL,
-            Self::SpaceBefore => strings::SPACE_BEFORE,
-            Self::SpaceAfter => strings::SPACE_AFTER,
-        }
+        crate::t!(match self {
+            Self::Font => Key::Font,
+            Self::Size => Key::Size,
+            Self::Weight => Key::Weight,
+            Self::LineHeight => Key::LineHeight,
+            Self::Align => Key::AlignLabel,
+            Self::SpaceBefore => Key::SpaceBefore,
+            Self::SpaceAfter => Key::SpaceAfter,
+        })
     }
 
     /// Typed text as a theme value. Units, tokens, and ranges are the engine's to judge, so only the JSON type
     /// is decided here.
-    pub fn parse(self, input: &str) -> Result<Value, &'static str> {
+    pub fn parse(self, input: &str) -> Result<Value, Key> {
         let input = input.trim();
         match self {
             Self::LineHeight => input
@@ -69,7 +69,7 @@ impl Property {
                 .ok()
                 .and_then(Number::from_f64)
                 .map(Value::Number)
-                .ok_or(strings::NOT_A_NUMBER),
+                .ok_or(Key::NotANumber),
             Self::Weight => Ok(input.parse::<u64>().map_or_else(
                 |_| Value::String(input.to_owned()),
                 |weight| Value::Number(weight.into()),
@@ -87,11 +87,11 @@ impl Property {
     }
 }
 
-pub const ALIGNMENTS: [(&str, &str); 4] = [
-    ("left", strings::ALIGN_LEFT),
-    ("center", strings::ALIGN_CENTER),
-    ("right", strings::ALIGN_RIGHT),
-    ("justify", strings::ALIGN_JUSTIFY),
+pub const ALIGNMENTS: [(&str, Key); 4] = [
+    ("left", Key::AlignLeft),
+    ("center", Key::AlignCenter),
+    ("right", Key::AlignRight),
+    ("justify", Key::AlignJustify),
 ];
 
 #[cfg(test)]

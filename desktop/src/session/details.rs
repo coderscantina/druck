@@ -12,7 +12,7 @@ use super::{Kind, Session};
 use crate::source::{Edit, EditKind};
 
 /// Where a new key goes among the keys already written.
-const ORDER: &[&str] = &[
+pub(crate) const ORDER: &[&str] = &[
     "title", "subtitle", "author", "date", "lang", "cover", "meta", "chapters", "exports",
 ];
 
@@ -219,7 +219,7 @@ impl Session {
 
     /// Applies a splice to the settings text. `check` must agree with what the engine reads from the result, or
     /// nothing changes.
-    fn write_settings(
+    pub(crate) fn write_settings(
         &mut self,
         edit: impl Fn(&str) -> Result<Option<Edit>, String>,
         check: impl Fn(&FrontMatter) -> bool,

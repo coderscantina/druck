@@ -1,58 +1,123 @@
-//! Every string the inspector shows, in one table. The German table joins this one before the first
-//! public release.
+//! Every string the inspector shows, in English and German. The tab labels are shown as written, so they are
+//! uppercase in both languages.
 
-pub const STYLES_TITLE: &str = "STYLES";
-pub const BACK: &str = "Styles";
-pub const INHERITED: &str = "INHERITED";
-pub const CUSTOMIZED: &str = "CUSTOMIZED";
-pub const RESET: &str = "Reset";
-pub const NO_THEME: &str = "No theme file is open. Start the app with --theme PATH.";
-pub const ALIGN_LABEL: &str = "Text alignment";
-pub const SAVE_FAILED: &str = "Cannot save the theme";
+crate::strings! {
+    pub enum Key {
+        TabSelection => ("SELECTION", "AUSWAHL"),
+        TabStyles => ("STYLES", "STILE"),
+        TabFonts => ("FONTS", "SCHRIFTEN"),
+        TabImages => ("IMAGES", "BILDER"),
+        TabDetails => ("DETAILS", "DETAILS"),
+        TabDiagnostics => ("DIAGNOSTICS", "DIAGNOSE"),
+        TabExport => ("EXPORT", "EXPORT"),
 
-pub const FONT: &str = "Font";
-pub const SIZE: &str = "Size";
-pub const WEIGHT: &str = "Weight";
-pub const LINE_HEIGHT: &str = "Line height";
-pub const SPACE_BEFORE: &str = "Space before";
-pub const SPACE_AFTER: &str = "Space after";
+        StylesTitle => ("STYLES", "STILE"),
+        Back => ("Styles", "Stile"),
+        Inherited => ("INHERITED", "GEERBT"),
+        Customized => ("CUSTOMIZED", "ANGEPASST"),
+        Reset => ("Reset", "Zurücksetzen"),
+        NoTheme => (
+            "No theme file is open. Start the app with --theme PATH.",
+            "Keine Theme-Datei geöffnet. App mit --theme PFAD starten."
+        ),
+        AlignLabel => ("Text alignment", "Textausrichtung"),
+        SaveFailed => ("Cannot save the theme", "Theme nicht sicherbar"),
 
-pub const ALIGN_LEFT: &str = "Left";
-pub const ALIGN_CENTER: &str = "Center";
-pub const ALIGN_RIGHT: &str = "Right";
-pub const ALIGN_JUSTIFY: &str = "Justify";
+        Font => ("Font", "Schriftart"),
+        Size => ("Size", "Größe"),
+        Weight => ("Weight", "Stärke"),
+        LineHeight => ("Line height", "Zeilenhöhe"),
+        SpaceBefore => ("Space before", "Abstand davor"),
+        SpaceAfter => ("Space after", "Abstand danach"),
 
-pub const NOT_A_NUMBER: &str = "Enter a number, such as 1.4";
+        AlignLeft => ("Left", "Links"),
+        AlignCenter => ("Center", "Zentriert"),
+        AlignRight => ("Right", "Rechts"),
+        AlignJustify => ("Justify", "Blocksatz"),
+
+        NotANumber => ("Enter a number, such as 1.4", "Zahl eingeben, z. B. 1.4"),
+
+        StyleBody => ("Regular text", "Fließtext"),
+        StyleHeading1 => ("Heading 1", "Überschrift 1"),
+        StyleHeading2 => ("Heading 2", "Überschrift 2"),
+        StyleHeading3 => ("Heading 3", "Überschrift 3"),
+        StyleHeading4 => ("Heading 4", "Überschrift 4"),
+        StyleHeading5 => ("Heading 5", "Überschrift 5"),
+        StyleHeading6 => ("Heading 6", "Überschrift 6"),
+        StyleQuote => ("Block quotation", "Blockzitat"),
+        StyleList => ("List", "Liste"),
+        StyleCodeBlock => ("Code block", "Codeblock"),
+        StyleCaption => ("Caption", "Beschriftung"),
+        StyleFootnote => ("Footnote", "Fußnote"),
+        StyleTableCell => ("Table cell", "Tabellenzelle"),
+        StyleTableHeader => ("Table header", "Tabellenkopf"),
+        StyleTitle => ("Title", "Titel"),
+        StyleSubtitle => ("Subtitle", "Untertitel"),
+        StyleAuthor => ("Author", "Autor"),
+        StyleDate => ("Date", "Datum"),
+        StyleAbstractHeading => ("Abstract heading", "Abstract-Überschrift"),
+        StyleAbstract => ("Abstract", "Abstract"),
+        StyleHeader => ("Running header", "Kopfzeile"),
+        StyleFooter => ("Running footer", "Fußzeile"),
+        StyleTocHeading => ("Contents heading", "Inhaltsüberschrift"),
+        StyleTocEntry => ("Contents entry", "Inhaltseintrag"),
+        StyleBibliography => ("Bibliography", "Literaturverzeichnis"),
+        StyleSceneBreak => ("Scene break", "Szenenwechsel"),
+        StyleIndexLetter => ("Index letter", "Registerbuchstabe"),
+        StyleIndexEntry => ("Index entry", "Registereintrag"),
+        StyleIndexSubEntry => ("Index sub-entry", "Register-Untereintrag"),
+
+        DetailsTitle => ("DETAILS", "DETAILS"),
+        CoverImageTitle => ("COVER IMAGE", "TITELBILD"),
+        MetaTitle => ("META", "META"),
+        FieldTitle => ("Title", "Titel"),
+        FieldSubtitle => ("Subtitle", "Untertitel"),
+        FieldAuthors => ("Authors", "Autoren"),
+        FieldDate => ("Date", "Datum"),
+        FieldLanguage => ("Language", "Sprache"),
+        NoCover => ("No cover", "Kein Cover"),
+        Choose => ("Choose\u{2026}", "Auswählen\u{2026}"),
+        Remove => ("Remove", "Entfernen"),
+        Isbn => ("ISBN", "ISBN"),
+        Publisher => ("Publisher", "Verlag"),
+        Other => ("Other", "Weitere"),
+        NewKey => ("New key", "Neuer Schlüssel"),
+        SeveralLines => (
+            "{value} (several lines, edit in the file)",
+            "{value} (mehrzeilig, in der Datei bearbeiten)"
+        ),
+    }
+}
 
 /// The block styles of the theme, in the order the list shows them, with the key each has in `styles`.
-pub const STYLES: &[(&str, &str)] = &[
-    ("body", "Regular text"),
-    ("heading-1", "Heading 1"),
-    ("heading-2", "Heading 2"),
-    ("heading-3", "Heading 3"),
-    ("heading-4", "Heading 4"),
-    ("heading-5", "Heading 5"),
-    ("heading-6", "Heading 6"),
-    ("quote", "Block quotation"),
-    ("list", "List"),
-    ("code-block", "Code block"),
-    ("caption", "Caption"),
-    ("footnote", "Footnote"),
-    ("table-cell", "Table cell"),
-    ("table-header", "Table header"),
-    ("title", "Title"),
-    ("subtitle", "Subtitle"),
-    ("author", "Author"),
-    ("date", "Date"),
-    ("abstract-heading", "Abstract heading"),
-    ("abstract", "Abstract"),
-    ("header", "Running header"),
-    ("footer", "Running footer"),
-    ("toc-heading", "Contents heading"),
-    ("toc-entry", "Contents entry"),
-    ("bibliography", "Bibliography"),
-    ("scene-break", "Scene break"),
-    ("index-letter", "Index letter"),
-    ("index-entry", "Index entry"),
-    ("index-sub-entry", "Index sub-entry"),
+pub const STYLES: &[(&str, Key)] = &[
+    ("body", Key::StyleBody),
+    ("heading-1", Key::StyleHeading1),
+    ("heading-2", Key::StyleHeading2),
+    ("heading-3", Key::StyleHeading3),
+    ("heading-4", Key::StyleHeading4),
+    ("heading-5", Key::StyleHeading5),
+    ("heading-6", Key::StyleHeading6),
+    ("quote", Key::StyleQuote),
+    ("list", Key::StyleList),
+    ("code-block", Key::StyleCodeBlock),
+    ("caption", Key::StyleCaption),
+    ("footnote", Key::StyleFootnote),
+    ("table-cell", Key::StyleTableCell),
+    ("table-header", Key::StyleTableHeader),
+    ("title", Key::StyleTitle),
+    ("subtitle", Key::StyleSubtitle),
+    ("author", Key::StyleAuthor),
+    ("date", Key::StyleDate),
+    ("abstract-heading", Key::StyleAbstractHeading),
+    ("abstract", Key::StyleAbstract),
+    ("header", Key::StyleHeader),
+    ("footer", Key::StyleFooter),
+    ("toc-heading", Key::StyleTocHeading),
+    ("toc-entry", Key::StyleTocEntry),
+    ("bibliography", Key::StyleBibliography),
+    ("scene-break", Key::StyleSceneBreak),
+    ("index-letter", Key::StyleIndexLetter),
+    ("index-entry", Key::StyleIndexEntry),
+    ("index-sub-entry", Key::StyleIndexSubEntry),
 ];

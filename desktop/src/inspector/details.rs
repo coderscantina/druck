@@ -10,11 +10,12 @@ use gpui::{
 };
 
 use super::input::{Committed, TextInput};
+use super::strings::Key;
 use crate::session::{Details, Field, LANGUAGES, MetaRow};
 use crate::tokens::{self, Tokens};
 
 /// `meta` keys offered before they are set.
-const SUGGESTED: &[(&str, &str)] = &[("isbn", "ISBN"), ("publisher", "Publisher")];
+const SUGGESTED: &[(&str, Key)] = &[("isbn", Key::Isbn), ("publisher", Key::Publisher)];
 
 /// What the author asked to change.
 pub enum DetailsEdit {
@@ -186,7 +187,7 @@ impl DetailsPanel {
             .flex()
             .flex_col()
             .gap(tokens::SPACE_1)
-            .child(div().text_color(tokens.text_quiet).child("Language"))
+            .child(div().text_color(tokens.text_quiet).child(crate::t!(Key::FieldLanguage)))
             .child(div().flex().gap(tokens::SPACE_1).children(buttons.collect::<Vec<_>>()))
     }
 
@@ -224,7 +225,7 @@ impl DetailsPanel {
                     .child(
                         div()
                             .truncate()
-                            .child(name.clone().unwrap_or_else(|| "No cover".to_owned())),
+                            .child(name.clone().unwrap_or_else(|| crate::t!(Key::NoCover).to_owned())),
                     )
                     .when_some(size, |column, size| {
                         column.child(
@@ -238,17 +239,21 @@ impl DetailsPanel {
                         div()
                             .flex()
                             .gap(tokens::SPACE_2)
-                            .child(link(tokens, "cover-choose", "Choose\u{2026}").on_click(cx.listener(
-                                |_, _, _, cx| {
-                                    cx.emit(DetailsEdit::ChooseCover);
-                                },
-                            )))
-                            .when(name.is_some(), |row| {
-                                row.child(link(tokens, "cover-remove", "Remove").on_click(cx.listener(
+                            .child(
+                                link(tokens, "cover-choose", crate::t!(Key::Choose)).on_click(cx.listener(
                                     |_, _, _, cx| {
-                                        cx.emit(DetailsEdit::Field(Field::Cover, String::new()));
+                                        cx.emit(DetailsEdit::ChooseCover);
                                     },
-                                )))
+                                )),
+                            )
+                            .when(name.is_some(), |row| {
+                                row.child(
+                                    link(tokens, "cover-remove", crate::t!(Key::Remove)).on_click(cx.listener(
+                                        |_, _, _, cx| {
+                                            cx.emit(DetailsEdit::Field(Field::Cover, String::new()));
+                                        },
+                                    )),
+                                )
                             }),
                     ),
             )
@@ -259,7 +264,7 @@ impl DetailsPanel {
         let label = SUGGESTED
             .iter()
             .find(|(suggested, _)| *suggested == row.key)
-            .map_or(row.key.clone(), |(_, label)| (*label).to_owned());
+            .map_or(row.key.clone(), |&(_, label)| crate::t!(label).to_owned());
         let remove = div()
             .id(SharedString::from(format!("meta-remove-{key}")))
             .flex_none()
@@ -281,7 +286,7 @@ impl DetailsPanel {
             Some(input) if !row.lines => input.clone().into_any_element(),
             _ => div()
                 .text_color(tokens.text_faint)
-                .child(format!("{} (several lines, edit in the file)", row.value))
+                .child(crate::t!(Key::SeveralLines, value = row.value))
                 .into_any_element(),
         };
         div().flex().flex_col().gap(tokens::SPACE_1).child(header).child(value)
@@ -317,10 +322,10 @@ impl Render for DetailsPanel {
             .iter()
             .map(|(field, input)| {
                 let label = match field {
-                    Field::Title => "Title",
-                    Field::Subtitle => "Subtitle",
-                    Field::Authors => "Authors",
-                    Field::Date => "Date",
+                    Field::Title => crate::t!(Key::FieldTitle),
+                    Field::Subtitle => crate::t!(Key::FieldSubtitle),
+                    Field::Authors => crate::t!(Key::FieldAuthors),
+                    Field::Date => crate::t!(Key::FieldDate),
                     Field::Language | Field::Cover => "",
                 };
                 Self::field(&tokens, label, input.clone())
@@ -339,6 +344,7 @@ impl Render for DetailsPanel {
             .iter()
             .filter(|(key, _)| !self.details.meta.iter().any(|row| row.key == *key))
             .map(|&(key, label)| {
+                let label = crate::t!(label);
                 div()
                     .id(key)
                     .flex()
@@ -372,7 +378,7 @@ impl Render for DetailsPanel {
                     .size(tokens::TEXT_SMALL)
                     .text_color(tokens.text_faint),
             )
-            .child("Other");
+            .child(crate::t!(Key::Other));
         let problem = self
             .details
             .problem
@@ -386,7 +392,7 @@ impl Render for DetailsPanel {
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .child(Self::section_label(&tokens, "DETAILS"))
+            .child(Self::section_label(&tokens, crate::t!(Key::DetailsTitle)))
             .when_some(problem, |panel, problem| {
                 panel.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(problem))
             })
@@ -401,9 +407,9 @@ impl Render for DetailsPanel {
                     .children(fields)
                     .child(languages),
             )
-            .child(Self::section_label(&tokens, "COVER IMAGE"))
+            .child(Self::section_label(&tokens, crate::t!(Key::CoverImageTitle)))
             .child(cover)
-            .child(Self::section_label(&tokens, "META"))
+            .child(Self::section_label(&tokens, crate::t!(Key::MetaTitle)))
             .child(
                 div()
                     .p(tokens::SPACE_3)
@@ -412,7 +418,7 @@ impl Render for DetailsPanel {
                     .gap(tokens::SPACE_3)
                     .children(rows)
                     .when_some(self.new_key.clone(), |column, key| {
-                        column.child(Self::field(&tokens, "New key", key))
+                        column.child(Self::field(&tokens, crate::t!(Key::NewKey), key))
                     })
                     .child(
                         div()

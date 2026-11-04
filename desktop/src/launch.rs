@@ -6,6 +6,10 @@ use gpui::{Context, EventEmitter, FontWeight, SharedString, Window, div, svg};
 use crate::session::{STARTERS, Starter};
 use crate::tokens::{self, Tokens};
 
+#[path = "launch_strings.rs"]
+mod launch_strings;
+use launch_strings::Key;
+
 pub enum LaunchEvent {
     Open,
     New(&'static Starter),
@@ -108,19 +112,15 @@ impl Render for LaunchView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Druck"),
                             )
-                            .child(
-                                div()
-                                    .text_color(tokens.text_quiet)
-                                    .child("Write it, and see the pages as you go."),
-                            ),
+                            .child(div().text_color(tokens.text_quiet).child(crate::t!(Key::Tagline))),
                     )
                     .child(
                         Self::row(
                             &tokens,
                             "open",
                             "icons/file.svg",
-                            "Open",
-                            "A Markdown file or a project folder",
+                            crate::t!(Key::Open),
+                            crate::t!(Key::OpenHint),
                         )
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
                     )
@@ -133,7 +133,7 @@ impl Render for LaunchView {
                             .text_size(tokens::TEXT_SMALL)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(tokens.text_quiet)
-                            .child("NEW PROJECT"),
+                            .child(crate::t!(Key::NewProject)),
                     )
                     .children(starters)
                     .when_some(self.error.clone(), |card, error| {

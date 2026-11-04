@@ -15,6 +15,7 @@ use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Win
 use styles::StylesPanel;
 pub use styles::ThemeChanged;
 
+use self::strings::Key;
 use crate::tokens::{self, Tokens};
 
 /// A tab of the rail. A panel takes one with [`InspectorView::mount`].
@@ -58,15 +59,15 @@ impl Tab {
     }
 
     fn label(self) -> &'static str {
-        match self {
-            Self::Selection => "SELECTION",
-            Self::Styles => "STYLES",
-            Self::Fonts => "FONTS",
-            Self::Images => "IMAGES",
-            Self::Details => "DETAILS",
-            Self::Diagnostics => "DIAGNOSTICS",
-            Self::Export => "EXPORT",
-        }
+        crate::t!(match self {
+            Self::Selection => Key::TabSelection,
+            Self::Styles => Key::TabStyles,
+            Self::Fonts => Key::TabFonts,
+            Self::Images => Key::TabImages,
+            Self::Details => Key::TabDetails,
+            Self::Diagnostics => Key::TabDiagnostics,
+            Self::Export => Key::TabExport,
+        })
     }
 }
 

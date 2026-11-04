@@ -22,6 +22,18 @@ const FILES: &[(&str, &[u8])] = &[
     ("icons/images.svg", include_bytes!("../assets/icons/images.svg")),
     ("icons/selection.svg", include_bytes!("../assets/icons/selection.svg")),
     ("icons/styles.svg", include_bytes!("../assets/icons/styles.svg")),
+    (
+        "icons/chevron-down.svg",
+        include_bytes!("../assets/icons/chevron-down.svg"),
+    ),
+    (
+        "icons/chevron-left.svg",
+        include_bytes!("../assets/icons/chevron-left.svg"),
+    ),
+    (
+        "icons/chevron-right.svg",
+        include_bytes!("../assets/icons/chevron-right.svg"),
+    ),
 ];
 
 pub struct Assets;
