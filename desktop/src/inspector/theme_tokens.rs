@@ -163,11 +163,14 @@ impl TokensPanel {
             .into_iter()
             .filter(|place| *place != format!("tokens.{}.{name}", self.group.key()))
             .collect();
-        let inherited = tokens::of(&default_theme(), self.group).iter().any(|(known, _)| known == name);
+        let inherited = tokens::of(&default_theme(), self.group)
+            .iter()
+            .any(|(known, _)| known == name);
         if !own_places.is_empty() && !inherited {
             let shown = own_places.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
             let more = if own_places.len() > 3 { ", …" } else { "" };
-            self.errors.insert(name.to_owned(), strings::TOKEN_BLOCKED.with(&format!("{shown}{more}")));
+            self.errors
+                .insert(name.to_owned(), strings::TOKEN_BLOCKED.with(&format!("{shown}{more}")));
             cx.notify();
             return;
         }
@@ -181,10 +184,11 @@ impl TokensPanel {
 
     fn start_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = cx.new(|cx| TextInput::new(window, cx).with_placeholder(strings::NEW_TOKEN_HINT.get()));
-        self._subscriptions.push(cx.subscribe(&input, |panel, input, _: &Submitted, cx| {
-            let name = input.read(cx).text().to_owned();
-            panel.create(&name, cx);
-        }));
+        self._subscriptions
+            .push(cx.subscribe(&input, |panel, input, _: &Submitted, cx| {
+                let name = input.read(cx).text().to_owned();
+                panel.create(&name, cx);
+            }));
         input.read(cx).focus_handle(cx).focus(window, cx);
         self.creating = Some(input);
         cx.notify();
@@ -194,10 +198,11 @@ impl TokensPanel {
         let input = cx.new(|cx| TextInput::new(window, cx));
         input.update(cx, |input, cx| input.set_value(name.to_owned(), true, cx));
         let from = name.to_owned();
-        self._subscriptions.push(cx.subscribe(&input, move |panel, input, _: &Submitted, cx| {
-            let to = input.read(cx).text().to_owned();
-            panel.rename(&from, &to, cx);
-        }));
+        self._subscriptions
+            .push(cx.subscribe(&input, move |panel, input, _: &Submitted, cx| {
+                let to = input.read(cx).text().to_owned();
+                panel.rename(&from, &to, cx);
+            }));
         input.read(cx).focus_handle(cx).focus(window, cx);
         self.renaming = Some((name.to_owned(), input));
         cx.notify();
@@ -221,7 +226,10 @@ impl TokensPanel {
                 )
             })
             .collect();
-        div().px(chrome::SPACE_3).py(chrome::SPACE_2).child(widgets::segmented(tokens, items))
+        div()
+            .px(chrome::SPACE_3)
+            .py(chrome::SPACE_2)
+            .child(widgets::segmented(tokens, items))
     }
 
     fn token_row(&self, name: &str, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -230,7 +238,9 @@ impl TokensPanel {
             return div().into_any_element();
         };
         let own = file.get(&["tokens", group.key(), name]).is_some();
-        let inherited = tokens::of(&default_theme(), group).iter().any(|(known, _)| known == name);
+        let inherited = tokens::of(&default_theme(), group)
+            .iter()
+            .any(|(known, _)| known == name);
         let uses = tokens::uses(file.merged(), &group.reference(name))
             .into_iter()
             .filter(|place| *place != format!("tokens.{}.{name}", group.key()))
@@ -245,7 +255,11 @@ impl TokensPanel {
             .to_owned();
         let swatch = (group == Group::Colors).then(|| parse_color(&value)).flatten();
         let input = self.values.get(&(group, name.to_owned())).cloned();
-        let renaming = self.renaming.as_ref().filter(|(renamed, _)| renamed == name).map(|(_, input)| input.clone());
+        let renaming = self
+            .renaming
+            .as_ref()
+            .filter(|(renamed, _)| renamed == name)
+            .map(|(_, input)| input.clone());
         let id = |what: &str| SharedString::from(format!("{what}-{name}"));
         let owned = name.to_owned();
         let title = match renaming {
@@ -255,7 +269,11 @@ impl TokensPanel {
         let mut actions = div().flex().items_center().gap(chrome::SPACE_3);
         actions = actions.child(widgets::note(
             tokens,
-            if uses == 0 { strings::TOKEN_UNUSED.get().to_owned() } else { strings::TOKEN_USED.with(&uses.to_string()) },
+            if uses == 0 {
+                strings::TOKEN_UNUSED.get().to_owned()
+            } else {
+                strings::TOKEN_USED.with(&uses.to_string())
+            },
         ));
         if own && !inherited {
             let renamed = name.to_owned();
@@ -283,7 +301,15 @@ impl TokensPanel {
             .gap(chrome::SPACE_1)
             .border_b_1()
             .border_color(tokens.divider)
-            .child(div().flex().items_center().justify_between().gap(chrome::SPACE_2).child(title).child(actions))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(chrome::SPACE_2)
+                    .child(title)
+                    .child(actions),
+            )
             .child(
                 div()
                     .flex()
@@ -317,12 +343,24 @@ impl Render for TokensPanel {
         let tokens = &Tokens::get(cx).clone();
         let column = div().flex_1().min_w_0().h_full().flex().flex_col();
         let names: Vec<String> = match self.model.read(cx).file() {
-            Ok(file) => tokens::of(file.merged(), self.group).into_iter().map(|(name, _)| name).collect(),
+            Ok(file) => tokens::of(file.merged(), self.group)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect(),
             Err(message) => {
-                let message = if message.is_empty() { strings::NO_THEME.get().to_owned() } else { message.to_owned() };
+                let message = if message.is_empty() {
+                    strings::NO_THEME.get().to_owned()
+                } else {
+                    message.to_owned()
+                };
                 return column
                     .child(widgets::header(tokens, strings::TOKENS_TITLE.upper()))
-                    .child(div().p(chrome::SPACE_3).text_color(tokens.text_quiet).child(SharedString::from(message)))
+                    .child(
+                        div()
+                            .p(chrome::SPACE_3)
+                            .text_color(tokens.text_quiet)
+                            .child(SharedString::from(message)),
+                    )
                     .into_any_element();
             }
         };

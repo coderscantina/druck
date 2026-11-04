@@ -82,20 +82,12 @@ strings! {
     INHERITED = "DEFAULT" / "STANDARD";
     CUSTOMIZED = "CUSTOM" / "EIGEN";
     NO_THEME = "No theme file is open. Start the app with --theme PATH or name a theme in the document." / "Keine Themendatei geöffnet. Starte die App mit --theme PFAD oder nenne ein Thema im Dokument.";
-    SAVE_FAILED = "Cannot save the theme" / "Das Thema lässt sich nicht speichern";
     CANCEL = "Cancel" / "Abbrechen";
     DELETE = "Delete" / "Löschen";
     RENAME = "Rename" / "Umbenennen";
-    CREATE = "Create" / "Anlegen";
-    NAME = "Name" / "Name";
     NOT_A_NUMBER = "Enter a number, such as 1.4" / "Gib eine Zahl ein, etwa 1,4";
-    NONE = "None" / "Keine";
     YES = "On" / "An";
     NO = "Off" / "Aus";
-    TOKEN = "Token" / "Token";
-    PICK_TOKEN = "Pick a token" / "Token wählen";
-    PROBLEMS = "PROBLEMS" / "PROBLEME";
-    EDIT = "Edit" / "Bearbeiten";
 
     TAB_STYLES = "Styles" / "Stile";
     TAB_TOKENS = "Tokens" / "Tokens";
@@ -105,9 +97,7 @@ strings! {
     // Styles
     STYLES_TITLE = "STYLES" / "STILE";
     CUSTOM_STYLES = "CUSTOM STYLES" / "EIGENE STILE";
-    NEW_STYLE = "New style" / "Neuer Stil";
     NEW_STYLE_HINT = "Name, such as pull-quote" / "Name, etwa zitat-gross";
-    STYLE_NAME_TAKEN = "A style with this name exists" / "Ein Stil mit diesem Namen existiert";
     BASED_ON = "Based on" / "Basiert auf";
     USED_AS = "Use in a document with {.name}" / "Im Dokument mit {.name} verwenden";
     RENAME_STYLE_NOTE = "Documents that use {.old} must change to {.new}." / "Dokumente, die {.alt} nutzen, müssen auf {.neu} wechseln.";
@@ -130,7 +120,6 @@ strings! {
     FIGURES_SPACING = "Figure width" / "Ziffernbreite";
     NUMBER_GAP = "Number gap" / "Nummernabstand";
     BULLETS = "Bullets per level" / "Aufzählungszeichen je Ebene";
-    BULLETS_HINT = "Separated by commas" / "Durch Kommas getrennt";
     MARKER = "Marker style" / "Markerstil";
     RULE_BELOW = "Rule below" / "Linie darunter";
     NORMAL = "Normal" / "Normal";
@@ -154,7 +143,6 @@ strings! {
 
     // Fonts
     FONTS_TITLE = "FONTS" / "SCHRIFTEN";
-    FONT_FAMILIES = "FAMILIES IN USE" / "VERWENDETE FAMILIEN";
     ADD_FONT = "Add a font file" / "Schriftdatei hinzufügen";
     CHOOSE = "Choose" / "Wählen";
     TYPEFACE = "Typeface" / "Schriftart";
@@ -169,7 +157,6 @@ strings! {
     SOURCE_BUNDLED = "Bundled" / "Mitgeliefert";
     SOURCE_INSTALLED = "Installed" / "Installiert";
     SOURCE_FILE = "Project file" / "Projektdatei";
-    SOURCE_THEME_FILE = "Theme file" / "Themendatei";
     EMBEDDING_WARNING = "This font's license restricts embedding. Druck embeds it anyway, so check that the license allows this." / "Die Lizenz dieser Schrift schränkt das Einbetten ein. Druck bettet sie trotzdem ein, prüfe daher die Lizenz.";
     AXES = "VARIABLE AXES" / "VARIABLE ACHSEN";
     AXES_NOTE = "Shown for reference. The weights a theme asks for set the axis." / "Zur Ansicht. Die angeforderten Schnitte setzen die Achse.";
@@ -177,7 +164,6 @@ strings! {
     FACES = "Faces" / "Schnitte";
     FONT_SPECIMEN = "Aa" / "Aa";
     FACE_NAME = "Face" / "Schnitt";
-    FONT_ADDED = "Added {}" / "{} hinzugefügt";
     NOT_A_FONT = "Not a font file" / "Keine Schriftdatei";
     BOLD_ITALIC = "Bold italic" / "Fett kursiv";
     INLINE_CODE = "Inline code" / "Code im Text";
@@ -195,12 +181,10 @@ strings! {
     GROUP_SIZES = "Sizes" / "Größen";
     GROUP_SPACING = "Spacing" / "Abstände";
     GROUP_COLORS = "Colors" / "Farben";
-    NEW_TOKEN = "New token" / "Neuer Token";
     NEW_TOKEN_HINT = "Name, such as accent" / "Name, etwa akzent";
     TOKEN_USED = "Used in {} places" / "An {} Stellen verwendet";
     TOKEN_UNUSED = "Not used" / "Nicht verwendet";
     TOKEN_BLOCKED = "In use, so it cannot be deleted: {}" / "In Verwendung und daher nicht löschbar: {}";
-    TOKEN_VALUE = "Value" / "Wert";
 
     // Page geometry
     GEOMETRY_TITLE = "PAGE" / "SEITE";
@@ -232,7 +216,6 @@ strings! {
     JSON_TITLE = "THEME SOURCE" / "THEMENQUELLE";
     JSON_VALID = "Valid. Changes apply as you type." / "Gültig. Änderungen gelten sofort.";
     JSON_INVALID = "Not applied: {}" / "Nicht übernommen: {}";
-    JSON_SECTIONS = "SECTIONS" / "ABSCHNITTE";
     JSON_DESIGNED = "Own panel" / "Eigenes Panel";
     JSON_ONLY = "Source view only" / "Nur Quellansicht";
     JSON_NOTE = "These sections have no panel yet. Edit them here." / "Für diese Abschnitte gibt es noch kein Panel. Bearbeite sie hier.";
@@ -247,7 +230,6 @@ strings! {
     DELETE_THEME = "Delete the common theme \"{}\"?" / "Das allgemeine Thema „{}“ löschen?";
     DELETE_THEME_DETAIL = "Documents that name it fall back to errors until they name another theme. This cannot be undone." / "Dokumente, die es nennen, melden Fehler, bis sie ein anderes Thema nennen. Das lässt sich nicht rückgängig machen.";
     DELETE_THEME_OPEN = "The open document uses it." / "Das geöffnete Dokument nutzt es.";
-    COPY_OF = "{}-copy" / "{}-kopie";
     SPECIMEN = "Specimen" / "Muster";
 
     // Fork
@@ -283,16 +265,25 @@ pub const STYLES: &[(&str, Text)] = &[
     ("subtitle", Text::new("Subtitle", "Untertitel")),
     ("author", Text::new("Author", "Autor")),
     ("date", Text::new("Date", "Datum")),
-    ("abstract-heading", Text::new("Abstract heading", "Zusammenfassung, Überschrift")),
+    (
+        "abstract-heading",
+        Text::new("Abstract heading", "Zusammenfassung, Überschrift"),
+    ),
     ("abstract", Text::new("Abstract", "Zusammenfassung")),
     ("header", Text::new("Running header", "Kopfzeile")),
     ("footer", Text::new("Running footer", "Fußzeile")),
     ("watermark", Text::new("Watermark", "Wasserzeichen")),
-    ("toc-heading", Text::new("Contents heading", "Inhaltsverzeichnis, Überschrift")),
+    (
+        "toc-heading",
+        Text::new("Contents heading", "Inhaltsverzeichnis, Überschrift"),
+    ),
     ("toc-entry", Text::new("Contents entry", "Inhaltsverzeichnis, Eintrag")),
     ("bibliography", Text::new("Bibliography", "Literaturverzeichnis")),
     ("scene-break", Text::new("Scene break", "Szenenwechsel")),
     ("index-letter", Text::new("Index letter", "Register, Buchstabe")),
     ("index-entry", Text::new("Index entry", "Register, Eintrag")),
-    ("index-sub-entry", Text::new("Index sub-entry", "Register, Untereintrag")),
+    (
+        "index-sub-entry",
+        Text::new("Index sub-entry", "Register, Untereintrag"),
+    ),
 ];

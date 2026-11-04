@@ -48,7 +48,12 @@ pub fn of(theme: &Value, group: Group) -> Vec<(String, Value)> {
         .get("tokens")
         .and_then(|tokens| tokens.get(group.key()))
         .and_then(Value::as_object)
-        .map(|tokens| tokens.iter().map(|(name, value)| (name.clone(), value.clone())).collect())
+        .map(|tokens| {
+            tokens
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -88,7 +93,9 @@ pub fn walk(value: &Value, path: &mut Vec<String>, visit: &mut impl FnMut(&[Stri
 /// The text with the token under a new name, and every reference to it following. A name taken is refused.
 pub fn rename(theme: &Value, text: &str, group: Group, from: &str, to: &str) -> Result<String, String> {
     if !is_name(to) {
-        return Err(format!("\"{to}\" is not a token name: use letters, digits, and hyphens"));
+        return Err(format!(
+            "\"{to}\" is not a token name: use letters, digits, and hyphens"
+        ));
     }
     if of(theme, group).iter().any(|(name, _)| name == to) {
         return Err(format!("a token named \"{to}\" already exists"));
@@ -100,19 +107,6 @@ pub fn rename(theme: &Value, text: &str, group: Group, from: &str, to: &str) -> 
         &group.reference(to),
         None,
     ))
-}
-
-/// The token group a property of a style or of the page takes, by the key it has in the theme.
-pub fn group_of(property: &str) -> Option<Group> {
-    match property {
-        "font" => Some(Group::Fonts),
-        "size" => Some(Group::Sizes),
-        "color" => Some(Group::Colors),
-        "space-before" | "space-after" | "indent" | "first-line-indent" | "number-gap" | "top" | "bottom"
-        | "inner" | "outer" | "width" | "height" | "text-width" | "column-gap" | "column-change-spacing"
-        | "header-offset" | "footer-offset" => Some(Group::Spacing),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -143,7 +137,11 @@ mod tests {
     fn renaming_keeps_the_token_in_place_and_updates_every_reference() {
         let theme: Value = serde_json::from_str(TEXT).unwrap();
         let renamed = rename(&theme, TEXT, Group::Sizes, "big", "large").unwrap();
-        assert_eq!(renamed, TEXT.replace("\"big\"", "\"large\"").replace("$sizes.big", "$sizes.large"));
+        assert_eq!(
+            renamed,
+            TEXT.replace("\"big\"", "\"large\"")
+                .replace("$sizes.big", "$sizes.large")
+        );
         assert!(rename(&theme, TEXT, Group::Sizes, "big", "huge").is_err());
         assert!(rename(&theme, TEXT, Group::Sizes, "big", "no way").is_err());
         let again: Value = serde_json::from_str(&renamed).unwrap();

@@ -9,7 +9,17 @@ use druck::output::{BlockKind, BlockSource, SourceMap, SourcePos};
 
 /// Styles of text that is not in any block: the title block, running heads, and the watermark. They are on the first
 /// page of any document that has them.
-const PAGE_STYLES: &[&str] = &["title", "subtitle", "author", "date", "abstract-heading", "abstract", "header", "footer", "watermark"];
+const PAGE_STYLES: &[&str] = &[
+    "title",
+    "subtitle",
+    "author",
+    "date",
+    "abstract-heading",
+    "abstract",
+    "header",
+    "footer",
+    "watermark",
+];
 
 /// Where to look at a style.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,7 +73,11 @@ pub fn styles_of(kind: BlockKind, parents: &[BlockKind], text: &str) -> Vec<Stri
         BlockKind::SceneBreak => own("scene-break"),
         BlockKind::Directive => match directive(text) {
             Some("toc") => vec!["toc-heading".to_owned(), "toc-entry".to_owned()],
-            Some("index") => vec!["index-letter".to_owned(), "index-entry".to_owned(), "index-sub-entry".to_owned()],
+            Some("index") => vec![
+                "index-letter".to_owned(),
+                "index-entry".to_owned(),
+                "index-sub-entry".to_owned(),
+            ],
             Some("bibliography") => own("bibliography"),
             _ => Vec::new(),
         },
@@ -90,7 +104,11 @@ pub fn find(
     let blocks = map.blocks();
     let chapters = map.chapters();
     let preferred = |block: &&BlockSource| {
-        prefer.is_some_and(|file| chapters.get(block.range.0.chapter.0 as usize).is_some_and(|chapter| chapter.path == file))
+        prefer.is_some_and(|file| {
+            chapters
+                .get(block.range.0.chapter.0 as usize)
+                .is_some_and(|chapter| chapter.path == file)
+        })
     };
     let uses = |block: &BlockSource| {
         let mut parents = Vec::new();
@@ -104,7 +122,10 @@ pub fn find(
         let file = &chapters.get(block.range.0.chapter.0 as usize)?.path;
         let start = block.range.0.offset as usize;
         let text = text_of(file, start..start + block.range.1 as usize).unwrap_or_default();
-        styles_of(block.kind, &parents, &text).iter().any(|used| used == style).then_some(block.range.0)
+        styles_of(block.kind, &parents, &text)
+            .iter()
+            .any(|used| used == style)
+            .then_some(block.range.0)
     };
     blocks
         .iter()
@@ -122,13 +143,20 @@ mod tests {
     fn a_block_is_set_in_the_style_its_kind_and_surroundings_give() {
         assert_eq!(styles_of(BlockKind::Heading(2), &[], "## A title"), ["heading-2"]);
         assert_eq!(styles_of(BlockKind::Paragraph, &[], "Plain text."), ["body"]);
-        assert_eq!(styles_of(BlockKind::Paragraph, &[BlockKind::Quote], "> text"), ["quote"]);
+        assert_eq!(
+            styles_of(BlockKind::Paragraph, &[BlockKind::Quote], "> text"),
+            ["quote"]
+        );
         assert_eq!(
             styles_of(BlockKind::Paragraph, &[BlockKind::List, BlockKind::ListItem], "item"),
             ["list"]
         );
         assert_eq!(
-            styles_of(BlockKind::Paragraph, &[BlockKind::Quote, BlockKind::List, BlockKind::ListItem], "x"),
+            styles_of(
+                BlockKind::Paragraph,
+                &[BlockKind::Quote, BlockKind::List, BlockKind::ListItem],
+                "x"
+            ),
             ["list"]
         );
         assert_eq!(styles_of(BlockKind::Code, &[], "```\nx\n```"), ["code-block"]);
@@ -137,14 +165,26 @@ mod tests {
     #[test]
     fn a_class_at_the_end_of_a_block_adds_its_custom_style() {
         assert_eq!(styles_of(BlockKind::Paragraph, &[], "Text. {.lead}"), ["body", "lead"]);
-        assert_eq!(styles_of(BlockKind::Heading(1), &[], "# Part {.part-title}  \n"), ["heading-1", "part-title"]);
-        assert_eq!(styles_of(BlockKind::Paragraph, &[], "Text with {braces} in it."), ["body"]);
+        assert_eq!(
+            styles_of(BlockKind::Heading(1), &[], "# Part {.part-title}  \n"),
+            ["heading-1", "part-title"]
+        );
+        assert_eq!(
+            styles_of(BlockKind::Paragraph, &[], "Text with {braces} in it."),
+            ["body"]
+        );
     }
 
     #[test]
     fn directives_are_told_apart_by_their_name() {
-        assert_eq!(styles_of(BlockKind::Directive, &[], "::: toc\n"), ["toc-heading", "toc-entry"]);
-        assert_eq!(styles_of(BlockKind::Directive, &[], "::: page-break"), Vec::<String>::new());
+        assert_eq!(
+            styles_of(BlockKind::Directive, &[], "::: toc\n"),
+            ["toc-heading", "toc-entry"]
+        );
+        assert_eq!(
+            styles_of(BlockKind::Directive, &[], "::: page-break"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

@@ -87,7 +87,9 @@ pub fn rename_key(text: &str, path: &[&str], to: &str) -> Result<String, String>
     let mut node = &root;
     let mut found = None;
     for key in path {
-        let Node::Object(object) = node else { return Ok(text.to_owned()) };
+        let Node::Object(object) = node else {
+            return Ok(text.to_owned());
+        };
         let Some(index) = object.position(key) else {
             return Ok(text.to_owned());
         };

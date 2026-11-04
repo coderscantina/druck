@@ -29,9 +29,12 @@ impl ForkPrompt {
     }
 
     fn decide(&mut self, fork: bool, cx: &mut Context<Self>) {
-        let result = self.model.update(cx, |model, cx| {
-            if fork { model.fork(cx) } else { model.edit_shared(cx) }
-        });
+        let result = self.model.update(
+            cx,
+            |model, cx| {
+                if fork { model.fork(cx) } else { model.edit_shared(cx) }
+            },
+        );
         self.error = result.err();
         cx.notify();
     }
@@ -93,14 +96,36 @@ impl Render for ForkPrompt {
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().font_weight(FontWeight::SEMIBOLD).child(strings::FORK_TITLE))
-            .child(div().text_color(tokens.text_quiet).child(strings::FORK_BODY.with(&name)))
+            .child(
+                div()
+                    .text_color(tokens.text_quiet)
+                    .child(strings::FORK_BODY.with(&name)),
+            )
             .child(widgets::note(
                 &tokens,
-                format!("{} {}", strings::FORK_AFFECTED.with(&document), strings::FORK_UNKNOWN.get()),
+                format!(
+                    "{} {}",
+                    strings::FORK_AFFECTED.with(&document),
+                    strings::FORK_UNKNOWN.get()
+                ),
             ))
-            .child(option("fork-copy", strings::FORK_COPY, strings::FORK_COPY_NOTE, true, true))
-            .child(option("fork-shared", strings::FORK_SHARED, strings::FORK_SHARED_NOTE, false, false))
-            .when_some(self.error.clone(), |card, message| card.child(widgets::error_line(&tokens, message)))
+            .child(option(
+                "fork-copy",
+                strings::FORK_COPY,
+                strings::FORK_COPY_NOTE,
+                true,
+                true,
+            ))
+            .child(option(
+                "fork-shared",
+                strings::FORK_SHARED,
+                strings::FORK_SHARED_NOTE,
+                false,
+                false,
+            ))
+            .when_some(self.error.clone(), |card, message| {
+                card.child(widgets::error_line(&tokens, message))
+            })
             .child(
                 div().flex().justify_end().child(
                     widgets::button(&tokens, "fork-cancel", strings::CANCEL)

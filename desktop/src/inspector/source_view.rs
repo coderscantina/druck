@@ -71,7 +71,9 @@ impl SourceView {
         let input = cx.new(|cx| TextInput::multiline(window, cx));
         let subscriptions = vec![
             cx.observe_in(&model, window, |view, _, window, cx| view.show_section(window, cx)),
-            cx.subscribe_in(&input, window, |view, _, _: &Edited, window, cx| view.edited(window, cx)),
+            cx.subscribe_in(&input, window, |view, _, _: &Edited, window, cx| {
+                view.edited(window, cx)
+            }),
             cx.subscribe(&input, |view, _, Committed(_), cx| view.apply(cx)),
         ];
         Self {
@@ -145,7 +147,12 @@ impl SourceView {
             };
             let Ok(file) = self.model.read(cx).file() else { return };
             let whole = match patch::value_span(file.text(), &[section]) {
-                Ok(Some(span)) => Ok(format!("{}{}{}", &file.text()[..span.start], text.trim(), &file.text()[span.end..])),
+                Ok(Some(span)) => Ok(format!(
+                    "{}{}{}",
+                    &file.text()[..span.start],
+                    text.trim(),
+                    &file.text()[span.end..]
+                )),
                 Ok(None) => patch::set(file.text(), &[section], &parsed),
                 Err(message) => Err(message),
             };
@@ -189,7 +196,11 @@ impl SourceView {
                                 },
                                 panel.is_some(),
                             ))
-                            .child(widgets::tag(tokens, if set { strings::CUSTOMIZED } else { strings::INHERITED }, set)),
+                            .child(widgets::tag(
+                                tokens,
+                                if set { strings::CUSTOMIZED } else { strings::INHERITED },
+                                set,
+                            )),
                     )
                     .on_click(cx.listener(move |view, _, window, cx| view.open(Some(section), window, cx)))
             })
@@ -199,7 +210,12 @@ impl SourceView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .child(div().px(chrome::SPACE_3).py(chrome::SPACE_2).child(widgets::note(tokens, strings::JSON_NOTE)))
+            .child(
+                div()
+                    .px(chrome::SPACE_3)
+                    .py(chrome::SPACE_2)
+                    .child(widgets::note(tokens, strings::JSON_NOTE)),
+            )
             .children(rows)
     }
 
@@ -213,7 +229,10 @@ impl SourceView {
             if more { format!("{shown}\n…") } else { shown }
         });
         let message = self.message.clone();
-        let panel = SECTIONS.iter().find(|(name, _)| *name == section).and_then(|(_, panel)| *panel);
+        let panel = SECTIONS
+            .iter()
+            .find(|(name, _)| *name == section)
+            .and_then(|(_, panel)| *panel);
         div()
             .id("source-editor")
             .flex_1()
@@ -225,7 +244,10 @@ impl SourceView {
             .flex_col()
             .gap(chrome::SPACE_2)
             .when_some(panel, |column, panel| {
-                column.child(widgets::note(tokens, format!("{}: {}", strings::JSON_DESIGNED.get(), panel.get())))
+                column.child(widgets::note(
+                    tokens,
+                    format!("{}: {}", strings::JSON_DESIGNED.get(), panel.get()),
+                ))
             })
             .child(self.input.clone())
             .child(match message {
@@ -252,10 +274,19 @@ impl Render for SourceView {
         let tokens = &Tokens::get(cx).clone();
         let column = div().flex_1().min_w_0().h_full().flex().flex_col();
         if let Err(message) = self.model.read(cx).file() {
-            let message = if message.is_empty() { strings::NO_THEME.get().to_owned() } else { message.to_owned() };
+            let message = if message.is_empty() {
+                strings::NO_THEME.get().to_owned()
+            } else {
+                message.to_owned()
+            };
             return column
                 .child(widgets::header(tokens, strings::JSON_TITLE.upper()))
-                .child(div().p(chrome::SPACE_3).text_color(tokens.text_quiet).child(SharedString::from(message)))
+                .child(
+                    div()
+                        .p(chrome::SPACE_3)
+                        .text_color(tokens.text_quiet)
+                        .child(SharedString::from(message)),
+                )
                 .into_any_element();
         }
         match self.section {

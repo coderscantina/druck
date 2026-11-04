@@ -62,7 +62,13 @@ impl ThemePicker {
     }
 
     fn common(&self, cx: &Context<Self>) -> Option<std::path::PathBuf> {
-        self.model.read(cx).editor().dirs().common.clone().or_else(library::common_dir)
+        self.model
+            .read(cx)
+            .editor()
+            .dirs()
+            .common
+            .clone()
+            .or_else(library::common_dir)
     }
 
     fn project(&self, cx: &Context<Self>) -> Option<std::path::PathBuf> {
@@ -95,10 +101,12 @@ impl ThemePicker {
     fn start_naming(&mut self, naming: Naming, text: String, window: &mut Window, cx: &mut Context<Self>) {
         let input = cx.new(|cx| TextInput::new(window, cx));
         input.update(cx, |input, cx| input.set_value(text, true, cx));
-        self._subscriptions.push(cx.subscribe_in(&input, window, |picker, input, _: &Submitted, window, cx| {
-            let name = input.read(cx).text().trim().to_owned();
-            picker.finish_naming(&name, window, cx);
-        }));
+        self._subscriptions.push(
+            cx.subscribe_in(&input, window, |picker, input, _: &Submitted, window, cx| {
+                let name = input.read(cx).text().trim().to_owned();
+                picker.finish_naming(&name, window, cx);
+            }),
+        );
         input.read(cx).focus_handle(cx).focus(window, cx);
         self.naming = Some((naming, input));
         self.error = None;
@@ -199,8 +207,8 @@ impl ThemePicker {
         if common {
             let toggled = name.clone();
             row = row.child(
-                widgets::link(tokens, id("more"), if expanded { "▴" } else { "⋯" })
-                    .on_click(cx.listener(move |picker, _, _, cx| {
+                widgets::link(tokens, id("more"), if expanded { "▴" } else { "⋯" }).on_click(cx.listener(
+                    move |picker, _, _, cx| {
                         cx.stop_propagation();
                         picker.expanded = if picker.expanded.as_deref() == Some(toggled.as_str()) {
                             None
@@ -208,7 +216,8 @@ impl ThemePicker {
                             Some(toggled.clone())
                         };
                         cx.notify();
-                    })),
+                    },
+                )),
             );
         }
         let mut column = div().flex().flex_col().child(row);
@@ -220,17 +229,21 @@ impl ThemePicker {
                     .py(tokens::SPACE_1)
                     .flex()
                     .gap(tokens::SPACE_3)
-                    .child(widgets::link(tokens, id("rename"), strings::RENAME).on_click(cx.listener(
-                        move |picker, _, window, cx| {
-                            picker.start_naming(Naming::Rename(renamed.clone()), renamed.clone(), window, cx);
-                        },
-                    )))
-                    .child(widgets::link(tokens, id("duplicate"), strings::DUPLICATE).on_click(cx.listener(
-                        move |picker, _, window, cx| picker.duplicate(&copied, window, cx),
-                    )))
-                    .child(widgets::link(tokens, id("delete"), strings::DELETE).on_click(cx.listener(
-                        move |picker, _, window, cx| picker.delete(&deleted, window, cx),
-                    ))),
+                    .child(
+                        widgets::link(tokens, id("rename"), strings::RENAME).on_click(cx.listener(
+                            move |picker, _, window, cx| {
+                                picker.start_naming(Naming::Rename(renamed.clone()), renamed.clone(), window, cx);
+                            },
+                        )),
+                    )
+                    .child(
+                        widgets::link(tokens, id("duplicate"), strings::DUPLICATE)
+                            .on_click(cx.listener(move |picker, _, window, cx| picker.duplicate(&copied, window, cx))),
+                    )
+                    .child(
+                        widgets::link(tokens, id("delete"), strings::DELETE)
+                            .on_click(cx.listener(move |picker, _, window, cx| picker.delete(&deleted, window, cx))),
+                    ),
             );
         }
         column.into_any_element()
@@ -252,9 +265,15 @@ impl ThemePicker {
         let mut rows: Vec<gpui::AnyElement> = Vec::new();
         let default_active = current.is_none();
         rows.push(
-            widgets::menu_item(tokens, "theme-default", strings::DEFAULT_THEME.get(), None, default_active)
-                .on_click(cx.listener(|picker, _, window, cx| picker.pick(None, window, cx)))
-                .into_any_element(),
+            widgets::menu_item(
+                tokens,
+                "theme-default",
+                strings::DEFAULT_THEME.get(),
+                None,
+                default_active,
+            )
+            .on_click(cx.listener(|picker, _, window, cx| picker.pick(None, window, cx)))
+            .into_any_element(),
         );
         let project_entries: Vec<Entry> = library::list(project.as_deref(), None)
             .into_iter()
@@ -284,7 +303,13 @@ impl ThemePicker {
             });
         }
         if let Some(message) = &self.error {
-            rows.push(div().px(tokens::SPACE_2).pb(tokens::SPACE_2).child(widgets::error_line(tokens, message.clone())).into_any_element());
+            rows.push(
+                div()
+                    .px(tokens::SPACE_2)
+                    .pb(tokens::SPACE_2)
+                    .child(widgets::error_line(tokens, message.clone()))
+                    .into_any_element(),
+            );
         }
         div()
             .id("theme-menu")
@@ -352,7 +377,9 @@ impl Render for ThemePicker {
                     .child(strings::SPECIMEN),
             )
             .when(self.open, |bar| {
-                bar.child(deferred(anchored().anchor(Anchor::TopRight).child(self.menu(&tokens, cx))))
+                bar.child(deferred(
+                    anchored().anchor(Anchor::TopRight).child(self.menu(&tokens, cx)),
+                ))
             })
     }
 }

@@ -7,9 +7,9 @@ mod geometry;
 pub mod input;
 mod model;
 mod picker;
+mod source_view;
 mod strings;
 mod style_property;
-mod source_view;
 mod styles;
 mod theme_tabs;
 mod theme_tokens;
@@ -21,11 +21,11 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
 
+use fonts::FontsPanel;
 pub use fork_prompt::ForkPrompt;
+use geometry::GeometryPanel;
 pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
 pub use picker::ThemePicker;
-use fonts::FontsPanel;
-use geometry::GeometryPanel;
 use source_view::SourceView;
 use styles::StylesPanel;
 use theme_tabs::ThemeTabs;
@@ -59,7 +59,10 @@ impl Tab {
     /// The tab `DRUCK_TAB` names, for screenshots.
     fn from_env() -> Option<Self> {
         let name = std::env::var("DRUCK_TAB").ok()?;
-        Self::TOP.into_iter().chain(Self::BOTTOM).find(|tab| tab.label().eq_ignore_ascii_case(&name))
+        Self::TOP
+            .into_iter()
+            .chain(Self::BOTTOM)
+            .find(|tab| tab.label().eq_ignore_ascii_case(&name))
     }
 
     fn id(self) -> &'static str {
@@ -140,7 +143,10 @@ impl InspectorView {
             cx.defer(move |cx| {
                 probe.update(cx, |model, cx| {
                     model
-                        .change(crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into()), cx)
+                        .change(
+                            crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into()),
+                            cx,
+                        )
                         .ok();
                 });
             });

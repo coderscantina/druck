@@ -83,12 +83,20 @@ pub const BLOCK: &[Property] = &[
     property(&["space-before"], strings::SPACE_BEFORE, Reference(Group::Spacing)),
     property(&["space-after"], strings::SPACE_AFTER, Reference(Group::Spacing)),
     property(&["indent"], strings::INDENT, Reference(Group::Spacing)),
-    property(&["first-line-indent"], strings::FIRST_LINE_INDENT, Reference(Group::Spacing)),
+    property(
+        &["first-line-indent"],
+        strings::FIRST_LINE_INDENT,
+        Reference(Group::Spacing),
+    ),
     property(&["tracking"], strings::TRACKING, Number),
     property(&["uppercase"], strings::UPPERCASE, Toggle),
     property(&["keep-with-next"], strings::KEEP_WITH_NEXT, Toggle),
     property(&["figures", "style"], strings::FIGURES_STYLE, Choice(FIGURE_STYLE)),
-    property(&["figures", "spacing"], strings::FIGURES_SPACING, Choice(FIGURE_SPACING)),
+    property(
+        &["figures", "spacing"],
+        strings::FIGURES_SPACING,
+        Choice(FIGURE_SPACING),
+    ),
 ];
 
 pub const NUMBER_GAP: Property = property(&["number-gap"], strings::NUMBER_GAP, Reference(Group::Spacing));
@@ -127,11 +135,7 @@ impl Property {
 
     /// The path in the theme, for a style at `prefix`.
     pub fn path_in(self, prefix: &[&str]) -> Vec<String> {
-        prefix
-            .iter()
-            .chain(self.path)
-            .map(|key| (*key).to_owned())
-            .collect()
+        prefix.iter().chain(self.path).map(|key| (*key).to_owned()).collect()
     }
 
     /// Typed text as a theme value. Units, tokens, and ranges are the engine's to judge, so only the JSON type
@@ -232,14 +236,24 @@ mod tests {
             );
         }
         for property in of_custom() {
-            assert!(custom.get(property.path[0]).is_some(), "{} is not a custom property", property.key());
+            assert!(
+                custom.get(property.path[0]).is_some(),
+                "{} is not a custom property",
+                property.key()
+            );
         }
         let block = schema["$defs"]["blockStyle"]["properties"].as_object().unwrap();
         for key in block.keys() {
-            assert!(BLOCK.iter().any(|property| property.path[0] == key), "{key} has no field");
+            assert!(
+                BLOCK.iter().any(|property| property.path[0] == key),
+                "{key} has no field"
+            );
         }
         for key in custom.as_object().unwrap().keys() {
-            assert!(of_custom().iter().any(|property| property.path[0] == key), "{key} has no field");
+            assert!(
+                of_custom().iter().any(|property| property.path[0] == key),
+                "{key} has no field"
+            );
         }
     }
 
@@ -253,7 +267,12 @@ mod tests {
                 .map(|(name, _)| Value::String(group.reference(&name)))
                 .collect()
         };
-        let strings = |values: &[&str]| values.iter().map(|value| Value::String((*value).to_owned())).collect::<Vec<_>>();
+        let strings = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| Value::String((*value).to_owned()))
+                .collect::<Vec<_>>()
+        };
         match property.control {
             Control::Reference(group) => {
                 let mut values: Vec<Value> = tokens_of(group).into_iter().take(1).collect();
@@ -266,7 +285,10 @@ mod tests {
                 values
             }
             Control::Choice(choices) => {
-                let mut values: Vec<Value> = choices.iter().map(|(value, _)| Value::String((*value).to_owned())).collect();
+                let mut values: Vec<Value> = choices
+                    .iter()
+                    .map(|(value, _)| Value::String((*value).to_owned()))
+                    .collect();
                 values.push(Value::String("sideways".to_owned()));
                 values
             }
@@ -290,7 +312,10 @@ mod tests {
             if path.extension().is_some_and(|extension| extension == "json") {
                 let name = path.file_name().unwrap().to_string_lossy().into_owned();
                 let name = name.trim_end_matches(".json");
-                let copy = scratch.write(&format!("project/themes/{name}/theme.json"), &std::fs::read_to_string(&path).unwrap());
+                let copy = scratch.write(
+                    &format!("project/themes/{name}/theme.json"),
+                    &std::fs::read_to_string(&path).unwrap(),
+                );
                 found.push((copy, ["report", "typography-styles"].contains(&name)));
             }
         }
@@ -310,14 +335,20 @@ mod tests {
         for entry in std::fs::read_dir(root.join("fonts")).unwrap().flatten() {
             std::fs::copy(entry.path(), fonts.join(entry.file_name())).unwrap();
         }
-        found.push((scratch.write("project/themes/bare/theme.json", "{\n  \"version\": 1\n}\n"), true));
+        found.push((
+            scratch.write("project/themes/bare/theme.json", "{\n  \"version\": 1\n}\n"),
+            true,
+        ));
         // Machine themes are tried too when the machine has any: always as copies, never in place.
         if let Some(common) = crate::theme_file::library::common_dir().filter(|dir| dir.is_dir()) {
             for entry in std::fs::read_dir(&common).unwrap().flatten().take(3) {
                 let path = entry.path();
                 if path.extension().is_some_and(|extension| extension == "json") {
                     let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-                    let copy = scratch.write(&format!("project/themes/machine-{name}/theme.json"), &std::fs::read_to_string(&path).unwrap_or_default());
+                    let copy = scratch.write(
+                        &format!("project/themes/machine-{name}/theme.json"),
+                        &std::fs::read_to_string(&path).unwrap_or_default(),
+                    );
                     // Assets of a machine theme sit under the common folder, so the copy names them by absolute path.
                     let text = std::fs::read_to_string(&copy).unwrap_or_default();
                     if serde_json::from_str::<Value>(&text).is_ok() && text.contains("\"version\"") {
@@ -335,7 +366,9 @@ mod tests {
     /// Turns the relative resource paths of a theme into absolute ones under `base`, for a copy elsewhere.
     fn absolutize(value: &mut Value, base: &std::path::Path) {
         for (section, deep) in [("fonts", 2usize), ("images", 0)] {
-            let Some(map) = value.get_mut(section).and_then(Value::as_object_mut) else { continue };
+            let Some(map) = value.get_mut(section).and_then(Value::as_object_mut) else {
+                continue;
+            };
             for entry in map.values_mut() {
                 if deep == 0 {
                     if let Some(path) = entry.as_str() {
@@ -344,7 +377,9 @@ mod tests {
                 } else if let Some(faces) = entry.as_object_mut() {
                     for face in faces.values_mut() {
                         match face {
-                            Value::String(path) => *face = Value::String(base.join(&*path).to_string_lossy().into_owned()),
+                            Value::String(path) => {
+                                *face = Value::String(base.join(&*path).to_string_lossy().into_owned())
+                            }
                             Value::Object(object) => {
                                 if let Some(Value::String(path)) = object.get_mut("file") {
                                     *path = base.join(&*path).to_string_lossy().into_owned();
@@ -383,14 +418,33 @@ mod tests {
                 (vec!["styles".to_owned(), "heading-1".to_owned()], vec![NUMBER_GAP]),
                 (
                     vec!["custom-styles".to_owned(), "probe".to_owned()],
-                    of_custom().into_iter().filter(|property| !BLOCK.contains(property)).collect(),
+                    of_custom()
+                        .into_iter()
+                        .filter(|property| !BLOCK.contains(property))
+                        .collect(),
                 ),
             ];
             editor
-                .apply(Change::set(&["custom-styles", "probe", "based-on"], Value::String("body".to_owned())))
+                .apply(Change::set(
+                    &["custom-styles", "probe", "based-on"],
+                    Value::String("body".to_owned()),
+                ))
                 .unwrap();
-            let styles = if full { styles } else { styles.into_iter().take(1).collect() };
-            let renders = rendered_fixtures.contains(&path.parent().unwrap().file_name().unwrap().to_string_lossy().into_owned().as_str());
+            let styles = if full {
+                styles
+            } else {
+                styles.into_iter().take(1).collect()
+            };
+            let renders = rendered_fixtures.contains(
+                &path
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+                    .as_str(),
+            );
             let count = styles.len();
             let mut batch: Vec<Vec<String>> = Vec::new();
             for (index, (prefix, properties)) in styles.into_iter().enumerate() {
@@ -432,12 +486,22 @@ mod tests {
                     continue;
                 }
                 // What the author has now must typeset, since each change was accepted on its own.
-                let typeset = Typesetter::new(Kind::Single { path: path.with_file_name("probe.md") }, Some(path.clone()))
-                    .run(Joined::single(specimen.to_owned(), 0), &Cancel::default());
+                let typeset = Typesetter::new(
+                    Kind::Single {
+                        path: path.with_file_name("probe.md"),
+                    },
+                    Some(path.clone()),
+                )
+                .run(Joined::single(specimen.to_owned(), 0), &Cancel::default());
                 match typeset {
                     Ok(_) => rendered += 1,
                     Err(druck::Failure::Errors(errors)) => {
-                        panic!("{} after {:?} no longer typesets: {:?}", path.display(), batch, errors.first())
+                        panic!(
+                            "{} after {:?} no longer typesets: {:?}",
+                            path.display(),
+                            batch,
+                            errors.first()
+                        )
                     }
                     Err(other) => panic!("{} failed: {other:?}", path.display()),
                 }

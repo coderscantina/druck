@@ -100,7 +100,10 @@ pub fn renders(path: &Path, text: &str) -> Result<(), Problem> {
     use crate::session::{Joined, Kind};
 
     let folder = path.parent().unwrap_or(path);
-    let trial = folder.join(format!(".{}.druck-check.json", path.file_stem().unwrap_or_default().to_string_lossy()));
+    let trial = folder.join(format!(
+        ".{}.druck-check.json",
+        path.file_stem().unwrap_or_default().to_string_lossy()
+    ));
     if std::fs::write(&trial, text).is_err() {
         // Nothing can be tried where the theme cannot be written, and saving it will say so.
         return Ok(());

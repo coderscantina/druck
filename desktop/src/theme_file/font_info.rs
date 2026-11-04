@@ -67,7 +67,8 @@ impl FontInfo {
             .into_iter()
             .find_map(name)
             .unwrap_or_default();
-        let format = if font.data_for_tag(Tag::new(b"CFF ")).is_some() || font.data_for_tag(Tag::new(b"CFF2")).is_some() {
+        let format = if font.data_for_tag(Tag::new(b"CFF ")).is_some() || font.data_for_tag(Tag::new(b"CFF2")).is_some()
+        {
             Format::OpenType
         } else {
             Format::TrueType
@@ -111,7 +112,12 @@ mod tests {
     use super::*;
 
     fn bundled(name: &str) -> Vec<u8> {
-        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fonts").join(name)).unwrap()
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../fonts")
+                .join(name),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -122,7 +128,11 @@ mod tests {
         assert_eq!(info.format, Format::OpenType);
         assert_eq!(info.faces, 1);
         assert_eq!(info.embedding, Embedding::Allowed);
-        assert!(info.license.as_deref().is_some_and(|license| license.contains("SIL Open Font License")));
+        assert!(
+            info.license
+                .as_deref()
+                .is_some_and(|license| license.contains("SIL Open Font License"))
+        );
         assert!(!info.is_variable());
     }
 

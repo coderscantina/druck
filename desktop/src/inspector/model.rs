@@ -46,7 +46,11 @@ impl ThemeModel {
     }
 
     fn refresh(&mut self) {
-        self.problems = self.editor.file().map(|file| file.problems().to_vec()).unwrap_or_default();
+        self.problems = self
+            .editor
+            .file()
+            .map(|file| file.problems().to_vec())
+            .unwrap_or_default();
     }
 
     pub fn editor(&self) -> &Editor {
@@ -58,16 +62,13 @@ impl ThemeModel {
         self.editor.file()
     }
 
-    pub fn problems(&self) -> &[Problem] {
-        &self.problems
-    }
-
     /// The first problem at a property, or under it.
     pub fn problem_at(&self, property: &str) -> Option<&Problem> {
         self.problems.iter().find(|problem| {
-            problem.property.as_deref().is_some_and(|at| {
-                at == property || at.strip_prefix(property).is_some_and(|rest| rest.starts_with('.'))
-            })
+            problem
+                .property
+                .as_deref()
+                .is_some_and(|at| at == property || at.strip_prefix(property).is_some_and(|rest| rest.starts_with('.')))
         })
     }
 
@@ -95,15 +96,6 @@ impl ThemeModel {
         self.refresh();
         cx.emit(ThemeSwitched);
         cx.notify();
-    }
-
-    /// The folders themes live in changed, such as when another project opened.
-    pub fn set_dirs(&mut self, dirs: Dirs, cx: &mut Context<Self>) {
-        if *self.editor.dirs() != dirs {
-            let path = self.editor.file().ok().map(|file| file.path().to_owned());
-            self.editor = Editor::open(path.as_deref(), dirs);
-            cx.notify();
-        }
     }
 
     /// Makes a change. The reason is the engine's when it refuses.

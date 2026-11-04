@@ -91,10 +91,7 @@ pub struct Editor {
 
 impl Editor {
     pub fn open(path: Option<&Path>, dirs: Dirs) -> Self {
-        let file = path.map_or_else(
-            || Err(String::new()),
-            |path| ThemeFile::open(path),
-        );
+        let file = path.map_or_else(|| Err(String::new()), ThemeFile::open);
         let place = file.as_ref().map_or(Place::Loose, |file| place_of(file.path(), &dirs));
         let root = file.as_ref().ok().and_then(|file| root_of(file.path(), place, &dirs));
         Self {
@@ -111,6 +108,7 @@ impl Editor {
         self.file.as_ref().map_err(String::as_str)
     }
 
+    #[cfg(test)]
     pub fn place(&self) -> Place {
         self.place
     }
@@ -188,7 +186,10 @@ impl Editor {
         let path = druck::resource::normalize(path);
         match &self.root {
             Some(root) if path.starts_with(druck::resource::normalize(root)) => Ok(()),
-            _ => Err(format!("{} is outside the folders this theme may be changed in", path.display())),
+            _ => Err(format!(
+                "{} is outside the folders this theme may be changed in",
+                path.display()
+            )),
         }
     }
 
@@ -198,9 +199,10 @@ impl Editor {
         }
         let file = self.file.as_mut().map_err(|message| message.clone())?;
         let refused = |problems: Vec<Problem>| {
-            problems
-                .first()
-                .map_or_else(|| "the theme cannot take this change".to_owned(), |problem| problem.message.clone())
+            problems.first().map_or_else(
+                || "the theme cannot take this change".to_owned(),
+                |problem| problem.message.clone(),
+            )
         };
         match &change {
             Change::Set(path, value) => file.set(&keys(path), value.clone()).map_err(refused)?,
@@ -214,7 +216,8 @@ impl Editor {
             Change::RenameCustomStyle(from, to) => rename_custom_style(file, from, to).map_err(refused)?,
             Change::AddFont { family, face, from } => return self.add_font(family, face, from),
         }
-        file.save().map_err(|error| format!("{}: {error}", file.path().display()))?;
+        file.save()
+            .map_err(|error| format!("{}: {error}", file.path().display()))?;
         Ok(Outcome::Saved)
     }
 
@@ -243,9 +246,13 @@ impl Editor {
             if copied {
                 fs::remove_file(&target).ok();
             }
-            return Err(problems.first().map(|problem| problem.message.clone()).unwrap_or_default());
+            return Err(problems
+                .first()
+                .map(|problem| problem.message.clone())
+                .unwrap_or_default());
         }
-        file.save().map_err(|error| format!("{}: {error}", file.path().display()))?;
+        file.save()
+            .map_err(|error| format!("{}: {error}", file.path().display()))?;
         Ok(Outcome::Saved)
     }
 }
@@ -282,7 +289,9 @@ pub fn place_of(path: &Path, dirs: &Dirs) -> Place {
 /// bytes is reused.
 fn free_name(folder: &Path, name: &str, bytes: &[u8]) -> (PathBuf, String) {
     let path = Path::new(name);
-    let stem = path.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+    let stem = path
+        .file_stem()
+        .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
     let extension = path
         .extension()
         .map_or_else(String::new, |extension| format!(".{}", extension.to_string_lossy()));
@@ -305,7 +314,12 @@ fn rename_custom_style(file: &mut ThemeFile, from: &str, to: &str) -> Result<(),
             "\"{to}\" is not a style name: use letters, digits, hyphens, and underscores"
         )));
     }
-    if file.value().get("custom-styles").and_then(|styles| styles.get(to)).is_some() {
+    if file
+        .value()
+        .get("custom-styles")
+        .and_then(|styles| styles.get(to))
+        .is_some()
+    {
         return Err(Problem::internal(format!("a style named \"{to}\" already exists")));
     }
     file.rewrite(|text| {
@@ -356,7 +370,9 @@ mod tests {
         let scratch = Scratch::new();
         let common = scratch.write("common/mine.json", THEME);
         let mut editor = Editor::open(Some(&common), dirs(&scratch));
-        editor.apply(Change::set(&["styles", "title", "align"], json!("right"))).unwrap();
+        editor
+            .apply(Change::set(&["styles", "title", "align"], json!("right")))
+            .unwrap();
         assert_eq!(editor.edit_shared(), Ok(Outcome::Saved));
         assert!(fs::read_to_string(&common).unwrap().contains("\"align\": \"right\""));
         assert_eq!(
@@ -369,7 +385,13 @@ mod tests {
     fn a_theme_without_a_project_around_it_changes_at_once() {
         let scratch = Scratch::new();
         let common = scratch.write("common/mine.json", THEME);
-        let mut editor = Editor::open(Some(&common), Dirs { project: None, common: Some(scratch.0.join("common")) });
+        let mut editor = Editor::open(
+            Some(&common),
+            Dirs {
+                project: None,
+                common: Some(scratch.0.join("common")),
+            },
+        );
         assert_eq!(
             editor.apply(Change::set(&["styles", "title", "align"], json!("right"))),
             Ok(Outcome::Saved)
@@ -384,13 +406,19 @@ mod tests {
         editor
             .apply(Change::RenameToken(Group::Sizes, "big".into(), "large".into()))
             .unwrap();
-        editor.apply(Change::RenameCustomStyle("lead".into(), "intro".into())).unwrap();
+        editor
+            .apply(Change::RenameCustomStyle("lead".into(), "intro".into()))
+            .unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"large\": \"20pt\""));
         assert!(text.contains("\"size\": \"$sizes.large\""));
         assert!(text.contains("\"intro\": { \"based-on\": \"body\" }"));
         assert!(text.contains("\"lead2\": { \"based-on\": \"intro\" }"));
-        assert!(editor.apply(Change::RenameCustomStyle("intro".into(), "lead2".into())).is_err());
+        assert!(
+            editor
+                .apply(Change::RenameCustomStyle("intro".into(), "lead2".into()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -416,8 +444,17 @@ mod tests {
                 from: font,
             })
             .unwrap();
-        assert!(scratch.0.join("project/themes/t/fonts/LibertinusSerif-Italic.otf").is_file());
-        assert!(fs::read_to_string(&path).unwrap().contains("\"regular\": \"fonts/LibertinusSerif-Italic.otf\""));
+        assert!(
+            scratch
+                .0
+                .join("project/themes/t/fonts/LibertinusSerif-Italic.otf")
+                .is_file()
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("\"regular\": \"fonts/LibertinusSerif-Italic.otf\"")
+        );
         let text = scratch.write("notes.txt", "not a font");
         let before = fs::read_to_string(&path).unwrap();
         assert!(
@@ -439,28 +476,40 @@ mod tests {
         let path = scratch.write("project/themes/t/theme.json", THEME);
         let mut editor = Editor::open(Some(&path), dirs(&scratch));
         // The bundled italic has no glyph for the bullet of a nested list, which only a layout finds out.
-        let refused = editor.apply(Change::set(&["styles", "list", "style"], json!("italic"))).unwrap_err();
+        let refused = editor
+            .apply(Change::set(&["styles", "list", "style"], json!("italic")))
+            .unwrap_err();
         assert!(refused.contains("no glyph"), "{refused}");
-        let refused = editor.apply(Change::set(&["styles", "body", "weight"], json!(600))).unwrap_err();
+        let refused = editor
+            .apply(Change::set(&["styles", "body", "weight"], json!(600)))
+            .unwrap_err();
         assert!(refused.contains("600"), "{refused}");
         assert_eq!(fs::read_to_string(&path).unwrap(), THEME);
-        assert!(!path.with_file_name(".theme.druck-check.json").exists(), "the trial file is removed");
+        assert!(
+            !path.with_file_name(".theme.druck-check.json").exists(),
+            "the trial file is removed"
+        );
     }
 
     #[test]
     fn a_theme_that_already_fails_to_typeset_can_still_be_mended() {
         let scratch = Scratch::new();
-        let broken = THEME.replace("\"version\": 1", "\"version\": 1, \"styles\": { \"list\": { \"style\": \"italic\" } }").replace(
-            "\"styles\": { \"title\": { \"size\": \"$sizes.big\" } },",
-            "",
-        );
+        let broken = THEME
+            .replace(
+                "\"version\": 1",
+                "\"version\": 1, \"styles\": { \"list\": { \"style\": \"italic\" } }",
+            )
+            .replace("\"styles\": { \"title\": { \"size\": \"$sizes.big\" } },", "");
         let path = scratch.write("project/themes/t/theme.json", &broken);
         let mut editor = Editor::open(Some(&path), dirs(&scratch));
         assert_eq!(
             editor.apply(Change::set(&["styles", "body", "align"], json!("left"))),
             Ok(Outcome::Saved)
         );
-        assert_eq!(editor.apply(Change::remove(&["styles", "list", "style"])), Ok(Outcome::Saved));
+        assert_eq!(
+            editor.apply(Change::remove(&["styles", "list", "style"])),
+            Ok(Outcome::Saved)
+        );
     }
 
     /// Every file below a folder with its size and time of change.
@@ -484,10 +533,15 @@ mod tests {
     #[test]
     fn no_write_reaches_a_path_outside_the_temp_root() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let outside: Vec<PathBuf> = [library::common_dir(), Some(repo.join("fonts")), Some(repo.join("samples")), Some(repo.join("themes"))]
-            .into_iter()
-            .flatten()
-            .collect();
+        let outside: Vec<PathBuf> = [
+            library::common_dir(),
+            Some(repo.join("fonts")),
+            Some(repo.join("samples")),
+            Some(repo.join("themes")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let before: Vec<_> = outside.iter().map(|dir| listing(dir)).collect();
 
         let scratch = Scratch::new();
@@ -499,15 +553,27 @@ mod tests {
         // Edits to a project theme, a fork of a common one, and the common folder's own operations.
         let project = scratch.write("project/themes/t/theme.json", THEME);
         let mut editor = Editor::open(Some(&project), dirs.clone());
-        editor.apply(Change::set(&["styles", "title", "align"], json!("right"))).unwrap();
-        editor.apply(Change::RenameToken(Group::Sizes, "big".into(), "large".into())).unwrap();
-        editor.apply(Change::RenameCustomStyle("lead".into(), "intro".into())).unwrap();
         editor
-            .apply(Change::AddFont { family: "../../escape".into(), face: "regular".into(), from: font.clone() })
+            .apply(Change::set(&["styles", "title", "align"], json!("right")))
+            .unwrap();
+        editor
+            .apply(Change::RenameToken(Group::Sizes, "big".into(), "large".into()))
+            .unwrap();
+        editor
+            .apply(Change::RenameCustomStyle("lead".into(), "intro".into()))
+            .unwrap();
+        editor
+            .apply(Change::AddFont {
+                family: "../../escape".into(),
+                face: "regular".into(),
+                from: font.clone(),
+            })
             .unwrap();
         let shared = scratch.write("common/shared.json", THEME);
         let mut forking = Editor::open(Some(&shared), dirs.clone());
-        forking.apply(Change::set(&["styles", "title", "align"], json!("left"))).unwrap();
+        forking
+            .apply(Change::set(&["styles", "title", "align"], json!("left")))
+            .unwrap();
         forking.fork().unwrap();
         library::create(&common_dir, "fresh").unwrap();
         library::duplicate(&common_dir, "fresh", "fresh-copy").unwrap();
@@ -521,15 +587,24 @@ mod tests {
         assert!(library::fork(&project_dir, &common_dir, "shared", "../escape").is_err());
         assert!(library::fork(&project_dir, &common_dir, "../shared", "x").is_err());
         assert!(editor.confine(&project_dir.join("themes/../../outside.json")).is_err());
-        assert!(editor.confine(&common_dir.join("any.json")).is_err(), "a project theme may not write to the common folder");
+        assert!(
+            editor.confine(&common_dir.join("any.json")).is_err(),
+            "a project theme may not write to the common folder"
+        );
         assert!(editor.confine(&project_dir.join("themes/t/fonts/a.otf")).is_ok());
 
         // A file named on the command line may change only inside its own folder.
         let loose = scratch.write("elsewhere/mine.json", THEME);
         let mut loose_editor = Editor::open(Some(&loose), dirs);
         assert_eq!(loose_editor.place(), Place::Loose);
-        loose_editor.apply(Change::set(&["styles", "title", "align"], json!("right"))).unwrap();
-        assert!(loose_editor.confine(&scratch.0.join("project/themes/t/theme.json")).is_err());
+        loose_editor
+            .apply(Change::set(&["styles", "title", "align"], json!("right")))
+            .unwrap();
+        assert!(
+            loose_editor
+                .confine(&scratch.0.join("project/themes/t/theme.json"))
+                .is_err()
+        );
 
         // Everything written is under the scratch root, and nothing outside it changed.
         let mut written: Vec<String> = fs::read_dir(&scratch.0)

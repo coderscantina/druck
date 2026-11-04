@@ -36,6 +36,7 @@ fn check_name(name: &str) -> Result<(), String> {
 }
 
 /// A theme by name. A project theme wins over a common one of the same name.
+#[cfg(test)]
 pub fn locate(name: &str, project: Option<&Path>, common: Option<&Path>) -> Option<Entry> {
     let project = project.map(|project| (Scope::Project, theme_path::project_file(project, name)));
     let common = common.map(|common| (Scope::Common, common_path(common, name)));

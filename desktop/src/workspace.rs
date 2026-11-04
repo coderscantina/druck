@@ -131,7 +131,9 @@ impl Workspace {
             cx.subscribe(&inspector, |workspace, _, event: &ThemeChanged, cx| {
                 workspace.theme_changed(event, cx)
             }),
-            cx.subscribe(&model, |workspace, _, _: &ThemeSwitched, cx| workspace.theme_switched(cx)),
+            cx.subscribe(&model, |workspace, _, _: &ThemeSwitched, cx| {
+                workspace.theme_switched(cx)
+            }),
             cx.subscribe(&model, |workspace, _, _: &SpecimenRequested, cx| {
                 workspace.specimen_requested(cx)
             }),
@@ -184,7 +186,10 @@ impl Workspace {
         workspace.sync_panels(window, cx);
         // `DRUCK_SPECIMEN=1` opens on the specimen, for screenshots.
         if std::env::var_os("DRUCK_SPECIMEN").is_some() {
-            workspace.parts.preview.update(cx, |preview, cx| preview.set_specimen(true, cx));
+            workspace
+                .parts
+                .preview
+                .update(cx, |preview, cx| preview.set_specimen(true, cx));
         }
         workspace.request_pages(cx);
         crate::gate::start(
@@ -291,13 +296,17 @@ impl Workspace {
     fn specimen_requested(&mut self, cx: &mut Context<Self>) {
         let model = self.parts.inspector.read(cx).model().clone();
         self.jump = model.read(cx).missing().map(str::to_owned);
-        self.parts.preview.update(cx, |preview, cx| preview.set_specimen(true, cx));
+        self.parts
+            .preview
+            .update(cx, |preview, cx| preview.set_specimen(true, cx));
     }
 
     /// Gives the Fonts tab the families the pages on screen use.
     fn show_fonts(&mut self, cx: &mut Context<Self>) {
         let fonts = self.parts.preview.read(cx).fonts().to_vec();
-        self.parts.inspector.update(cx, |inspector, cx| inspector.set_fonts(fonts, cx));
+        self.parts
+            .inspector
+            .update(cx, |inspector, cx| inspector.set_fonts(fonts, cx));
     }
 
     /// Shows, on the pages and in the galley, the first block set in the style that was edited. A style with no block
@@ -308,11 +317,14 @@ impl Workspace {
         };
         let editor = self.parts.editor.clone();
         let session = editor.read(cx).session();
-        let prefer = session.chapter(session.active()).map(|chapter| chapter.path().to_owned());
+        let prefer = session
+            .chapter(session.active())
+            .map(|chapter| chapter.path().to_owned());
         let text_of = |file: &std::path::Path, range: std::ops::Range<usize>| {
             let (id, start) = session.locate(file, range.start)?;
             let text = session.buffer(id).text();
-            text.get(start..(start + range.len()).min(text.len())).map(str::to_owned)
+            text.get(start..(start + range.len()).min(text.len()))
+                .map(str::to_owned)
         };
         let preview = self.parts.preview.clone();
         let target = preview.read(cx).find_style(&style, prefer.as_deref(), &text_of);
@@ -323,7 +335,9 @@ impl Workspace {
         let galley = place.as_ref().and_then(|(file, offset)| session.locate(file, *offset));
         let specimen = preview.read(cx).is_specimen();
         let model = self.parts.inspector.read(cx).model().clone();
-        model.update(cx, |model, cx| model.set_missing(target.is_none().then(|| style.clone()), cx));
+        model.update(cx, |model, cx| {
+            model.set_missing(target.is_none().then(|| style.clone()), cx)
+        });
         match target {
             Some(Target::Block(_)) => {
                 if let Some((file, offset)) = place {

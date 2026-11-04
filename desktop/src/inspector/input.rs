@@ -143,7 +143,6 @@ struct Shaped {
     line_height: Pixels,
     /// Where the text starts in the window.
     origin: Point<Pixels>,
-    width: Pixels,
 }
 
 struct ShapedLine {
@@ -267,13 +266,6 @@ impl TextInput {
         self.buffer.text()
     }
 
-    /// Where the caret is in the window, from the last paint. For scrolling it into view.
-    pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
-        let shaped = self.shaped.as_ref()?;
-        let (position, height) = Self::position(shaped, self.selection.head);
-        Some(Bounds::new(position, size(px(1.), height)))
-    }
-
     fn commit(&mut self, cx: &mut Context<Self>) {
         if self.buffer.text() != self.original {
             self.original = self.buffer.text().to_owned();
@@ -305,7 +297,11 @@ impl TextInput {
     }
 
     fn replace_selection(&mut self, text: &str, cx: &mut Context<Self>) {
-        let text = if self.multiline { text.to_owned() } else { text.replace(['\n', '\r'], " ") };
+        let text = if self.multiline {
+            text.to_owned()
+        } else {
+            text.replace(['\n', '\r'], " ")
+        };
         self.edit(EditKind::Discrete, self.selection.range(), &text, false, cx);
     }
 
@@ -615,8 +611,16 @@ impl EntityInputHandler for TextInput {
             .map(|range| self.buffer.range_from_utf16(&range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range());
-        let kind = if self.marked.is_some() { EditKind::Composing } else { EditKind::Typing };
-        let text = if self.multiline { text.to_owned() } else { text.replace(['\n', '\r'], " ") };
+        let kind = if self.marked.is_some() {
+            EditKind::Composing
+        } else {
+            EditKind::Typing
+        };
+        let text = if self.multiline {
+            text.to_owned()
+        } else {
+            text.replace(['\n', '\r'], " ")
+        };
         self.edit(kind, range, &text, false, cx);
     }
 
@@ -663,11 +667,20 @@ impl EntityInputHandler for TextInput {
         let range = self.buffer.range_from_utf16(&range_utf16);
         let (start, height) = Self::position(shaped, range.start);
         let (end, _) = Self::position(shaped, range.end);
-        let width = if end.y == start.y { (end.x - start.x).max(px(1.)) } else { px(1.) };
+        let width = if end.y == start.y {
+            (end.x - start.x).max(px(1.))
+        } else {
+            px(1.)
+        };
         Some(Bounds::new(start, size(width, height)))
     }
 
-    fn character_index_for_point(&mut self, point: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+    fn character_index_for_point(
+        &mut self,
+        point: Point<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<usize> {
         Some(self.buffer.utf16_of(self.offset_at(point)))
     }
 }
@@ -709,7 +722,7 @@ impl Element for InputElement {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         window: &mut Window,
-        cx: &mut App,
+        _: &mut App,
     ) -> (LayoutId, Slot) {
         let slot: Slot = Rc::new(RefCell::new(None));
         let mut style = Style::default();
@@ -805,7 +818,11 @@ impl Element for InputElement {
                 } else if caret < input.scroll_x {
                     input.scroll_x = caret;
                 }
-                if shaped.lines.first().is_some_and(|line| line.wrapped.width() <= bounds.size.width) {
+                if shaped
+                    .lines
+                    .first()
+                    .is_some_and(|line| line.wrapped.width() <= bounds.size.width)
+                {
                     input.scroll_x = px(0.);
                 }
             }
@@ -844,7 +861,11 @@ impl TextInput {
         .into();
         let family = if self.multiline { "Menlo" } else { tokens::FONT_UI };
         let font = font(family);
-        let size = if self.multiline { tokens::TEXT_SMALL + px(1.) } else { tokens::TEXT_BODY };
+        let size = if self.multiline {
+            tokens::TEXT_SMALL + px(1.)
+        } else {
+            tokens::TEXT_BODY
+        };
         let line_height = size * 1.45;
         let wrap = self.multiline.then_some(width);
         let text = if showing_placeholder {
@@ -883,7 +904,6 @@ impl TextInput {
             lines,
             line_height,
             origin: point(px(0.), px(0.)),
-            width,
         }
     }
 }
@@ -948,12 +968,16 @@ fn selection_rectangles(shaped: &Shaped, range: Range<usize>, width: Pixels) -> 
             }
             let left = layout.x_for_index(start - line.range.start) - layout.x_for_index(row.start);
             let right = if continues {
-                (width.max(layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start)) + px(4.)).max(left)
+                (width.max(layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start)) + px(4.))
+                    .max(left)
             } else {
                 layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start)
             };
             rectangles.push(Bounds::new(
-                point(shaped.origin.x + left, shaped.origin.y + line.top + shaped.line_height * index as f32),
+                point(
+                    shaped.origin.x + left,
+                    shaped.origin.y + line.top + shaped.line_height * index as f32,
+                ),
                 size((right - left).max(px(0.)), shaped.line_height),
             ));
         }
@@ -1034,7 +1058,10 @@ impl Render for TextInput {
             .border_color(if focused { tokens.accent } else { tokens.divider })
             .bg(tokens.canvas);
         if multiline {
-            field.py(tokens::SPACE_2).min_h(tokens::FIELD_HEIGHT).child(InputElement { input: cx.entity() })
+            field
+                .py(tokens::SPACE_2)
+                .min_h(tokens::FIELD_HEIGHT)
+                .child(InputElement { input: cx.entity() })
         } else {
             field
                 .h(tokens::FIELD_HEIGHT)

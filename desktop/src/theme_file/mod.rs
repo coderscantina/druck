@@ -69,6 +69,7 @@ impl ThemeFile {
     }
 
     /// Whether the text differs from what is on disk.
+    #[cfg(test)]
     pub fn is_dirty(&self) -> bool {
         !self.saved
     }
@@ -158,7 +159,11 @@ impl ThemeFile {
 
     fn take(&mut self, text: String, own: Value) -> Result<(), Vec<Problem>> {
         let now = validate::check(&self.path, &own);
-        let introduced: Vec<Problem> = now.iter().filter(|problem| !self.problems.contains(problem)).cloned().collect();
+        let introduced: Vec<Problem> = now
+            .iter()
+            .filter(|problem| !self.problems.contains(problem))
+            .cloned()
+            .collect();
         if !introduced.is_empty() {
             return Err(introduced);
         }
