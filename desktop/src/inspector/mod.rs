@@ -1,6 +1,7 @@
 //! Right pane: the panel of the active tab, then the tab rail at the window's edge.
 
 pub mod details;
+mod geometry;
 pub mod input;
 mod model;
 mod strings;

@@ -204,6 +204,15 @@ strings! {
     COLUMN_GAP = "Column gap" / "Spaltenabstand";
     TEXT_WIDTH = "Narrower prose width" / "Schmalere Textbreite";
     TEXT_WIDTH_HINT = "Empty for the full frame" / "Leer für den ganzen Satzspiegel";
+    FULL_FRAME = "Full frame" / "Ganzer Satzspiegel";
+    PAPER_A4 = "A4" / "A4";
+    PAPER_A5 = "A5" / "A5";
+    PAPER_B5 = "B5" / "B5";
+    PAPER_LETTER = "Letter" / "US-Letter";
+    PAPER_LEGAL = "Legal" / "US-Legal";
+    LENGTH_NOTE = "{mm} mm · {pt} pt" / "{mm} mm · {pt} pt";
+    FRAME_SIZE = "Frame {}" / "Satzspiegel {}";
+    DECIMAL = "." / ",";
 
     // JSON view
     JSON_TITLE = "THEME SOURCE" / "THEMENQUELLE";
