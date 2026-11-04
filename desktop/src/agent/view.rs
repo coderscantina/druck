@@ -88,6 +88,7 @@ impl AgentView {
                 let label = model.map_or(crate::t!(Key::ModelDefault), |model| model);
                 div()
                     .id(label)
+                    .button(tokens, label)
                     .h(tokens::LIST_ROW_HEIGHT)
                     .px(tokens::SPACE_3)
                     .flex()
@@ -220,6 +221,7 @@ impl AgentView {
                         row.child(
                             div()
                                 .id(("sent-context", index))
+                                .button(tokens, crate::t!(Key::Show))
                                 .cursor_pointer()
                                 .text_size(tokens::TEXT_SMALL)
                                 .text_color(tokens.text_faint)
@@ -280,6 +282,7 @@ impl AgentView {
             .child(
                 div()
                     .id(("tool", index))
+                    .button(tokens, tool.name.clone())
                     .flex()
                     .items_center()
                     .gap(tokens::SPACE_1)

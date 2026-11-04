@@ -280,6 +280,7 @@ impl Shell {
     /// stays in a recovery copy, and the file keeps the other version. Only text that could not be written asks
     /// whether to go on, with `message`. Cancel runs nothing.
     fn after_saving(&mut self, message: Key, window: &mut Window, cx: &mut Context<Self>, then: After) {
+        crate::persist::commit_floats(window, cx);
         let dirty = self
             .workspace
             .as_ref()

@@ -18,7 +18,7 @@ Left the sidebar, centre the canvas, right the inspector with its tab rail.
 
 The window has three places to mount a view without touching the shell, listed in `desktop/src/app.rs`: `toolbar` in the title bar before the canvas switch, `footer` in the strip under the canvas, and `overlays` over the window. Inspector tabs take a panel with `InspectorView::mount`.
 
-The title bar holds, before the canvas switch, the source toggle, the theme picker, and the specimen switch.
+The title bar holds, before the canvas switch, the theme picker, the specimen switch, the source toggle, and the print lines toggle.
 
 The footer holds the saving state at its left and the word count at its right. The word count is faint, with a thin space between thousands.
 
@@ -56,6 +56,8 @@ Section labels, field labels, and rows keep the mockups' hierarchy: a small sect
 - The scrollbar is a 6 px thumb in the pane's right edge, faint, and stronger when the pointer is over it.
 - The source view uses one monospace on the same sheet with no block backgrounds. Markers, comments, directives, and front matter are in the quiet color, headings bold, and code in the link color.
 - Passages an agent changed are tinted in the `added` color at 20 percent. A deleted passage has no mark, only its row in the panel.
+- With print lines on, the sheet narrows to the page's measure at the galley's scale, so its lines are the page's, or as wide as the pane allows. Lines that reach the measure are justified, a paragraph's first line takes the engine's indent, and a hyphen the engine added is painted after its row. The active block keeps toolkit lines from the first key until the caret leaves it. Blocks in a size the galley does not show, such as a custom style, keep toolkit lines.
+- A misspelled word has a 1 px line under it in the accent color at 60 percent, in the galley and the source view. It takes no room and leaves as soon as its block is edited, until the next pause. Its menu uses the slash menu's rows: suggestions with a text icon, then a plus icon and the row that adds the word to the project's words. The word stays selected behind the menu.
 
 ## Floats
 
@@ -81,6 +83,10 @@ The tab's title is the block's type. Text alignment is five segments: the theme'
 ### Images
 
 A row is a 44 px thumbnail on the raised color, the path as the document writes it, and one quiet line with the size and how often the book uses it. A file the text names that is not there shows the images icon and "File missing" in the accent color. A click goes to the first use. Insert image stands at the panel's foot.
+
+## Keyboard
+
+Only a keyboard's focus shows: a 2 px accent ring inside the control's edge, drawn as an inset shadow over any border, so nothing moves and nothing fills. Tab and Shift+Tab walk the controls, and Enter or Space click. In the text, Tab stays in the text, and Control+Tab leaves it. Rows of the contents list stay out of the tab order, since arrow keys walk them: the sidebar holds one stop.
 
 ## Saving state and conflicts
 

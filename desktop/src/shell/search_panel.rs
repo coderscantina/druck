@@ -180,6 +180,7 @@ impl SearchPanel {
                                 end.child(
                                     div()
                                         .id(("replace-file", id.number()))
+                                        .button(tokens, crate::t!(Key::ReplaceInFile))
                                         .cursor_pointer()
                                         .text_color(tokens.accent)
                                         .on_click(cx.listener(move |_, _, _, cx| cx.emit(SearchEvent::ReplaceFile(id))))

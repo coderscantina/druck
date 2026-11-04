@@ -538,6 +538,10 @@ impl EditorView {
         let option = picker.option;
         let toggle = div()
             .id("picker-option")
+            .role(gpui::Role::CheckBox)
+            .aria_label(option_label)
+            .focusable()
+            .tab_stop(true)
             .flex_none()
             .flex()
             .items_center()

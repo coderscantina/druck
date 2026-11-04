@@ -1,6 +1,7 @@
 //! What every control gives keyboard and assistive technology. gpui carries roles and labels to the system through
 //! AccessKit for elements that have an id, and a focusable element in the tab order takes Enter and Space as a click.
-//! Only a keyboard's focus shows: a 1 px accent ring outside the control, which moves nothing, the same on every control.
+//! Only a keyboard's focus shows: a 2 px accent ring inside the control's edge, over any border it has, which moves nothing, the same on every
+//! control.
 
 use gpui::prelude::*;
 use gpui::{BoxShadow, Div, Role, SharedString, Stateful, Toggled, point, px};
@@ -26,8 +27,8 @@ impl Control for Stateful<Div> {
             color: tokens.accent.into(),
             offset: point(px(0.), px(0.)),
             blur_radius: px(0.),
-            spread_radius: px(1.),
-            inset: false,
+            spread_radius: px(2.),
+            inset: true,
         };
         self.role(role)
             .aria_label(label)

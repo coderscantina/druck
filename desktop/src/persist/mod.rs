@@ -106,6 +106,15 @@ pub fn settle(window: &mut Window, cx: &mut App) -> Option<futures::channel::one
     Some(view.update(cx, |view, cx| view.settle(window, cx)))
 }
 
+/// Writes what a float's fields hold into the text, before a document closes.
+pub fn commit_floats(window: &mut Window, cx: &mut App) {
+    let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) else {
+        return;
+    };
+    let editor = view.read(cx).editor.clone();
+    editor.update(cx, |editor, cx| editor.commit_floats(window, cx));
+}
+
 /// Clears what is kept for a document's unsaved text, when a person chose to discard it.
 pub fn forget_unsaved(location: &Path) {
     if let Some(data) = data_dir() {
@@ -249,7 +258,7 @@ impl PersistView {
     /// wants all changes up to now calls this first. While a save is running or an input method composes, the look
     /// waits for them.
     pub fn scan_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.writing.is_some() || self.editor.read(cx).is_composing() {
+        if self.writing.is_some() || self.editor.read(cx).holds_outside_changes() {
             self.signals.unbounded_send(Signal::Everything).ok();
             return;
         }
@@ -488,6 +497,15 @@ impl PersistView {
 
     /// Writes everything now and waits for it: the app is about to go. What cannot be written stays as a recovery copy.
     fn flush_blocking(&mut self, cx: &mut Context<Self>) {
+        // A footnote's text being typed counts as written.
+        if let Some(handle) = cx.try_global::<Current>().map(|current| current.window) {
+            let editor = self.editor.clone();
+            handle
+                .update(cx, |_, window, cx| {
+                    editor.update(cx, |editor, cx| editor.commit_floats(window, cx));
+                })
+                .ok();
+        }
         let lock = self.write_lock.clone();
         let _writing = lock.lock();
         let sync = &mut self.sync;
@@ -551,7 +569,7 @@ impl PersistView {
     /// Takes what is ready from the waiting paths, and returns how long until the next look, if anything still waits.
     fn take_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Duration> {
         let now = Instant::now();
-        let busy = self.writing.is_some() || self.editor.read(cx).is_composing();
+        let busy = self.writing.is_some() || self.editor.read(cx).holds_outside_changes();
         let session = self.editor.read(cx).session();
         let theme = self.theme.as_deref();
         // An empty file may be a program halfway through writing it, so it gets the same grace as a missing one.

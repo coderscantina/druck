@@ -13,6 +13,7 @@ use super::model::ThemeModel;
 use super::strings::{Key, STYLES};
 use super::style_property::{self, ALIGNMENTS, Control, Property, style_label};
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::theme_file::editor::Change;
 use crate::theme_file::tokens::{self, Group};
 use crate::tokens::{self as chrome, Tokens};
@@ -595,6 +596,7 @@ impl StylesPanel {
                 (
                     div()
                         .id(value)
+                        .toggle(tokens, label, active)
                         .child(label)
                         .on_click(cx.listener(move |panel, _, _, cx| {
                             panel.apply(property, Some(value.into()), cx);
@@ -621,6 +623,7 @@ impl StylesPanel {
                 (
                     div()
                         .id(SharedString::from(format!("{key}-{value}")))
+                        .button(tokens, label)
                         .child(label)
                         .on_click(cx.listener(move |panel, _, _, cx| {
                             panel.apply(property, Some(Value::Bool(value)), cx);
@@ -648,6 +651,7 @@ impl StylesPanel {
                 (
                     div()
                         .id(SharedString::from(format!("{key}-{value}")))
+                        .button(tokens, label)
                         .child(label)
                         .on_click(cx.listener(move |panel, _, _, cx| {
                             panel.apply(property, Some(value.into()), cx);

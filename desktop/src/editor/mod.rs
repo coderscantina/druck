@@ -528,8 +528,20 @@ impl EditorView {
         self.marked.is_some()
     }
 
+    /// Whether an outside change must wait: it would move text under an input method, and a change to the buffer closes
+    /// what floats, with what was typed in its field.
+    pub fn holds_outside_changes(&self) -> bool {
+        self.is_composing() || self.float_takes_keys()
+    }
+
+    /// Writes what a float's fields hold, before something closes it.
+    pub fn commit_floats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_rich_float(window, cx);
+    }
+
     /// Opens a chapter in the galley, where the caret last was in it, with its own undo history.
     pub fn show_chapter(&mut self, id: ChapterId, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_rich_float(window, cx);
         self.update_session(
             |session| {
                 session.resplit();
@@ -548,6 +560,7 @@ impl EditorView {
             self.jump_to(offset, window, cx);
             return;
         }
+        self.commit_rich_float(window, cx);
         self.update_session(
             |session| {
                 session.set_active(id);

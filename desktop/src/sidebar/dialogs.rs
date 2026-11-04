@@ -130,6 +130,7 @@ impl SectionDialog {
     fn button(tokens: &Tokens, id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
+            .button(tokens, label)
             .h(tokens::FIELD_HEIGHT)
             .px(tokens::SPACE_3)
             .flex()

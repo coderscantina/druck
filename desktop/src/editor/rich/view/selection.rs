@@ -6,6 +6,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, svg};
 use serde_json::{Value, json};
 
+use crate::a11y::Control as _;
 use crate::editor::rich::Key;
 use crate::editor::rich::styles::{self, Class};
 use crate::editor::rich::view::RichChanged;
@@ -336,6 +337,7 @@ impl Render for SelectionPanel {
                         row.child(
                             div()
                                 .id("align-reset")
+                                .button(&tokens, crate::t!(Key::ResetLabel))
                                 .cursor_pointer()
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(|panel, _, window, cx| panel.reset_alignment(window, cx)))
@@ -439,6 +441,7 @@ fn segment(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
+        .toggle(tokens, tip, chosen)
         .flex_none()
         .size(px(28.))
         .flex()

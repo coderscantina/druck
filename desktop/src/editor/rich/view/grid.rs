@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use super::{CONTEXT, NextField, PreviousField, RichFloat, card, field_label, small_button};
+use crate::a11y::Control as _;
 use crate::editor::commands::marks::Mark;
 use crate::editor::float::Float;
 use crate::editor::rich::table::{Align, Caption, Grid};
@@ -505,6 +506,7 @@ impl EditorView {
                 let chosen = align == choice;
                 div()
                     .id(id)
+                    .toggle(&tokens, tip, chosen)
                     .flex_none()
                     .size(px(22.))
                     .flex()
