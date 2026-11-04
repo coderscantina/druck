@@ -28,6 +28,7 @@ use resvg::tiny_skia::Pixmap;
 use self::bench::Bench;
 pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
+pub use self::fonts::FontUse;
 pub use self::job::BodyStyle;
 use self::job::{Job, Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
@@ -189,7 +190,20 @@ impl PreviewView {
             bench.requested(&joined.text);
         }
         self.latest = Some(joined);
+        // The specimen stays as it is while the document changes. A theme edit asks for it again with `refresh`.
+        if !self.specimen {
+            self.typeset_latest(cx);
+        }
+    }
+
+    /// Typesets again what the pages show, since the theme file changed.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.typeset_latest(cx);
+    }
+
+    /// The font families the pages on screen use.
+    pub fn fonts(&self) -> &[FontUse] {
+        self.layout.as_ref().map_or(&[], |layout| &layout.fonts)
     }
 
     /// Typesets what the pages show: the specimen, or the document as last asked for.

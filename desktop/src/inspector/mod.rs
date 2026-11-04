@@ -23,6 +23,7 @@ use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Win
 pub use fork_prompt::ForkPrompt;
 pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
 pub use picker::ThemePicker;
+use fonts::FontsPanel;
 use source_view::SourceView;
 use styles::StylesPanel;
 use theme_tabs::ThemeTabs;
@@ -95,6 +96,7 @@ pub struct InspectorView {
     /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
     panels: HashMap<Tab, AnyView>,
     styles: Entity<StylesPanel>,
+    fonts: Entity<FontsPanel>,
     model: Entity<ThemeModel>,
     _subscriptions: Vec<Subscription>,
 }
@@ -110,6 +112,7 @@ impl InspectorView {
         let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
         let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
         let source = cx.new(|cx| SourceView::new(model.clone(), window, cx));
+        let fonts = cx.new(|cx| FontsPanel::new(model.clone(), window, cx));
         let theme_tabs = cx.new(|_| {
             ThemeTabs::new(vec![
                 (strings::STYLES_TITLE, styles.clone().into()),
@@ -123,11 +126,17 @@ impl InspectorView {
         ];
         Self {
             active: Tab::from_env().unwrap_or(Tab::Details),
-            panels: HashMap::from([(Tab::Styles, theme_tabs.into())]),
+            panels: HashMap::from([(Tab::Styles, theme_tabs.into()), (Tab::Fonts, fonts.clone().into())]),
             styles,
+            fonts,
             model,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Gives the Fonts tab the families the pages use.
+    pub fn set_fonts(&mut self, fonts: Vec<crate::preview::FontUse>, cx: &mut Context<Self>) {
+        self.fonts.update(cx, |panel, cx| panel.set_fonts(fonts, cx));
     }
 
     /// The theme the panels edit.
@@ -219,4 +228,16 @@ impl Render for InspectorView {
             .child(div().flex().flex_col().children(bottom));
         div().flex_none().h_full().flex().child(panel).child(rail)
     }
+}
+
+/// Mounts the theme picker in the title bar and the question about common themes over the window.
+pub fn mount_theme(parts: &crate::workspace::Parts, slots: &mut crate::workspace::Slots, cx: &mut gpui::App) {
+    let model = parts.inspector.read(cx).model().clone();
+    slots.toolbar.push(
+        cx.new(|cx| ThemePicker::new(parts.editor.clone(), parts.preview.clone(), model.clone(), cx))
+            .into(),
+    );
+    slots
+        .overlays
+        .push(cx.new(|cx| ForkPrompt::new(model, parts.editor.clone(), cx)).into());
 }

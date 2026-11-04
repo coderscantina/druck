@@ -12,6 +12,7 @@ use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSele
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Renderer};
 
+use super::fonts::{FontUse, fonts_in_use};
 use super::raster::{Painter, family_name, fingerprint};
 use crate::session::{Joined, Kind, LiveResolver};
 
@@ -88,6 +89,8 @@ pub struct Layout {
     /// Configuration and typesetting warnings.
     pub warnings: Vec<Diagnostic>,
     pub body: BodyStyle,
+    /// The font families the styles use, for the Fonts tab.
+    pub fonts: Vec<FontUse>,
     pub timing: Timing,
 }
 
@@ -212,6 +215,7 @@ impl Typesetter {
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
             body: BodyStyle::of(config, &laid),
+            fonts: fonts_in_use(config, &laid),
             laid,
             painter,
             fingerprints,

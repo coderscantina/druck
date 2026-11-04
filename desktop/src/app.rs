@@ -41,7 +41,8 @@ const WINDOW_SIZE: (f32, f32) = (1680., 1000.);
 const SCREEN_MARGIN: f32 = 80.;
 
 /// Mounts what later slices own into the workspace's slots and tabs. One line per view.
-pub fn mount(_parts: &Parts, slots: &mut Slots, _window: &mut Window, cx: &mut Context<Workspace>) {
+pub fn mount(parts: &Parts, slots: &mut Slots, _window: &mut Window, cx: &mut Context<Workspace>) {
+    crate::inspector::mount_theme(parts, slots, cx);
     slots.footer.push(cx.new(|_| AgentView::new()).into());
 }
 
