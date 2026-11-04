@@ -157,7 +157,7 @@ pub fn set_lines(
     config: &Config,
     document: &DocumentFile,
     today: Date,
-) -> Result<Vec<layout::SetLine>, Failure> {
+) -> Result<layout::SetLines, Failure> {
     let set = load_fonts(job, config)?;
     let fonts = set.fonts();
     let content = parse_mapped(config, document)?;

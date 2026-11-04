@@ -195,6 +195,7 @@ impl EditorView {
         }
         shape_block(
             ShapeRequest {
+                composed: None,
                 kind,
                 lines,
                 separator: false,

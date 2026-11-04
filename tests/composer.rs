@@ -101,7 +101,7 @@ fn compare(name: &str, input: &Input, resolver: &FileResolver) -> usize {
             })
         })
     };
-    let set: BTreeSet<SourcePos> = composed.iter().map(|line| line.start).filter(running).collect();
+    let set: BTreeSet<SourcePos> = composed.lines.iter().map(|line| line.start).filter(running).collect();
     let body: BTreeSet<SourcePos> = on_pages.iter().copied().filter(running).collect();
     let missing: Vec<_> = body.difference(&set).take(5).collect();
     let extra: Vec<_> = set.difference(&body).take(5).collect();

@@ -5,6 +5,7 @@
 //! Types into the middle of the open document on a timer, through the same input path as the keyboard, while pages
 //! refresh in the background, then prints typing latency, pause to painted pages, theme edit to updated pages, and
 //! memory over many refreshes, and quits. `DRUCK_GATE_THEME_EDITS=0` skips the theme edits, for a read-only theme.
+//! `DRUCK_GATE_PRINT=1` measures with the print-composer lines on.
 //!
 //! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
 //! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
@@ -80,6 +81,9 @@ impl Gate {
         self.wait_for_pages(cx).await;
         eprintln!("gate: first pages; {}", memory());
         self.place_caret(cx).await;
+        if var("DRUCK_GATE_PRINT").is_some() {
+            self.print_lines(cx).await;
+        }
         if var("DRUCK_GATE_THEME_ONLY").is_none() {
             self.typing(cx).await;
             self.pause_to_pages(cx).await;
@@ -156,6 +160,17 @@ impl Gate {
         let page = self.preview.update(cx, |preview, cx| preview.show_text(MARK, cx));
         eprintln!("gate: typing on page {page:?}");
         self.sleep(Duration::from_millis(200), cx).await;
+    }
+
+    /// Turns on the print-composer lines and waits for the first ones.
+    async fn print_lines(&self, cx: &mut AsyncApp) {
+        let editor = self.editor.clone();
+        self.window
+            .update(cx, |_, window, cx| {
+                editor.update(cx, |editor, cx| editor.toggle_print_lines(window, cx));
+            })
+            .ok();
+        self.sleep(Duration::from_secs(2), cx).await;
     }
 
     async fn typing(&self, cx: &mut AsyncApp) {

@@ -613,7 +613,7 @@ impl SourceMap {
         source: &InputSource,
         document: &std::path::Path,
     ) -> Self {
-        let chapters = chapters(source, document);
+        let chapters = chapters_of(source, document);
         let blocks: Vec<BlockSource> = (sources.blocks.iter().enumerate())
             .map(|(index, block)| {
                 let start = position_in(&chapters, block.start);
@@ -850,13 +850,7 @@ impl SourceMap {
     }
 }
 
-/// A chapter-relative place for a document offset, for the composer.
-pub(crate) fn place_in(source: &InputSource, document: &std::path::Path) -> impl Fn(u32) -> SourcePos + use<> {
-    let chapters = chapters(source, document);
-    move |offset| position_in(&chapters, offset)
-}
-
-fn position_in(chapters: &[Chapter], offset: u32) -> SourcePos {
+pub(crate) fn position_in(chapters: &[Chapter], offset: u32) -> SourcePos {
     let index = chapters
         .partition_point(|chapter| chapter.start <= offset)
         .saturating_sub(1);
@@ -867,7 +861,7 @@ fn position_in(chapters: &[Chapter], offset: u32) -> SourcePos {
     }
 }
 
-fn chapters(source: &InputSource, document: &std::path::Path) -> Vec<Chapter> {
+pub(crate) fn chapters_of(source: &InputSource, document: &std::path::Path) -> Vec<Chapter> {
     if let InputSource::Chapters(map) = source {
         return (map.bytes())
             .map(|(path, start, skip)| Chapter {

@@ -64,7 +64,7 @@ mod watermark;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use self::fields::Fields;
 use self::notes::NoteStyles;
@@ -375,6 +375,13 @@ pub struct SetLine {
     pub left: f64,
 }
 
+/// The lines of a document with the chapter files their places name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLines {
+    pub chapters: Vec<PathBuf>,
+    pub lines: Vec<SetLine>,
+}
+
 /// The lines of running text that [`layout`] would set with this `config`, in written order, without making pages.
 /// One pass only, so a page reference takes its text from page 1 and not from where it ends up.
 #[allow(
@@ -392,7 +399,7 @@ pub fn set_lines(
     document_path: &Path,
     today: Date,
     cancel: &Cancel,
-) -> Result<Vec<SetLine>, Failure> {
+) -> Result<SetLines, Failure> {
     let fields = Fields::new(document, config, today);
     check(document, config, &fields, source)?;
     let structure = Structure::new(document, config, cited.references());
@@ -415,12 +422,11 @@ pub fn set_lines(
     };
     let assumed = vec!["1".to_owned(); structure.anchors.len()];
     let (content, _, _, texts) = pass.content(&assumed)?;
-    let (Some(texts), Some(sources)) = (texts, document.sources.as_ref()) else {
-        return Ok(Vec::new());
-    };
-    let place = crate::source_map::place_in(source, document_path);
+    let texts = texts.expect("a document parsed with its sources has texts");
+    let sources = document.sources.as_ref().expect("a mapped parse records its sources");
+    let chapters = crate::source_map::chapters_of(source, document_path);
     let width = config.page.text_width().0;
-    Ok(content
+    let lines = content
         .body
         .iter()
         .filter_map(|line| {
@@ -441,13 +447,17 @@ pub fn set_lines(
             }
             let ((x, _, (block, offset, _)), (end_x, end_run, (_, _, inserted))) = (first?, last?);
             sources.is_prose(block).then(|| SetLine {
-                start: place(offset),
+                start: crate::source_map::position_in(&chapters, offset),
                 hyphen: line.line.hyphenated && inserted && end_run.text.ends_with(['-', '\u{2010}']),
                 fills: end_x.0 + end_run.width.0 >= width - FILLS,
                 left: x.0,
             })
         })
-        .collect())
+        .collect();
+    Ok(SetLines {
+        chapters: chapters.into_iter().map(|chapter| chapter.path).collect(),
+        lines,
+    })
 }
 
 /// How close to the measure's end a line counts as reaching it, in points.

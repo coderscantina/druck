@@ -78,7 +78,7 @@ pub mod composer {
     use crate::config::values::Pt;
     use crate::renderer::{Configured, Failure};
 
-    pub use crate::layout::SetLine;
+    pub use crate::layout::{SetLine, SetLines};
 
     /// The width of the document's prose on the page, in points.
     pub fn page_measure(configured: &Configured<'_>) -> f64 {
@@ -87,7 +87,7 @@ pub mod composer {
 
     /// The lines of running text in written order, in a frame `measure` points wide. Headings, tables, and code are
     /// left out. It fails as a layout does, also for a word wider than `measure`.
-    pub fn lines(configured: &Configured<'_>, measure: f64) -> Result<Vec<SetLine>, Failure> {
+    pub fn lines(configured: &Configured<'_>, measure: f64) -> Result<SetLines, Failure> {
         let mut config = configured.config.clone();
         let page = &mut config.page;
         page.width = Pt(page.width.0 + measure - page.prose_width.0);

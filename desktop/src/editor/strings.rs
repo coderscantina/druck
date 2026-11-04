@@ -40,6 +40,7 @@ crate::strings! {
         CrossReference => ("Cross-reference", "Querverweis"),
         NewSection => ("New section", "Neuer Abschnitt"),
         SourceView => ("Source", "Quelltext"),
+        PrintLines => ("Print lines", "Druckzeilen"),
         NotesTitle => ("NOTES", "NOTIZEN"),
         NotesEmpty => (
             "This chapter opens with no comment. A comment at its very start shows here.",

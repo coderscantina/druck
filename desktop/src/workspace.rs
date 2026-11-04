@@ -330,6 +330,9 @@ impl Workspace {
     fn theme_changed(&mut self, event: &ThemeChanged, cx: &mut Context<Self>) {
         self.jump = style_of(&event.property);
         self.parts.preview.update(cx, |preview, cx| preview.refresh(cx));
+        self.parts
+            .editor
+            .update(cx, |editor, cx| editor.composed_lines_are_stale(cx));
     }
 
     fn specimen_requested(&mut self, cx: &mut Context<Self>) {

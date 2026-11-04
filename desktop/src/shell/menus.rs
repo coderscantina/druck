@@ -7,7 +7,7 @@ use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 
 use super::text::Key;
 use crate::app::{NewBook, NewOffer, NewReport, Open, Quit};
-use crate::editor::{Copy, Cut, Paste, Redo, Save, SelectAll, Undo};
+use crate::editor::{Copy, Cut, Paste, Redo, Save, SelectAll, TogglePrintLines, Undo};
 use crate::preview::{ZoomIn, ZoomOut, ZoomToFit};
 use crate::workspace::{ShowPages, ShowSplit, ShowWrite};
 
@@ -159,6 +159,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::ViewWrite, ShowWrite),
             item(Key::ViewPages, ShowPages),
             item(Key::ViewSplit, ShowSplit),
+            item(Key::ViewPrintLines, TogglePrintLines),
             MenuItem::separator(),
             item(Key::ZoomIn, ZoomIn),
             item(Key::ZoomOut, ZoomOut),

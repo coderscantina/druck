@@ -41,7 +41,7 @@ impl ChapterMap {
     }
 
     /// The part of the joined text that is the chapter file at `path`.
-    fn range_of(&self, path: &Path) -> Option<Range<usize>> {
+    pub(crate) fn range_of(&self, path: &Path) -> Option<Range<usize>> {
         let place = self.places.iter().find(|place| place.path == path)?;
         Some(place.range.clone())
     }

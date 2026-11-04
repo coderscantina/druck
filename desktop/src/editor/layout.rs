@@ -2,17 +2,20 @@
 
 use std::ops::Range;
 
+use std::sync::Arc;
+
 use gpui::{
-    Bounds, Font, FontStyle, FontWeight, Hsla, Pixels, SharedString, StrikethroughStyle, TextRun, UnderlineStyle,
-    Window, WrappedLine, font, point, px, rgb, size,
+    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, ShapedLine, SharedString, StrikethroughStyle,
+    TextRun, UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, rgb, size,
 };
 
+use super::composed::{ComposedBlock, Forced};
 use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
 use super::rich::view::shapes::Whole;
 use crate::source::BlockKind;
 
 /// Logical pixels per point of the theme's sizes. The galley is for reading on screen, larger than the page.
-const POINT: f32 = 1.4;
+pub(super) const POINT: f32 = 1.4;
 
 /// The galley's look. The body comes from the theme: the sheet shows document styling, not app chrome.
 pub struct GalleyStyle {
@@ -217,6 +220,10 @@ pub struct ShapedSourceLine {
     pub bullet: Option<(SharedString, Pixels)>,
     /// Behind each chip on the line, from the block's top and the column's left edge.
     pub chips: Vec<(Bounds<Pixels>, ChipLook)>,
+    /// How far in the first row starts, with the engine's lines.
+    pub indent: Pixels,
+    /// The rows that end in a hyphen the engine added, with the hyphen to paint.
+    pub hyphens: Option<(Vec<usize>, ShapedLine)>,
 }
 
 impl ShapedSourceLine {
@@ -237,7 +244,12 @@ impl ShapedSourceLine {
     /// The distance of a displayed offset from the start of its row.
     pub fn x_in_row(&self, display: usize, row: usize) -> Pixels {
         let layout = &self.shaped.unwrapped_layout;
-        layout.x_for_index(display) - layout.x_for_index(self.rows[row].start)
+        layout.x_for_index(display) - layout.x_for_index(self.rows[row].start) + self.row_left(row)
+    }
+
+    /// How far in a row starts.
+    fn row_left(&self, row: usize) -> Pixels {
+        if row == 0 { self.indent } else { px(0.) }
     }
 
     /// The displayed offset closest to `x` from the start of a row.
@@ -245,6 +257,7 @@ impl ShapedSourceLine {
         let range = &self.rows[row];
         let layout = &self.shaped.unwrapped_layout;
         let start_x = layout.x_for_index(range.start);
+        let x = (x - self.row_left(row)).max(px(0.));
         layout.closest_index_for_x(start_x + x).clamp(range.start, range.end)
     }
 
@@ -266,6 +279,8 @@ pub struct BlockLayout {
     pub chips: Vec<Chip>,
     /// A table or figure drawn in place of its lines.
     pub whole: Option<Box<Whole>>,
+    /// The engine's lines it was shaped with.
+    pub composed: Option<Arc<ComposedBlock>>,
 }
 
 impl BlockLayout {
@@ -297,6 +312,7 @@ pub struct ShapeRequest<'a> {
     pub style: &'a GalleyStyle,
     pub chips: Vec<Chip>,
     pub whole: Option<Box<Whole>>,
+    pub composed: Option<Arc<ComposedBlock>>,
 }
 
 pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
@@ -312,6 +328,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         style,
         chips,
         whole,
+        composed,
     } = request;
     let base = if source {
         style.source_line_style(kind)
@@ -340,12 +357,51 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             runs.push(style.run(&base, 0, RunStyle::default()));
         }
         let text: SharedString = display.text.clone().into();
-        let shaped = window
-            .text_system()
-            .shape_text(text, base.size, &runs, Some(wrap), None)
-            .ok()
-            .and_then(|mut lines| lines.pop())
-            .unwrap_or_default();
+        let shape = |wrap_at| {
+            window
+                .text_system()
+                .shape_text(text.clone(), base.size, &runs, wrap_at, None)
+                .ok()
+                .and_then(|mut lines| lines.pop())
+                .unwrap_or_default()
+        };
+        let forced = composed.as_ref().map(|composed| composed.breaks(&display));
+        let mut shaped = if composed.is_some() {
+            shape(None)
+        } else {
+            shape(Some(wrap))
+        };
+        // A paragraph in a custom style has the engine's measure for another size than the galley shows.
+        let forced = forced.filter(|forced| {
+            let fits = rows_fit(&shaped, forced, wrap);
+            if !fits {
+                shaped = shape(Some(wrap));
+            }
+            fits
+        });
+        let mut indent = px(0.);
+        let mut hyphens = None;
+        if let (Some(composed), Some(forced)) = (&composed, forced.as_ref()) {
+            let starts_block = display.source.start == 0 || display.text.is_empty();
+            indent = if starts_block {
+                px(composed.indent * POINT)
+            } else {
+                px(0.)
+            };
+            let hyphen = forced
+                .iter()
+                .any(|row| row.hyphen)
+                .then(|| hyphen_line(&base, style, window));
+            let hyphen_width = hyphen.as_ref().map_or(px(0.), |line| line.width);
+            force_rows(&mut shaped, forced, indent, wrap, hyphen_width);
+            hyphens = hyphen.map(|line| {
+                let rows = (forced.iter().enumerate())
+                    .filter(|(_, row)| row.hyphen)
+                    .map(|(index, _)| index)
+                    .collect();
+                (rows, line)
+            });
+        }
         let rows = rows_of(&shaped);
         let hidden_line = collapsed || display.is_collapsed();
         let skipped = separator || hidden_line;
@@ -361,7 +417,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             .bullet
             .clone()
             .map(|text| (SharedString::from(text), unit * display.nesting as f32));
-        let chip_boxes = chip_boxes(&display, &shaped, &rows, x, y, line_height);
+        let chip_boxes = chip_boxes(&display, &shaped, &rows, x, y, line_height, indent);
         shaped_lines.push(ShapedSourceLine {
             display,
             shaped,
@@ -373,6 +429,8 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             skipped,
             bullet,
             chips: chip_boxes,
+            indent,
+            hyphens,
         });
         y += height;
     }
@@ -385,7 +443,99 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         collapsed,
         chips,
         whole,
+        composed,
     }
+}
+
+/// The hyphen the engine added at the end of a row, which is painted and is not in the text.
+fn hyphen_line(base: &LineStyle, style: &GalleyStyle, window: &Window) -> ShapedLine {
+    let run = style.run(base, 1, RunStyle::default());
+    window.text_system().shape_line("-".into(), base.size, &[run], None)
+}
+
+/// Breaks a shaped line where the engine did, and sets each row's left edge and spaces: the first row starts `indent`
+/// in, and one that reaches the measure in the engine's lines reaches `width` here, whatever the toolkit's glyphs measure.
+/// Positions stay rising from row to row, as the caret's lookups expect, and rows are measured from their first glyph.
+fn force_rows(shaped: &mut WrappedLine, forced: &[Forced], indent: Pixels, width: Pixels, hyphen: Pixels) {
+    let text = shaped.text.clone();
+    let line = &shaped.unwrapped_layout;
+    let mut runs = line.runs.clone();
+    let mut boundaries = Vec::new();
+    let mut row = 0;
+    let mut shift = indent;
+    let mut step = row_step(line, &text, forced, row, indent, width, hyphen);
+    let mut spaces = px(0.);
+    for (run_ix, run) in runs.iter_mut().enumerate() {
+        for (glyph_ix, glyph) in run.glyphs.iter_mut().enumerate() {
+            if forced.get(row).is_some_and(|next| glyph.index >= next.at) {
+                row += 1;
+                shift += spaces;
+                spaces = px(0.);
+                step = row_step(line, &text, forced, row, px(0.), width, hyphen);
+                boundaries.push(WrapBoundary { run_ix, glyph_ix });
+            }
+            glyph.position.x += shift + spaces;
+            if text.as_bytes().get(glyph.index) == Some(&b' ') {
+                spaces += step;
+            }
+        }
+    }
+    let layout = WrappedLineLayout {
+        unwrapped_layout: Arc::new(LineLayout {
+            font_size: line.font_size,
+            width: line.width + shift + spaces,
+            ascent: line.ascent,
+            descent: line.descent,
+            runs,
+            len: line.len,
+        }),
+        wrap_boundaries: boundaries.into_iter().collect(),
+        wrap_width: None,
+    };
+    **shaped = Arc::new(layout);
+}
+
+/// Whether the rows between `forced` breaks hold in `width`, give or take what a line's spaces can give.
+fn rows_fit(shaped: &WrappedLine, forced: &[Forced], width: Pixels) -> bool {
+    let line = &shaped.unwrapped_layout;
+    let mut start = 0;
+    for end in forced.iter().map(|row| row.at).chain([line.len]) {
+        let natural = line.x_for_index(end) - line.x_for_index(start);
+        if natural > width * (1. + OVERFLOW) {
+            return false;
+        }
+        start = end;
+    }
+    true
+}
+
+/// How much wider than the column a row can be before the engine's breaks are taken to be for another size.
+const OVERFLOW: f32 = 0.06;
+
+/// What each space of a row gains so that it reaches the measure, or nothing if it need not.
+fn row_step(
+    line: &LineLayout,
+    text: &str,
+    forced: &[Forced],
+    row: usize,
+    left: Pixels,
+    width: Pixels,
+    hyphen: Pixels,
+) -> Pixels {
+    let Some(end) = forced.get(row).filter(|end| end.fills) else {
+        return px(0.);
+    };
+    let start = if row == 0 { 0 } else { forced[row - 1].at };
+    let shown = text[start..end.at].trim_end_matches(' ');
+    let spaces = shown.bytes().filter(|byte| *byte == b' ').count();
+    if spaces == 0 {
+        return px(0.);
+    }
+    let natural = line.x_for_index(start + shown.len()) - line.x_for_index(start);
+    let room = width - left - if end.hyphen { hyphen } else { px(0.) };
+    let step = (room - natural) / spaces as f32;
+    // A very different toolkit font should not close the spaces or tear them open.
+    step.clamp(line.font_size * -0.12, line.font_size * 0.5)
 }
 
 /// How far a chip's box stands off its text, and how much of the line it leaves free above and below.
@@ -400,6 +550,7 @@ fn chip_boxes(
     x: Pixels,
     y: Pixels,
     line_height: Pixels,
+    indent: Pixels,
 ) -> Vec<(Bounds<Pixels>, ChipLook)> {
     let layout = &shaped.unwrapped_layout;
     let mut boxes = Vec::new();
@@ -410,8 +561,9 @@ fn chip_boxes(
                 continue;
             }
             let row_start = layout.x_for_index(shown.start);
-            let left = x + layout.x_for_index(start) - row_start - CHIP_PAD;
-            let right = x + layout.x_for_index(end) - row_start + CHIP_PAD;
+            let row_left = if row == 0 { indent } else { px(0.) };
+            let left = x + row_left + layout.x_for_index(start) - row_start - CHIP_PAD;
+            let right = x + row_left + layout.x_for_index(end) - row_start + CHIP_PAD;
             let inset = line_height * CHIP_INSET;
             boxes.push((
                 Bounds::new(

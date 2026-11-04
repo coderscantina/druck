@@ -110,6 +110,7 @@ impl Element for Galley {
         let (mut frame, floats) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
             view.set_viewport(bounds);
+            view.compose_if_resized(window, cx);
             if view.autoscroll {
                 view.autoscroll = false;
                 view.scroll_to_caret(window);
@@ -328,6 +329,17 @@ pub(super) fn paint_lines(
         line.shaped
             .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
             .ok();
+        if let Some((rows, hyphen)) = &line.hyphens {
+            for row in rows {
+                let at = point(
+                    origin.x + line.x_in_row(line.rows[*row].end, *row),
+                    origin.y + line.line_height * *row as f32,
+                );
+                hyphen
+                    .paint(at, line.line_height, TextAlign::Left, None, window, cx)
+                    .ok();
+            }
+        }
     }
 }
 

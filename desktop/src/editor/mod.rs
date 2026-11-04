@@ -6,6 +6,7 @@
 //! the footnotes, citations, tables, and images, with their floats and the Selection and Images tabs.
 
 mod commands;
+mod composed;
 mod display;
 mod element;
 mod float;
@@ -47,7 +48,7 @@ use float::Float;
 use gutter::{BlockGrab, CommentMarker, ShowNotes};
 use layout::{BlockLayout, GalleyStyle, ShapeRequest, shape_block};
 use notes_panel::NotesPanel;
-use source_toggle::SourceToggle;
+use source_toggle::{PrintToggle, SourceToggle};
 use trace::Trace;
 
 /// Mounts what this slice shows outside the galley: the source toggle and the notes panel.
@@ -56,6 +57,9 @@ pub fn mount(parts: &Parts, slots: &mut Slots, cx: &mut Context<Workspace>) {
     slots
         .toolbar
         .push(cx.new(|cx| SourceToggle::new(editor.clone(), cx)).into());
+    slots
+        .toolbar
+        .push(cx.new(|cx| PrintToggle::new(editor.clone(), cx)).into());
     let notes = cx.new(|cx| NotesPanel::new(editor.clone(), cx));
     let inspector = parts.inspector.clone();
     inspector.update(cx, |inspector, _| inspector.mount(Tab::Notes, notes.into()));
@@ -119,6 +123,7 @@ actions!(
         ToggleNumbers,
         OpenLink,
         ToggleSource,
+        TogglePrintLines,
         Cancel,
         InsertFootnote,
         InsertCitation,
@@ -197,6 +202,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-7", ToggleNumbers, context),
         KeyBinding::new("cmd-k", OpenLink, context),
         KeyBinding::new("cmd-/", ToggleSource, context),
+        KeyBinding::new("cmd-alt-l", TogglePrintLines, context),
         KeyBinding::new("escape", Cancel, context),
         KeyBinding::new("cmd-alt-f", InsertFootnote, context),
         KeyBinding::new("cmd-alt-c", InsertCitation, context),
@@ -253,6 +259,8 @@ struct Slot {
 #[derive(Clone, Copy, Default)]
 struct Column {
     viewport: Bounds<Pixels>,
+    /// The widest the text can be here, which the engine's lines may keep it under.
+    room: Pixels,
     sheet_left: Pixels,
     sheet_width: Pixels,
     text_left: Pixels,
@@ -376,6 +384,8 @@ pub struct EditorView {
     rich_pause: Task<()>,
     /// Reads the engine's text for chips, off the main thread.
     rich_labels: Task<()>,
+    /// The print-composer lines. See [`composed`].
+    print: composed::PrintLines,
     /// The newest revision and body style painted, and when each first was.
     painted_revision: (u64, Instant),
     painted_style: (u64, Instant),
@@ -459,6 +469,7 @@ impl EditorView {
             rich: rich::Rich::default(),
             rich_pause: Task::ready(()),
             rich_labels: Task::ready(()),
+            print: composed::PrintLines::default(),
             painted_revision: (0, Instant::now()),
             painted_style: (0, Instant::now()),
             style_generation: 0,
@@ -845,9 +856,11 @@ impl EditorView {
         }
         self.marked = marked;
         self.set_selection(after, false, window, cx);
+        self.print.typing = self.print.on;
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
         self.schedule_rich(window, cx);
+        self.schedule_composer(window, cx);
         cx.emit(TextChanged);
     }
 
@@ -877,6 +890,9 @@ impl EditorView {
     fn set_selection(&mut self, selection: Selection, upstream: bool, window: &mut Window, cx: &mut Context<Self>) {
         if selection.head != self.selection.head {
             cx.emit(CaretMoved(selection.head));
+        }
+        if self.print.typing && self.blocks.index_at(selection.head) != self.blocks.index_at(self.selection.head) {
+            self.print.typing = false;
         }
         self.selection = selection;
         self.upstream = upstream;
@@ -1595,8 +1611,18 @@ impl EditorView {
                 .map(|at| at - block.range.start);
             self.rich.chips(block_text, &syntax.spans, caret)
         };
+        let typed_here = self.print.typing && self.blocks.index_at(self.selection.head) == index;
+        let composed = (composed::composes(block.kind)
+            && !self.source
+            && !collapsed
+            && whole_atom.is_none()
+            && marked.is_none()
+            && !typed_here)
+            .then(|| self.print.lines_of(block_text, self.composer_measure()))
+            .flatten();
         if let Some(layout) = &self.slots[index].layout
             && layout.width == width
+            && layout.composed == composed
             && layout.hidden == hidden
             && layout.marked == marked
             && layout.collapsed == collapsed
@@ -1616,6 +1642,11 @@ impl EditorView {
         );
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let whole = whole_atom.as_ref().map(|atom| Box::new(self.shape_atom(atom, window)));
+        let lines = if composed.is_some() && block.kind == BlockKind::Paragraph {
+            display::join_lines(lines)
+        } else {
+            lines
+        };
         let layout = Rc::new(shape_block(
             ShapeRequest {
                 kind: block.kind,
@@ -1629,6 +1660,7 @@ impl EditorView {
                 style: &self.style,
                 chips,
                 whole,
+                composed,
             },
             window,
         ));
@@ -1658,10 +1690,16 @@ impl EditorView {
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
         let room = bounds.size.width - tokens::SPACE_3 - tokens::SCROLLBAR_WIDTH;
-        let sheet_width = room.min(MAX_SHEET_WIDTH).max(MIN_SHEET_WIDTH);
+        let widest = room.min(MAX_SHEET_WIDTH).max(MIN_SHEET_WIDTH);
+        let text_room = widest - tokens::GUTTER_WIDTH - SHEET_PADDING_RIGHT;
+        // The engine's lines keep to the page's measure, so they break as the page does where there is room.
+        let text_width = match self.print.page_measure {
+            Some(page) if self.print.on && !self.source => text_room.min(px(page * layout::POINT)),
+            _ => text_room,
+        };
+        let sheet_width = text_width + tokens::GUTTER_WIDTH + SHEET_PADDING_RIGHT;
         let slack = (room - sheet_width).max(px(0.));
         let sheet_left = bounds.left() + tokens::SPACE_3 + slack * 0.5;
-        let text_width = sheet_width - tokens::GUTTER_WIDTH - SHEET_PADDING_RIGHT;
         if text_width != self.column.text_width {
             for slot in &self.slots {
                 slot.estimate.set(None);
@@ -1669,6 +1707,7 @@ impl EditorView {
         }
         self.column = Column {
             viewport: bounds,
+            room: text_room,
             sheet_left,
             sheet_width,
             text_left: sheet_left + tokens::GUTTER_WIDTH,
@@ -1915,6 +1954,7 @@ impl Render for EditorView {
             )
             .on_action(cx.listener(|this, _: &OpenLink, window, cx| this.open_link(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSource, window, cx| this.toggle_source(window, cx)))
+            .on_action(cx.listener(|this, _: &TogglePrintLines, window, cx| this.toggle_print_lines(window, cx)))
             .on_action(cx.listener(|this, _: &InsertFootnote, window, cx| this.insert_footnote(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertCitation, window, cx| this.open_citation_picker(None, window, cx)))
             .on_action(

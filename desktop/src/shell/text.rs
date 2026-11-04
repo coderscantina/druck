@@ -57,6 +57,7 @@ crate::strings! {
         ViewWrite => ("Write", "Schreiben"),
         ViewPages => ("Pages", "Seiten"),
         ViewSplit => ("Split", "Geteilte Ansicht"),
+        ViewPrintLines => ("Print Lines", "Druckzeilen"),
         ZoomIn => ("Zoom In", "Vergrößern"),
         ZoomOut => ("Zoom Out", "Verkleinern"),
         ZoomFit => ("Fit to Width", "An Breite anpassen"),

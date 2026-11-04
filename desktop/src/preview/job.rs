@@ -214,6 +214,32 @@ impl Typesetter {
         })
     }
 
+    /// The engine's lines for the document as `joined` has it, at the page's measure or at `room` points if that is
+    /// less, with the page's measure.
+    pub fn composed(
+        &self,
+        joined: Joined,
+        room: f64,
+        cancel: &Cancel,
+    ) -> Option<(druck::editor::composer::SetLines, f64, f64)> {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("druck-composer".into())
+                .stack_size(LAYOUT_STACK)
+                .spawn_scoped(scope, || {
+                    let (input, _) = self.input(joined).ok()?;
+                    let configured = self.renderer.job(&self.resolver, &input, cancel).configure().ok()?;
+                    let page = druck::editor::composer::page_measure(&configured);
+                    let measure = page.min(room);
+                    let lines = druck::editor::composer::lines(&configured, measure).ok()?;
+                    Some((lines, measure, page))
+                })
+                .expect("the system starts a thread")
+                .join()
+                .unwrap_or(None)
+        })
+    }
+
     fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;
