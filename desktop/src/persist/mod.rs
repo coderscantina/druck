@@ -32,7 +32,7 @@ pub use self::sync::FileChange;
 use self::sync::{ChangeKind, FileSync, Next, Pacer, Problem};
 use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
-use crate::inspector::InspectorView;
+use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
 use crate::session::disk::Outgoing;
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
@@ -93,6 +93,11 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut App
     view
 }
 
+/// The theme the inspector has open: the one the document names, or what the author chose or forked.
+fn open_theme(model: &Entity<ThemeModel>, cx: &App) -> Option<PathBuf> {
+    model.read(cx).file().ok().map(|file| file.path().to_owned())
+}
+
 /// Clears what is kept for a document's unsaved text, when a person chose to discard it.
 pub fn forget_unsaved(location: &Path) {
     if let Some(data) = data_dir() {
@@ -147,7 +152,8 @@ impl PersistView {
     ) -> Self {
         let location = editor.read(cx).session().location().to_owned();
         let copies = data_dir().map(|data| Copies::new(&data, &location));
-        let theme = editor.read(cx).session().theme_file();
+        let model = inspector.read(cx).model().clone();
+        let theme = open_theme(&model, cx);
         let (signals, mut receive) = futures::channel::mpsc::unbounded::<Signal>();
         let incoming = cx.spawn_in(window, async move |view, cx| {
             // Parked in `next` while nothing changes: no timer runs at idle.
@@ -185,6 +191,7 @@ impl PersistView {
                     view.edited(window, cx);
                 }
             }),
+            cx.subscribe(&model, |view, _, _: &ThemeSwitched, cx| view.update_watched_files(cx)),
             cx.subscribe_in(&editor, window, |view, _, _: &SaveRequested, window, cx| {
                 view.flush(window, cx);
             }),
@@ -272,6 +279,7 @@ impl PersistView {
     }
 
     fn update_watched_files(&mut self, cx: &mut Context<Self>) {
+        self.theme = open_theme(self.inspector.read(cx).model(), cx);
         let mut files = self.session(cx).files();
         files.extend(self.theme.clone());
         if let Some(watcher) = &mut self.watcher {

@@ -692,7 +692,7 @@ fn front_matter_details_change_only_the_front_matter() {
     session.set_field(Field::Title, "New").expect("sets");
     session.set_meta("publisher", "Harbour").expect("sets");
     assert_eq!(
-        folder.read("whole.md"),
+        session.file_text(&path).expect("read"),
         format!("---\n# a comment\ntitle: New\nlang: de\nmeta:\n  publisher: Harbour\n---\n\n{body}")
     );
     assert_eq!(session.details().title, "New");
@@ -716,9 +716,12 @@ fn a_file_without_front_matter_gets_one_and_loses_it_when_emptied() {
         "the file's name stands in for a title"
     );
     session.set_field(Field::Authors, "Ada").expect("sets");
-    assert_eq!(folder.read("plain.md"), format!("---\nauthor: Ada\n---\n\n{text}"));
+    assert_eq!(
+        session.file_text(&path).expect("read"),
+        format!("---\nauthor: Ada\n---\n\n{text}")
+    );
     session.set_field(Field::Authors, "").expect("removes");
-    assert_eq!(folder.read("plain.md"), text);
+    assert_eq!(session.file_text(&path).expect("read"), text);
 }
 
 #[test]

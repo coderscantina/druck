@@ -74,6 +74,8 @@ pub struct SessionConfig {
     pub program: PathBuf,
     /// Working directory, the project folder.
     pub cwd: PathBuf,
+    /// The search path for the CLI and what it starts. `None` keeps the app's own.
+    pub path: Option<OsString>,
     pub model: Option<String>,
     /// Session id of an earlier run to continue.
     pub resume: Option<String>,
@@ -94,7 +96,11 @@ pub struct Session {
 impl Session {
     /// Starts the CLI and returns the event stream. The child lives until the session drops.
     pub fn spawn(config: &SessionConfig) -> io::Result<(Self, Receiver<Event>)> {
-        let mut child = Command::new(&config.program)
+        let mut command = Command::new(&config.program);
+        if let Some(path) = &config.path {
+            command.env("PATH", path);
+        }
+        let mut child = command
             .args(build_args(config))
             .current_dir(&config.cwd)
             .stdin(Stdio::piped())

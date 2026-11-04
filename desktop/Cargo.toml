@@ -6,6 +6,10 @@ description = "Native desktop composer and theme editor for Druck"
 license = "MIT"
 publish = false
 
+[features]
+# Reads the variables in gate.rs that change what the app does, for release-build measurements. Never in a shipped build.
+measure = []
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 druck = { path = "..", default-features = false, features = ["editor"] }

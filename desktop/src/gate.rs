@@ -1,4 +1,5 @@
-//! The spike's gate, measured with everything running. Off unless `DRUCK_GATE=1`. Any other value only opens the window
+//! The spike's gate, measured with everything running. Off unless built with the `measure` feature, or as a debug
+//! build, and run with `DRUCK_GATE=1`. Any other value only opens the window
 //! as a measurement does, floating without focus, for screenshots.
 //!
 //! Types into the middle of the open document on a timer, through the same input path as the keyboard, while pages
@@ -40,6 +41,16 @@ struct Gate {
     letters: Cell<usize>,
 }
 
+/// A variable that changes what the app does, for screenshots and measurements. A debug build or a build with the
+/// `measure` feature reads them. Any other build, so any app that ships, has no hidden behaviour.
+pub fn var(name: &str) -> Option<String> {
+    if cfg!(any(debug_assertions, feature = "measure")) {
+        std::env::var(name).ok()
+    } else {
+        None
+    }
+}
+
 pub fn start(
     editor: Entity<EditorView>,
     preview: Entity<PreviewView>,
@@ -47,7 +58,7 @@ pub fn start(
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
-    if std::env::var("DRUCK_GATE").as_deref() != Ok("1") {
+    if var("DRUCK_GATE").as_deref() != Some("1") {
         return;
     }
     let gate = Gate {
@@ -69,11 +80,11 @@ impl Gate {
         self.wait_for_pages(cx).await;
         eprintln!("gate: first pages; {}", memory());
         self.place_caret(cx).await;
-        if std::env::var_os("DRUCK_GATE_THEME_ONLY").is_none() {
+        if var("DRUCK_GATE_THEME_ONLY").is_none() {
             self.typing(cx).await;
             self.pause_to_pages(cx).await;
         }
-        if std::env::var("DRUCK_GATE_THEME_EDITS").as_deref() != Ok("0") {
+        if var("DRUCK_GATE_THEME_EDITS").as_deref() != Some("0") {
             self.theme_edits(cx).await;
         }
         self.memory(cx).await;
@@ -253,8 +264,7 @@ impl Gate {
     }
 
     async fn memory(&self, cx: &mut AsyncApp) {
-        let refreshes = std::env::var("DRUCK_GATE_REFRESHES")
-            .ok()
+        let refreshes = var("DRUCK_GATE_REFRESHES")
             .and_then(|count| count.parse().ok())
             .unwrap_or(REFRESHES);
         self.settle(cx).await;

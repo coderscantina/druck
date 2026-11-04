@@ -1,4 +1,5 @@
-//! Measurements and fixed views of the preview, driven by the environment and off by default.
+//! Measurements and fixed views of the preview, driven by the environment and off by default. Only a debug build or a
+//! build with the `measure` feature reads the variables.
 //!
 //! `DRUCK_PREVIEW_ZOOM=1.5` and `DRUCK_PREVIEW_PAGE=12` open at a zoom and a page, for comparing screenshots.
 //! `DRUCK_PREVIEW_BENCH=1` then times the first layout and paint, painting every page, scrolling the whole
@@ -54,7 +55,7 @@ pub struct Bench {
 
 impl Bench {
     pub fn from_env() -> Option<Self> {
-        let var = |name| std::env::var(name).ok();
+        let var = crate::gate::var;
         let run = var("DRUCK_PREVIEW_BENCH").is_some();
         let zoom = var("DRUCK_PREVIEW_ZOOM").and_then(|zoom| zoom.parse().ok());
         let page = var("DRUCK_PREVIEW_PAGE").and_then(|page| page.parse().ok());

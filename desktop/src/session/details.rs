@@ -236,7 +236,6 @@ impl Session {
             Kind::Single { path } => {
                 let path = path.clone();
                 self.patch_front_matter(&path, edit, check)?;
-                self.save()?;
             }
         }
         self.refresh_details();

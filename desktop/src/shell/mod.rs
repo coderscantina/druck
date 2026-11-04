@@ -111,7 +111,7 @@ pub fn init(forced: Option<Scheme>, cx: &mut App) {
             ..MenuState::default()
         },
         window: None,
-        persist: std::env::var_os("DRUCK_GATE").is_none(),
+        persist: crate::gate::var("DRUCK_GATE").is_none(),
     });
 }
 

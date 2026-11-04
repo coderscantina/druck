@@ -73,7 +73,7 @@ pub struct Statistics {
 
 impl Statistics {
     /// The statistics of `document`, whose sentences follow the conventions of `lang`.
-    pub fn count(document: &Document, lang: Lang) -> Self {
+    pub(crate) fn count(document: &Document, lang: Lang) -> Self {
         let mut counter = Counter {
             statistics: Self::default(),
             lang,

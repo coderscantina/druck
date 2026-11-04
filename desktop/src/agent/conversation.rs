@@ -269,10 +269,8 @@ impl Conversation {
                     tool.state = state;
                     tool.output = clip(&content);
                 }
-                if !is_error {
-                    if let Some(details) = details {
-                        effects.extend(self.record_changes(&details));
-                    }
+                if !is_error && let Some(details) = details {
+                    effects.extend(self.record_changes(&details));
                 }
             }
             Event::TurnFinished {

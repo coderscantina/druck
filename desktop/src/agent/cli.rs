@@ -1,8 +1,11 @@
 //! Finding the user's `claude` CLI, checking that it is a version we tested, and asking which login it reports.
 
 use std::env;
+use std::ffi::{OsStr, OsString};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// The CLI line this protocol code was captured and tested against.
 const TESTED_MAJOR: u32 = 2;
@@ -19,12 +22,14 @@ pub enum CliState {
     Ready(String),
 }
 
-/// Finds `claude`: the program `DRUCK_CLAUDE` names if that is set, else on the search path, then in the places GUI
-/// apps miss because they do not inherit the shell's `PATH`.
-pub fn locate() -> Option<PathBuf> {
-    if let Some(program) = env::var_os("DRUCK_CLAUDE").filter(|program| !program.is_empty()) {
-        return Some(PathBuf::from(program));
-    }
+/// How long the login shell may take to say what its search path is.
+const SHELL_WAIT: Duration = Duration::from_secs(3);
+
+/// The search path a terminal has. An app started from the Finder inherits only the system's, without the folders where
+/// `claude`, `node`, `git`, and the author's MCP servers live, so the CLI and everything it starts get this one. The
+/// login shell knows it, and it is asked once, off the main thread.
+pub fn search_path() -> OsString {
+    let inherited = env::var_os("PATH").unwrap_or_default();
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let fallbacks = [
         PathBuf::from("/opt/homebrew/bin"),
@@ -32,16 +37,66 @@ pub fn locate() -> Option<PathBuf> {
         home.join(".local/bin"),
         home.join(".claude/local"),
     ];
-    let path = env::var_os("PATH").unwrap_or_default();
-    env::split_paths(&path)
+    let shell = login_shell_path().unwrap_or_default();
+    let mut folders: Vec<PathBuf> = Vec::new();
+    for folder in env::split_paths(&shell)
+        .chain(env::split_paths(&inherited))
         .chain(fallbacks)
+    {
+        if !folder.as_os_str().is_empty() && !folders.contains(&folder) {
+            folders.push(folder);
+        }
+    }
+    env::join_paths(folders).unwrap_or(inherited)
+}
+
+/// The search path of the author's login shell, or nothing if it has none, fails, or takes too long.
+fn login_shell_path() -> Option<OsString> {
+    const MARK: &str = "__DRUCK_PATH__";
+    let shell = env::var_os("SHELL").unwrap_or_else(|| "/bin/zsh".into());
+    let mut child = Command::new(shell)
+        .args(["-lc", &format!("printf '\\n{MARK}%s\\n' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    while child.try_wait().ok()?.is_none() {
+        if started.elapsed() > SHELL_WAIT {
+            child.kill().ok();
+            child.wait().ok();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut output = String::new();
+    child.stdout.take()?.read_to_string(&mut output).ok()?;
+    parse_shell_path(&output, MARK).map(OsString::from)
+}
+
+/// The path after the mark, whatever a shell's startup files printed before it.
+fn parse_shell_path<'a>(output: &'a str, mark: &str) -> Option<&'a str> {
+    output
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(mark))
+        .filter(|path| !path.is_empty())
+}
+
+/// Finds `claude`: the program `DRUCK_CLAUDE` names if that is set, else on `path`.
+pub fn locate(path: &OsStr) -> Option<PathBuf> {
+    if let Some(program) = env::var_os("DRUCK_CLAUDE").filter(|program| !program.is_empty()) {
+        return Some(PathBuf::from(program));
+    }
+    env::split_paths(path)
         .map(|dir| dir.join("claude"))
         .find(|candidate| candidate.is_file())
 }
 
 /// Runs `<program> --version` and classifies the result.
-pub fn check(program: &Path) -> CliState {
-    let Ok(output) = Command::new(program).arg("--version").output() else {
+pub fn check(program: &Path, path: &OsStr) -> CliState {
+    let Ok(output) = Command::new(program).arg("--version").env("PATH", path).output() else {
         return CliState::Missing;
     };
     classify(&String::from_utf8_lossy(&output.stdout))
@@ -60,8 +115,12 @@ pub enum Login {
 }
 
 /// Runs `<program> auth status`, which prints the CLI's own report as JSON.
-pub fn login(program: &Path) -> Login {
-    match Command::new(program).args(["auth", "status"]).output() {
+pub fn login(program: &Path, path: &OsStr) -> Login {
+    match Command::new(program)
+        .args(["auth", "status"])
+        .env("PATH", path)
+        .output()
+    {
         Ok(output) => classify_login(&String::from_utf8_lossy(&output.stdout)),
         Err(_) => Login::Unknown,
     }
@@ -106,6 +165,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_shells_path_is_found_behind_what_its_startup_files_print() {
+        let output = "Welcome!\nsome tool 1.2\n\n__M__/opt/homebrew/bin:/usr/bin\n";
+        assert_eq!(parse_shell_path(output, "__M__"), Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(parse_shell_path("no mark here\n", "__M__"), None);
+        assert_eq!(parse_shell_path("__M__\n", "__M__"), None);
+    }
+
+    #[test]
     fn classifies_versions() {
         assert_eq!(classify("2.1.317 (Claude Code)\n"), CliState::Ready("2.1.317".into()));
         assert_eq!(classify("2.1.400 (Claude Code)"), CliState::Ready("2.1.400".into()));
@@ -133,13 +200,17 @@ mod tests {
 
     #[test]
     fn missing_program_is_reported() {
-        assert_eq!(check(Path::new("/nonexistent/claude")), CliState::Missing);
+        assert_eq!(
+            check(Path::new("/nonexistent/claude"), OsStr::new("")),
+            CliState::Missing
+        );
     }
 
     #[test]
     #[ignore = "needs the installed claude CLI"]
     fn installed_cli_is_ready() {
-        let program = locate().expect("claude is installed");
-        assert!(matches!(check(&program), CliState::Ready(_)));
+        let path = search_path();
+        let program = locate(&path).expect("claude is installed");
+        assert!(matches!(check(&program, &path), CliState::Ready(_)));
     }
 }

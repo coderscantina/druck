@@ -86,7 +86,7 @@ impl StylesPanel {
             }
         }
         // `DRUCK_STYLE` opens a style for screenshots.
-        let selected = std::env::var("DRUCK_STYLE").ok().and_then(|name| {
+        let selected = crate::gate::var("DRUCK_STYLE").and_then(|name| {
             STYLES
                 .iter()
                 .find(|(key, _)| *key == name)

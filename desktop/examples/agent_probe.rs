@@ -29,8 +29,9 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let dir = PathBuf::from(args.next().expect("usage: agent_probe <scratch-dir> [transcript]"));
     let transcript = args.next().map(PathBuf::from);
-    let program = cli::locate().expect("claude not found");
-    println!("cli: {:?} {:?}", program, cli::check(&program));
+    let path = cli::search_path();
+    let program = cli::locate(&path).expect("claude not found");
+    println!("cli: {:?} {:?}", program, cli::check(&program, &path));
 
     let config = SessionConfig {
         program,

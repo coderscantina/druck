@@ -34,6 +34,7 @@ mod view;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
@@ -83,6 +84,8 @@ pub fn mount(parts: &Parts, persist: Entity<PersistView>, window: &mut Window, c
 /// What looking for the CLI found.
 struct Cli {
     program: PathBuf,
+    /// The search path the CLI runs with.
+    path: OsString,
     state: CliState,
     login: Login,
 }
@@ -241,14 +244,20 @@ impl AgentView {
         }
         self.checking = true;
         let lookup = cx.background_spawn(async {
-            let program = cli::locate()?;
-            let state = cli::check(&program);
+            let path = cli::search_path();
+            let program = cli::locate(&path)?;
+            let state = cli::check(&program, &path);
             let login = if matches!(state, CliState::Missing) {
                 Login::Unknown
             } else {
-                cli::login(&program)
+                cli::login(&program, &path)
             };
-            Some(Cli { program, state, login })
+            Some(Cli {
+                program,
+                path,
+                state,
+                login,
+            })
         });
         cx.spawn_in(window, async move |view, cx| {
             let found = lookup.await;
@@ -256,6 +265,7 @@ impl AgentView {
                 view.checking = false;
                 view.cli = Some(found.unwrap_or(Cli {
                     program: PathBuf::new(),
+                    path: OsString::new(),
                     state: CliState::Missing,
                     login: Login::Unknown,
                 }));
@@ -294,6 +304,7 @@ impl AgentView {
         };
         let config = SessionConfig {
             program: cli.program.clone(),
+            path: Some(cli.path.clone()),
             cwd: self.base.clone(),
             model: self.model.map(str::to_owned),
             resume: self.conversation.session_id().map(str::to_owned),

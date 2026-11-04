@@ -1,4 +1,4 @@
-//! Input-to-paint timing, on when `DRUCK_TRACE` is set. Prints one line to stderr for each input that reached a frame.
+//! Input-to-paint timing, on when `DRUCK_TRACE` is set in a debug build or a build with the `measure` feature. Prints one line to stderr for each input that reached a frame.
 
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ pub struct Trace {
 impl Trace {
     pub fn from_env() -> Self {
         Self {
-            enabled: std::env::var_os("DRUCK_TRACE").is_some(),
+            enabled: crate::gate::var("DRUCK_TRACE").is_some(),
             ..Self::default()
         }
     }

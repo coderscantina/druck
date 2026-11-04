@@ -90,7 +90,7 @@ pub fn open(
         px(fit(wanted_width, display.map(|display| display.width))),
         px(fit(wanted_height, display.map(|display| display.height))),
     );
-    let measuring = std::env::var_os("DRUCK_GATE").is_some();
+    let measuring = crate::gate::var("DRUCK_GATE").is_some();
     // Macs stop painting a covered window. A measurement run floats on the last display without taking focus.
     let display_id = measuring
         .then(|| cx.displays().last().map(|display| display.id()))

@@ -83,8 +83,7 @@ impl FontsPanel {
         self.families = fonts.into_iter().map(Family::of).collect();
         // `DRUCK_FONT` opens a family for screenshots.
         if self.selected.is_none() {
-            self.selected = std::env::var("DRUCK_FONT")
-                .ok()
+            self.selected = crate::gate::var("DRUCK_FONT")
                 .filter(|name| self.families.iter().any(|family| &family.font.family == name));
         }
         if let Some(selected) = &self.selected

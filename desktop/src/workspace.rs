@@ -50,7 +50,7 @@ impl Canvas {
     ];
 
     fn from_env() -> Option<Self> {
-        match std::env::var("DRUCK_CANVAS").ok()?.as_str() {
+        match crate::gate::var("DRUCK_CANVAS")?.as_str() {
             "write" => Some(Self::Write),
             "pages" => Some(Self::Pages),
             "split" => Some(Self::Split),
@@ -193,7 +193,7 @@ impl Workspace {
         workspace.theme_setting = workspace.parts.editor.read(cx).session().theme_setting();
         workspace.sync_panels(window, cx);
         // `DRUCK_SPECIMEN=1` opens on the specimen, for screenshots.
-        if std::env::var_os("DRUCK_SPECIMEN").is_some() {
+        if crate::gate::var("DRUCK_SPECIMEN").is_some() {
             workspace
                 .parts
                 .preview

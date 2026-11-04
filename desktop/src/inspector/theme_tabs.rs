@@ -16,8 +16,7 @@ pub struct ThemeTabs {
 impl ThemeTabs {
     pub fn new(panels: Vec<(Key, AnyView)>) -> Self {
         // `DRUCK_SUBTAB` picks the panel for screenshots.
-        let active = std::env::var("DRUCK_SUBTAB")
-            .ok()
+        let active = crate::gate::var("DRUCK_SUBTAB")
             .and_then(|index| index.parse().ok())
             .filter(|index| *index < panels.len())
             .unwrap_or(0);

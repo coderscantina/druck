@@ -370,7 +370,7 @@ An image stands alone in its paragraph. Its description becomes the caption:
 ```
 
 - PNG, JPEG, and SVG files are supported. GIF, WebP, and other formats are errors, as is a file whose content does not match its extension.
-- The path is relative to the Markdown file, wherever Druck is run from. Put a path with spaces in angle brackets: `![Caption](<my chart.png>)`.
+- The path is relative to the Markdown file, or in a [project](#projects) to the project folder, wherever Druck is run from. Put a path with spaces in angle brackets: `![Caption](<my chart.png>)`.
 - Only local files are read. URLs, including `data:` URLs, are errors. An SVG file may embed images as data URLs but cannot refer to other files.
 - The caption is numbered and labelled in the document language, as in "Figure 1: Pages typeset per year". It may use emphasis, strong text, and inline code. An image with an empty description, `![](file.png)`, has no caption and no number.
 - A caption cannot hold a footnote, because CommonMark does not read `[^note]` inside an image description. Reference the note from the text next to the image.

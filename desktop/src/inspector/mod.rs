@@ -68,7 +68,7 @@ impl Tab {
 
     /// The tab `DRUCK_TAB` names, for screenshots.
     fn from_env() -> Option<Self> {
-        let name = std::env::var("DRUCK_TAB").ok()?;
+        let name = crate::gate::var("DRUCK_TAB")?;
         Self::TOP
             .into_iter()
             .chain(Self::BOTTOM)
@@ -156,7 +156,7 @@ impl InspectorView {
             cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
         ];
         // `DRUCK_PROBE_EDIT=1` makes one edit at the start, for screenshots of what an edit asks.
-        if std::env::var_os("DRUCK_PROBE_EDIT").is_some() {
+        if crate::gate::var("DRUCK_PROBE_EDIT").is_some() {
             let probe = model.clone();
             cx.defer(move |cx| {
                 probe.update(cx, |model, cx| {
