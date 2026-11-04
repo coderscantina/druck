@@ -66,6 +66,20 @@ pub fn remove(text: &str, path: &[&str]) -> Result<String, String> {
     Ok(plan_remove(&root, path).map_or_else(|| text.to_owned(), |edit| edit.apply(text)))
 }
 
+/// The bytes of the value at an object path, or `None` where nothing is written.
+pub fn value_span(text: &str, path: &[&str]) -> Result<Option<Range<usize>>, String> {
+    let root = parse(text)?;
+    let mut node = &root;
+    for key in path {
+        let Node::Object(object) = node else { return Ok(None) };
+        let Some(index) = object.position(key) else {
+            return Ok(None);
+        };
+        node = &object.members[index].value;
+    }
+    Ok(Some(node.span()))
+}
+
 /// Renames the last key of an object path in place, so the member keeps its position and its value. A
 /// path that is not there leaves the text unchanged.
 pub fn rename_key(text: &str, path: &[&str], to: &str) -> Result<String, String> {
@@ -459,6 +473,29 @@ mod tests {
             "{ \"a\": [1,  2], \"b\":   \"y\" , \"c\": {\"d\":1}}"
         );
         assert_eq!(remove(text, &["a"]).unwrap(), "{ \"b\":   \"x\" , \"c\": {\"d\":1}}");
+    }
+
+    #[test]
+    fn a_value_has_its_own_span_and_a_missing_one_has_none() {
+        let span = value_span(MULTILINE, &["styles", "heading-1"]).unwrap().unwrap();
+        assert_eq!(&MULTILINE[span], "{ \"color\": \"$colors.accent\" }");
+        assert_eq!(value_span(MULTILINE, &["nope"]).unwrap(), None);
+    }
+
+    #[test]
+    fn renaming_a_key_keeps_its_place_and_value_and_references_follow_by_value() {
+        let renamed = rename_key(MULTILINE, &["styles", "title"], "headline").unwrap();
+        assert_eq!(renamed, MULTILINE.replace("\"title\"", "\"headline\""));
+        assert_eq!(rename_key(MULTILINE, &["styles", "nope"], "x").unwrap(), MULTILINE);
+        let text = "{ \"a\": { \"based-on\": \"x\", \"x\": \"x\" }, \"l\": [\"x\"] }";
+        assert_eq!(
+            rename_values(text, "x", "y", None),
+            "{ \"a\": { \"based-on\": \"y\", \"x\": \"y\" }, \"l\": [\"y\"] }"
+        );
+        assert_eq!(
+            rename_values(text, "x", "y", Some(&["based-on"])),
+            "{ \"a\": { \"based-on\": \"y\", \"x\": \"x\" }, \"l\": [\"x\"] }"
+        );
     }
 
     #[test]

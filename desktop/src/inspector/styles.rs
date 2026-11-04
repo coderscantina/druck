@@ -82,9 +82,17 @@ impl StylesPanel {
                 inputs.insert(property.key(), input);
             }
         }
-        Self {
+        // `DRUCK_STYLE` opens a style for screenshots.
+        let selected = std::env::var("DRUCK_STYLE").ok().and_then(|name| {
+            STYLES
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(key, _)| Selected::Builtin(key))
+                .or(Some(Selected::Custom(name)))
+        });
+        let mut panel = Self {
             model,
-            selected: None,
+            selected,
             inputs,
             errors: HashMap::new(),
             open: None,
@@ -92,7 +100,9 @@ impl StylesPanel {
             renaming: None,
             notice: None,
             _subscriptions: subscriptions,
-        }
+        };
+        panel.sync(window, cx);
+        panel
     }
 
     /// Sets the body size as if typed into its field. For measurements.

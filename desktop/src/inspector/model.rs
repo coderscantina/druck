@@ -19,23 +19,27 @@ pub struct ThemeChanged {
 /// Another theme file is open now.
 pub struct ThemeSwitched;
 
+/// The author asked to see the specimen, since the document has no block in the style being edited.
+pub struct SpecimenRequested;
+
 pub struct ThemeModel {
     editor: Editor,
     /// What the engine says about the file as it stands, kept so a panel does not ask on every frame.
     problems: Vec<Problem>,
-    /// The open document, named in the question about a common theme.
-    document: String,
+    /// A style the document has no block in, for the Styles panel to offer the specimen about.
+    missing: Option<String>,
 }
 
 impl EventEmitter<ThemeChanged> for ThemeModel {}
 impl EventEmitter<ThemeSwitched> for ThemeModel {}
+impl EventEmitter<SpecimenRequested> for ThemeModel {}
 
 impl ThemeModel {
     pub fn new(path: Option<&Path>, dirs: Dirs) -> Self {
         let mut model = Self {
             editor: Editor::open(path, dirs),
             problems: Vec::new(),
-            document: String::new(),
+            missing: None,
         };
         model.refresh();
         model
@@ -67,12 +71,21 @@ impl ThemeModel {
         })
     }
 
-    pub fn document(&self) -> &str {
-        &self.document
+    /// The style the document has no block in, after the last jump looked for one.
+    pub fn missing(&self) -> Option<&str> {
+        self.missing.as_deref()
     }
 
-    pub fn set_document(&mut self, label: String) {
-        self.document = label;
+    pub fn set_missing(&mut self, style: Option<String>, cx: &mut Context<Self>) {
+        if self.missing != style {
+            self.missing = style;
+            cx.notify();
+        }
+    }
+
+    /// Asks for the specimen, for the style that was missing.
+    pub fn request_specimen(&mut self, cx: &mut Context<Self>) {
+        cx.emit(SpecimenRequested);
     }
 
     /// Opens another theme file, dropping any change that waited for a choice.

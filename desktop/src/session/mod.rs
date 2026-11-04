@@ -180,6 +180,16 @@ pub enum Kind {
     Project { dir: PathBuf },
 }
 
+impl Kind {
+    /// The folder relative paths in the document start from.
+    pub fn base_dir(&self) -> PathBuf {
+        match self {
+            Self::Project { dir } => dir.clone(),
+            Self::Single { path } => path.parent().map(Path::to_owned).unwrap_or_default(),
+        }
+    }
+}
+
 pub struct Session {
     kind: Kind,
     chapters: BTreeMap<ChapterId, Chapter>,
@@ -428,10 +438,7 @@ impl Session {
 
     /// The folder relative paths in the document start from.
     pub fn base_dir(&self) -> PathBuf {
-        match &self.kind {
-            Kind::Project { dir } => dir.clone(),
-            Kind::Single { path } => path.parent().map(Path::to_owned).unwrap_or_default(),
-        }
+        self.kind.base_dir()
     }
 
     /// The folder or file the document was opened from, for the window title.
@@ -617,6 +624,11 @@ impl Session {
                 Some(engine::theme_file(&self.resolver, Path::new(theme), dir, &dirs))
             }
         }
+    }
+
+    /// The theme as the document writes it: a name or a path, or nothing when it asks for the default.
+    pub fn theme_setting(&self) -> Option<String> {
+        self.settings.as_ref().ok()?.theme.clone()
     }
 
     /// Where a bare theme name is looked up for this document.

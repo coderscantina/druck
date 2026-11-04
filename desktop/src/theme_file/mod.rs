@@ -1,6 +1,7 @@
 //! A theme JSON file the app edits. Changes are partial: only the touched member changes in the text, and
 //! every change is checked through the engine before it can reach disk. Holds no gpui types.
 
+pub mod blocks;
 pub mod editor;
 pub mod font_info;
 pub mod library;

@@ -1,11 +1,16 @@
 //! Right pane: the panel of the active tab, then the tab rail at the window's edge.
 
 pub mod details;
+mod fork_prompt;
 pub mod input;
 mod model;
+mod picker;
 mod strings;
 mod style_property;
+mod source_view;
 mod styles;
+mod theme_tabs;
+mod theme_tokens;
 mod widgets;
 
 use std::collections::HashMap;
@@ -14,8 +19,13 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
 
-pub use model::{ThemeChanged, ThemeModel, ThemeSwitched};
+pub use fork_prompt::ForkPrompt;
+pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
+pub use picker::ThemePicker;
+use source_view::SourceView;
 use styles::StylesPanel;
+use theme_tabs::ThemeTabs;
+use theme_tokens::TokensPanel;
 
 use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
@@ -35,6 +45,12 @@ pub enum Tab {
 impl Tab {
     const TOP: [Self; 5] = [Self::Selection, Self::Styles, Self::Fonts, Self::Images, Self::Details];
     const BOTTOM: [Self; 2] = [Self::Diagnostics, Self::Export];
+
+    /// The tab `DRUCK_TAB` names, for screenshots.
+    fn from_env() -> Option<Self> {
+        let name = std::env::var("DRUCK_TAB").ok()?;
+        Self::TOP.into_iter().chain(Self::BOTTOM).find(|tab| tab.label().eq_ignore_ascii_case(&name))
+    }
 
     fn id(self) -> &'static str {
         match self {
@@ -91,13 +107,22 @@ impl InspectorView {
         input::bind_keys(cx);
         let model = cx.new(|_| ThemeModel::new(theme.as_deref(), dirs));
         let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
+        let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
+        let source = cx.new(|cx| SourceView::new(model.clone(), window, cx));
+        let theme_tabs = cx.new(|_| {
+            ThemeTabs::new(vec![
+                (strings::STYLES_TITLE, styles.clone().into()),
+                (strings::TOKENS_TITLE, tokens_panel.into()),
+                (strings::JSON_TITLE, source.into()),
+            ])
+        });
         let subscriptions = vec![
             cx.subscribe(&model, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone())),
             cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
         ];
         Self {
-            active: Tab::Details,
-            panels: HashMap::from([(Tab::Styles, styles.clone().into())]),
+            active: Tab::from_env().unwrap_or(Tab::Details),
+            panels: HashMap::from([(Tab::Styles, theme_tabs.into())]),
             styles,
             model,
             _subscriptions: subscriptions,

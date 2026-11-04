@@ -15,6 +15,15 @@ use druck::{Failure, LayoutOptions, Renderer};
 use super::raster::{Painter, family_name, fingerprint};
 use crate::session::{Joined, Kind, LiveResolver};
 
+/// What one layout typesets: a text, in a theme, which is the specimen or the document.
+#[derive(Clone)]
+pub struct Job {
+    pub joined: Joined,
+    /// The theme file to use instead of the document's.
+    pub theme: Option<PathBuf>,
+    pub specimen: bool,
+}
+
 /// A request to start: its number, the job, and the token that stops it.
 pub type Started<T> = (u64, T, Cancel);
 
@@ -162,6 +171,11 @@ impl Typesetter {
             resolver: FileResolver::new(),
             painter: None,
         }
+    }
+
+    /// Typesets the next runs in this theme, or in the document's when `None`.
+    pub fn set_theme(&mut self, theme: Option<PathBuf>) {
+        self.theme = theme;
     }
 
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
