@@ -152,6 +152,7 @@ pub fn typeset(
 }
 
 /// The lines of running text as a layout with this configuration sets them, without making pages.
+#[cfg(feature = "editor")]
 pub fn set_lines(
     job: &JobContext,
     config: &Config,

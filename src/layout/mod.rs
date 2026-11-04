@@ -64,7 +64,7 @@ mod watermark;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use self::fields::Fields;
 use self::notes::NoteStyles;
@@ -84,7 +84,7 @@ use crate::highlight;
 use crate::image::Image;
 use crate::output::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::renderer::Failure;
-use crate::source_map::{BlockKind, SourceMap, SourcePos, Sources, Spans, TextId, Texts};
+use crate::source_map::{BlockKind, SourceMap, Sources, Spans, TextId, Texts};
 use crate::tags::{self, Id, Kind, Mark, Tree};
 use crate::text::{Fonts, ShapedRun};
 
@@ -363,10 +363,11 @@ fn settle<T>(
 }
 
 /// A line of running text as the paragraph composer set it, for a client that shows the same line breaks elsewhere.
+#[cfg(feature = "editor")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetLine {
     /// Where the line starts in the written text. A word cut at a hyphen starts at the cut.
-    pub start: SourcePos,
+    pub start: crate::source_map::SourcePos,
     /// The line ends in a hyphen the composer added, which is not in the text.
     pub hyphen: bool,
     /// The line reaches the end of the measure, as a justified line does.
@@ -376,14 +377,16 @@ pub struct SetLine {
 }
 
 /// The lines of a document with the chapter files their places name.
+#[cfg(feature = "editor")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLines {
-    pub chapters: Vec<PathBuf>,
+    pub chapters: Vec<std::path::PathBuf>,
     pub lines: Vec<SetLine>,
 }
 
 /// The lines of running text that [`layout`] would set with this `config`, in written order, without making pages.
 /// One pass only, so a page reference takes its text from page 1 and not from where it ends up.
+#[cfg(feature = "editor")]
 #[allow(
     clippy::too_many_arguments,
     reason = "the inputs of layout, each prepared separately"
@@ -461,6 +464,7 @@ pub fn set_lines(
 }
 
 /// How close to the measure's end a line counts as reaching it, in points.
+#[cfg(feature = "editor")]
 const FILLS: f64 = 1.5;
 
 /// What every layout pass shares.

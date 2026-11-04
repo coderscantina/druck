@@ -61,7 +61,7 @@ pub fn start(
     cx: &mut App,
 ) {
     if var("DRUCK_SOAK_MEMORY").is_some() {
-        soak(preview, cx);
+        soak(editor, preview, cx);
         return;
     }
     if var("DRUCK_GATE").as_deref() != Some("1") {
@@ -81,36 +81,35 @@ pub fn start(
     .detach();
 }
 
-/// For a long run driven from outside: prints the memory each minute and, for each batch of keys, how long after the last
-/// key its pages were painted. `DRUCK_SOAK_MEMORY=1` turns it on.
-fn soak(preview: Entity<PreviewView>, cx: &mut App) {
+/// For a long run driven from outside: prints the memory each minute and, for each new pages, how long after the last
+/// change of the text they were painted. `DRUCK_SOAK_MEMORY=1` turns it on.
+fn soak(editor: Entity<EditorView>, preview: Entity<PreviewView>, cx: &mut App) {
     let started = Instant::now();
     cx.spawn(async move |cx| {
         let mut printed = Instant::now();
-        let mut asked: Option<Instant> = None;
+        let mut revision = 0;
+        let mut changed: Option<Instant> = None;
         loop {
-            cx.background_executor().timer(Duration::from_millis(20)).await;
-            let (painted, laying_out) =
-                preview.read_with(cx, |preview, _| (preview.painted_at(), preview.is_laying_out()));
-            match (asked, painted) {
-                (None, None) => asked = Some(Instant::now()),
-                (Some(from), Some(painted)) => {
-                    eprintln!(
-                        "soak: pages {:?} after the request, at {} s",
-                        painted.saturating_duration_since(from),
-                        started.elapsed().as_secs()
-                    );
-                    asked = None;
-                }
-                _ => {}
+            cx.background_executor().timer(Duration::from_millis(10)).await;
+            let now = editor.read_with(cx, |editor, _| editor.revision());
+            if now != revision {
+                revision = now;
+                changed = Some(Instant::now());
+            }
+            let painted = preview.read_with(cx, |preview, _| preview.painted_at());
+            if let (Some(from), Some(painted)) = (changed, painted)
+                && painted > from
+            {
+                eprintln!(
+                    "soak: pages {} ms after the last change, at {} s",
+                    painted.duration_since(from).as_millis(),
+                    started.elapsed().as_secs()
+                );
+                changed = None;
             }
             if printed.elapsed() >= Duration::from_secs(60) {
                 printed = Instant::now();
-                eprintln!(
-                    "soak: {} s; {}; laying out {laying_out}",
-                    started.elapsed().as_secs(),
-                    memory()
-                );
+                eprintln!("soak: {} s; {}", started.elapsed().as_secs(), memory());
             }
         }
     })

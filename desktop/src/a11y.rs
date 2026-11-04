@@ -1,9 +1,9 @@
 //! What every control gives keyboard and assistive technology. gpui carries roles and labels to the system through
 //! AccessKit for elements that have an id, and a focusable element in the tab order takes Enter and Space as a click.
-//! Only a keyboard's focus shows, in the accent color, the same way on every control.
+//! Only a keyboard's focus shows: a 1 px accent ring outside the control, which moves nothing, the same on every control.
 
 use gpui::prelude::*;
-use gpui::{Div, Role, SharedString, Stateful, Toggled};
+use gpui::{BoxShadow, Div, Role, SharedString, Stateful, Toggled, point, px};
 
 use crate::tokens::Tokens;
 
@@ -22,12 +22,18 @@ pub trait Control: Sized {
 
 impl Control for Stateful<Div> {
     fn control(self, tokens: &Tokens, role: Role, label: impl Into<SharedString>) -> Self {
-        let accent = tokens.accent;
+        let ring = BoxShadow {
+            color: tokens.accent.into(),
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: px(1.),
+            inset: false,
+        };
         self.role(role)
             .aria_label(label)
             .focusable()
             .tab_stop(true)
-            .focus_visible(move |style| style.border_1().border_color(accent))
+            .focus_visible(move |style| style.shadow(vec![ring.clone()]))
     }
 
     fn toggle(self, tokens: &Tokens, label: impl Into<SharedString>, on: bool) -> Self {

@@ -350,6 +350,7 @@ pub(crate) struct Sources {
 
 impl Sources {
     /// Whether a block's lines are running text set by the paragraph composer, and not a heading, a table, or code.
+    #[cfg(feature = "editor")]
     pub fn is_prose(&self, block: u32) -> bool {
         matches!(
             self.blocks.get(block as usize).map(|block| block.kind),
@@ -514,6 +515,7 @@ impl Texts {
 
     /// The block of a text, the document offset its first byte stands for, and whether its last byte is inserted.
     /// `None` for text the engine generated, which has no place of its own.
+    #[cfg(feature = "editor")]
     pub fn place(&self, id: TextId) -> Option<(u32, u32, bool)> {
         let text = self.entries[id.index()];
         let (first, last) = match text.head() {
