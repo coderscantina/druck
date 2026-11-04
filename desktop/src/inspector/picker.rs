@@ -377,9 +377,10 @@ impl Render for ThemePicker {
                     .child(strings::SPECIMEN),
             )
             .when(self.open, |bar| {
-                bar.child(deferred(
+                // The menu hangs from the bottom edge of the buttons, its right edge under theirs.
+                bar.child(div().absolute().top_full().right_0().child(deferred(
                     anchored().anchor(Anchor::TopRight).child(self.menu(&tokens, cx)),
-                ))
+                )))
             })
     }
 }

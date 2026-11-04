@@ -397,7 +397,9 @@ fn sheet(sheet: &Sheet, aspect: f64, tokens: &Tokens) -> Div {
         .w(width)
         .h(height)
         .bg(tokens.sheet)
-        .child(place(sheet.prose).bg(tokens.raised).opacity(0.6))
+        .border_1()
+        .border_color(tokens.divider)
+        .child(place(sheet.prose).bg(tokens.text_faint).opacity(0.45))
         .when_some(sheet.gap, |page, gap| page.child(place(gap).bg(tokens.sheet)))
         .child(place(sheet.frame).border_1().border_color(tokens.divider))
 }
