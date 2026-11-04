@@ -3,6 +3,7 @@
 pub mod details;
 mod fonts;
 mod fork_prompt;
+mod geometry;
 pub mod input;
 mod model;
 mod picker;
@@ -24,6 +25,7 @@ pub use fork_prompt::ForkPrompt;
 pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
 pub use picker::ThemePicker;
 use fonts::FontsPanel;
+use geometry::GeometryPanel;
 use source_view::SourceView;
 use styles::StylesPanel;
 use theme_tabs::ThemeTabs;
@@ -111,13 +113,15 @@ impl InspectorView {
         let model = cx.new(|_| ThemeModel::new(theme.as_deref(), dirs));
         let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
         let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
+        let geometry = cx.new(|cx| GeometryPanel::new(model.clone(), window, cx));
         let source = cx.new(|cx| SourceView::new(model.clone(), window, cx));
         let fonts = cx.new(|cx| FontsPanel::new(model.clone(), window, cx));
         let theme_tabs = cx.new(|_| {
             ThemeTabs::new(vec![
-                (strings::STYLES_TITLE, styles.clone().into()),
-                (strings::TOKENS_TITLE, tokens_panel.into()),
-                (strings::JSON_TITLE, source.into()),
+                (strings::TAB_STYLES, styles.clone().into()),
+                (strings::TAB_TOKENS, tokens_panel.into()),
+                (strings::TAB_PAGE, geometry.into()),
+                (strings::TAB_SOURCE, source.into()),
             ])
         });
         let subscriptions = vec![

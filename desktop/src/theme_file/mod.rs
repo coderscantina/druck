@@ -4,6 +4,7 @@
 pub mod blocks;
 pub mod editor;
 pub mod font_info;
+pub mod geometry;
 pub mod library;
 pub mod patch;
 pub mod tokens;
