@@ -1,18 +1,19 @@
 //! From document text to published pages: the engine call, and which request's result counts. Holds no gpui
 //! types.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
 use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
-use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
+use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Renderer};
 
 use super::raster::{Painter, family_name, fingerprint};
+use crate::session::{Joined, Kind, LiveResolver};
 
 /// A request to start: its number, the job, and the token that stops it.
 pub type Started<T> = (u64, T, Cancel);
@@ -137,7 +138,7 @@ const LAYOUT_STACK: usize = 16 * 1024 * 1024;
 /// Lays out one document repeatedly. Its renderer keeps fonts and images by content, so each run reads them again
 /// and prepares only what changed.
 pub struct Typesetter {
-    path: PathBuf,
+    kind: Kind,
     theme: Option<PathBuf>,
     working_dir: PathBuf,
     renderer: Renderer,
@@ -146,13 +147,15 @@ pub struct Typesetter {
 }
 
 impl Typesetter {
-    /// `path` is the document the text belongs to: relative paths in it start from its folder. `theme`, if any,
-    /// replaces the one the document names.
-    pub fn new(path: &Path, theme: Option<PathBuf>) -> Self {
-        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
-        let working_dir = path.parent().map(Path::to_owned).unwrap_or_default();
+    /// `kind` is the document the text belongs to, with absolute paths: relative paths in it start from its folder.
+    /// `theme`, if any, replaces the one the document names.
+    pub fn new(kind: Kind, theme: Option<PathBuf>) -> Self {
+        let working_dir = match &kind {
+            Kind::Single { path } => path.parent().map(PathBuf::from).unwrap_or_default(),
+            Kind::Project { dir } => dir.clone(),
+        };
         Self {
-            path,
+            kind,
             theme,
             working_dir,
             renderer: Renderer::new(),
@@ -164,27 +167,32 @@ impl Typesetter {
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
     /// of stack, and a debug build needs about as much for deserializing a theme alone. The schema's nesting
     /// is fixed, so one size covers any input.
-    pub fn run(&mut self, text: String, cancel: &Cancel) -> Result<Layout, Failure> {
+    pub fn run(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("druck-layout".into())
                 .stack_size(LAYOUT_STACK)
-                .spawn_scoped(scope, || self.typeset(text, cancel))
+                .spawn_scoped(scope, || self.typeset(joined, cancel))
                 .expect("the system starts a thread")
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
         })
     }
 
-    fn typeset(&mut self, text: String, cancel: &Cancel) -> Result<Layout, Failure> {
+    fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         let start = Instant::now();
-        let input = self.input(text)?;
+        let (input, unlisted) = self.input(joined)?;
         let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
         let configured_at = Instant::now();
         let laid = configured.layout(&LayoutOptions { source_map: true })?;
         let typeset = Instant::now();
         let config = resolved_config::of(&configured);
-        let warnings = config.warnings.iter().chain(laid.warnings()).cloned().collect();
+        let warnings = unlisted
+            .iter()
+            .chain(&config.warnings)
+            .chain(laid.warnings())
+            .cloned()
+            .collect();
         let painter = same_fonts(&mut self.painter, &laid);
         let fingerprints_from = Instant::now();
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
@@ -202,31 +210,45 @@ impl Typesetter {
         })
     }
 
-    fn input(&self, text: String) -> Result<Input, Vec<Diagnostic>> {
+    /// The document as the engine's input, with the warnings a project's manifest gives.
+    fn input(&self, joined: Joined) -> Result<(Input, Vec<Diagnostic>), Vec<Diagnostic>> {
         let dirs = ThemeDirs {
-            project: None,
+            project: matches!(self.kind, Kind::Project { .. }).then(|| self.working_dir.clone()),
             shared: FileResolver::shared_themes(),
         };
         let theme = match &self.theme {
             Some(theme) => ThemeSelection::asked(theme, &self.working_dir, dirs),
             None => ThemeSelection::Document { dirs },
         };
-        let name = self.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let today = match source_date() {
             Ok(Some(day)) => Ok(day),
             Ok(None) => clock_date(),
             Err(message) => Err(message),
         };
-        Ok(Input {
-            text: DocumentText::Single {
-                text,
-                origin: Origin::Document(self.working_dir.clone()),
-                name,
-            },
+        let today = today.map_err(|message| vec![Diagnostic::error(message)])?;
+        let (text, warnings) = match &self.kind {
+            Kind::Single { path } => {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let text = DocumentText::Single {
+                    text: joined.text,
+                    origin: Origin::Document(self.working_dir.clone()),
+                    name,
+                };
+                (text, Vec::new())
+            }
+            Kind::Project { dir } => {
+                let project = Project::open(&LiveResolver::new(&joined, &self.resolver), dir)?;
+                let warnings = project.warnings().to_vec();
+                (project.export(None)?.0, warnings)
+            }
+        };
+        let input = Input {
+            text,
             theme,
             overrides: Overrides::default(),
-            today: today.map_err(|message| vec![Diagnostic::error(message)])?,
-        })
+            today,
+        };
+        Ok((input, warnings))
     }
 }
 
@@ -241,6 +263,7 @@ fn same_fonts(painter: &mut Option<Arc<Painter>>, laid: &druck::output::Layout) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn a_newer_request_supersedes_the_running_one() {
@@ -260,17 +283,25 @@ mod tests {
     }
 
     fn sample(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples").join(name)
+        druck::resource::normalize(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples").join(name))
+    }
+
+    fn single(path: PathBuf) -> Kind {
+        Kind::Single { path }
+    }
+
+    fn text(text: impl Into<String>) -> Joined {
+        Joined::single(text.into(), 0)
     }
 
     #[test]
     fn repeated_runs_reuse_the_painter_and_fonts() {
-        let mut typesetter = Typesetter::new(&sample("report.md"), None);
-        let text = std::fs::read_to_string(sample("report.md")).expect("sample");
-        let Ok(first) = typesetter.run(text.clone(), &Cancel::default()) else {
+        let mut typesetter = Typesetter::new(single(sample("report.md")), None);
+        let written = std::fs::read_to_string(sample("report.md")).expect("sample");
+        let Ok(first) = typesetter.run(text(written.clone()), &Cancel::default()) else {
             panic!("typesets")
         };
-        let Ok(second) = typesetter.run(text + "\n\nOne more paragraph.\n", &Cancel::default()) else {
+        let Ok(second) = typesetter.run(text(written + "\n\nOne more paragraph.\n"), &Cancel::default()) else {
             panic!("typesets")
         };
         assert!(Arc::ptr_eq(&first.painter, &second.painter));
@@ -293,9 +324,9 @@ mod tests {
             r#"{"version": 1, "fonts": {"Body": {"regular": "body.otf"}}, "styles": {"body": {"font": "Body"}}}"#,
         )
         .expect("theme");
-        let mut typesetter = Typesetter::new(&dir.join("document.md"), Some(theme));
+        let mut typesetter = Typesetter::new(single(dir.join("document.md")), Some(theme));
         let run = |typesetter: &mut Typesetter| {
-            let Ok(layout) = typesetter.run("Body text.\n".to_owned(), &Cancel::default()) else {
+            let Ok(layout) = typesetter.run(text("Body text.\n"), &Cancel::default()) else {
                 panic!("typesets")
             };
             layout
@@ -311,7 +342,6 @@ mod tests {
 
     #[test]
     fn a_theme_given_to_the_typesetter_sets_the_body_style() {
-        let text = "Body text.\n".to_owned();
         let dir = std::env::temp_dir().join(format!("druck-job-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temporary folder");
         let theme = dir.join("theme.json");
@@ -321,7 +351,8 @@ mod tests {
         )
         .expect("theme");
         let document = dir.join("document.md");
-        let Ok(layout) = Typesetter::new(&document, Some(theme)).run(text, &Cancel::default()) else {
+        let Ok(layout) = Typesetter::new(single(document), Some(theme)).run(text("Body text.\n"), &Cancel::default())
+        else {
             panic!("typesets")
         };
         std::fs::remove_dir_all(&dir).expect("temporary folder");
@@ -332,12 +363,14 @@ mod tests {
 
     #[test]
     fn layout_does_not_depend_on_the_callers_stack() {
-        let text = std::fs::read_to_string(sample("report.md")).expect("sample");
+        let written = std::fs::read_to_string(sample("report.md")).expect("sample");
         let layout = std::thread::Builder::new()
             .stack_size(256 * 1024)
             .spawn(move || {
                 let cancel = Cancel::default();
-                Typesetter::new(&sample("report.md"), None).run(text, &cancel).is_ok()
+                Typesetter::new(single(sample("report.md")), None)
+                    .run(text(written), &cancel)
+                    .is_ok()
             })
             .expect("thread")
             .join()
@@ -347,20 +380,20 @@ mod tests {
 
     #[test]
     fn a_cancelled_run_publishes_nothing_and_the_next_one_works() {
-        let mut typesetter = Typesetter::new(&sample("report.md"), None);
-        let text = std::fs::read_to_string(sample("report.md")).expect("sample");
+        let mut typesetter = Typesetter::new(single(sample("report.md")), None);
+        let written = std::fs::read_to_string(sample("report.md")).expect("sample");
         let cancelled = Cancel::default();
         cancelled.cancel();
-        let result = typesetter.run(text.clone(), &cancelled);
+        let result = typesetter.run(text(written.clone()), &cancelled);
         assert!(matches!(result, Err(Failure::Cancelled)));
-        assert!(typesetter.run(text, &Cancel::default()).is_ok());
+        assert!(typesetter.run(text(written), &Cancel::default()).is_ok());
     }
 
     #[test]
     fn source_offsets_count_the_front_matter_the_engine_strips() {
-        let text = "---\ntitle: A title\n---\n\nFirst word here.\n";
-        let mut typesetter = Typesetter::new(&sample("report.md"), None);
-        let Ok(layout) = typesetter.run(text.to_owned(), &Cancel::default()) else {
+        let written = "---\ntitle: A title\n---\n\nFirst word here.\n";
+        let mut typesetter = Typesetter::new(single(sample("report.md")), None);
+        let Ok(layout) = typesetter.run(text(written), &Cancel::default()) else {
             panic!("typesets")
         };
         let map = layout.laid.source_map().expect("the app asks for a map");
@@ -378,13 +411,13 @@ mod tests {
         let at = map
             .position(source.expect("the word is on a page"), 0)
             .expect("written");
-        assert_eq!(&text[at.offset as usize..at.offset as usize + 4], "word");
+        assert_eq!(&written[at.offset as usize..at.offset as usize + 4], "word");
     }
 
     #[test]
     fn invalid_text_reports_diagnostics() {
-        let mut typesetter = Typesetter::new(&sample("report.md"), None);
-        let result = typesetter.run("---\ntitle: [unclosed\n---\n\nBody\n".to_owned(), &Cancel::default());
+        let mut typesetter = Typesetter::new(single(sample("report.md")), None);
+        let result = typesetter.run(text("---\ntitle: [unclosed\n---\n\nBody\n"), &Cancel::default());
         let Err(Failure::Errors(diagnostics)) = result else {
             panic!("front matter is invalid")
         };

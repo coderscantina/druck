@@ -7,7 +7,6 @@ mod layout;
 mod trace;
 
 use std::ops::Range;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -18,8 +17,9 @@ use gpui::{
     UTF16Selection, Window, actions, div, point, px, size,
 };
 
+use crate::session::{ChapterId, ChapterView, Session};
 use crate::source::inline::{inline_spans, line_markers};
-use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection, motion, typing};
+use crate::source::{BlockKind, Blocks, Edit, EditKind, Selection, motion, typing};
 use crate::tokens::{self, Tokens};
 use display::{Syntax, display_lines, hidden_ranges};
 use element::Galley;
@@ -197,12 +197,17 @@ pub struct CaretMoved(pub usize);
 
 impl EventEmitter<CaretMoved> for EditorView {}
 
+/// Something other than typing changed the session: the active chapter, the book, or the settings.
+pub struct SessionChanged;
+
+impl EventEmitter<SessionChanged> for EditorView {}
+
 pub struct EditorView {
     focus: FocusHandle,
-    path: Option<PathBuf>,
+    /// The document. It lives here because every key needs the active buffer. See [`crate::session`].
+    session: Session,
     status: SharedString,
     style: GalleyStyle,
-    buffer: Buffer,
     blocks: Blocks,
     slots: Vec<Slot>,
     selection: Selection,
@@ -236,28 +241,29 @@ const SHEET_PADDING_X: Pixels = px(24.);
 const MAX_SHEET_WIDTH: Pixels = px(680.);
 const CARET_MARGIN: Pixels = px(24.);
 const BLINK: Duration = Duration::from_millis(530);
+/// A chapter's first view: its top, with the sheet's margin above it.
+const START_OF_CHAPTER: Anchor = Anchor {
+    block: 0,
+    offset: px(0. - 16. - 36.),
+};
 
 impl EditorView {
-    /// Opens `path`, keeping its bytes as they are. A folder or a file that cannot be read as text shows why, and has
-    /// no path to save to, so nothing can overwrite it.
-    pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (buffer, path, status) = match path {
-            Some(path) => match open(&path) {
-                Ok(buffer) => (buffer, Some(path), SharedString::default()),
-                Err(message) => (Buffer::new(""), None, message.into()),
-            },
-            None => (Buffer::new(""), None, SharedString::default()),
-        };
-        let blocks = Blocks::parse(buffer.text());
+    /// Shows the session's active chapter.
+    pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let blocks = Blocks::parse(session.active_buffer().text());
+        let status = session
+            .active_chapter()
+            .problem()
+            .map(SharedString::from)
+            .unwrap_or_default();
         let mut view = Self {
             focus,
-            path,
             status,
             style: GalleyStyle::new(),
             slots: vec![Slot::default(); blocks.as_slice().len()],
-            buffer,
+            session,
             blocks,
             selection: Selection::default(),
             upstream: false,
@@ -265,10 +271,7 @@ impl EditorView {
             goal_x: None,
             reveal_at: 0,
             drag: None,
-            scroll: Anchor {
-                block: 0,
-                offset: px(0.) - TOP_MARGIN - SHEET_PADDING_Y,
-            },
+            scroll: START_OF_CHAPTER,
             autoscroll: false,
             column: Column::default(),
             visible: Vec::new(),
@@ -284,22 +287,130 @@ impl EditorView {
         view
     }
 
-    /// The document's file, if it opened as one.
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+    /// The document, for reading.
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// Changes the session from outside the galley: anything that edits a chapter, moves chapters, or changes settings
+    /// goes through here. The galley then shows the result, and [`SessionChanged`] tells everyone else.
+    pub fn update_session<R>(
+        &mut self,
+        change: impl FnOnce(&mut Session) -> R,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> R {
+        self.store_view();
+        let before = (self.session.active(), self.session.active_buffer().revision());
+        let result = change(&mut self.session);
+        if before != (self.session.active(), self.session.active_buffer().revision()) {
+            self.adopt_active(window, cx);
+        }
+        cx.emit(SessionChanged);
+        cx.notify();
+        result
+    }
+
+    /// Opens a chapter in the galley, where the caret last was in it, with its own undo history.
+    pub fn show_chapter(&mut self, id: ChapterId, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_session(
+            |session| {
+                session.resplit();
+                if session.chapter(id).is_some() {
+                    session.set_active(id);
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Opens a chapter with the caret at `offset`, for a click on a page.
+    pub fn show_place(&mut self, id: ChapterId, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if id == self.session.active() {
+            self.jump_to(offset, window, cx);
+            return;
+        }
+        self.update_session(
+            |session| {
+                session.set_active(id);
+                session.active_chapter_mut().view = ChapterView {
+                    selection: Selection::caret(offset),
+                    scroll: None,
+                };
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Reads the active chapter's title again, after its text changed.
+    pub fn refresh_outline(&mut self) {
+        let active = self.session.active();
+        self.session.refresh_outline(active);
+        if self.session.book().first() == Some(&active) {
+            self.session.refresh_details();
+        }
+    }
+
+    /// Keeps the galley's place in the active chapter, to come back to it.
+    fn store_view(&mut self) {
+        let view = ChapterView {
+            selection: self.selection,
+            scroll: Some((self.scroll.block, f32::from(self.scroll.offset))),
+        };
+        self.session.active_chapter_mut().view = view;
+    }
+
+    /// Takes over the session's active chapter: derives its blocks again and restores its place.
+    fn adopt_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let chapter = self.session.active_chapter();
+        let text = chapter.text();
+        let view = chapter.view;
+        self.status = chapter.problem().map(SharedString::from).unwrap_or_default();
+        self.blocks = Blocks::parse(text);
+        self.slots = vec![Slot::default(); self.blocks.as_slice().len()];
+        let last_block = self.blocks.as_slice().len() - 1;
+        self.autoscroll = view.scroll.is_none() && view.selection != Selection::default();
+        self.scroll = view.scroll.map_or(START_OF_CHAPTER, |(block, offset)| Anchor {
+            block: block.min(last_block),
+            offset: px(offset),
+        });
+        let clamp = |offset: usize| text.floor_char_boundary(offset.min(text.len()));
+        self.selection = Selection {
+            anchor: clamp(view.selection.anchor),
+            head: clamp(view.selection.head),
+        };
+        self.reveal_at = self.selection.head;
+        self.upstream = false;
+        self.marked = None;
+        self.goal_x = None;
+        self.drag = None;
+        self.hovered = None;
+        self.visible.clear();
+        self.restart_blink(cx);
+        window.notify_text_input_changed(&self.focus);
+        window.notify_text_selection_changed(&self.focus);
+        cx.emit(CaretMoved(self.selection.head));
+        cx.notify();
     }
 
     pub fn text(&self) -> &str {
-        self.buffer.text()
+        self.session.active_buffer().text()
     }
 
+    /// The session's revision: it changes with the text the pages are set from.
     pub fn revision(&self) -> u64 {
-        self.buffer.revision()
+        self.session.revision()
     }
 
     /// Puts the caret at `offset`, on a character boundary at or before it, and brings it into view.
     pub fn jump_to(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let offset = self.buffer.text().floor_char_boundary(offset.min(self.buffer.len()));
+        let offset = self
+            .session
+            .active_buffer()
+            .text()
+            .floor_char_boundary(offset.min(self.session.active_buffer().len()));
         self.set_selection(Selection::caret(offset), false, window, cx);
     }
 
@@ -330,8 +441,8 @@ impl EditorView {
     /// Called at the end of each paint.
     fn note_painted(&mut self) {
         let now = Instant::now();
-        if self.painted_revision.0 != self.buffer.revision() {
-            self.painted_revision = (self.buffer.revision(), now);
+        if self.painted_revision.0 != self.session.revision() {
+            self.painted_revision = (self.session.revision(), now);
         }
         if self.painted_style.0 != self.style_generation {
             self.painted_style = (self.style_generation, now);
@@ -366,7 +477,11 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         let started = self.trace.input();
-        match self.buffer.transact(kind, edits, self.selection, after, started) {
+        match self
+            .session
+            .active_buffer_mut()
+            .transact(kind, edits, self.selection, after, started)
+        {
             Ok(splice) => self.resegment(splice),
             Err(error) => {
                 eprintln!("edit rejected: {error}");
@@ -383,7 +498,7 @@ impl EditorView {
     fn resegment(&mut self, splice: crate::source::buffer::Splice) {
         let delta = splice.new_end as isize - splice.old_end as isize;
         let anchor_start = self.blocks.as_slice()[self.scroll.block].range.start;
-        let change = self.blocks.apply(self.buffer.text(), splice);
+        let change = self.blocks.apply(self.session.active_buffer().text(), splice);
         self.slots.splice(
             change.start..change.start + change.removed,
             vec![Slot::default(); change.inserted],
@@ -422,7 +537,7 @@ impl EditorView {
     fn delete_towards(&mut self, target: impl Fn(&str, usize) -> usize, window: &mut Window, cx: &mut Context<Self>) {
         let range = if self.selection.is_empty() {
             let head = self.selection.head;
-            let other = target(self.buffer.text(), head);
+            let other = target(self.session.active_buffer().text(), head);
             head.min(other)..head.max(other)
         } else {
             self.selection.range()
@@ -456,7 +571,7 @@ impl EditorView {
 
     fn new_block(&mut self, _: &NewBlock, window: &mut Window, cx: &mut Context<Self>) {
         let edit = if self.selection.is_empty() {
-            typing::line_break(self.buffer.text(), &self.blocks, self.selection.head)
+            typing::line_break(self.session.active_buffer().text(), &self.blocks, self.selection.head)
         } else {
             Edit::new(self.selection.range(), "\n\n")
         };
@@ -470,14 +585,14 @@ impl EditorView {
 
     fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
-            let restored = self.buffer.undo();
+            let restored = self.session.active_buffer_mut().undo();
             self.restore(restored, window, cx);
         }
     }
 
     fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
-            let restored = self.buffer.redo();
+            let restored = self.session.active_buffer_mut().redo();
             self.restore(restored, window, cx);
         }
     }
@@ -501,14 +616,14 @@ impl EditorView {
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selection.is_empty() {
-            let text = self.buffer.text()[self.selection.range()].to_owned();
+            let text = self.session.active_buffer().text()[self.selection.range()].to_owned();
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selection.is_empty() {
-            let text = self.buffer.text()[self.selection.range()].to_owned();
+            let text = self.session.active_buffer().text()[self.selection.range()].to_owned();
             cx.write_to_clipboard(ClipboardItem::new_string(text));
             self.replace_selection("", EditKind::Discrete, window, cx);
         }
@@ -520,13 +635,16 @@ impl EditorView {
         }
     }
 
-    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = &self.path else {
-            return;
-        };
-        self.status = match std::fs::write(path, self.buffer.text()) {
-            Ok(()) => "Saved".into(),
-            Err(error) => format!("Cannot save: {error}").into(),
+    fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_all(window, cx);
+    }
+
+    /// Writes every chapter that changed, for now. Autosave replaces this as the way text reaches disk.
+    pub fn save_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let saved = self.update_session(Session::save, window, cx);
+        self.status = match saved {
+            Ok(_) => "Saved".into(),
+            Err(problem) => problem.into(),
         };
         cx.notify();
     }
@@ -539,7 +657,7 @@ impl EditorView {
 
     fn move_caret(&mut self, motion_kind: Motion, extend: bool, window: &mut Window, cx: &mut Context<Self>) {
         let started = self.trace.input();
-        let text = self.buffer.text();
+        let text = self.session.active_buffer().text();
         let head = self.selection.head;
         let range = self.selection.range();
         let collapsing = !extend && !self.selection.is_empty();
@@ -612,7 +730,7 @@ impl EditorView {
                     line_index = 0;
                     row = 0;
                 } else {
-                    return (self.buffer.len(), false, goal);
+                    return (self.session.active_buffer().len(), false, goal);
                 }
             } else if row > 0 {
                 row -= 1;
@@ -655,7 +773,7 @@ impl EditorView {
     fn select_all(&mut self, _: &SelectAll, window: &mut Window, cx: &mut Context<Self>) {
         let selection = Selection {
             anchor: 0,
-            head: self.buffer.len(),
+            head: self.session.active_buffer().len(),
         };
         self.set_selection(selection, false, window, cx);
     }
@@ -665,7 +783,7 @@ impl EditorView {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         let (offset, upstream) = self.offset_at(event.position, window);
-        let text = self.buffer.text();
+        let text = self.session.active_buffer().text();
         let (origin, unit) = match event.click_count {
             1 => (offset..offset, DragUnit::Character),
             2 => (motion::word_range(text, offset), DragUnit::Word),
@@ -716,7 +834,7 @@ impl EditorView {
             self.lay_out_visible(window);
         }
         let (offset, upstream) = self.offset_at(event.position, window);
-        let text = self.buffer.text();
+        let text = self.session.active_buffer().text();
         let unit = match drag.unit {
             DragUnit::Character => offset..offset,
             DragUnit::Word => motion::word_range(text, offset),
@@ -773,7 +891,7 @@ impl EditorView {
                 let block = &self.blocks.as_slice()[index];
                 self.style.estimate_height(
                     block.kind,
-                    &self.buffer.text()[block.range.clone()],
+                    &self.session.active_buffer().text()[block.range.clone()],
                     self.column.text_width,
                 )
             }
@@ -783,7 +901,7 @@ impl EditorView {
     /// Shapes a block for the current caret and width, or returns the shape it already has.
     fn layout_block(&mut self, index: usize, window: &Window) -> Rc<BlockLayout> {
         let block = self.blocks.as_slice()[index].clone();
-        let text = self.buffer.text();
+        let text = self.session.active_buffer().text();
         let block_text = &text[block.range.clone()];
         let last = index + 1 == self.blocks.as_slice().len();
         let trailing_line = last && text.ends_with('\n');
@@ -980,7 +1098,10 @@ impl EditorView {
         let line = &layout.lines[line_index];
         if line.skipped && line.height > px(0.) {
             return if relative_y < line.y + line.height * 0.5 {
-                (motion::prev_grapheme(self.buffer.text(), range.start), false)
+                (
+                    motion::prev_grapheme(self.session.active_buffer().text(), range.start),
+                    false,
+                )
             } else {
                 (range.end, false)
             };
@@ -1008,14 +1129,6 @@ impl EditorView {
         );
         Some(Bounds::new(origin, size(px(1.5), line.line_height)))
     }
-}
-
-fn open(path: &Path) -> Result<Buffer, String> {
-    if path.is_dir() {
-        return Err("Folders open in a later version. Open a Markdown file.".to_owned());
-    }
-    let bytes = std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-    Buffer::from_bytes(bytes).map_err(|_| format!("{} is not UTF-8 text.", path.display()))
 }
 
 impl Focusable for EditorView {
@@ -1051,7 +1164,7 @@ impl Render for EditorView {
             .gap(tokens::SPACE_2)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_faint)
-            .child("Write")
+            .children(self.session.active_chapter().heading().map(str::to_owned))
             .child(self.status.clone());
         let pane = div()
             .flex_1()
@@ -1106,9 +1219,9 @@ impl EntityInputHandler for EditorView {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.buffer.range_from_utf16(&range_utf16);
-        actual_range.replace(self.buffer.range_to_utf16(&range));
-        Some(self.buffer.text()[range].to_owned())
+        let range = self.session.active_buffer().range_from_utf16(&range_utf16);
+        actual_range.replace(self.session.active_buffer().range_to_utf16(&range));
+        Some(self.session.active_buffer().text()[range].to_owned())
     }
 
     fn selected_text_range(
@@ -1118,13 +1231,13 @@ impl EntityInputHandler for EditorView {
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         Some(UTF16Selection {
-            range: self.buffer.range_to_utf16(&self.selection.range()),
+            range: self.session.active_buffer().range_to_utf16(&self.selection.range()),
             reversed: self.selection.reversed(),
         })
     }
 
     fn set_selected_text_range(&mut self, range_utf16: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        let range = self.buffer.range_from_utf16(&range_utf16);
+        let range = self.session.active_buffer().range_from_utf16(&range_utf16);
         let selection = Selection {
             anchor: range.start,
             head: range.end,
@@ -1133,11 +1246,13 @@ impl EntityInputHandler for EditorView {
     }
 
     fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
-        Some(self.buffer.utf16_len())
+        Some(self.session.active_buffer().utf16_len())
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked.as_ref().map(|range| self.buffer.range_to_utf16(range))
+        self.marked
+            .as_ref()
+            .map(|range| self.session.active_buffer().range_to_utf16(range))
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1203,7 +1318,7 @@ impl EntityInputHandler for EditorView {
         window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let range = self.buffer.range_from_utf16(&range_utf16);
+        let range = self.session.active_buffer().range_from_utf16(&range_utf16);
         let start = self.offset_bounds(range.start, false, window)?;
         let end = self.offset_bounds(range.end, false, window).unwrap_or(start);
         let width = if end.origin.y == start.origin.y {
@@ -1221,7 +1336,7 @@ impl EntityInputHandler for EditorView {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let (offset, _) = self.offset_at(point, window);
-        Some(self.buffer.utf16_of(offset))
+        Some(self.session.active_buffer().utf16_of(offset))
     }
 }
 
@@ -1229,7 +1344,7 @@ impl EditorView {
     /// The range an input method means: the one it names, else the marked text, else the selection.
     fn input_range(&self, range_utf16: Option<Range<usize>>) -> Range<usize> {
         range_utf16
-            .map(|range| self.buffer.range_from_utf16(&range))
+            .map(|range| self.session.active_buffer().range_from_utf16(&range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range())
     }

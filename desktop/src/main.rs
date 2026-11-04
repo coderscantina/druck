@@ -3,28 +3,30 @@
 mod agent;
 mod app;
 mod assets;
-mod document;
 mod editor;
 mod gate;
 mod inspector;
+mod launch;
 mod preview;
+mod session;
 mod sidebar;
 mod source;
 mod theme_file;
 mod tokens;
+mod workspace;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
 
-use document::Opened;
+use session::Session;
 use tokens::Scheme;
 
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// Markdown document to open.
+    /// Markdown file or project folder to open.
     #[arg(long, value_name = "PATH")]
     open: Option<PathBuf>,
     /// Theme to use instead of the document's: a JSON file, or the name of a common theme.
@@ -37,24 +39,29 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let opened = match cli.open.as_deref().map(Opened::read).transpose() {
-        Ok(opened) => opened,
-        Err(message) => {
-            eprintln!("{message}");
-            return ExitCode::FAILURE;
-        }
+    if let Some(path) = cli.open.as_deref().filter(|path| !path.exists()) {
+        eprintln!("cannot open {}: no such file or folder", path.display());
+        return ExitCode::FAILURE;
+    }
+    // Anything else that keeps a document from opening shows on the launch screen.
+    let (session, error) = match cli.open.as_deref().map(Session::open) {
+        Some(Ok(session)) => (Some(session), None),
+        Some(Err(problem)) => (None, Some(problem)),
+        None => (None, None),
     };
-    let asked = cli.theme.as_deref().map(|theme| {
+    let theme = cli.theme.as_deref().map(|theme| {
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let dirs = druck::input::ThemeDirs {
-            project: None,
-            shared: druck::resource::FileResolver::shared_themes(),
-        };
+        let dirs = session.as_ref().map_or_else(
+            || druck::input::ThemeDirs {
+                project: None,
+                shared: druck::resource::FileResolver::shared_themes(),
+            },
+            Session::theme_dirs,
+        );
         druck::editor::engine::theme_file(&druck::resource::FileResolver::new(), theme, &working_dir, &dirs)
     });
-    let theme = asked.or_else(|| opened.as_ref().and_then(|opened| opened.theme.clone()));
     gpui_platform::application()
         .with_assets(assets::Assets)
-        .run(move |cx| app::open(opened, theme, cli.appearance, cx));
+        .run(move |cx| app::open(session, error, theme, cli.appearance, cx));
     ExitCode::SUCCESS
 }

@@ -121,14 +121,19 @@ impl Gate {
         self.key(if typed % 7 == 6 { " " } else { "e" }, cx);
     }
 
-    /// Puts the caret at a paragraph end in the middle of the document, and shows that page.
+    /// Puts the caret at a paragraph end in the middle of the middle chapter, and shows that page.
     async fn place_caret(&self, cx: &mut AsyncApp) {
         let editor = self.editor.clone();
         self.window
             .update(cx, |_, window, cx| {
                 editor.update(cx, |editor, cx| {
+                    let book = editor.session().book();
+                    let middle_chapter = book[book.len() / 2];
+                    editor.show_chapter(middle_chapter, window, cx);
                     let text = editor.text();
-                    let middle = text.len() / 2;
+                    // Chapters open with long comments, whose text never reaches a page.
+                    let body = text.rfind("-->").map_or(0, |end| end + 3);
+                    let middle = text.floor_char_boundary(body + (text.len() - body) / 2);
                     let at = text[middle..].find(".\n").map_or(middle, |found| middle + found + 1);
                     editor.jump_to(at, window, cx);
                 })

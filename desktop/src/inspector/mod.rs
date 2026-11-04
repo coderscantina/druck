@@ -1,22 +1,25 @@
 //! Right pane: the panel of the active tab, then the tab rail at the window's edge.
 
-mod input;
+pub mod details;
+pub mod input;
 mod strings;
 mod style_property;
 mod styles;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
+use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
 
 use styles::StylesPanel;
 pub use styles::ThemeChanged;
 
 use crate::tokens::{self, Tokens};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
+/// A tab of the rail. A panel takes one with [`InspectorView::mount`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Tab {
     Selection,
     Styles,
     Fonts,
@@ -69,6 +72,8 @@ impl Tab {
 
 pub struct InspectorView {
     active: Tab,
+    /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
+    panels: HashMap<Tab, AnyView>,
     styles: Entity<StylesPanel>,
     _subscription: Subscription,
 }
@@ -82,10 +87,22 @@ impl InspectorView {
         let styles = cx.new(|cx| StylesPanel::new(theme, window, cx));
         let subscription = cx.subscribe(&styles, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone()));
         Self {
-            active: Tab::Styles,
+            active: Tab::Details,
+            panels: HashMap::from([(Tab::Styles, styles.clone().into())]),
             styles,
             _subscription: subscription,
         }
+    }
+
+    /// Gives a tab its panel.
+    pub fn mount(&mut self, tab: Tab, panel: AnyView) {
+        self.panels.insert(tab, panel);
+    }
+
+    /// Shows a tab.
+    pub fn show(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        self.active = tab;
+        cx.notify();
     }
 
     /// Sets the body size as if typed into its field. For measurements.
@@ -130,8 +147,8 @@ impl Render for InspectorView {
             .bg(tokens.panel)
             .border_l_1()
             .border_color(tokens.divider);
-        let panel = if self.active == Tab::Styles {
-            panel.child(self.styles.clone())
+        let panel = if let Some(mounted) = self.panels.get(&self.active) {
+            panel.child(mounted.clone())
         } else {
             panel.child(
                 div()
@@ -159,6 +176,6 @@ impl Render for InspectorView {
             .border_color(tokens.divider)
             .child(div().flex().flex_col().children(top))
             .child(div().flex().flex_col().children(bottom));
-        div().flex_none().flex().child(panel).child(rail)
+        div().flex_none().h_full().flex().child(panel).child(rail)
     }
 }

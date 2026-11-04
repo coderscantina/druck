@@ -5,6 +5,13 @@ use std::borrow::Cow;
 use gpui::{AssetSource, Result, SharedString};
 
 const FILES: &[(&str, &[u8])] = &[
+    ("icons/book.svg", include_bytes!("../assets/icons/book.svg")),
+    ("icons/close.svg", include_bytes!("../assets/icons/close.svg")),
+    ("icons/contents.svg", include_bytes!("../assets/icons/contents.svg")),
+    ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
+    ("icons/more.svg", include_bytes!("../assets/icons/more.svg")),
+    ("icons/plus.svg", include_bytes!("../assets/icons/plus.svg")),
+    ("icons/title.svg", include_bytes!("../assets/icons/title.svg")),
     ("icons/details.svg", include_bytes!("../assets/icons/details.svg")),
     (
         "icons/diagnostics.svg",

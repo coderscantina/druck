@@ -12,6 +12,9 @@ use crate::tokens::{self, Tokens};
 /// The field's text, after the author finished editing it.
 pub struct Committed(pub String);
 
+/// The author pressed Enter in the field.
+pub struct Submitted;
+
 pub struct TextInput {
     text: String,
     /// What the field held when editing began, so an unchanged field commits nothing.
@@ -27,6 +30,7 @@ pub struct TextInput {
 }
 
 impl EventEmitter<Committed> for TextInput {}
+impl EventEmitter<Submitted> for TextInput {}
 
 impl Focusable for TextInput {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
@@ -64,6 +68,11 @@ impl TextInput {
         self.text = text;
         self.customized = customized;
         cx.notify();
+    }
+
+    /// The text as it stands, committed or not.
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
     fn commit(&mut self, cx: &mut Context<Self>) {
@@ -117,6 +126,7 @@ impl TextInput {
             "enter" => {
                 self.replace_all = false;
                 self.commit(cx);
+                cx.emit(Submitted);
                 window.blur(cx);
                 return;
             }

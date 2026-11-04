@@ -1,0 +1,19 @@
+title: Untitled offer
+subtitle: What this offer covers
+date: Today
+theme: business
+meta:
+  offer: "2027-001"
+  client:
+    - Client name
+    - Attn. Contact person
+    - Street 1
+    - 12345 City
+  contact:
+    - +00 000 000 00
+    - you@example.com
+chapters:
+  - manuscript/01-offer.md
+exports:
+  offer:
+    output: build/offer.pdf

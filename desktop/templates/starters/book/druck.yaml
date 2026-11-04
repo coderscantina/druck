@@ -1,0 +1,21 @@
+title: Untitled book
+author: Your Name
+lang: en
+theme: novel
+meta:
+  publisher: Your Press
+chapters:
+  - manuscript/00-front.md
+  - manuscript/01-first-chapter.md
+  - manuscript/02-second-chapter.md
+exports:
+  draft:
+    draft: true
+    output: build/draft.pdf
+  print:
+    bleed: 3mm
+    crop-marks: true
+    final: true
+    output: build/print.pdf
+  ebook:
+    output: build/book.epub

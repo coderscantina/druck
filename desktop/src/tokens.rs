@@ -9,17 +9,34 @@ pub const FONT_UI: &str = ".SystemUIFont";
 pub const TEXT_SMALL: Pixels = px(11.);
 pub const TEXT_BODY: Pixels = px(13.);
 
+pub const SPACE_1: Pixels = px(4.);
 pub const SPACE_2: Pixels = px(8.);
 pub const SPACE_3: Pixels = px(12.);
 pub const SPACE_4: Pixels = px(16.);
 
 pub const TITLEBAR_HEIGHT: Pixels = px(28.);
 pub const SECTION_HEIGHT: Pixels = px(30.);
-pub const SIDEBAR_WIDTH: Pixels = px(232.);
+pub const SIDEBAR_WIDTH: Pixels = px(256.);
 pub const INSPECTOR_WIDTH: Pixels = px(296.);
 pub const RAIL_WIDTH: Pixels = px(40.);
 pub const ICON_SIZE: Pixels = px(16.);
 pub const ROW_HEIGHT: Pixels = px(36.);
+/// A row of the sidebar's contents list.
+pub const LIST_ROW_HEIGHT: Pixels = px(30.);
+/// The number or icon column of a contents row.
+pub const LIST_LEAD_WIDTH: Pixels = px(24.);
+/// The slot at the end of a contents row that holds its dot.
+pub const LIST_DOT_WIDTH: Pixels = px(18.);
+pub const DOT_SIZE: Pixels = px(6.);
+pub const COVER_THUMB_HEIGHT: Pixels = px(56.);
+pub const COVER_THUMB_WIDTH: Pixels = px(38.);
+pub const COVER_PREVIEW_HEIGHT: Pixels = px(96.);
+pub const COVER_PREVIEW_WIDTH: Pixels = px(64.);
+pub const FOOTER_HEIGHT: Pixels = px(30.);
+pub const DIALOG_WIDTH: Pixels = px(380.);
+pub const DIALOG_LIST_HEIGHT: Pixels = px(440.);
+pub const LAUNCH_WIDTH: Pixels = px(440.);
+pub const TEXT_TITLE: Pixels = px(20.);
 pub const FIELD_HEIGHT: Pixels = px(30.);
 pub const RADIUS: Pixels = px(6.);
 

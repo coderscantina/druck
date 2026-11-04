@@ -197,7 +197,7 @@ pub fn frame(
     bench.ticking = true;
     if let Some(round) = next_text {
         let text = edited(&bench.text, round);
-        view.request(text, round as u64, cx);
+        view.request(crate::session::Joined::single(text, round as u64), cx);
     }
     if start_ticking {
         cx.spawn(async move |this, cx| {

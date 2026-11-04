@@ -454,11 +454,7 @@ fn parse_front_matter(text: &str, source: &InputSource) -> Result<FrontMatter, V
 const PROJECT_FIELDS: &str = "chapters and exports belong in a project's druck.yaml";
 
 /// Reads settings from YAML that starts at 1-based line `first_line` of `source`.
-pub(crate) fn parse_settings(
-    yaml: &str,
-    first_line: u64,
-    source: &InputSource,
-) -> Result<FrontMatter, Vec<Diagnostic>> {
+pub fn parse_settings(yaml: &str, first_line: u64, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
     serde_saphyr::from_str(yaml).map_err(|error| {
         let mut diagnostic = Diagnostic::new(Some(source.clone()), yaml_message(&error));
         if let Some(location) = error.location() {

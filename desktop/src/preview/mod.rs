@@ -1,15 +1,15 @@
 //! Centre pane, pages side: the engine's pages painted natively, never through PDF.
 //!
-//! The shell calls [`PreviewView::request`] with the editor's text and hears [`Typeset`] when pages change.
+//! The workspace calls [`PreviewView::request`] with the session's joined text and hears [`Typeset`] when pages change.
 
 mod bench;
 mod cache;
-mod job;
+pub(crate) mod job;
 mod raster;
 mod sheets;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -31,6 +31,7 @@ pub use self::job::BodyStyle;
 use self::job::{Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
+use crate::session::{Joined, Kind};
 use crate::tokens::{self, Tokens};
 
 actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
@@ -47,12 +48,6 @@ const RASTER_THREADS: usize = 3;
 const PREFETCH_PAGES: usize = 2;
 /// The line that shows the editor's caret on a page.
 const CARET_WIDTH: Pixels = px(2.);
-
-/// Text to lay out and the revision of the document it is.
-struct Request {
-    text: String,
-    revision: u64,
-}
 
 /// How large sheets are drawn.
 #[derive(Clone, Copy, PartialEq)]
@@ -74,8 +69,11 @@ pub struct Typeset(pub BodyStyle);
 
 impl EventEmitter<Typeset> for PreviewView {}
 
-/// A click on a page landed on text written at this byte of the document.
-pub struct PageClicked(pub usize);
+/// A click on a page landed on text written at this byte of this file.
+pub struct PageClicked {
+    pub file: PathBuf,
+    pub offset: usize,
+}
 
 impl EventEmitter<PageClicked> for PreviewView {}
 
@@ -90,8 +88,8 @@ struct CaretMark {
 
 pub struct PreviewView {
     focus: FocusHandle,
-    scheduler: Scheduler<Request>,
-    typesetter: Option<Arc<Mutex<Typesetter>>>,
+    scheduler: Scheduler<Joined>,
+    typesetter: Arc<Mutex<Typesetter>>,
     layout: Option<Arc<Layout>>,
     /// Why the latest text has no pages. The last good pages stay on screen meanwhile.
     diagnostics: Vec<Diagnostic>,
@@ -130,13 +128,13 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 impl PreviewView {
-    /// A view of the document at `path` in `theme`, or the theme it names. Without a path it stays empty.
-    pub fn new(path: Option<PathBuf>, theme: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+    /// A view of the document in `theme`, or the theme it names.
+    pub fn new(kind: Kind, theme: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
         let mut view = Self {
             focus: cx.focus_handle(),
             scheduler: Scheduler::new(),
-            typesetter: None,
+            typesetter: Arc::new(Mutex::new(Typesetter::new(kind, theme))),
             layout: None,
             diagnostics: Vec::new(),
             cache: PageCache::new(CACHE_BYTES),
@@ -157,17 +155,16 @@ impl PreviewView {
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
             view.zoom = Zoom::Fixed(fixed);
         }
-        view.typesetter = path.map(|path| Arc::new(Mutex::new(Typesetter::new(&path, theme))));
         view
     }
 
-    /// Lays out `text`, which is `revision` of the document, on a background thread and publishes the pages when
-    /// done. A newer request cancels this one. Does nothing without a document.
-    pub fn request(&mut self, text: String, revision: u64, cx: &mut Context<Self>) {
+    /// Lays out a copy of the document on a background thread and publishes the pages when done. A newer request
+    /// cancels this one.
+    pub fn request(&mut self, joined: Joined, cx: &mut Context<Self>) {
         if let Some(bench) = &mut self.bench {
-            bench.requested(&text);
+            bench.requested(&joined.text);
         }
-        if let Some(started) = self.scheduler.request(Request { text, revision }) {
+        if let Some(started) = self.scheduler.request(joined) {
             self.start_layout(started, cx);
         }
     }
@@ -177,10 +174,17 @@ impl PreviewView {
         self.revision == Some(revision)
     }
 
-    /// Marks the text written at byte `offset` of the document, and scrolls to it if it is off screen.
-    pub fn show_source(&mut self, offset: usize, cx: &mut Context<Self>) {
+    /// Marks the text written at byte `offset` of `file`, and scrolls to it if it is off screen.
+    pub fn show_source(&mut self, file: &Path, offset: usize, cx: &mut Context<Self>) {
+        let chapter = self.layout.as_ref().and_then(|layout| {
+            let chapters = layout.laid.source_map()?.chapters();
+            chapters.iter().position(|chapter| chapter.path == file)
+        });
+        let Some(chapter) = chapter else {
+            return;
+        };
         let at = SourcePos {
-            chapter: ChapterId(0),
+            chapter: ChapterId(chapter as u32),
             offset: offset as u32,
         };
         let Some(located) = self.layout.as_ref().and_then(|layout| layout.laid.locate(at)) else {
@@ -211,12 +215,16 @@ impl PreviewView {
         let Some((page, x, y)) = sheets.point_at(at, self.view.0, self.scroll) else {
             return;
         };
-        let position = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.laid.position_at(page, Pt(f64::from(x)), Pt(f64::from(y))));
-        if let Some(position) = position {
-            cx.emit(PageClicked(position.offset as usize));
+        let clicked = self.layout.as_ref().and_then(|layout| {
+            let position = layout.laid.position_at(page, Pt(f64::from(x)), Pt(f64::from(y)))?;
+            let chapter = layout.laid.source_map()?.chapters().get(position.chapter.0 as usize)?;
+            Some(PageClicked {
+                file: chapter.path.clone(),
+                offset: position.offset as usize,
+            })
+        });
+        if let Some(clicked) = clicked {
+            cx.emit(clicked);
         }
     }
 
@@ -255,13 +263,11 @@ impl PreviewView {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
     }
 
-    fn start_layout(&mut self, (number, request, cancel): Started<Request>, cx: &mut Context<Self>) {
-        let Some(typesetter) = self.typesetter.clone() else {
-            return;
-        };
-        let Request { text, revision } = request;
+    fn start_layout(&mut self, (number, joined, cancel): Started<Joined>, cx: &mut Context<Self>) {
+        let typesetter = self.typesetter.clone();
+        let revision = joined.revision;
         let layout =
-            cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(text, &cancel) });
+            cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(joined, &cancel) });
         cx.spawn(async move |this, cx| {
             let result = layout.await;
             this.update(cx, |view, cx| {

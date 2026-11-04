@@ -332,7 +332,9 @@ mod tests {
     fn sample_layout() -> super::super::job::Layout {
         let path = FilePath::new(env!("CARGO_MANIFEST_DIR")).join("../samples/report.md");
         let text = std::fs::read_to_string(&path).expect("sample");
-        let Ok(layout) = Typesetter::new(&path, None).run(text, &Cancel::default()) else {
+        let Ok(layout) = Typesetter::new(crate::session::Kind::Single { path: path.clone() }, None)
+            .run(crate::session::Joined::single(text, 0), &Cancel::default())
+        else {
             panic!("typesets")
         };
         layout
@@ -481,8 +483,16 @@ mod tests {
                 );
                 let theme_path = dir.join("variable.json");
                 std::fs::write(&theme_path, theme).expect("theme");
-                let typeset = Typesetter::new(&dir.join("doc.md"), Some(theme_path))
-                    .run("Hamburg\n".to_owned(), &Cancel::default());
+                let typeset = Typesetter::new(
+                    crate::session::Kind::Single {
+                        path: dir.join("doc.md"),
+                    },
+                    Some(theme_path),
+                )
+                .run(
+                    crate::session::Joined::single("Hamburg\n".to_owned(), 0),
+                    &Cancel::default(),
+                );
                 let Ok(layout) = typeset else {
                     panic!("the theme is valid and the font loads")
                 };
