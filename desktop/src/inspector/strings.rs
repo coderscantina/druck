@@ -8,6 +8,7 @@ crate::strings! {
         TabFonts => ("FONTS", "SCHRIFTEN"),
         TabImages => ("IMAGES", "BILDER"),
         TabDetails => ("DETAILS", "DETAILS"),
+        TabNotes => ("NOTES", "NOTIZEN"),
         TabDiagnostics => ("DIAGNOSTICS", "DIAGNOSE"),
         TabExport => ("EXPORT", "EXPORT"),
 

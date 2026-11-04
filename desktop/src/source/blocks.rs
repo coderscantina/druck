@@ -7,6 +7,9 @@
 //! It follows the engine's reading of Markdown (`src/markdown.rs`) for where blocks start: CommonMark with GFM tables
 //! and footnotes, and `:::` directive lines at column 0 outside code. A `:::` line is a block of its own. What it
 //! encloses is ordinary Markdown, so its contents segment as usual.
+//!
+//! The engine cuts comments out before it parses, so a comment is its own block only when nothing else stands on its
+//! lines. `<!-- c --> text` is a paragraph, and a comment holding a blank line inside a paragraph does not end it.
 
 use std::ops::Range;
 
@@ -88,7 +91,9 @@ impl Blocks {
         let delta = splice.new_end as isize - splice.old_end as isize;
         // A block's extent can depend on the first line after the blank lines that follow it, so the block two before
         // the edit may change too. Nothing further back can.
-        let start = self.index_at(splice.start).saturating_sub(2);
+        // A comment still open before the edit can be closed by it, which changes the block the comment started in.
+        let start = open_comment_before(text, splice.start).unwrap_or(splice.start);
+        let start = self.index_at(start).saturating_sub(2);
         let mut pos = self.list[start].range.start;
         let mut next = start;
         let mut scanned = Vec::new();
@@ -171,7 +176,13 @@ fn scan(text: &str, pos: usize) -> Block {
         return block(BlockKind::Code, fence_end(text, next, fence));
     }
     if is_comment_start(line) {
-        return block(BlockKind::Comment, comment_end(text, pos));
+        return match whole_comment_end(text, pos) {
+            Some(end) => block(BlockKind::Comment, end),
+            None => {
+                let (kind, end) = paragraph_end(text, past_comments(text, pos, next));
+                block(kind, end)
+            }
+        };
     }
     if let Some(level) = atx_level(line) {
         return block(BlockKind::Heading { level }, next);
@@ -183,10 +194,13 @@ fn scan(text: &str, pos: usize) -> Block {
         return block(BlockKind::Quote, quote_end(text, next));
     }
     if let Some(item) = list_item(line) {
-        return block(BlockKind::List, list_end(text, next, item));
+        return block(BlockKind::List, list_end(text, past_comments(text, pos, next), item));
     }
     if is_footnote_definition(line) {
-        return block(BlockKind::FootnoteDefinition, footnote_end(text, next));
+        return block(
+            BlockKind::FootnoteDefinition,
+            footnote_end(text, past_comments(text, pos, next)),
+        );
     }
     if is_html_start(line) {
         return block(BlockKind::Raw, skip_nonblank(text, next));
@@ -197,7 +211,7 @@ fn scan(text: &str, pos: usize) -> Block {
     if is_table_start(text, line, next) {
         return block(BlockKind::Table, table_end(text, next));
     }
-    let (kind, end) = paragraph_end(text, next);
+    let (kind, end) = paragraph_end(text, past_comments(text, pos, next));
     block(kind, end)
 }
 
@@ -315,13 +329,76 @@ fn is_comment_start(line: &str) -> bool {
     indent(line) <= 3 && line.trim_start().starts_with("<!--")
 }
 
-/// The end of the line that closes the comment opening at `pos`, or the end of the text.
-fn comment_end(text: &str, pos: usize) -> usize {
-    let open = pos + text[pos..].find("<!--").map_or(0, |at| at + "<!--".len());
-    match text[open..].find("-->") {
-        Some(at) => line_at(text, open + at).1,
-        None => text.len(),
+/// The end of the comment block that starts on the line at `pos`, if nothing but comments stands on its lines. A comment
+/// that is never closed runs to the end of the text, so that closing it later is an edit inside this block.
+fn whole_comment_end(text: &str, pos: usize) -> Option<usize> {
+    let mut at = pos + (text[pos..].len() - text[pos..].trim_start_matches([' ', '\t']).len());
+    loop {
+        let open = text[at..].strip_prefix("<!--")?;
+        let body = at + "<!--".len();
+        let Some(close) = open.find("-->") else {
+            return Some(text.len());
+        };
+        let end = body + close + "-->".len();
+        let (rest, next) = line_at(text, end);
+        if is_blank(rest) {
+            return Some(next);
+        }
+        at = end + (rest.len() - rest.trim_start_matches([' ', '\t']).len());
     }
+}
+
+/// `next`, the start of the line after the one at `pos`, moved past a comment that this line opens and a later line
+/// closes. Lines inside the comment, blank ones too, are not lines of the block. A comment never closed moves nothing.
+fn past_comments(text: &str, pos: usize, next: usize) -> usize {
+    let mut from = pos;
+    let mut line_end = next;
+    while let Some(open) = open_comment_on_line(&text[from..line_end]) {
+        let body = from + open + "<!--".len();
+        let Some(close) = text[body..].find("-->") else {
+            return line_end;
+        };
+        from = body + close + "-->".len();
+        line_end = line_at(text, from).1;
+    }
+    line_end
+}
+
+/// Where a comment opens in `line` that does not close on it, outside inline code and escapes.
+fn open_comment_on_line(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    let mut code: Option<usize> = None;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' if code.is_none() => at += 2,
+            b'`' => {
+                let run = bytes[at..].iter().take_while(|byte| **byte == b'`').count();
+                match code {
+                    Some(open) if open == run => code = None,
+                    None => code = Some(run),
+                    Some(_) => {}
+                }
+                at += run;
+            }
+            b'<' if code.is_none() && line[at..].starts_with("<!--") => {
+                let body = at + "<!--".len();
+                match line[body..].find("-->") {
+                    Some(close) => at = body + close + "-->".len(),
+                    None => return Some(at),
+                }
+            }
+            _ => at += 1,
+        }
+    }
+    None
+}
+
+/// The start of the comment still open at `offset`: the first `<!--` after the last `-->` before it.
+fn open_comment_before(text: &str, offset: usize) -> Option<usize> {
+    let before = &text[..offset];
+    let from = before.rfind("-->").map_or(0, |close| close + "-->".len());
+    before[from..].find("<!--").map(|open| from + open)
 }
 
 fn atx_level(line: &str) -> Option<u8> {
@@ -376,10 +453,10 @@ fn is_quote(line: &str) -> bool {
 fn quote_end(text: &str, mut pos: usize) -> usize {
     while pos < text.len() {
         let (line, next) = line_at(text, pos);
-        if is_blank(line) || (!is_quote(line) && interrupts_paragraph(text, line, next)) {
+        if is_blank(line) || (!is_quote(line) && interrupts_paragraph(text, pos, line, next)) {
             break;
         }
-        pos = next;
+        pos = past_comments(text, pos, next);
     }
     pos
 }
@@ -475,10 +552,10 @@ fn list_end(text: &str, mut pos: usize, first: ListItem) -> usize {
             pos = next;
             continue;
         }
-        if interrupts_paragraph(text, line, next) {
+        if interrupts_paragraph(text, pos, line, next) {
             return pos;
         }
-        pos = next;
+        pos = past_comments(text, pos, next);
     }
     pos
 }
@@ -505,10 +582,10 @@ fn footnote_end(text: &str, mut pos: usize) -> usize {
             pos = after;
             continue;
         }
-        if indent(line) < 4 && (is_footnote_definition(line) || interrupts_paragraph(text, line, next)) {
+        if indent(line) < 4 && (is_footnote_definition(line) || interrupts_paragraph(text, pos, line, next)) {
             return pos;
         }
-        pos = next;
+        pos = past_comments(text, pos, next);
     }
     pos
 }
@@ -592,7 +669,7 @@ fn table_end(text: &str, pos: usize) -> usize {
     let (_, mut pos) = line_at(text, pos);
     while pos < text.len() {
         let (line, next) = line_at(text, pos);
-        if is_blank(line) || interrupts_paragraph(text, line, next) {
+        if is_blank(line) || interrupts_paragraph(text, pos, line, next) {
             break;
         }
         pos = next;
@@ -601,9 +678,9 @@ fn table_end(text: &str, pos: usize) -> usize {
 }
 
 /// Whether a line ends the paragraph above it rather than continuing it.
-fn interrupts_paragraph(text: &str, line: &str, next: usize) -> bool {
+fn interrupts_paragraph(text: &str, pos: usize, line: &str, next: usize) -> bool {
     line.starts_with(":::")
-        || is_comment_start(line)
+        || (is_comment_start(line) && whole_comment_end(text, pos).is_some())
         || atx_level(line).is_some()
         || fence_open(line).is_some()
         || is_thematic_break(line)
@@ -624,10 +701,10 @@ fn paragraph_end(text: &str, mut pos: usize) -> (BlockKind, usize) {
         if let Some(level) = setext_level(line) {
             return (BlockKind::Heading { level }, next);
         }
-        if interrupts_paragraph(text, line, next) {
+        if interrupts_paragraph(text, pos, line, next) {
             break;
         }
-        pos = next;
+        pos = past_comments(text, pos, next);
     }
     (BlockKind::Paragraph, pos)
 }
@@ -715,6 +792,62 @@ mod tests {
             kinds("a\n::: toc\nb\n"),
             [(Paragraph, "a\n"), (Directive, "::: toc\n"), (Paragraph, "b\n")]
         );
+    }
+
+    #[test]
+    fn a_comment_is_a_block_only_with_nothing_else_on_its_lines() {
+        use BlockKind::*;
+        assert_eq!(kinds("<!-- c --> text\n"), [(Paragraph, "<!-- c --> text\n")]);
+        assert_eq!(kinds("<!-- a\nb --> text\n"), [(Paragraph, "<!-- a\nb --> text\n")]);
+        assert_eq!(kinds("<!-- a --> <!-- b -->\n"), [(Comment, "<!-- a --> <!-- b -->\n")]);
+        assert_eq!(
+            kinds("a\n<!-- c -->\nb\n"),
+            [(Paragraph, "a\n"), (Comment, "<!-- c -->\n"), (Paragraph, "b\n")]
+        );
+        assert_eq!(kinds("a\n<!-- c --> b\nd\n"), [(Paragraph, "a\n<!-- c --> b\nd\n")]);
+    }
+
+    #[test]
+    fn a_comment_holding_a_blank_line_does_not_split_its_paragraph() {
+        use BlockKind::*;
+        assert_eq!(kinds("a <!-- b\n\nc --> d\n"), [(Paragraph, "a <!-- b\n\nc --> d\n")]);
+        assert_eq!(
+            kinds("a <!-- b\n\nc --> d\ne\n\nf\n"),
+            [
+                (Paragraph, "a <!-- b\n\nc --> d\ne\n"),
+                (Blank, "\n"),
+                (Paragraph, "f\n")
+            ]
+        );
+        assert_eq!(
+            kinds("a `<!--` b\n\nc --> d\n"),
+            [(Paragraph, "a `<!--` b\n"), (Blank, "\n"), (Paragraph, "c --> d\n")]
+        );
+        assert_eq!(
+            kinds("a <!-- open\n\nb\n"),
+            [(Paragraph, "a <!-- open\n"), (Blank, "\n"), (Paragraph, "b\n")]
+        );
+    }
+
+    #[test]
+    fn closing_a_comment_far_below_updates_the_block_it_opened_in() {
+        let text = "a <!-- b\n\nc\n\nd\n\ne\n\nf\n";
+        let mut buffer = Buffer::new(text);
+        let mut blocks = Blocks::parse(buffer.text());
+        let at = text.len() - 1;
+        let caret = Selection::caret(at);
+        let splice = buffer
+            .transact(
+                EditKind::Typing,
+                vec![Edit::new(at..at, " -->")],
+                caret,
+                caret,
+                Instant::now(),
+            )
+            .unwrap();
+        blocks.apply(buffer.text(), splice);
+        assert_eq!(blocks, Blocks::parse(buffer.text()));
+        assert_eq!(blocks.as_slice().len(), 1);
     }
 
     #[test]

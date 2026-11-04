@@ -7,6 +7,7 @@
 
 use std::ops::Range;
 
+use druck::editor::comments;
 use druck::editor::marks;
 use druck::editor::syntax::{self, Segment};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -83,6 +84,46 @@ pub fn inline_spans(kind: BlockKind, text: &str) -> Vec<InlineSpan> {
     if !has_inline(kind) {
         return Vec::new();
     }
+    if !text.contains("<!--") {
+        return spans_of(text);
+    }
+    // As the engine does: a comment is cut out before parsing, as if it had not been written. One that is never closed
+    // is an error there, so it stays text here.
+    let comments = comments::find(text, OPTIONS);
+    if comments.unterminated.is_some() || comments.ranges().is_empty() {
+        return spans_of(text);
+    }
+    let (cut, cuts) = comments.strip(text);
+    let mut spans = spans_of(&cut);
+    let start_of = |offset: usize| cuts.original(offset);
+    let end_of = |offset: usize| offset.checked_sub(1).map_or(0, |last| cuts.original(last) + 1);
+    let range_of = |range: &Range<usize>| start_of(range.start)..end_of(range.end).max(start_of(range.start));
+    for span in &mut spans {
+        span.range = range_of(&span.range);
+        span.open = range_of(&span.open);
+        span.close = range_of(&span.close);
+    }
+    spans.extend(comments.ranges().iter().map(|range| InlineSpan {
+        kind: SpanKind::Comment,
+        range: range.clone(),
+        open: range.start..range.start,
+        close: range.end..range.end,
+    }));
+    spans.sort_by_key(|span| (span.range.start, std::cmp::Reverse(span.range.end)));
+    spans
+}
+
+/// The same constructs the engine parses, without the typographic rewriting, which does not move any range here.
+const OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_FOOTNOTES)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_SUBSCRIPT)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_HEADING_ATTRIBUTES)
+    .union(Options::ENABLE_GFM);
+
+/// The spans of text that holds no comments the engine would cut.
+fn spans_of(text: &str) -> Vec<InlineSpan> {
     let mut spans = parser_spans(text);
     let opaque: Vec<Range<usize>> = spans
         .iter()
@@ -103,19 +144,11 @@ pub fn inline_spans(kind: BlockKind, text: &str) -> Vec<InlineSpan> {
 }
 
 fn parser_spans(text: &str) -> Vec<InlineSpan> {
-    // The same constructs the engine parses, without the typographic rewriting, which does not move any range here.
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_SUBSCRIPT
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_HEADING_ATTRIBUTES
-        | Options::ENABLE_GFM;
     let mut spans = Vec::new();
     let mut open: Vec<(SpanKind, Range<usize>, usize)> = Vec::new();
     let mut last_inner_end = 0;
     let mut in_image = 0;
-    for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+    for (event, range) in Parser::new_ext(text, OPTIONS).into_offset_iter() {
         match event {
             Event::Start(Tag::Image { .. }) => in_image += 1,
             Event::End(TagEnd::Image) => in_image -= 1,
@@ -163,14 +196,6 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
                     range: range.clone(),
                 });
                 last_inner_end = last_inner_end.max(range.end);
-            }
-            Event::InlineHtml(ref html) if html.starts_with("<!--") => {
-                spans.push(InlineSpan {
-                    kind: SpanKind::Comment,
-                    open: range.start..range.start,
-                    close: range.end..range.end,
-                    range: range.clone(),
-                });
             }
             _ => {
                 if !open.is_empty() {
@@ -475,6 +500,27 @@ mod tests {
                 (Code, "`^a^`", "`", "`"),
                 (Comment, "<!-- ~~b~~ -->", "", ""),
                 (Strike, "~~c~~", "~~", "~~"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_leading_comment_styles_only_itself_and_the_text_after_it_is_parsed() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("<!-- c --> *text*"),
+            [(Comment, "<!-- c -->", "", ""), (Emphasis, "*text*", "*", "*")]
+        );
+    }
+
+    #[test]
+    fn a_comment_holding_a_blank_line_is_one_span_and_marks_around_it_pair() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("a *b <!-- x\n\ny --> c* d"),
+            [
+                (Emphasis, "*b <!-- x\n\ny --> c*", "*", "*"),
+                (Comment, "<!-- x\n\ny -->", "", "")
             ]
         );
     }

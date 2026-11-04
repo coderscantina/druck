@@ -12,7 +12,8 @@
 //!
 //! - **Persistence** owns a new `persist/`: autosave, the watcher, and merges, on `Session::save`,
 //!   `Session::edit_chapter`, and `Session::read_manifest`. It replaces the Cmd+S handling.
-//! - **Editor commands** own `editor/`, and an `overlays` view for the toolbar and slash menu.
+//! - **Editor commands** own `editor/`, whose galley draws its own floats, the source toggle in `toolbar`, and the
+//!   `Tab::Notes` panel.
 //! - **Theme core** owns `theme_file/` and new panels on the `Tab::Fonts` tab and a theme picker in `toolbar`.
 //! - **Shell** owns a new `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, sidebar dots, search and word count
 //!   in `footer`, the string tables, and the rest of the menus.
@@ -46,6 +47,7 @@ const SCREEN_MARGIN: f32 = 80.;
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     shell::mount(parts, slots, window, cx);
     slots.footer.push(cx.new(|_| AgentView::new()).into());
+    crate::editor::mount(parts, slots, cx);
 }
 
 /// Opens the only window, with a document or with the launch screen. `error` says why a document asked for did not

@@ -26,12 +26,20 @@ pub enum Tab {
     Fonts,
     Images,
     Details,
+    Notes,
     Diagnostics,
     Export,
 }
 
 impl Tab {
-    const TOP: [Self; 5] = [Self::Selection, Self::Styles, Self::Fonts, Self::Images, Self::Details];
+    const TOP: [Self; 6] = [
+        Self::Selection,
+        Self::Styles,
+        Self::Fonts,
+        Self::Images,
+        Self::Details,
+        Self::Notes,
+    ];
     const BOTTOM: [Self; 2] = [Self::Diagnostics, Self::Export];
 
     fn id(self) -> &'static str {
@@ -41,6 +49,7 @@ impl Tab {
             Self::Fonts => "tab-fonts",
             Self::Images => "tab-images",
             Self::Details => "tab-details",
+            Self::Notes => "tab-notes",
             Self::Diagnostics => "tab-diagnostics",
             Self::Export => "tab-export",
         }
@@ -53,6 +62,7 @@ impl Tab {
             Self::Fonts => "icons/fonts.svg",
             Self::Images => "icons/images.svg",
             Self::Details => "icons/details.svg",
+            Self::Notes => "icons/notes.svg",
             Self::Diagnostics => "icons/diagnostics.svg",
             Self::Export => "icons/export.svg",
         }
@@ -65,6 +75,7 @@ impl Tab {
             Self::Fonts => Key::TabFonts,
             Self::Images => Key::TabImages,
             Self::Details => Key::TabDetails,
+            Self::Notes => Key::TabNotes,
             Self::Diagnostics => Key::TabDiagnostics,
             Self::Export => Key::TabExport,
         })

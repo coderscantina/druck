@@ -1,18 +1,21 @@
-//! The galley element: paints the sheet, the visible blocks, the selection, the caret, and the block gutter.
+//! The galley element: paints the sheet, the visible blocks, the selection, the caret, the block gutter, and the
+//! scrollbar, and hands what floats over them to [`super::float`].
 
 use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Style,
-    TextAlign, TextRun, Window, fill, font, point, px, relative, size,
+    AnyElement, App, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
+    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels,
+    Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
 };
 
+use super::float::prepaint_float;
+use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
 use super::layout::BlockLayout;
-use super::{Column, EditorView, SHEET_PADDING_Y};
+use super::{Column, EditorView, SHEET_PADDING_Y, Scrollbar};
 use crate::source::BlockKind;
-use crate::tokens::{self, Tokens};
+use crate::tokens::Tokens;
 
 pub struct Galley {
     view: Entity<EditorView>,
@@ -24,23 +27,31 @@ impl Galley {
     }
 }
 
-struct FrameBlock {
-    kind: BlockKind,
-    top: Pixels,
-    layout: Rc<BlockLayout>,
-    active: bool,
-    hovered: bool,
+pub(super) struct FrameBlock {
+    pub kind: BlockKind,
+    pub top: Pixels,
+    pub layout: Rc<BlockLayout>,
+    pub active: bool,
+    pub hovered: bool,
+    pub icon: Option<&'static str>,
 }
 
 pub struct Frame {
-    column: Column,
-    blocks: Vec<FrameBlock>,
+    pub(super) column: Column,
+    pub(super) blocks: Vec<FrameBlock>,
     sheet: Bounds<Pixels>,
     selection: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
     hitbox: Hitbox,
-    ink: Hsla,
-    quiet: Hsla,
+    gutter_hitbox: Hitbox,
+    pub(super) markers: Vec<CommentMarker>,
+    pub(super) drop_line: Option<Bounds<Pixels>>,
+    scrollbar: Option<Scrollbar>,
+    scrollbar_strong: bool,
+    floats: Vec<AnyElement>,
+    source: bool,
+    pub(super) ink: Hsla,
+    pub(super) quiet: Hsla,
     rule: Hsla,
     code_background: Hsla,
     body_size: Pixels,
@@ -90,7 +101,7 @@ impl Element for Galley {
         window: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        self.view.update(cx, |view, _| {
+        let (mut frame, floats) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
             view.set_viewport(bounds);
             if view.autoscroll {
@@ -98,15 +109,35 @@ impl Element for Galley {
                 view.scroll_to_caret(window);
             }
             view.lay_out_visible(window);
-            let hitbox = window.insert_hitbox(
+            view.update_scrollbar();
+            let gutter_hitbox = window.insert_hitbox(
                 Bounds::new(
                     point(view.column.sheet_left, bounds.top()),
-                    size(view.column.sheet_width, bounds.size.height),
+                    size(view.column.text_left - view.column.sheet_left, bounds.size.height),
                 ),
                 HitboxBehavior::Normal,
             );
-            view.frame(hitbox, window)
-        })
+            let hitbox = window.insert_hitbox(
+                Bounds::new(
+                    point(view.column.text_left, bounds.top()),
+                    size(
+                        view.column.sheet_left + view.column.sheet_width - view.column.text_left,
+                        bounds.size.height,
+                    ),
+                ),
+                HitboxBehavior::Normal,
+            );
+            let frame = view.frame(hitbox, gutter_hitbox, window);
+            let selection = frame.selection.clone();
+            let caret = frame.caret.or_else(|| view.caret_bounds(window));
+            let floats = view.floats(&selection, caret, window, cx);
+            (frame, floats)
+        });
+        frame.floats = floats
+            .into_iter()
+            .map(|(element, origin)| prepaint_float(element, origin, window, cx))
+            .collect();
+        frame
     }
 
     fn paint(
@@ -126,11 +157,15 @@ impl Element for Galley {
         self.view.update(cx, |view, _| view.trace.paint_started());
         window.handle_input(&focus, ElementInputHandler::new(bounds, self.view.clone()), cx);
         window.set_cursor_style(CursorStyle::IBeam, &frame.hitbox);
+        window.set_cursor_style(gutter_cursor(frame), &frame.gutter_hitbox);
+        if frame.drop_line.is_some() {
+            window.set_window_cursor_style(CursorStyle::ClosedHand);
+        }
 
         let tokens = Tokens::get(cx);
         let sheet_color = tokens.sheet;
         let selection_color = Hsla::from(tokens.accent).opacity(0.25);
-        let label_color = tokens.text_faint;
+        let thumb_color = Hsla::from(tokens.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             window.paint_quad(fill(frame.sheet, sheet_color));
@@ -141,7 +176,11 @@ impl Element for Galley {
                 window.paint_quad(fill(*rectangle, selection_color));
             }
             for block in &frame.blocks {
-                paint_block_text(block, frame, label_color.into(), window, cx);
+                paint_block_text(block, frame, window, cx);
+            }
+            paint_gutter(frame, window, cx);
+            if let Some(bar) = frame.scrollbar {
+                window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(px(3.)));
             }
             if focused
                 && caret_on
@@ -158,11 +197,14 @@ impl Element for Galley {
             }
         });
         let view = self.view.clone();
-        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
             if phase.bubble() {
-                view.update(cx, |view, cx| view.mouse_up(event, cx));
+                view.update(cx, |view, cx| view.mouse_up(event, window, cx));
             }
         });
+        for float in &mut frame.floats {
+            float.paint(window, cx);
+        }
         self.view.update(cx, |view, _| {
             view.trace.painted();
             view.note_painted();
@@ -171,6 +213,9 @@ impl Element for Galley {
 }
 
 fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window) {
+    if frame.source {
+        return;
+    }
     let column = &frame.column;
     let height = block.layout.height;
     match block.kind {
@@ -189,7 +234,7 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
     }
 }
 
-fn paint_block_text(block: &FrameBlock, frame: &Frame, label_color: Hsla, window: &mut Window, cx: &mut App) {
+fn paint_block_text(block: &FrameBlock, frame: &Frame, window: &mut Window, cx: &mut App) {
     let column = &frame.column;
     for line in &block.layout.lines {
         if line.height == px(0.) {
@@ -218,66 +263,32 @@ fn paint_block_text(block: &FrameBlock, frame: &Frame, label_color: Hsla, window
             .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
             .ok();
     }
-    if (block.active || block.hovered)
-        && let Some(label) = block_label(block.kind)
-    {
-        let label: SharedString = label.into();
-        let run = TextRun {
-            len: label.len(),
-            font: font(tokens::FONT_UI),
-            color: label_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let shaped = window.text_system().shape_line(label, tokens::TEXT_SMALL, &[run], None);
-        let line_height = block
-            .layout
-            .lines
-            .first()
-            .map_or(tokens::TEXT_SMALL, |line| line.line_height);
-        let origin = point(column.sheet_left - tokens::SPACE_2 - shaped.width(), block.top);
-        shaped
-            .paint(origin, line_height, TextAlign::Left, None, window, cx)
-            .ok();
-    }
-}
-
-fn block_label(kind: BlockKind) -> Option<&'static str> {
-    Some(match kind {
-        BlockKind::FrontMatter => "Meta",
-        BlockKind::Heading { level: 1 } => "H1",
-        BlockKind::Heading { level: 2 } => "H2",
-        BlockKind::Heading { level: 3 } => "H3",
-        BlockKind::Heading { .. } => "H4+",
-        BlockKind::Paragraph => "Text",
-        BlockKind::List => "List",
-        BlockKind::Quote => "Quote",
-        BlockKind::Code => "Code",
-        BlockKind::Table => "Table",
-        BlockKind::Directive => "Dir",
-        BlockKind::Comment => "Note",
-        BlockKind::SceneBreak => "Break",
-        BlockKind::FootnoteDefinition => "Foot",
-        BlockKind::Raw => "Raw",
-        BlockKind::Blank => return None,
-    })
 }
 
 impl EditorView {
     /// Everything paint needs, gathered while the view is mutably at hand.
-    fn frame(&mut self, hitbox: Hitbox, window: &Window) -> Frame {
+    fn frame(&mut self, hitbox: Hitbox, gutter_hitbox: Hitbox, window: &Window) -> Frame {
         let column = self.column;
         let viewport = column.viewport;
         let active = self.blocks.index_at(self.selection.head);
         let mut blocks = Vec::with_capacity(self.visible.len());
         for (index, top) in self.visible.clone() {
+            let block = self.blocks.as_slice()[index].clone();
+            let icon = match self.slots[index].icon {
+                Some(icon) => Some(icon),
+                None => {
+                    let icon = block_icon(block.kind, &self.session.active_buffer().text()[block.range.clone()]);
+                    self.slots[index].icon = icon;
+                    icon
+                }
+            };
             blocks.push(FrameBlock {
-                kind: self.blocks.as_slice()[index].kind,
+                kind: block.kind,
                 top,
                 layout: self.layout_block(index, window),
                 active: index == active,
                 hovered: self.hovered == Some(index),
+                icon,
             });
         }
         let starts_here = self.visible.first().is_some_and(|(index, _)| *index == 0);
@@ -303,6 +314,7 @@ impl EditorView {
         } else {
             None
         };
+        self.markers = self.comment_markers(&blocks);
         Frame {
             column,
             blocks,
@@ -310,6 +322,13 @@ impl EditorView {
             selection,
             caret,
             hitbox,
+            gutter_hitbox,
+            markers: self.markers.clone(),
+            drop_line: self.drop_line(),
+            scrollbar: self.scrollbar,
+            scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
+            floats: Vec::new(),
+            source: self.source,
             ink: self.style.ink,
             quiet: self.style.quiet,
             rule: self.style.rule,
@@ -347,6 +366,10 @@ impl EditorView {
                     .display
                     .to_display(selection.end.saturating_sub(block_start).min(line.display.source.end));
                 let crosses_line_end = selection.end > line_end;
+                // A blank gap between blocks is how Markdown spells the boundary: nothing to show as selected.
+                if line.skipped {
+                    continue;
+                }
                 for (row, range) in line.rows.iter().enumerate() {
                     let start = from.max(range.start);
                     let end = to.min(range.end);

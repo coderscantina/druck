@@ -1,11 +1,24 @@
 //! Centre pane, writing side: one chapter as a galley on a sheet. The buffer holds the Markdown, every change is an
 //! edit to it, and what shows is derived from it: blocks, hidden markers, and shaped lines, only for what is on screen.
+//!
+//! [`commands`] writes what the toolbar, slash menu, and gutter ask for, without gpui. [`float`] and [`gutter`] are their
+//! views, [`notes_panel`] the chapter's notes in the inspector, and [`source_toggle`] the source view's button.
 
+mod commands;
 mod display;
 mod element;
+mod float;
+mod gutter;
 mod layout;
+mod notes_panel;
+mod place;
+mod scrollbar;
+mod source_toggle;
+mod strings;
 mod trace;
 
+use std::cell::Cell;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -13,18 +26,42 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString, Task,
-    UTF16Selection, Window, actions, div, point, px, size,
+    KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString,
+    Subscription, Task, UTF16Selection, Window, actions, div, point, px, size,
 };
 
+use crate::inspector::Tab;
 use crate::session::{ChapterId, ChapterView, Session};
 use crate::source::inline::{inline_spans, line_markers};
 use crate::source::{BlockKind, Blocks, Edit, EditKind, Selection, motion, typing};
 use crate::tokens::{self, Tokens};
+use crate::workspace::{Parts, Slots, Workspace};
+use commands::convert::BlockType;
+use commands::marks::Mark;
+use commands::notes;
 use display::{Syntax, display_lines, hidden_ranges};
 use element::Galley;
+use float::Float;
+use gutter::{BlockGrab, CommentMarker, ShowNotes};
 use layout::{BlockLayout, GalleyStyle, ShapeRequest, shape_block};
+use notes_panel::NotesPanel;
+use source_toggle::SourceToggle;
 use trace::Trace;
+
+/// Mounts what this slice shows outside the galley: the source toggle and the notes panel.
+pub fn mount(parts: &Parts, slots: &mut Slots, cx: &mut Context<Workspace>) {
+    let editor = parts.editor.clone();
+    slots
+        .toolbar
+        .push(cx.new(|cx| SourceToggle::new(editor.clone(), cx)).into());
+    let notes = cx.new(|cx| NotesPanel::new(editor.clone(), cx));
+    let inspector = parts.inspector.clone();
+    inspector.update(cx, |inspector, _| inspector.mount(Tab::Notes, notes.into()));
+    cx.subscribe(&editor, move |_, _, _: &ShowNotes, cx| {
+        inspector.update(cx, |inspector, cx| inspector.show(Tab::Notes, cx));
+    })
+    .detach();
+}
 
 actions!(
     editor,
@@ -68,13 +105,31 @@ actions!(
         Redo,
         Save,
         ShowCharacterPalette,
+        ToggleBold,
+        ToggleItalic,
+        ToggleUnderline,
+        ToggleStrike,
+        ToggleSuperscript,
+        ToggleSubscript,
+        ToggleQuote,
+        ToggleBullets,
+        ToggleNumbers,
+        OpenLink,
+        ToggleSource,
+        Cancel,
+        MenuUp,
+        MenuDown,
+        MenuAccept,
     ]
 );
 
 const CONTEXT: &str = "Editor";
+/// Set beside [`CONTEXT`] while a menu is open, whose bindings then win.
+const MENU_CONTEXT: &str = "CommandMenu";
 
 pub fn bind_keys(cx: &mut App) {
-    let context = Some(CONTEXT);
+    // The notes panel's field listens to the editing keys too.
+    let context = Some("Editor || NoteField");
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, context),
         KeyBinding::new("shift-backspace", Backspace, context),
@@ -121,6 +176,27 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-s", Save, context),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, context),
     ]);
+    let context = Some(CONTEXT);
+    cx.bind_keys([
+        KeyBinding::new("cmd-b", ToggleBold, context),
+        KeyBinding::new("cmd-i", ToggleItalic, context),
+        KeyBinding::new("cmd-u", ToggleUnderline, context),
+        KeyBinding::new("cmd-shift-x", ToggleStrike, context),
+        KeyBinding::new("cmd-.", ToggleSuperscript, context),
+        KeyBinding::new("cmd-shift-.", ToggleSubscript, context),
+        KeyBinding::new("cmd-shift-9", ToggleQuote, context),
+        KeyBinding::new("cmd-shift-8", ToggleBullets, context),
+        KeyBinding::new("cmd-shift-7", ToggleNumbers, context),
+        KeyBinding::new("cmd-k", OpenLink, context),
+        KeyBinding::new("cmd-/", ToggleSource, context),
+        KeyBinding::new("escape", Cancel, context),
+    ]);
+    let context = Some(MENU_CONTEXT);
+    cx.bind_keys([
+        KeyBinding::new("up", MenuUp, context),
+        KeyBinding::new("down", MenuDown, context),
+        KeyBinding::new("enter", MenuAccept, context),
+    ]);
 }
 
 #[derive(Clone, Copy)]
@@ -152,6 +228,11 @@ struct Anchor {
 struct Slot {
     syntax: Option<Rc<Syntax>>,
     layout: Option<Rc<BlockLayout>>,
+    icon: Option<&'static str>,
+    /// The height before shaping, for the scrollbar's sum over every block.
+    estimate: Cell<Option<Pixels>>,
+    /// Whether its comments show in place, opened by their gutter marker.
+    expanded: bool,
 }
 
 /// The text column inside the pane.
@@ -169,6 +250,13 @@ struct Column {
 struct Drag {
     origin: Range<usize>,
     unit: DragUnit,
+}
+
+/// The scrollbar in this frame.
+#[derive(Clone, Copy)]
+struct Scrollbar {
+    track: Bounds<Pixels>,
+    thumb: Bounds<Pixels>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -202,6 +290,11 @@ pub struct SessionChanged;
 
 impl EventEmitter<SessionChanged> for EditorView {}
 
+/// The active chapter's source view went on or off.
+pub struct SourceViewChanged;
+
+impl EventEmitter<SourceViewChanged> for EditorView {}
+
 pub struct EditorView {
     focus: FocusHandle,
     /// The document. It lives here because every key needs the active buffer. See [`crate::session`].
@@ -225,8 +318,29 @@ pub struct EditorView {
     /// Blocks in the current frame, with the window y of each one's top.
     visible: Vec<(usize, Pixels)>,
     hovered: Option<usize>,
+    /// Chapters showing their source, which stay so when the writer comes back to them.
+    source_chapters: HashSet<ChapterId>,
+    /// Whether the active chapter shows its source.
+    source: bool,
+    float: Float,
+    /// What the toolbar last read from the text.
+    toolbar_seen: Option<float::ToolbarState>,
+    /// A command chose this selection, or the writer pressed Escape, so no toolbar opens on it.
+    toolbar_dismissed: bool,
+    /// A press on a block's gutter icon.
+    grab: Option<BlockGrab>,
+    markers: Vec<CommentMarker>,
+    scrollbar: Option<Scrollbar>,
+    /// How far down the thumb the pointer holds it.
+    thumb_grab: Option<Pixels>,
+    thumb_hovered: bool,
+    /// Where the pointer last was, for scrolling on while it stands outside the galley.
+    pointer: Point<Pixels>,
+    /// Keeps scrolling during a drag while the pointer stands outside. Dropped when it comes back.
+    drag_scroll: Option<Task<()>>,
     caret_on: bool,
     blink: Task<()>,
+    _focus_subscriptions: Vec<Subscription>,
     trace: Trace,
     /// The newest revision and body style painted, and when each first was.
     painted_revision: (u64, Instant),
@@ -236,11 +350,15 @@ pub struct EditorView {
 
 const TOP_MARGIN: Pixels = px(16.);
 const SHEET_PADDING_Y: Pixels = px(36.);
-const GUTTER_WIDTH: Pixels = px(40.);
-const SHEET_PADDING_X: Pixels = px(24.);
-const MAX_SHEET_WIDTH: Pixels = px(680.);
+const SHEET_PADDING_RIGHT: Pixels = px(36.);
+const MAX_SHEET_WIDTH: Pixels = px(720.);
+const MIN_SHEET_WIDTH: Pixels = px(200.);
 const CARET_MARGIN: Pixels = px(24.);
 const BLINK: Duration = Duration::from_millis(530);
+/// How often a drag scrolls while the pointer stands outside the galley, and how fast for each pixel it is out.
+const DRAG_SCROLL_TICK: Duration = Duration::from_millis(16);
+const DRAG_SCROLL_SPEED: f32 = 0.35;
+const DRAG_SCROLL_MAX: Pixels = px(60.);
 /// A chapter's first view: its top, with the sheet's margin above it.
 const START_OF_CHAPTER: Anchor = Anchor {
     block: 0,
@@ -253,6 +371,17 @@ impl EditorView {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let blocks = Blocks::parse(session.active_buffer().text());
+        let caret = notes::leading_region(session.active_buffer().text(), &blocks)
+            .filter(|region| region.start == 0)
+            .map_or(0, |region| region.end);
+        let focus_subscriptions = vec![
+            cx.on_focus_in(&focus, window, |view, window, cx| view.restart_blink(window, cx)),
+            cx.on_blur(&focus, window, |view, _, cx| {
+                view.blink = Task::ready(());
+                cx.notify();
+            }),
+            cx.observe_window_activation(window, |view, window, cx| view.restart_blink(window, cx)),
+        ];
         let status = session
             .active_chapter()
             .problem()
@@ -265,25 +394,38 @@ impl EditorView {
             slots: vec![Slot::default(); blocks.as_slice().len()],
             session,
             blocks,
-            selection: Selection::default(),
+            selection: Selection::caret(caret),
             upstream: false,
             marked: None,
             goal_x: None,
-            reveal_at: 0,
+            reveal_at: caret,
             drag: None,
             scroll: START_OF_CHAPTER,
             autoscroll: false,
             column: Column::default(),
             visible: Vec::new(),
             hovered: None,
+            source_chapters: HashSet::new(),
+            source: false,
+            float: Float::None,
+            toolbar_seen: None,
+            toolbar_dismissed: false,
+            grab: None,
+            markers: Vec::new(),
+            scrollbar: None,
+            thumb_grab: None,
+            thumb_hovered: false,
+            pointer: Point::default(),
+            drag_scroll: None,
             caret_on: true,
             blink: Task::ready(()),
+            _focus_subscriptions: focus_subscriptions,
             trace: Trace::from_env(),
             painted_revision: (0, Instant::now()),
             painted_style: (0, Instant::now()),
             style_generation: 0,
         };
-        view.restart_blink(cx);
+        view.restart_blink(window, cx);
         view
     }
 
@@ -377,18 +519,31 @@ impl EditorView {
             offset: px(offset),
         });
         let clamp = |offset: usize| text.floor_char_boundary(offset.min(text.len()));
+        self.source = self.source_chapters.contains(&self.session.active());
         self.selection = Selection {
             anchor: clamp(view.selection.anchor),
             head: clamp(view.selection.head),
         };
+        // A chapter opens at its first visible text, not inside the notes hidden above it.
+        if !self.source
+            && self.selection.is_empty()
+            && let Some(region) = notes::leading_region(text, &self.blocks)
+            && region.contains(&self.selection.head)
+        {
+            self.selection = Selection::caret(region.end);
+        }
         self.reveal_at = self.selection.head;
         self.upstream = false;
         self.marked = None;
         self.goal_x = None;
         self.drag = None;
+        self.drag_scroll = None;
+        self.grab = None;
+        self.float = Float::None;
+        self.toolbar_dismissed = false;
         self.hovered = None;
         self.visible.clear();
-        self.restart_blink(cx);
+        self.restart_blink(window, cx);
         window.notify_text_input_changed(&self.focus);
         window.notify_text_selection_changed(&self.focus);
         cx.emit(CaretMoved(self.selection.head));
@@ -434,10 +589,111 @@ impl EditorView {
     pub fn set_body(&mut self, family: &str, size: f32, line_height: f32, cx: &mut Context<Self>) {
         self.style.set_body(family, size, line_height);
         self.style_generation += 1;
+        self.forget_shapes();
+        cx.notify();
+    }
+
+    /// Every block is shaped and estimated again as it comes into view.
+    fn forget_shapes(&mut self) {
         for slot in &mut self.slots {
             slot.layout = None;
+            slot.estimate.set(None);
         }
+    }
+
+    /// Whether the active chapter shows its source.
+    pub fn shows_source(&self) -> bool {
+        self.source
+    }
+
+    /// Shows the active chapter's plain Markdown, or its galley again. Buffer, caret, and undo stay the same.
+    pub fn toggle_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active = self.session.active();
+        self.source = !self.source;
+        if self.source {
+            self.source_chapters.insert(active);
+        } else {
+            self.source_chapters.remove(&active);
+            self.selection = self.visible_selection();
+            self.reveal_at = self.selection.head;
+        }
+        self.forget_shapes();
+        self.float = Float::None;
+        self.autoscroll = true;
+        window.invalidate_character_coordinates();
+        cx.emit(SourceViewChanged);
         cx.notify();
+    }
+
+    /// The selection, with a caret moved out of what the galley hides.
+    fn visible_selection(&self) -> Selection {
+        if !self.selection.is_empty() {
+            return self.selection;
+        }
+        Selection::caret(self.skip_hidden(self.selection.head, true))
+    }
+
+    /// The text of each note that opens the chapter, as the panel shows it.
+    pub fn note_texts(&self) -> Vec<String> {
+        let text = self.text();
+        notes::leading_notes(text, &self.blocks)
+            .into_iter()
+            .map(|note| text[note.shown].to_owned())
+            .collect()
+    }
+
+    /// Writes a change from the notes panel: `range` of note `index`'s shown text becomes `new`. Returns whether it was
+    /// allowed. The caret in the text stays where it is, on the same text.
+    fn edit_note(
+        &mut self,
+        index: usize,
+        range: Range<usize>,
+        new: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let text = self.session.active_buffer().text();
+        let Some(note) = notes::leading_notes(text, &self.blocks).into_iter().nth(index) else {
+            return false;
+        };
+        let Some(edit) = notes::note_edit(text, &note, range, new) else {
+            return false;
+        };
+        let edits = vec![edit];
+        let moved = |offset| commands::moved(offset, &edits, commands::Bias::After);
+        let after = Selection {
+            anchor: moved(self.selection.anchor),
+            head: moved(self.selection.head),
+        };
+        let started = self.trace.input();
+        match self
+            .session
+            .active_buffer_mut()
+            .transact(EditKind::Typing, edits, self.selection, after, started)
+        {
+            Ok(splice) => self.resegment(splice),
+            Err(error) => {
+                eprintln!("edit rejected: {error}");
+                return false;
+            }
+        }
+        self.selection = after;
+        self.reveal_at = after.head;
+        window.notify_text_input_changed(&self.focus);
+        self.trace.handled(started);
+        cx.emit(TextChanged);
+        cx.notify();
+        true
+    }
+
+    fn undo_from_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let restored = self.session.active_buffer_mut().undo();
+        self.restore(restored, window, cx);
+    }
+
+    fn redo_from_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let restored = self.session.active_buffer_mut().redo();
+        self.restore(restored, window, cx);
     }
 
     pub fn style_generation(&self) -> u64 {
@@ -465,16 +721,27 @@ impl EditorView {
         }
     }
 
-    fn restart_blink(&mut self, cx: &mut Context<Self>) {
+    /// Shows the caret and blinks it from now on. Only a focused galley in the active window blinks, so an idle one
+    /// draws nothing.
+    fn restart_blink(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.caret_on = true;
-        self.blink = cx.spawn(async move |this, cx| {
+        if !self.focus.is_focused(window) || !window.is_window_active() {
+            self.blink = Task::ready(());
+            return;
+        }
+        self.blink = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(BLINK).await;
-                let toggled = this.update(cx, |this, cx| {
-                    this.caret_on = !this.caret_on;
-                    cx.notify();
+                let blinked = this.update_in(cx, |this, window, cx| {
+                    let showing = this.focus.is_focused(window) && window.is_window_active();
+                    // A selection shows no caret, so it has nothing to draw.
+                    if showing && this.selection.is_empty() {
+                        this.caret_on = !this.caret_on;
+                        cx.notify();
+                    }
+                    showing
                 });
-                if toggled.is_err() {
+                if !matches!(blinked, Ok(true)) {
                     break;
                 }
             }
@@ -515,10 +782,15 @@ impl EditorView {
         let delta = splice.new_end as isize - splice.old_end as isize;
         let anchor_start = self.blocks.as_slice()[self.scroll.block].range.start;
         let change = self.blocks.apply(self.session.active_buffer().text(), splice);
-        self.slots.splice(
-            change.start..change.start + change.removed,
-            vec![Slot::default(); change.inserted],
-        );
+        let new_slots: Vec<Slot> = (0..change.inserted)
+            .map(|at| Slot {
+                // Blocks around an edit are scanned again. If the count stayed, an open comment stays open.
+                expanded: change.removed == change.inserted && self.slots[change.start + at].expanded,
+                ..Slot::default()
+            })
+            .collect();
+        self.slots
+            .splice(change.start..change.start + change.removed, new_slots);
         let moved = if anchor_start > splice.start {
             anchor_start.saturating_add_signed(delta).max(splice.start)
         } else {
@@ -535,11 +807,13 @@ impl EditorView {
         self.selection = selection;
         self.upstream = upstream;
         self.goal_x = None;
+        self.toolbar_dismissed = false;
         if self.drag.is_none() {
             self.reveal_at = selection.head;
         }
         self.autoscroll = true;
-        self.restart_blink(cx);
+        self.follow_slash();
+        self.restart_blink(window, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
     }
@@ -554,6 +828,14 @@ impl EditorView {
         let range = if self.selection.is_empty() {
             let head = self.selection.head;
             let other = target(self.session.active_buffer().text(), head);
+            // A comment hidden there is not deleted by a key that cannot show it: the caret goes past it.
+            let visible = self.skip_hidden(other, other > head);
+            if visible != other {
+                if visible != head {
+                    self.set_selection(Selection::caret(visible), false, window, cx);
+                }
+                return;
+            }
             head.min(other)..head.max(other)
         } else {
             self.selection.range()
@@ -586,6 +868,10 @@ impl EditorView {
     }
 
     fn new_block(&mut self, _: &NewBlock, window: &mut Window, cx: &mut Context<Self>) {
+        if self.source {
+            self.replace_selection("\n", EditKind::Discrete, window, cx);
+            return;
+        }
         let edit = if self.selection.is_empty() {
             typing::line_break(self.session.active_buffer().text(), &self.blocks, self.selection.head)
         } else {
@@ -682,6 +968,8 @@ impl EditorView {
         let (target, upstream) = match motion_kind {
             Motion::Left if collapsing => (range.start, false),
             Motion::Right if collapsing => (range.end, false),
+            Motion::Left if self.source => (motion::prev_grapheme(text, head), false),
+            Motion::Right if self.source => (motion::next_grapheme(text, head), false),
             Motion::Left => (motion::left(text, head), false),
             Motion::Right => (motion::right(text, head), false),
             Motion::WordLeft => (motion::prev_word(text, head), false),
@@ -703,6 +991,7 @@ impl EditorView {
                 (target, upstream)
             }
         };
+        let target = self.skip_hidden(target, target > head);
         let selection = Selection {
             anchor: if extend { self.selection.anchor } else { target },
             head: target,
@@ -787,8 +1076,12 @@ impl EditorView {
     }
 
     fn select_all(&mut self, _: &SelectAll, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.session.active_buffer().text();
+        let anchor = notes::leading_region(text, &self.blocks)
+            .filter(|region| !self.source && region.start == 0)
+            .map_or(0, |region| region.end);
         let selection = Selection {
-            anchor: 0,
+            anchor,
             head: self.session.active_buffer().len(),
         };
         self.set_selection(selection, false, window, cx);
@@ -798,7 +1091,13 @@ impl EditorView {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        self.pointer = event.position;
+        self.close_float(cx);
+        if self.scrollbar_mouse_down(event.position, cx) || self.gutter_mouse_down(event.position, cx) {
+            return;
+        }
         let (offset, upstream) = self.offset_at(event.position, window);
+        let offset = self.skip_hidden(offset, true);
         let text = self.session.active_buffer().text();
         let (origin, unit) = match event.click_count {
             1 => (offset..offset, DragUnit::Character),
@@ -822,6 +1121,7 @@ impl EditorView {
     }
 
     fn mouse_moved(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.pointer = event.position;
         let viewport = self.column.viewport;
         let inside = viewport.contains(&event.position);
         let hovered = if inside {
@@ -833,23 +1133,37 @@ impl EditorView {
             self.hovered = hovered;
             cx.notify();
         }
+        let over_thumb = self.scrollbar.is_some_and(|bar| bar.track.contains(&event.position));
+        if over_thumb != self.thumb_hovered {
+            self.thumb_hovered = over_thumb;
+            cx.notify();
+        }
+        let pressed = event.pressed_button == Some(MouseButton::Left);
+        if !pressed && (self.drag.is_some() || self.grab.is_some() || self.thumb_grab.is_some()) {
+            self.end_mouse(window, cx);
+            return;
+        }
+        if self.thumb_grab.is_some() {
+            self.scrollbar_mouse_moved(event.position, cx);
+            return;
+        }
+        if self.grab.is_some() {
+            self.gutter_mouse_moved(event.position, cx);
+            self.keep_scrolling_while_outside(window, cx);
+            return;
+        }
+        if self.drag.is_some() {
+            self.extend_drag(window, cx);
+            self.keep_scrolling_while_outside(window, cx);
+        }
+    }
+
+    /// Extends the selection in progress to the pointer.
+    fn extend_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(drag) = self.drag.clone() else {
             return;
         };
-        if event.pressed_button != Some(MouseButton::Left) {
-            self.end_drag(cx);
-            return;
-        }
-        let above = viewport.top() - event.position.y;
-        let below = event.position.y - viewport.bottom();
-        if above > px(0.) {
-            self.scroll_by(px(0.) - above);
-            self.lay_out_visible(window);
-        } else if below > px(0.) {
-            self.scroll_by(below);
-            self.lay_out_visible(window);
-        }
-        let (offset, upstream) = self.offset_at(event.position, window);
+        let (offset, upstream) = self.offset_at(self.pointer, window);
         let text = self.session.active_buffer().text();
         let unit = match drag.unit {
             DragUnit::Character => offset..offset,
@@ -879,15 +1193,159 @@ impl EditorView {
         }
     }
 
-    fn mouse_up(&mut self, _: &MouseUpEvent, cx: &mut Context<Self>) {
-        self.end_drag(cx);
+    /// How far to scroll for a pointer standing outside the galley, up or down.
+    fn drag_scroll_step(&self) -> Option<Pixels> {
+        let viewport = self.column.viewport;
+        let above = viewport.top() - self.pointer.y;
+        let below = self.pointer.y - viewport.bottom();
+        let step = |distance: Pixels| (distance * DRAG_SCROLL_SPEED).max(px(1.)).min(DRAG_SCROLL_MAX);
+        if above > px(0.) {
+            Some(px(0.) - step(above))
+        } else if below > px(0.) {
+            Some(step(below))
+        } else {
+            None
+        }
     }
 
-    fn end_drag(&mut self, cx: &mut Context<Self>) {
+    /// Scrolls on a timer while a drag's pointer stands outside the galley, whether or not it moves.
+    fn keep_scrolling_while_outside(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag_scroll_step().is_none() {
+            self.drag_scroll = None;
+            return;
+        }
+        if self.drag_scroll.is_some() {
+            return;
+        }
+        self.drag_scroll = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(DRAG_SCROLL_TICK).await;
+                let going = this.update_in(cx, |this, window, cx| {
+                    let Some(step) = this
+                        .drag_scroll_step()
+                        .filter(|_| this.drag.is_some() || this.grab.is_some())
+                    else {
+                        return false;
+                    };
+                    this.scroll_by(step);
+                    this.lay_out_visible(window);
+                    this.extend_drag(window, cx);
+                    this.gutter_mouse_moved(this.pointer, cx);
+                    window.invalidate_character_coordinates();
+                    cx.notify();
+                    true
+                });
+                if !matches!(going, Ok(true)) {
+                    break;
+                }
+            }
+            this.update(cx, |this, _| this.drag_scroll = None).ok();
+        }));
+    }
+
+    fn mouse_up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_mouse(window, cx);
+    }
+
+    /// The button came up: a selection settles, a held icon drops or opens its menu, and the thumb lets go.
+    fn end_mouse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drag_scroll = None;
+        self.thumb_grab = None;
+        self.gutter_mouse_up(window, cx);
         if self.drag.take().is_some() {
             self.reveal_at = self.selection.head;
             cx.notify();
         }
+    }
+
+    fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        if self.grab.take().is_some() {
+            self.drag_scroll = None;
+        } else if !matches!(self.float, Float::None) {
+            self.float = Float::None;
+        } else {
+            self.toolbar_dismissed = true;
+        }
+        cx.notify();
+    }
+
+    fn scrollbar_mouse_down(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(bar) = self.scrollbar.filter(|bar| bar.track.contains(&position)) else {
+            return false;
+        };
+        let grab = if bar.thumb.contains(&position) {
+            position.y - bar.thumb.top()
+        } else {
+            // A click on the track brings the thumb's middle there.
+            bar.thumb.size.height * 0.5
+        };
+        self.thumb_grab = Some(grab);
+        self.scrollbar_mouse_moved(position, cx);
+        true
+    }
+
+    fn scrollbar_mouse_moved(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let (Some(grab), Some(bar)) = (self.thumb_grab, self.scrollbar) else {
+            return;
+        };
+        let content: f32 = self.content_height();
+        let viewport = f32::from(bar.track.size.height);
+        let top = f32::from(position.y - bar.track.top() - grab);
+        let scrolled = scrollbar::scrolled_at(top, f32::from(bar.thumb.size.height), content, viewport, viewport);
+        let lead = f32::from(TOP_MARGIN + SHEET_PADDING_Y);
+        self.scroll = if scrolled < lead {
+            Anchor {
+                block: 0,
+                offset: px(scrolled - lead),
+            }
+        } else {
+            let heights: Vec<f32> = (0..self.blocks.as_slice().len())
+                .map(|index| f32::from(self.block_height(index)))
+                .collect();
+            let (block, offset) = scrollbar::block_at(heights, scrolled - lead);
+            Anchor {
+                block,
+                offset: px(offset),
+            }
+        };
+        cx.notify();
+    }
+
+    /// The height of the whole chapter on its sheet, with estimates for what is not shaped yet.
+    fn content_height(&self) -> f32 {
+        let lead = f32::from(TOP_MARGIN + SHEET_PADDING_Y) * 2.;
+        lead + (0..self.blocks.as_slice().len())
+            .map(|index| f32::from(self.block_height(index)))
+            .sum::<f32>()
+    }
+
+    /// The scrollbar for this frame, in the pane's right edge.
+    fn update_scrollbar(&mut self) {
+        let viewport = self.column.viewport;
+        let content = self.content_height();
+        let above: f32 = (0..self.scroll.block)
+            .map(|index| f32::from(self.block_height(index)))
+            .sum();
+        let scrolled = above + f32::from(self.scroll.offset + TOP_MARGIN + SHEET_PADDING_Y);
+        let height = f32::from(viewport.size.height);
+        let track = Bounds::new(
+            point(viewport.right() - tokens::SCROLLBAR_WIDTH, viewport.top()),
+            size(tokens::SCROLLBAR_WIDTH, viewport.size.height),
+        );
+        self.scrollbar = scrollbar::thumb(
+            scrolled,
+            content,
+            height,
+            height,
+            f32::from(tokens::SCROLLBAR_THUMB_MIN),
+        )
+        .map(|(top, thumb_height)| Scrollbar {
+            track,
+            thumb: Bounds::new(
+                point(track.left() + px(2.), track.top() + px(top)),
+                size(tokens::SCROLLBAR_WIDTH - px(4.), px(thumb_height)),
+            ),
+        });
     }
 
     fn scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -901,16 +1359,82 @@ impl EditorView {
 
     /// The height of a block: real if it has been shaped for this width, otherwise estimated.
     fn block_height(&self, index: usize) -> Pixels {
-        match &self.slots[index].layout {
-            Some(layout) => layout.height,
-            None => {
-                let block = &self.blocks.as_slice()[index];
-                self.style.estimate_height(
-                    block.kind,
-                    &self.session.active_buffer().text()[block.range.clone()],
-                    self.column.text_width,
-                )
-            }
+        let slot = &self.slots[index];
+        if let Some(layout) = &slot.layout {
+            return layout.height;
+        }
+        if let Some(estimate) = slot.estimate.get() {
+            return estimate;
+        }
+        let block = &self.blocks.as_slice()[index];
+        let estimate = if self.is_hidden_block(index) {
+            px(0.)
+        } else {
+            self.style.estimate_height(
+                block.kind,
+                &self.session.active_buffer().text()[block.range.clone()],
+                self.column.text_width,
+                self.source,
+            )
+        };
+        // A hidden comment can show later without this block changing, so only a real estimate lasts.
+        if !matches!(block.kind, BlockKind::Comment | BlockKind::Blank) {
+            slot.estimate.set(Some(estimate));
+        }
+        estimate
+    }
+
+    /// Where markers reveal: at a caret, and at the start of a drag so nothing moves under the pointer. A selection shows
+    /// its text clean, so nothing moves under it either.
+    fn reveal_offset(&self) -> Option<usize> {
+        (!self.source && (self.selection.is_empty() || self.drag.is_some())).then_some(self.reveal_at)
+    }
+
+    /// Whether a comment block takes no room here: it is closed, not opened by its marker, and has no caret in it.
+    fn comment_is_hidden(&self, index: usize) -> bool {
+        let block = &self.blocks.as_slice()[index];
+        block.kind == BlockKind::Comment
+            && !self.slots[index].expanded
+            && notes::is_closed(&self.session.active_buffer().text()[block.range.clone()])
+            && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
+    }
+
+    /// Whether a block takes no room in the galley: a hidden comment and the blank line after it.
+    fn is_hidden_block(&self, index: usize) -> bool {
+        if self.source {
+            return false;
+        }
+        match self.blocks.as_slice()[index].kind {
+            BlockKind::Comment => self.comment_is_hidden(index),
+            BlockKind::Blank => index > 0 && self.comment_is_hidden(index - 1),
+            _ => false,
+        }
+    }
+
+    /// `target`, moved past the hidden blocks it falls in, on the side the caret is heading.
+    fn skip_hidden(&self, target: usize, forward: bool) -> usize {
+        let index = self.blocks.index_at(target);
+        if !self.is_hidden_block(index) {
+            return target;
+        }
+        let count = self.blocks.as_slice().len();
+        let mut first = index;
+        while first > 0 && self.is_hidden_block(first - 1) {
+            first -= 1;
+        }
+        let mut last = index;
+        while last + 1 < count && self.is_hidden_block(last + 1) {
+            last += 1;
+        }
+        let text = self.session.active_buffer().text();
+        let (before, after) = (
+            self.blocks.as_slice()[first].range.start,
+            self.blocks.as_slice()[last].range.end,
+        );
+        if (forward && after < text.len()) || before == 0 {
+            after
+        } else {
+            motion::left(text, before)
         }
     }
 
@@ -930,8 +1454,26 @@ impl EditorView {
                 })
             })
             .clone();
-        let caret = (self.blocks.index_at(self.reveal_at) == index).then(|| self.reveal_at - block.range.start);
-        let hidden = hidden_ranges(block.kind, block_text, &syntax, caret, trailing_line);
+        let collapsed = self.is_hidden_block(index);
+        let hidden = if self.source {
+            Vec::new()
+        } else if collapsed {
+            let whole = 0..block_text.len();
+            vec![whole]
+        } else {
+            let caret = self
+                .reveal_offset()
+                .filter(|at| self.blocks.index_at(*at) == index)
+                .map(|at| at - block.range.start);
+            hidden_ranges(
+                block.kind,
+                block_text,
+                &syntax,
+                caret,
+                trailing_line,
+                self.slots[index].expanded,
+            )
+        };
         let marked = self.marked.as_ref().and_then(|marked| {
             let start = marked.start.max(block.range.start);
             let end = marked.end.min(block.range.end);
@@ -942,16 +1484,19 @@ impl EditorView {
             && layout.width == width
             && layout.hidden == hidden
             && layout.marked == marked
+            && layout.collapsed == collapsed
         {
             return layout.clone();
         }
         let lines = display_lines(block.kind, block_text, &syntax, &hidden, marked.clone(), trailing_line);
-        let separator = block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
+        let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let layout = Rc::new(shape_block(
             ShapeRequest {
                 kind: block.kind,
                 lines,
                 separator,
+                collapsed,
+                source: self.source,
                 hidden,
                 marked,
                 width,
@@ -984,17 +1529,22 @@ impl EditorView {
     }
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
-        let sheet_width = (bounds.size.width - GUTTER_WIDTH - tokens::SPACE_3)
-            .min(MAX_SHEET_WIDTH)
-            .max(px(120.));
-        let slack = (bounds.size.width - GUTTER_WIDTH - tokens::SPACE_3 - sheet_width).max(px(0.));
-        let sheet_left = bounds.left() + GUTTER_WIDTH + slack * 0.5;
+        let room = bounds.size.width - tokens::SPACE_3 - tokens::SCROLLBAR_WIDTH;
+        let sheet_width = room.min(MAX_SHEET_WIDTH).max(MIN_SHEET_WIDTH);
+        let slack = (room - sheet_width).max(px(0.));
+        let sheet_left = bounds.left() + tokens::SPACE_3 + slack * 0.5;
+        let text_width = sheet_width - tokens::GUTTER_WIDTH - SHEET_PADDING_RIGHT;
+        if text_width != self.column.text_width {
+            for slot in &self.slots {
+                slot.estimate.set(None);
+            }
+        }
         self.column = Column {
             viewport: bounds,
             sheet_left,
             sheet_width,
-            text_left: sheet_left + SHEET_PADDING_X,
-            text_width: sheet_width - SHEET_PADDING_X * 2.,
+            text_left: sheet_left + tokens::GUTTER_WIDTH,
+            text_width,
         };
     }
 
@@ -1171,6 +1721,14 @@ macro_rules! motions {
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
+        let mut context = KeyContext::default();
+        // The link field floats inside this pane, and its keys are its own.
+        if !self.link_is_open() {
+            context.add(CONTEXT);
+        }
+        if self.menu_is_open() {
+            context.add(MENU_CONTEXT);
+        }
         let header = div()
             .flex_none()
             .h(tokens::SECTION_HEIGHT)
@@ -1187,7 +1745,7 @@ impl Render for EditorView {
             .min_w_0()
             .flex()
             .flex_col()
-            .key_context(CONTEXT)
+            .key_context(context)
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
@@ -1204,6 +1762,31 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::show_character_palette))
+            .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::menu_up))
+            .on_action(cx.listener(Self::menu_down))
+            .on_action(cx.listener(Self::menu_accept))
+            .on_action(cx.listener(|this, _: &ToggleBold, window, cx| this.toggle_mark(Mark::Bold, window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleItalic, window, cx| this.toggle_mark(Mark::Italic, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleUnderline, window, cx| this.toggle_mark(Mark::Underline, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ToggleStrike, window, cx| this.toggle_mark(Mark::Strike, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleSuperscript, window, cx| this.toggle_mark(Mark::Superscript, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleSubscript, window, cx| this.toggle_mark(Mark::Subscript, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ToggleQuote, window, cx| this.toggle_block(BlockType::Quote, window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleBullets, window, cx| this.toggle_block(BlockType::Bullets, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleNumbers, window, cx| this.toggle_block(BlockType::Numbers, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &OpenLink, window, cx| this.open_link(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSource, window, cx| this.toggle_source(window, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll));
         motions!(
@@ -1290,8 +1873,13 @@ impl EntityInputHandler for EditorView {
             EditKind::Typing
         };
         let range = self.input_range(range_utf16);
+        let typed_slash = new_text == "/" && kind == EditKind::Typing && !self.menu_is_open();
+        let at = range.start;
         let after = Selection::caret(range.start + new_text.len());
         self.edit(kind, vec![Edit::new(range, new_text)], after, None, window, cx);
+        if typed_slash {
+            self.open_slash(at, cx);
+        }
     }
 
     fn replace_and_mark_text_in_range(

@@ -39,6 +39,21 @@ pub const LAUNCH_WIDTH: Pixels = px(440.);
 pub const TEXT_TITLE: Pixels = px(20.);
 pub const FIELD_HEIGHT: Pixels = px(30.);
 pub const RADIUS: Pixels = px(6.);
+/// The floating toolbar and its buttons.
+pub const TOOLBAR_HEIGHT: Pixels = px(36.);
+pub const TOOLBAR_BUTTON: Pixels = px(28.);
+pub const TOOLBAR_SEPARATOR: Pixels = px(9.);
+/// A list that floats over the galley: the slash menu and a block's convert menu.
+pub const MENU_WIDTH: Pixels = px(248.);
+pub const MENU_ROW_HEIGHT: Pixels = px(28.);
+pub const MENU_MAX_ROWS: usize = 10;
+pub const LINK_POPUP_WIDTH: Pixels = px(320.);
+/// Room kept between something floating and what it belongs to, or the window's edge.
+pub const FLOAT_GAP: Pixels = px(6.);
+pub const SCROLLBAR_WIDTH: Pixels = px(10.);
+pub const SCROLLBAR_THUMB_MIN: Pixels = px(28.);
+/// The block gutter inside the sheet, from the sheet's edge to the text.
+pub const GUTTER_WIDTH: Pixels = px(52.);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Scheme {
