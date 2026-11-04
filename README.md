@@ -86,13 +86,19 @@ The design lives in a JSON theme: page size and margins, fonts, type sizes, colo
 
 The [samples](samples) show what a theme can do. Render them all with `scripts/render-samples.sh <druck> <outdir>`.
 
+## As a library
+
+The engine is also a Rust crate, `druck`, with the CLI as its first client. It renders from memory or through a resolver you supply, returns structured diagnostics, stops on a cancel token, and gives an inspectable layout before the PDF. It starts no threads and prints nothing. Six runnable examples are in [examples](examples), and the crate docs (`cargo doc --open`) describe the API. Nothing is published yet.
+
+Two numbers are versioned apart from the package, which is a date: `druck::API_VERSION` (1) counts breaking changes to the public modules, and `druck::THEME_SCHEMA_VERSIONS` (`[1]`) lists the theme `version` values this release reads. A theme with another version fails with an error at its `version`.
+
 ## Documentation
 
 - [Authoring](docs/AUTHORING.md): front matter, the command line, Markdown, directives, references, and citations.
 - [Themes](docs/THEMES.md): the theme format, section by section.
 - [Releasing](docs/RELEASE.md): building, checking, and publishing a release.
 
-Development notes: [the product briefing](docs/BRIEFING.md), [milestones](docs/PHASE_1_MILESTONES.md), [progress](docs/PROGRESS.md), [decisions](docs/DECISIONS.md), and [the planned public crate](docs/RUST_CRATE_API_PHASE_2.md).
+Development notes: [the product briefing](docs/BRIEFING.md), [milestones](docs/PHASE_1_MILESTONES.md), [progress](docs/PROGRESS.md), [decisions](docs/DECISIONS.md), [the public crate contract](docs/RUST_CRATE_API_PHASE_2.md), and [the API as shipped](docs/PHASE_2_API.md).
 
 ## License
 

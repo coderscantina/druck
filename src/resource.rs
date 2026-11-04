@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[doc(hidden)]
-pub use crate::config::source::normalize;
-pub use crate::config::source::{Origin, Resource};
+pub use crate::config::source::{Origin, Resource, normalize};
 use crate::date::Date;
 use crate::installed;
 use crate::text::bundled;

@@ -1,50 +1,39 @@
 //! Unstable internals for `druck-desktop`, behind the `editor` feature. Outside `API_VERSION`: anything here
 //! may change in any release, and the desktop, which pins the path dependency, follows.
+//!
+//! Each item says what the desktop needs it for. Everything else it uses is the public API.
 
-use std::path::Path;
-
+/// Citation syntax: the source layer must tint exactly what the parser reads as a citation.
 pub use crate::bibliography::syntax;
+/// Inline mark pairing: the source layer must pair `^x^`, `~x~`, and `{todo:` as the parser does.
 pub use crate::markdown::marks;
 
-/// The theme as a JSON value, for the theme editor.
+/// The theme as a JSON value: the theme file code edits and saves partial themes over the bundled default.
 pub mod theme_value {
     pub use crate::config::layer::default_theme_value;
     pub use crate::config::merge::merge;
 }
 
-/// Finding themes by name.
+/// Where named themes are kept: the theme file code lists, finds, and creates them.
 pub mod theme_path {
     pub use crate::theme_path::*;
 }
 
-/// The resolved configuration, whose fields the inspector and the galley read.
+/// The resolved configuration: the theme validator runs `resolve` as a render does, and the preview reads the
+/// body style and the document's title and authors from `Config`.
 pub mod resolved_config {
     pub use crate::config::front_matter::FrontMatter;
     pub use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
-    pub use crate::config::resolved::{Config, FontFiles};
+    pub use crate::config::resolved::Config;
     pub use crate::config::source::InputSource;
-    pub use crate::config::theme::{Face, FontStyle, Lang, Weight};
-    pub use crate::config::values::Color;
+    pub use crate::config::theme::{FontStyle, Weight};
 
     pub fn of<'a>(configured: &'a crate::Configured<'_>) -> &'a Config {
         &configured.config
     }
 }
 
-/// The document's absolute path and its text.
-pub fn document_text<'a>(configured: &'a crate::Configured<'_>) -> (&'a Path, &'a str) {
-    (&configured.document.path, &configured.document.text)
-}
-
-/// Finding themes and faces by the rules of the engine.
+/// Which theme file a selection or a document means: the Styles tab edits that file.
 pub mod engine {
-    use crate::config::theme::{FontStyle, Weight};
-    use crate::output::{FaceId, Layout};
-
     pub use crate::pipeline::{document_theme, theme_file};
-
-    /// The face a style of `family`, `weight`, and `style` uses in `layout`.
-    pub fn face_of(layout: &Layout, family: &str, weight: Weight, style: FontStyle) -> FaceId {
-        layout.fonts.face(family, weight, style)
-    }
 }

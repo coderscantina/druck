@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::{self, engine, resolved_config};
+use druck::editor::{engine, resolved_config};
 use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use druck::resource::{FileResolver, clock_date, normalize, source_date};
 use druck::{Failure, Renderer};
@@ -58,8 +58,12 @@ fn identity(path: &Path) -> Result<Identity, Failure> {
     let cancel = Cancel::default();
     let configured = renderer.job(&resolver, &input, &cancel).configure()?;
     print(configured.warnings());
-    let (file, text) = editor::document_text(&configured);
-    let theme = engine::document_theme(&resolver, file, text, &theme_dirs());
+    let theme = match &input.text {
+        DocumentText::Single { text, origin, name } => origin
+            .file(name)
+            .and_then(|file| engine::document_theme(&resolver, &file, text, &theme_dirs())),
+        DocumentText::Project(_) => None,
+    };
     let metadata = &resolved_config::of(&configured).metadata;
     Ok(Identity {
         title: metadata.title.clone(),

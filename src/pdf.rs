@@ -142,6 +142,8 @@ fn compose(
 ) -> Result<(Document, BTreeSet<FaceId>), Stop> {
     let print = settings.print;
     let margin = print.margin();
+    // In `FaceId` order. Not the faces' own handles: see `Face::pdf_for_export`.
+    let pdf_fonts: Vec<krilla::text::Font> = fonts.faces().map(|face| face.pdf_for_export()).collect();
     let destination = |anchor: usize| {
         let position = output
             .anchors
@@ -247,7 +249,7 @@ fn compose(
                     let breaks = contents.breaks_word(element, x.0, y.0, run);
                     let space = breaks.then(|| fonts.face_of(run.face).space()).flatten();
                     let start = Point::from_xy(x.0 as f32, y.0 as f32);
-                    draw_run(&mut surface, fonts, run, start, *color, space)
+                    draw_run(&mut surface, &pdf_fonts[run.face.0], run, start, *color, space)
                 }
                 Item::TurnedText {
                     x,
@@ -261,7 +263,7 @@ fn compose(
                     let start = Point::from_xy(x.0 as f32, y.0 as f32);
                     // y grows downward, so a counterclockwise turn is a negative angle.
                     surface.push_transform(&Transform::from_rotate_at(-*angle as f32, start.x, start.y));
-                    draw_run(&mut surface, fonts, run, start, *color, None);
+                    draw_run(&mut surface, &pdf_fonts[run.face.0], run, start, *color, None);
                     surface.pop();
                 }
                 // Rectangles are underlines, code backgrounds, and rules: decoration.
@@ -693,7 +695,14 @@ fn fill(color: Color) -> Fill {
 /// Draws a shaped run with its baseline at `start`. krilla takes glyph metrics as fractions of the
 /// font size, and the run text so the PDF can map glyphs back to text for search and copy.
 /// With `space`, a space glyph without advance comes first, so the text reads as a new word.
-fn draw_run(surface: &mut Surface, fonts: &FontSet, run: &ShapedRun, start: Point, color: Color, space: Option<u16>) {
+fn draw_run(
+    surface: &mut Surface,
+    font: &krilla::text::Font,
+    run: &ShapedRun,
+    start: Point,
+    color: Color,
+    space: Option<u16>,
+) {
     if run.glyphs.is_empty() {
         return;
     }
@@ -720,7 +729,7 @@ fn draw_run(surface: &mut Surface, fonts: &FontSet, run: &ShapedRun, start: Poin
         Cow::Borrowed(run.text.as_str())
     };
     surface.set_fill(Some(fill(color)));
-    surface.draw_glyphs(start, &glyphs, fonts.pdf_font(run.face).clone(), &text, size, false);
+    surface.draw_glyphs(start, &glyphs, font.clone(), &text, size, false);
 }
 
 /// Draws two marks at each corner of the `width` by `height` trim box, which starts `print.margin()` from

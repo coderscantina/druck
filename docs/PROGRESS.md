@@ -35,8 +35,27 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 13: Rich tables.
 - [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
 - [x] 15: Engine amendment.
+- [x] Phase 2: the public crate API, steps 1 to 5, outside the milestone plan. Complete on macOS; Linux and Windows wait for the first CI run. Nothing is published ([record](PHASE_2_API.md), [evidence](ACCEPTANCE.md#phase-2-contract)).
 
 ## Resume note
+
+Phase 2, the public crate API, is complete on this machine (macOS) in five steps, each on its own branch, stacked in this order: `t3/design-phase-two-api` (06dafeb, the design), `t3/phase-two-facade` (8195d0e: one package, public modules, `cli` and `editor` features), `t3/phase-two-renderer-resolver` (26bdd73: `Resolver`, content-hashed `Bytes`, `Arc<Face>`, no leaked fonts), `t3/diagnostics-cancellation` (820b351: structured diagnostics and `Cancel`), `t3/phase-two-layout-source-map` (f7d31c7: `Layout`, the source map, click sync in the app), and `t3/phase-two-api-acceptance` (step 5, below). [The API record](PHASE_2_API.md) has the signatures as built, [acceptance](ACCEPTANCE.md#phase-2-contract) lists each contract requirement with its evidence, and every step has a dated entry in [decisions](DECISIONS.md#2026-11-04-phase-2-step-5-choices-beyond-the-design). Nothing is pushed or published; publishing a crate needs its own request.
+
+Step 5 routes the CLI through the public modules only (`grep -nE 'editor|doc\(hidden\)' src/main.rs` finds nothing), cuts `editor` to seven items the desktop's source layer and theme file code cannot do without, adds `Layout::font`, adds six examples that CI runs and two root doctests, moves the acceptance test back to `tests/` on the public `Layout`, adds `tests/parity.rs` and `tests/public_api.rs`, and gives each PDF export its own font handles, which took four concurrent exports from 300 ms to 134 ms each. Results on the M1 Pro, release builds:
+
+- The byte guard against `f7d31c7` holds for 50 files (16 sample PDFs, 13 EPUBs, the book as `print` and `draft` PDF and as EPUB, the sample project, and what a matrix of 87 CLI commands wrote), and the matrix gave the same stdout, stderr, and exit code for each command.
+- The 203-page book through the public API: 0.39 s and 48 MB for one job, as in phase 1; 5.6 jobs/s on four threads against 2.6 on one; no concurrency limit is needed in the crate, and the rustdoc advises about one job per fast core. The numbers and the allocator finding are in [decisions](DECISIONS.md#2026-11-04-phase-2-step-5-choices-beyond-the-design).
+- The source map of the book is 0.68 MB and adds 2.6 percent to layout time. A cancel 50 ms into a layout returns `Cancelled` in a median of 0.78 ms (step 4's report gave 0.73 ms; the maximum is 1.1 ms).
+- Commands to repeat it: `cargo test` (444 unit tests, the acceptance, CLI, parity, and public API tests, and two doctests), `DRUCK_BOOK=<project folder> cargo test --test parity` for the book, `cargo run --example <name>` for each of `render`, `theme`, `in_memory`, `inspect`, `cancel`, and `concurrent`, `cargo doc --no-deps`, `cargo build --no-default-features --lib`, and `cargo test -p druck-desktop`. The book project is the 27 chapters of `buch-1-ttp404` with the title page's front matter moved into a `druck.yaml` (`theme: memoir-print`, the settings, `chapters:` in name order, `exports:` `draft` and `print`), `literatur.bib` beside it, and a valid ISBN.
+
+Not done, and why: Linux and Windows (no CI has run, and no machine was at hand); an automated check that the core never prints or touches the filesystem (a grep run by hand stands in); a second painter that draws from a `Layout`; the desktop's project opening, which is the next wave.
+
+What the owner must do, from phase 2 (the lists for milestones 10 and 14 follow and still stand):
+
+- Try a real mouse click on a page in the desktop app. Automated mouse events did not reach the window on macOS, so the click was proven through gpui's `dispatch_event`, not by a pointer. Keys sent to the app's PID do arrive.
+- Review the accent caret line on the page that follows the galley caret. Its look and weight have not been seen by you.
+- Decide whether `API_VERSION` and a CalVer package version are enough once an outside client exists, or whether a semver library crate is split off. The design left this open.
+- Push, so that the new `Examples` and `Documentation` steps of CI run on Linux and Windows too.
 
 Release acceptance (milestone 10) is prepared on branch `t3/druck-milestone-10-acceptance`, on top of `t3/finish-druck-milestone-15`, and is **not complete**. The evidence matrix is [acceptance](ACCEPTANCE.md), with its gaps and the boundaries phase 2 will expose. The limits are in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci). What remains, in order:
 
@@ -90,6 +109,13 @@ Next: milestone 10, release acceptance. The project is now named Druck and MIT l
 For milestone 10: release groundwork is merged ([decisions](DECISIONS.md#2026-10-07-milestone-10-release-groundwork), [release procedure](RELEASE.md)). CI now renders every sample on macOS, Linux, and Windows and fails if the PDFs differ, checks that `THIRD_PARTY_NOTICES.md` is current (run `python3 scripts/notices.py` after dependency changes), and `release.yml` builds five targets as artifacts without publishing. None of these workflows has run, since nothing is pushed. Still open for 10: the visual acceptance review, cross-platform results, final benchmarks against the limits, and the list of internal boundaries for phase 2. Samples for the acceptance review are `samples/report.md` (also with `--theme samples/themes/report.json` and `--set citation-style=numeric`), `samples/report-de.md`, `samples/en.md`, `samples/de.md`, `samples/pagination.md`, `samples/columns.md`, `samples/images.md`, and `samples/tables.md`. The first follow-up below shows in two of the report renders and may be worth fixing before a release.
 
 ## Verification
+
+Phase 2 step 5, on 2026-11-04 on the owner's M1 Pro (macOS 27, other work running), on `t3/phase-two-api-acceptance`:
+
+- `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, the same with `--all-features`, `cargo clippy --no-default-features --lib -- -D warnings`, `cargo clippy --examples -- -D warnings`, and `cargo clippy -p druck-desktop --all-targets -- -D warnings`: clean. `actionlint`: clean. `python3 scripts/notices.py --check` and `--desktop --check`: pass, with the known warnings about crates that ship no license file.
+- `DRUCK_BOOK=<book project> cargo test`: 444 unit tests, 1 acceptance, 52 CLI, 1 parity (31 s in a debug build, with the book), 3 public API, and 2 doctests passed. `cargo test -p druck-desktop`: 102 passed, 1 ignored.
+- `cargo run --example` for each of the six examples: all passed. `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`: the index lists `cancel`, `diagnostic`, `input`, `output`, `resource`, and the root items. `cargo build --no-default-features --lib`: builds, with no clap in `cargo tree`. `cargo install --path . --locked --root <scratch>`: installs a working binary.
+- Benchmarks through the public API are in [decisions](DECISIONS.md#2026-11-04-phase-2-step-5-choices-beyond-the-design).
 
 Release acceptance preparation, on 2026-11-03 on the owner's M1 Pro (32 GB, macOS 27.0.1, AC power), release build of this branch (`druck 26.10.11-8c433cc`). `src/`, `themes/`, `samples/`, and `schema/` are unchanged from `8c433cc`, so every sample PDF is byte-identical to the previous build by construction; two renders of all 16 PDFs with `scripts/render-samples.sh` were byte-identical to each other.
 
@@ -199,7 +225,10 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
-- Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders. Clicking in Pages cannot locate the text until the engine has source mapping.
+- Phase 2: a long-lived process holds about five times the memory of one job on macOS (the allocator keeps freed memory; the program's own heap is flat). Measure it on Linux, and consider a note for service authors or an allocator choice.
+- Phase 2: `Overrides::parse`, `Project::open`, and `DocumentText::read` return `Vec<Diagnostic>` rather than `Failure`, so `?` into a `Failure` works but a plain `Box<dyn Error>` needs `map_err`. Unify if an outside client complains.
+- Phase 2: only `druck-desktop` draws from a `Layout`, and the core's "no printing, no filesystem" rule has no automated check.
+- Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme. The sidebar's contents list and the agent panel are placeholders.
 - Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
 
 - Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).
@@ -207,7 +236,6 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 - A URL without a single slash that is wider than its column is still an error.
 - `{pages}` and other page placeholders are rejected in the body; supporting them would need the settling loop to carry the page count.
 - Reading speed for `{reading-time}` is fixed per language, and `{build-date}` uses UTC, not the local time zone.
-- Font bytes from disk are leaked once per render. Fine for the CLI; the phase 2 crate must own them (see decisions).
 
 ## Updating this file
 

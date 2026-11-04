@@ -1,16 +1,17 @@
 //! Acceptance checks over every sample, with its custom theme where it has one: the laid-out pages are
 //! inspected for overflow, lost content, broken references, and unstable pagination, and the PDF for
-//! embedded fonts, text maps, links, and bookmarks. See `docs/ACCEPTANCE.md` for what each requirement
-//! rests on.
+//! embedded fonts, text maps, links, and bookmarks. Everything is read through the public `Layout`. See
+//! `docs/ACCEPTANCE.md` for what each requirement rests on.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
-use crate::output::{Item, Output};
-use crate::renderer::{LayoutOptions, PdfOptions, Renderer};
-use crate::resource::FileResolver;
+use druck::cancel::Cancel;
+use druck::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
+use druck::output::{Item, Layout, Link};
+use druck::resource::FileResolver;
+use druck::{LayoutOptions, PdfOptions, Renderer};
 
 const SAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/samples");
 
@@ -53,7 +54,7 @@ fn variants() -> Vec<Variant> {
 
 struct Rendered {
     source: String,
-    laid: Output,
+    layout: Layout,
     pdf: Vec<u8>,
 }
 
@@ -72,7 +73,7 @@ fn render(variant: &Variant) -> Rendered {
         today: Date::from_unix(0),
     };
     let renderer = Renderer::new();
-    let cancel = crate::cancel::Cancel::default();
+    let cancel = Cancel::default();
     let configured = renderer
         .job(&resolver, &input, &cancel)
         .configure()
@@ -84,11 +85,7 @@ fn render(variant: &Variant) -> Rendered {
         .pdf(&PdfOptions::default(), &cancel)
         .unwrap_or_else(|failure| panic!("{}: {failure:?}", variant.name))
         .bytes;
-    Rendered {
-        source,
-        laid: layout.laid,
-        pdf,
-    }
+    Rendered { source, layout, pdf }
 }
 
 type Check = fn(&Variant, &Rendered) -> Vec<String>;
@@ -105,7 +102,7 @@ const CHECKS: [(&str, Check); 5] = [
 /// Nothing is drawn outside its page.
 fn overflow(_: &Variant, rendered: &Rendered) -> Vec<String> {
     let mut problems = Vec::new();
-    for (index, page) in rendered.laid.pages.iter().enumerate() {
+    for (index, page) in rendered.layout.pages().iter().enumerate() {
         let (width, height) = (page.width.0 + 0.01, page.height.0 + 0.01);
         for item in &page.items {
             let (left, top, right, bottom) = match item {
@@ -175,7 +172,7 @@ fn source_words(source: &str) -> BTreeSet<String> {
 /// the text of the pages without spaces and hyphens.
 fn lost_content(_: &Variant, rendered: &Rendered) -> Vec<String> {
     let mut stream = String::new();
-    for page in &rendered.laid.pages {
+    for page in rendered.layout.pages() {
         for item in &page.items {
             if let Item::Text { run, .. } = item {
                 stream.extend(
@@ -204,15 +201,15 @@ fn lost_content(_: &Variant, rendered: &Rendered) -> Vec<String> {
 /// Every link, bookmark, and cross-reference leads to a destination on a page, and no reference is left
 /// unresolved in the text.
 fn references(_: &Variant, rendered: &Rendered) -> Vec<String> {
-    let laid = &rendered.laid;
+    let layout = &rendered.layout;
     let mut problems = Vec::new();
     let mut placed = BTreeSet::new();
-    for (index, page) in laid.pages.iter().enumerate() {
+    for (index, page) in layout.pages().iter().enumerate() {
         for item in &page.items {
             match item {
                 Item::Anchor { id, .. } => {
                     placed.insert(*id);
-                    if laid.anchors.get(*id).map(|position| position.page) != Some(index) {
+                    if layout.anchor(*id).page != index {
                         problems.push(format!("anchor {id} is listed on another page than page {}", index + 1));
                     }
                 }
@@ -227,11 +224,10 @@ fn references(_: &Variant, rendered: &Rendered) -> Vec<String> {
             }
         }
     }
-    for page in &laid.pages {
+    for page in layout.pages() {
         for item in &page.items {
             if let Item::Link {
-                link: crate::document::Link::Anchor(id),
-                ..
+                link: Link::Anchor(id), ..
             } = item
                 && !placed.contains(id)
             {
@@ -239,7 +235,7 @@ fn references(_: &Variant, rendered: &Rendered) -> Vec<String> {
             }
         }
     }
-    for bookmark in &laid.outline {
+    for bookmark in layout.outline() {
         if !placed.contains(&bookmark.anchor) {
             problems.push(format!("the bookmark \"{}\" goes nowhere", bookmark.title));
         }
@@ -276,10 +272,7 @@ fn pdf_features(_: &Variant, rendered: &Rendered) -> Vec<String> {
     if count(pdf, "/ToUnicode") != fonts {
         problems.push("a font has no text map, so its text could not be selected".to_owned());
     }
-    let links = rendered
-        .laid
-        .pages
-        .iter()
+    let links = (rendered.layout.pages().iter())
         .flat_map(|page| &page.items)
         .filter(|item| matches!(item, Item::Link { .. }))
         .count();
@@ -289,7 +282,7 @@ fn pdf_features(_: &Variant, rendered: &Rendered) -> Vec<String> {
             count(pdf, "/Subtype/Link")
         ));
     }
-    if !rendered.laid.outline.is_empty() && count(pdf, "/Type/Outlines") != 1 {
+    if !rendered.layout.outline().is_empty() && count(pdf, "/Type/Outlines") != 1 {
         problems.push("the headings are not bookmarked".to_owned());
     }
     problems

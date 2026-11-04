@@ -186,15 +186,16 @@ impl FontSet {
     ///
     /// Panics for a family that is not loaded.
     pub fn face(&self, family: &str, weight: Weight, style: FontStyle) -> FaceId {
-        let faces = self
-            .families
-            .get(family)
-            .unwrap_or_else(|| panic!("font family \"{family}\" is not configured"));
-        let (_, id) = faces
-            .iter()
+        self.nearest(family, weight, style)
+            .unwrap_or_else(|| panic!("font family \"{family}\" is not configured"))
+    }
+
+    /// [`FontSet::face`] for a family that may not be loaded.
+    pub fn nearest(&self, family: &str, weight: Weight, style: FontStyle) -> Option<FaceId> {
+        let (_, id) = (self.families.get(family)?.iter())
             .min_by_key(|(face, _)| (weight_rank(weight, face.weight), face.style != style))
             .expect("every family has a face");
-        *id
+        Some(*id)
     }
 
     /// A warning for a face whose font restricts embedding, naming its file.

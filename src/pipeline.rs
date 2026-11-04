@@ -398,7 +398,7 @@ fn read_theme_file(resolver: &dyn Resolver, path: &Path) -> Result<Bytes, Resolv
 }
 
 /// The theme file that the front matter of a document's `text` names, if it names one and parses.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
+#[cfg(feature = "editor")]
 pub fn document_theme(resolver: &dyn Resolver, path: &Path, text: &str, dirs: &ThemeDirs) -> Option<PathBuf> {
     let source = InputSource::Document(path.to_owned());
     let settings = parse_front_matter(text, &source).ok()?;
@@ -407,7 +407,7 @@ pub fn document_theme(resolver: &dyn Resolver, path: &Path, text: &str, dirs: &T
 }
 
 /// The file a theme selection means, whether or not it can be read.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
+#[cfg(any(test, feature = "editor"))]
 pub fn theme_file(resolver: &dyn Resolver, selection: &Path, base: &Path, dirs: &ThemeDirs) -> PathBuf {
     find_theme(resolver, selection, base, dirs).0
 }

@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::engine;
 use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
 use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
@@ -104,7 +103,10 @@ impl BodyStyle {
             (style.weight, FontStyle::Italic),
             (Weight::BOLD, FontStyle::Italic),
         ] {
-            let face = laid.face(engine::face_of(laid, &style.font, weight, font_style));
+            let italic = font_style == FontStyle::Italic;
+            let face = laid
+                .font(&style.font, weight.get(), italic)
+                .expect("the body font is loaded");
             if family.is_empty() {
                 family = family_name(face.data(), face.index()).unwrap_or_else(|| style.font.clone());
             }

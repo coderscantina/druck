@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub const PROJECT_FILE: &str = "theme.json";
 
 /// Which of the two places a named theme came from.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
+#[cfg(feature = "editor")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Project,

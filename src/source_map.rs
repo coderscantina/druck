@@ -755,8 +755,7 @@ impl SourceMap {
         byte as usize
     }
 
-    /// Bytes this map holds, beside what any layout holds.
-    #[doc(hidden)]
+    /// Bytes this map holds, beside what any layout holds, for a client that budgets memory.
     pub fn memory(&self) -> usize {
         use std::mem::size_of;
         size_of::<Self>()

@@ -36,7 +36,7 @@ use crate::cancel::Cancel;
 use crate::config::front_matter::Metadata;
 use crate::config::source::InputSource;
 pub use crate::config::theme::NumberFormat;
-use crate::config::theme::{Conformance, Lang};
+use crate::config::theme::{Conformance, FontStyle, Lang, Weight};
 pub use crate::config::values::{Color, Pt};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
@@ -99,6 +99,15 @@ impl Layout {
     /// The font of a run. A [`FaceId`] is valid for the layout whose run holds it.
     pub fn face(&self, id: FaceId) -> &Face {
         self.fonts.face_of(id)
+    }
+
+    /// The face a theme font family uses for text of `weight` (100 to 900) and slant, chosen as inline emphasis
+    /// chooses: the nearest weight, then the slant asked for. `None` for a family the theme does not load. For
+    /// clients that set their own text in the document's fonts.
+    pub fn font(&self, family: &str, weight: u16, italic: bool) -> Option<&Face> {
+        let style = if italic { FontStyle::Italic } else { FontStyle::Normal };
+        let id = self.fonts.nearest(family, Weight::of_font(weight), style)?;
+        Some(self.fonts.face_of(id))
     }
 
     /// Every font the document names, in [`FaceId`] order.

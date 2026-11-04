@@ -57,6 +57,15 @@ impl Face {
         &self.coordinates
     }
 
+    /// A font handle of its own, for one export. krilla clones a font once per glyph it writes, and the clones of
+    /// one handle that jobs on several threads share would contend on its reference count.
+    pub(crate) fn pdf_for_export(&self) -> krilla::text::Font {
+        let coordinates: Vec<_> = (self.coordinates.iter())
+            .map(|(tag, value)| (krilla::text::Tag::new(tag), *value))
+            .collect();
+        krilla::text::Font::new_variable(self.data.data(), self.index, &coordinates).expect("parsed before")
+    }
+
     pub(super) fn pdf(&self) -> &krilla::text::Font {
         &self.pdf
     }

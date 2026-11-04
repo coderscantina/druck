@@ -35,8 +35,23 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Clippy with the editor module
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy as a library without the CLI
+        run: cargo clippy --no-default-features --lib -- -D warnings
+      # Runs the unit, integration, and parity tests and the documentation tests of the crate root.
       - name: Test
         run: cargo test
+      # Each example is a program that asserts what it shows.
+      - name: Examples
+        shell: bash
+        run: |
+          for file in examples/*.rs; do
+            cargo run --quiet --example "$(basename "$file" .rs)"
+          done
+      - name: Documentation lists only the public modules
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
 
   # Renders every sample with the release build on each OS, from an empty
   # working directory. Fonts and hyphenation data are bundled, so the result

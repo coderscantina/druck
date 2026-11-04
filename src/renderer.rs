@@ -203,6 +203,7 @@ impl Configured<'_> {
 }
 
 /// Finished output.
+#[derive(Debug)]
 pub struct Rendered {
     pub bytes: Vec<u8>,
     pub warnings: Vec<Diagnostic>,
@@ -211,7 +212,7 @@ pub struct Rendered {
 }
 
 /// What a layout includes besides its pages.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct LayoutOptions {
     /// Whether to connect the text items to the written text, see [`Layout::source_map`]. A batch render needs no
     /// map, and without it the parser records nothing.
@@ -219,7 +220,7 @@ pub struct LayoutOptions {
 }
 
 /// Export settings. They never change the layout.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PdfOptions {
     /// How far the bleed box reaches past the trim box on each side.
     pub bleed: Pt,
@@ -236,7 +237,7 @@ impl Default for PdfOptions {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct EpubOptions {
     /// The day of `dcterms:modified`. Without it an ISO `date` setting decides, then `Input::today`, so the same
     /// input gives the same bytes. A build with `SOURCE_DATE_EPOCH` passes that day.
@@ -250,6 +251,26 @@ pub enum Failure {
     /// Every error of the stage that failed, in reading order.
     Errors(Vec<Diagnostic>),
 }
+
+/// One line per error, as a terminal shows them with every path absolute.
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("cancelled"),
+            Self::Errors(errors) => {
+                for (index, error) in errors.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str("\n")?;
+                    }
+                    std::fmt::Display::fmt(error, f)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for Failure {}
 
 impl From<Vec<Diagnostic>> for Failure {
     fn from(errors: Vec<Diagnostic>) -> Self {

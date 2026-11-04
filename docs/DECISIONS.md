@@ -1184,6 +1184,45 @@ Where the design was wrong or contradicts itself:
 - Section 6 has `locate` take the layout. Numbering texts in written order and storing their places makes that unnecessary.
 - Section 6 lists smart punctuation as `None`, which `pulldown-cmark`'s events give, but its encoding says the parser "records whether the text is verbatim". Comparing the event's text with the source at its offset is what says so, and also handles entities, escapes, and code spans without a flag.
 
+## 2026-11-04: Phase 2 step 5, choices beyond the design
+
+The CLI, the cut `editor` module, the examples, the parity test, and the measurements. [The API record](PHASE_2_API.md) has the signatures as built. These go beyond the design or differ from it.
+
+- **`Layout::font(family, weight, italic) -> Option<&Face>` replaces `editor::engine::face_of`.** The galley needs the four faces of the body family. Any painter that sets its own text in the document's fonts needs the same question answered by the rule inline emphasis uses, so it is public, with a plain `u16` weight and a `bool` slant instead of the config types. `FontSet::nearest` is the version that does not panic for an unknown family.
+- **`editor` is cut to what only the desktop's source layer and theme file code need:** `syntax`, `marks`, `theme_value`, `theme_path`, `resolved_config` (the validator's `resolve` and its inputs, and `Config`, `FontStyle`, `Weight`, `of` for the preview), and `engine::{document_theme, theme_file}`. `document_text`, `FontFiles`, `Face`, `Lang`, and `Color` are gone, and the desktop takes a document's text from its own `Input`. Each item carries a one-line reason in `src/editor.rs`. `Scope`, `document_theme`, and `theme_file` are compiled only with `editor` (and `theme_file` in tests), which replaces step 1's `allow(dead_code)` markers.
+- **`normalize` and `SourceMap::memory` are documented public items, not `doc(hidden)`.** The CLI needs `normalize` for its paths, and a client that budgets memory needs `memory`. `grep -rn 'doc(hidden)' src` finds only the `editor` module.
+- **`Failure` implements `Display` and `Error`,** and `Rendered` and the option types implement `Debug`. A host that uses `?` with `Box<dyn Error>` or `anyhow` had no way to. `Overrides::parse`, `Project::open`, and `DocumentText::read` still return `Vec<Diagnostic>`, which converts with `Failure::from`. A host that wants `?` there writes `.map_err(Failure::from)`, as the examples do.
+- **The acceptance test is back in `tests/acceptance.rs` and reads the public `Layout`.** Nothing in it needed a private type, so step 1's move is undone.
+- **The parity test compares bytes, not only layout.** `tests/parity.rs` renders every sample, each with its theme, the sample project, and EPUBs through `Renderer::render`, through the stages, and through the CLI binary, with a source map on and off. A book runs where `DRUCK_BOOK` names a project folder, since the book is the owner's and sits outside the repository. Where the variable is unset the test prints a note and runs the rest.
+- **Six examples in `examples/`, each a program that asserts what it shows and runs in CI.** They share `examples/common/mod.rs`, which runs the work on a thread with 16 MB of stack: a debug build needs about 1 MB to read a theme, and a Windows main thread has 1 MB. The crate-root doctests use `no_run`, since an example that runs on the same stack rule would need the same wrapper hidden in the docs. `[lib] doctest = false` is gone.
+- **CI:** `cargo clippy --no-default-features --lib`, the examples, and `cargo doc --no-deps` with `-D warnings` were added to the `check` job. None has run, since nothing is pushed.
+- **A PDF export gives each of its faces a font handle of its own** (`Face::pdf_for_export`). krilla clones a font once per glyph it writes, and with one handle shared by every job on a renderer, four threads exporting the same fonts spent 300 ms on the PDF stage where one thread spent 96 ms. Eight threads spent 1,097 ms. With a handle per export the stage takes 134 ms at four threads and 198 ms at eight, the same as renderers that share nothing, and 96 ms at one. Parsing a face again costs microseconds. The bytes are unchanged on all samples and the book (the guard below).
+
+Measured on the 203-page book (the 27 chapters with their 78 comments, a `print` export, `memoir-print` from the shared folder), on the owner's M1 Pro (8 fast and 2 efficient cores, other work running, load average 2.5 to 4), through the public API in a release build with fat LTO, `/usr/bin/time -l`:
+
+| Case | Time per job | Peak memory footprint (RSS) |
+| --- | --- | --- |
+| One job in a process, a fresh renderer (the CLI's case), median of 3 | 383 to 419 ms: configure 1 to 3, layout 287 to 320, export 96 to 98 | 47.6 MB (60.5 MB) |
+| 20 jobs, a fresh renderer each, one thread, median | 372 ms | 225 MB (254 MB) |
+| 20 jobs on one reused renderer, one thread | first 392 ms, later median 374 ms | 238 MB (267 MB) |
+| 4 threads, one shared renderer, 12 jobs each | median 699 ms per job, 5.6 jobs/s | 330 to 336 MB (443 to 454 MB) |
+| 4 threads, a renderer each | 707 ms, 5.6 jobs/s | 331 MB (449 MB) |
+| 1, 2, and 8 threads, one shared renderer | 2.64, 4.26, and 5.33 jobs/s | 145, 213, and 365 MB (174, 270, 596 MB) |
+
+- **Against the limits** of [the release acceptance entry](#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci), which are 1 s and 128 MB for 100 pages: one job on the 203-page book takes 0.39 s and 48 MB, as in phase 1 (0.38 s, 59 MB), so the public API adds nothing. Reusing the renderer saves nothing measurable on this book (372 against 374 ms); what it keeps, faces and decoded images, costs little to rebuild here, and its worth is in not reading and decoding them again for an editor. A reused renderer does not use more memory than a fresh one in the steady state.
+- **A long-lived process uses about five times the memory of one job.** The footprint of repeated jobs rises for about 20 jobs and then holds near 230 to 250 MB, while the bytes the program has allocated are flat at 1.3 MB between jobs (a counting allocator in the benchmark) and `leaks` finds none. That is the macOS allocator keeping freed memory, not a leak, and the same holds for a fresh renderer per job. A service should budget for it, and may prefer an allocator that returns memory. Linux was not measured.
+- **No concurrency limit is enforced, and none is needed in the crate,** which has no scheduler. Throughput rises with threads up to about the number of fast cores (2.64 jobs/s at one thread, 4.26 at two, 5.6 at four) and does not rise beyond (5.33 at eight), while the time of one job doubles (0.37 s alone, 0.70 s at four, 1.47 s at eight) and the footprint grows by about 50 MB per job in flight. A client should run about as many jobs at once as the machine has fast cores, and budget about 50 MB of live memory per 200 pages in flight. The rustdoc says this under "Threads". Before the export fix, throughput fell from 4.4 jobs/s at four threads to 3.4 at eight.
+- **Cancel to `Cancelled`, 25 cancels at each wait, release build:** median 0.77 ms 20 ms into a layout (maximum 8.8 ms), 0.78 ms at 50 ms (maximum 1.1), 1.50 ms at 100 ms, and 1.05 ms at 200 ms. This is step 3's measurement through the public API.
+- **Source map:** 0.68 MB (step 4), unchanged.
+
+Byte guard, release builds of this step against the base `f7d31c7`, with `SOURCE_DATE_EPOCH` set: the 16 sample PDFs (the samples, their themed variants, and the sample project), the 13 sample EPUBs, the book as a `print` PDF, a `draft` PDF, and an EPUB, the sample project's `print` PDF and its EPUB, and the 16 files that the CLI matrix wrote are byte-identical under `cmp` (50 files). The CLI matrix of 87 commands (every sample with `check`, `--print-config`, and `render`; `--set`, `--theme`, `--bleed`, and `--export` errors; bad themes; raw HTML, YAML, image, and wide code errors; a missing file and a folder; a project with a stray chapter, a missing chapter, an open todo, and a print export on an EPUB; `--help`, no arguments, a bad subcommand, and a bad `SOURCE_DATE_EPOCH`) gave the same stdout, stderr, and exit code for each command (57 succeeded, 23 exited 1, 7 exited 2).
+
+Where the design was wrong or left out:
+
+- Section 10 says the parity test "lays out every sample and the corpus". The corpus is outside the repository, so it runs where `DRUCK_BOOK` is set.
+- Section 4 expects shared faces to be free to share. They were not, for the reason in the export bullet: sharing an `Arc` that krilla clones per glyph is the one place the shared renderer cost throughput.
+- `API_VERSION` stays 1. Everything this step added to the public modules is new, and nothing is published.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.
