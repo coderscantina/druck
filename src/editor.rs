@@ -3,6 +3,9 @@
 //!
 //! Each item says what the desktop needs it for. Everything else it uses is the public API.
 
+/// The version the CLI prints, as in `26.10.7-1a2b3c4`: the desktop's About box and `--version` say the same.
+pub const VERSION: &str = env!("DRUCK_VERSION");
+
 /// Citation syntax: the source layer must tint exactly what the parser reads as a citation.
 pub use crate::bibliography::syntax;
 /// Comment finding: the source layer must cut a comment out of a block exactly where the parser does.

@@ -1,5 +1,7 @@
 //! A theme JSON file the app edits. Changes are partial: only the touched member changes in the text, and
-//! every change is checked through the engine before it can reach disk. Holds no gpui types.
+//! every change is checked through the engine before it can reach disk. The check that resolves the theme runs at
+//! once, so a change is refused where it is made. The probe typeset and the write run later, in order, on
+//! [`writer::Writer`]. Holds no gpui types.
 
 pub mod blocks;
 pub mod editor;
@@ -9,15 +11,16 @@ pub mod library;
 pub mod patch;
 pub mod tokens;
 mod validate;
+pub mod writer;
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use druck::editor::theme_value::{default_theme_value, merge};
 use serde_json::Value;
 
 pub use validate::Problem;
+use writer::Commit;
 
 /// The bundled specimen: every element of a document, to see a theme on and to try a change against.
 pub const SPECIMEN: &str = include_str!("../../assets/specimen.md");
@@ -31,7 +34,10 @@ pub struct ThemeFile {
     effective: Value,
     /// What the engine says about `own`, kept so a change is only checked once.
     problems: Vec<Problem>,
-    saved: bool,
+    /// The text last written, which is what the file holds unless another program changed it.
+    disk: String,
+    /// The text last handed out by [`Self::commit`], so a change that leaves the text as it was is not written again.
+    queued: String,
 }
 
 impl ThemeFile {
@@ -43,8 +49,9 @@ impl ThemeFile {
             own: Value::Null,
             effective: Value::Null,
             problems: Vec::new(),
+            disk: text.clone(),
+            queued: text.clone(),
             text,
-            saved: true,
         };
         file.load()?;
         file.problems = validate::check(&file.path, &file.own);
@@ -68,10 +75,10 @@ impl ThemeFile {
         &self.text
     }
 
-    /// Whether the text differs from what is on disk.
+    /// Whether the text differs from what was written last.
     #[cfg(test)]
     pub fn is_dirty(&self) -> bool {
-        !self.saved
+        self.text != self.disk
     }
 
     /// The value this file sets at a path, if it sets one.
@@ -118,14 +125,53 @@ impl ThemeFile {
         self.replace(text, path, None)
     }
 
-    /// Writes the text if it changed, so that a crash cannot leave half a theme.
-    pub fn save(&mut self) -> io::Result<()> {
-        if self.saved {
-            return Ok(());
+    /// What to write for the changes made since the last call, or nothing if the text is as it was.
+    pub fn commit(&mut self) -> Option<Commit> {
+        if self.text == self.queued {
+            return None;
         }
-        crate::persist::atomic::write(&self.path, self.text.as_bytes())?;
-        self.saved = true;
+        self.queued.clone_from(&self.text);
+        Some(Commit {
+            path: self.path.clone(),
+            text: self.text.clone(),
+        })
+    }
+
+    /// Where [`Commit::run`] compares a text that fails to typeset: what the file held at the last write.
+    pub fn disk(&self) -> &str {
+        &self.disk
+    }
+
+    /// A commit reached the disk.
+    pub fn written(&mut self, text: &str) {
+        self.disk = text.to_owned();
+    }
+
+    /// Takes back every change the disk has not seen, after one was refused or could not be written.
+    pub fn revert(&mut self) -> Result<(), String> {
+        self.text.clone_from(&self.disk);
+        self.queued.clone_from(&self.disk);
+        self.load()?;
+        self.problems = validate::check(&self.path, &self.own);
         Ok(())
+    }
+
+    /// Writes the changes now, on this thread, and takes them back if they cannot be written.
+    #[cfg(test)]
+    pub fn save(&mut self) -> Result<(), Problem> {
+        let Some(commit) = self.commit() else {
+            return Ok(());
+        };
+        match commit.run(&self.disk) {
+            Ok(()) => {
+                self.disk = commit.text;
+                Ok(())
+            }
+            Err(problem) => {
+                self.revert().ok();
+                Err(problem)
+            }
+        }
     }
 
     /// Takes new text if it parses, holds `expected` at `path`, and adds no problem the old text did not have.
@@ -167,14 +213,7 @@ impl ThemeFile {
         if text == self.text {
             return Ok(());
         }
-        // A theme that already failed to typeset may be mended in steps, so only one that rendered must keep rendering.
-        if let Err(problem) = validate::renders(&self.path, &text)
-            && validate::renders(&self.path, &self.text).is_ok()
-        {
-            return Err(vec![problem]);
-        }
         self.text = text;
-        self.saved = false;
         self.load().map_err(Problem::internal)?;
         self.problems = now;
         Ok(())

@@ -2,7 +2,8 @@ name: Release
 
 # Builds and packages binaries for five targets. A manual run keeps them as
 # workflow artifacts. A tag push from scripts/release.sh also creates the GitHub
-# release with the newest CHANGELOG.md section. See docs/RELEASE.md.
+# release with the newest CHANGELOG.md section. The desktop job builds the macOS app and keeps it as a workflow
+# artifact only: it is ad-hoc signed, and the publish job takes only the `druck-*` artifacts. See docs/RELEASE.md.
 on:
   workflow_dispatch:
   push:
@@ -54,6 +55,32 @@ jobs:
         with:
           name: druck-${{ matrix.target }}
           path: dist/*
+          if-no-files-found: error
+
+  desktop:
+    name: macOS desktop app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # No signing variables are set here, so the bundle is signed ad hoc. The owner signs and notarizes a release by
+      # hand, see docs/RELEASE.md.
+      - name: Package Druck.app and the DMG
+        run: python3 scripts/package-desktop.py --outdir dist-desktop
+      - name: Check the bundle and the image
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist-desktop/Druck.app
+          hdiutil verify dist-desktop/*.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-aarch64-apple-darwin
+          path: dist-desktop/*.dmg*
           if-no-files-found: error
 
   publish:

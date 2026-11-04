@@ -1,5 +1,6 @@
 //! The theme the inspector edits: one file, the changes the panels make to it, and the rule for common themes.
-//! Every change is a text splice checked through the engine, then saved. A common theme opened from a project is
+//! Every change is a text splice checked through the engine at once. Writing it is a [`Commit`] the caller runs, since
+//! the probe typeset and the fsync take too long for the window's thread. A common theme opened from a project is
 //! not changed before the author has chosen between a fork in the project and the shared file. Holds no gpui types,
 //! and every folder it may write to is given to it, so tests run on scratch copies.
 
@@ -10,6 +11,7 @@ use serde_json::Value;
 
 use super::library;
 use super::tokens::{self, Group};
+use super::writer::Commit;
 use super::{ThemeFile, patch};
 use crate::theme_file::validate::Problem;
 
@@ -71,7 +73,7 @@ impl Change {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// The change is in the file on disk.
+    /// The change is made. It reaches the disk when its [`Commit`] has run.
     Saved,
     /// The theme is a common one and the author has not chosen yet.
     NeedsDecision,
@@ -152,9 +154,9 @@ impl Editor {
         self.place == Place::Common && self.dirs.project.is_some() && !self.shared
     }
 
-    /// Makes a change. On a common theme in a project nothing happens until [`Self::fork`] or
-    /// [`Self::edit_shared`], and the change waits.
-    pub fn apply(&mut self, change: Change) -> Result<Outcome, String> {
+    /// Makes a change in the text. On a common theme in a project nothing happens until [`Self::fork`] or
+    /// [`Self::edit_shared`], and the change waits. [`Self::take_commit`] says what to write for it.
+    pub fn stage(&mut self, change: Change) -> Result<Outcome, String> {
         if self.file.is_err() {
             return Err(self.file.as_ref().err().cloned().unwrap_or_default());
         }
@@ -163,6 +165,46 @@ impl Editor {
             return Ok(Outcome::NeedsDecision);
         }
         self.write(change)
+    }
+
+    /// What to write for the changes staged since the last call.
+    pub fn take_commit(&mut self) -> Option<Commit> {
+        self.file.as_mut().ok()?.commit()
+    }
+
+    /// A commit reached the disk.
+    pub fn written(&mut self, text: &str) {
+        if let Ok(file) = &mut self.file {
+            file.written(text);
+        }
+    }
+
+    /// Takes back the changes the disk has not seen, once nothing more is on its way. Returns whether there were any.
+    pub fn take_back_unwritten(&mut self) -> bool {
+        let Ok(file) = &mut self.file else {
+            return false;
+        };
+        if file.text() == file.disk() {
+            return false;
+        }
+        file.revert().is_ok()
+    }
+
+    /// Makes a change and writes it on this thread, for tests of what reaches the disk.
+    #[cfg(test)]
+    pub fn apply(&mut self, change: Change) -> Result<Outcome, String> {
+        let outcome = self.stage(change)?;
+        self.write_out()?;
+        Ok(outcome)
+    }
+
+    /// Writes what is staged on this thread. A change that cannot be written is taken back.
+    #[cfg(test)]
+    pub fn write_out(&mut self) -> Result<(), String> {
+        match &mut self.file {
+            Ok(file) => file.save().map_err(|problem| problem.to_string()),
+            Err(_) => Ok(()),
+        }
     }
 
     /// Copies the common theme with its fonts and images into the project, opens the copy, and makes the waiting
@@ -232,8 +274,6 @@ impl Editor {
             Change::RenameCustomStyle(from, to) => rename_custom_style(file, from, to).map_err(refused)?,
             Change::AddFont { family, face, from } => return self.add_font(family, face, from),
         }
-        file.save()
-            .map_err(|error| format!("{}: {error}", file.path().display()))?;
         Ok(Outcome::Saved)
     }
 
@@ -267,8 +307,6 @@ impl Editor {
                 .map(|problem| problem.message.clone())
                 .unwrap_or_default());
         }
-        file.save()
-            .map_err(|error| format!("{}: {error}", file.path().display()))?;
         Ok(Outcome::Saved)
     }
 }
@@ -375,6 +413,7 @@ mod tests {
         assert_eq!(editor.apply(change.clone()), Ok(Outcome::NeedsDecision));
         assert_eq!(fs::read_to_string(&common).unwrap(), THEME);
         assert_eq!(editor.fork(), Ok(Outcome::Saved));
+        editor.write_out().unwrap();
         assert_eq!(editor.place(), Place::Project);
         assert_eq!(fs::read_to_string(&common).unwrap(), THEME, "shared file untouched");
         let forked = scratch.0.join("project/themes/mine/theme.json");
@@ -390,6 +429,7 @@ mod tests {
             .apply(Change::set(&["styles", "title", "align"], json!("right")))
             .unwrap();
         assert_eq!(editor.edit_shared(), Ok(Outcome::Saved));
+        editor.write_out().unwrap();
         assert!(fs::read_to_string(&common).unwrap().contains("\"align\": \"right\""));
         assert_eq!(
             editor.apply(Change::set(&["styles", "title", "align"], json!("left"))),
@@ -591,6 +631,7 @@ mod tests {
             .apply(Change::set(&["styles", "title", "align"], json!("left")))
             .unwrap();
         forking.fork().unwrap();
+        forking.write_out().unwrap();
         library::create(&common_dir, "fresh").unwrap();
         library::duplicate(&common_dir, "fresh", "fresh-copy").unwrap();
         library::rename(&common_dir, "fresh-copy", "renamed").unwrap();

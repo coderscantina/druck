@@ -7,6 +7,7 @@ mod editor;
 mod gate;
 mod inspector;
 mod launch;
+mod open_urls;
 mod persist;
 mod preview;
 mod session;
@@ -26,7 +27,7 @@ use session::Session;
 use tokens::Scheme;
 
 #[derive(Parser)]
-#[command(version)]
+#[command(version = druck::editor::VERSION)]
 struct Cli {
     /// Markdown file or project folder to open.
     #[arg(long, value_name = "PATH")]
@@ -62,8 +63,12 @@ fn main() -> ExitCode {
         );
         druck::editor::engine::theme_file(&druck::resource::FileResolver::new(), theme, &working_dir, &dirs)
     });
-    gpui_platform::application()
-        .with_assets(assets::Assets)
-        .run(move |cx| app::open(session, error, theme, cli.appearance, cx));
+    // Documents the system hands over, which can arrive before or after the window exists.
+    let (opened, documents) = futures::channel::mpsc::unbounded();
+    let application = gpui_platform::application().with_assets(assets::Assets);
+    application.on_open_urls(move |urls| {
+        opened.unbounded_send(open_urls::paths(&urls)).ok();
+    });
+    application.run(move |cx| app::open(session, error, theme, cli.appearance, documents, cx));
     ExitCode::SUCCESS
 }

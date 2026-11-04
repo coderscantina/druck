@@ -38,7 +38,7 @@ pub use self::joined::{ChapterMap, Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
 pub use self::templates::{STARTERS, Starter, TEMPLATES, Template};
-use crate::persist::atomic::{self, Outcome};
+use crate::persist::atomic;
 use crate::source::buffer::EditError;
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -819,17 +819,18 @@ impl Session {
         self.resplit_unsaved || self.chapters.values().any(Chapter::is_dirty)
     }
 
-    /// Writes what changed, now. Each file that changed is written whole, and no other file is touched. A file that
-    /// changed on disk since it was read is not overwritten: this is an error, and the merge deals with it. Returns how
-    /// many files were written.
+    /// Writes what changed, now, for the session's own tests. The app saves through [`crate::persist`]. Each file that
+    /// changed is written whole, and no other file is touched. A file that changed on disk since it was read is not
+    /// overwritten: this is an error. Returns how many files were written.
+    #[cfg(test)]
     pub fn save(&mut self) -> Result<usize, String> {
         self.resplit();
         let mut written = 0;
         for outgoing in self.outgoing() {
             let path = outgoing.path.display();
             match outgoing.write() {
-                Ok(Outcome::Written) => {}
-                Ok(Outcome::Changed(_)) => return Err(format!("{path} changed on disk, so it was not saved.")),
+                Ok(atomic::Outcome::Written) => {}
+                Ok(atomic::Outcome::Changed(_)) => return Err(format!("{path} changed on disk, so it was not saved.")),
                 Err(error) => return Err(format!("cannot save {path}: {error}")),
             }
             self.written(&outgoing);

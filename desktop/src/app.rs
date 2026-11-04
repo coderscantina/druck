@@ -22,14 +22,17 @@
 
 use std::path::{Path, PathBuf};
 
+use futures::StreamExt as _;
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, Entity, KeyBinding, PathPromptOptions, Pixels, PromptLevel, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowKind, WindowOptions, actions, div, point, px, size,
+    App, Bounds, Context, Entity, KeyBinding, PathPromptOptions, Pixels, PromptLevel, Subscription, Task,
+    TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, actions, div, point, px, size,
 };
 
 use crate::editor::Save;
 use crate::launch::{LaunchEvent, LaunchView};
+use crate::persist::Closing;
 use crate::session::{STARTERS, Session, Starter};
 use crate::shell::text::Key;
 use crate::shell::{self, menus};
@@ -60,6 +63,7 @@ pub fn open(
     error: Option<String>,
     theme: Option<PathBuf>,
     scheme: Option<Scheme>,
+    documents: UnboundedReceiver<Vec<PathBuf>>,
     cx: &mut App,
 ) {
     shell::init(scheme, cx);
@@ -120,7 +124,7 @@ pub fn open(
     };
     let window = cx.open_window(options, |window, cx| {
         cx.set_global(Tokens::new(shell::current_scheme(window, cx)));
-        cx.new(|cx| Shell::new(session, error, theme, window, cx))
+        cx.new(|cx| Shell::new(session, error, theme, documents, window, cx))
     });
     if let Err(error) = window {
         eprintln!("cannot open a window: {error}");
@@ -132,11 +136,15 @@ pub fn open(
     }
 }
 
+/// What to do once the document is saved.
+type After = Box<dyn FnOnce(&mut Shell, &mut Window, &mut Context<Shell>)>;
+
 /// The window's root: the launch screen, or the workspace of the one open document.
 struct Shell {
     launch: Entity<LaunchView>,
     workspace: Option<Entity<Workspace>>,
     _subscriptions: Vec<Subscription>,
+    _documents: Task<()>,
 }
 
 impl Shell {
@@ -144,6 +152,7 @@ impl Shell {
         session: Option<Session>,
         error: Option<String>,
         theme: Option<PathBuf>,
+        mut documents: UnboundedReceiver<Vec<PathBuf>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -161,10 +170,27 @@ impl Shell {
                 LaunchEvent::New(starter) => shell.ask_for_new_project(starter, window, cx),
             }),
         ];
+        // A document opened from the Finder or dropped on the Dock icon. One window holds one document, so the first
+        // of several wins.
+        let opened = cx.spawn_in(window, async move |shell, cx| {
+            while let Some(paths) = documents.next().await {
+                let Some(path) = paths.into_iter().next() else {
+                    continue;
+                };
+                let alive = shell.update_in(cx, |shell, window, cx| {
+                    window.activate_window();
+                    shell.open_path(&path, window, cx);
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+        });
         let mut shell = Self {
             launch,
             workspace: None,
             _subscriptions: subscriptions,
+            _documents: opened,
         };
         if let Some(session) = session {
             shell.show_session(session, theme, window, cx);
@@ -219,49 +245,86 @@ impl Shell {
         .detach();
     }
 
-    /// Opens a document in this window, asking first if the one open has unsaved text.
+    /// Opens a document in this window. Text not yet on disk is written first, and a person is asked only if that fails.
     fn open_path(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let path = path.to_owned();
-        self.after_saving(Key::SaveBeforeOpening, window, cx, move |shell, window, cx| {
-            shell.replace_document(&path, window, cx);
-        });
+        self.after_saving(
+            Key::CannotSaveBeforeOpening,
+            window,
+            cx,
+            Box::new(move |shell, window, cx| {
+                shell.replace_document(&path, window, cx);
+            }),
+        );
     }
 
-    /// Closes the document and shows the launch screen, asking first if it has unsaved text. With no document it
-    /// closes the window.
+    /// Closes the document and shows the launch screen, saving it first. With no document it closes the window.
     fn close_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.workspace.is_none() {
             window.remove_window();
             return;
         }
-        self.after_saving(Key::SaveBeforeClosing, window, cx, |shell, window, cx| {
-            shell.workspace = None;
-            window.set_window_title("Druck");
-            cx.notify();
-        });
+        self.after_saving(
+            Key::CannotSaveBeforeClosing,
+            window,
+            cx,
+            Box::new(|shell, window, cx| {
+                shell.workspace = None;
+                window.set_window_title("Druck");
+                cx.notify();
+            }),
+        );
     }
 
-    /// Runs `then`, after asking whether to save if the document has unsaved text. Cancel runs nothing.
-    fn after_saving(
-        &mut self,
-        message: Key,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) {
+    /// Runs `then` once the document's text is on disk. A conflict that the footer holds does not stop it: the text
+    /// stays in a recovery copy, and the file keeps the other version. Only text that could not be written asks
+    /// whether to go on, with `message`. Cancel runs nothing.
+    fn after_saving(&mut self, message: Key, window: &mut Window, cx: &mut Context<Self>, then: After) {
         let dirty = self
             .workspace
             .as_ref()
             .is_some_and(|workspace| workspace.read(cx).is_dirty(cx));
-        if !dirty {
+        let Some(closing) = dirty.then(|| crate::persist::settle(window, cx)).flatten() else {
             then(self, window, cx);
             return;
-        }
+        };
+        cx.spawn_in(window, async move |shell, cx| {
+            let Ok(closing) = closing.await else {
+                return;
+            };
+            shell
+                .update_in(cx, |shell, window, cx| match closing {
+                    Closing::Saved | Closing::Held => then(shell, window, cx),
+                    Closing::Failed { file, reason } => {
+                        shell.ask_after_failure(message, &file, &reason, window, cx, then)
+                    }
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// The text could not be written. Trying again, discarding it, and staying are the choices.
+    fn ask_after_failure(
+        &mut self,
+        message: Key,
+        file: &Path,
+        reason: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: After,
+    ) {
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        let detail = format!("{name}: {reason}");
         let answer = window.prompt(
             PromptLevel::Warning,
             crate::t!(message),
-            None,
-            &[crate::t!(Key::Save), crate::t!(Key::Discard), crate::t!(Key::Cancel)],
+            Some(&detail),
+            &[
+                crate::t!(Key::TryAgain),
+                crate::t!(Key::Discard),
+                crate::t!(Key::Cancel),
+            ],
             cx,
         );
         cx.spawn_in(window, async move |shell, cx| {
@@ -269,20 +332,15 @@ impl Shell {
                 return;
             };
             shell
-                .update_in(cx, |shell, window, cx| {
-                    let workspace = shell.workspace.clone();
-                    let saved = match (answer, workspace) {
-                        (0, Some(workspace)) => workspace.update(cx, |workspace, cx| workspace.save(window, cx)),
-                        (1, Some(workspace)) => {
+                .update_in(cx, |shell, window, cx| match answer {
+                    0 => shell.after_saving(message, window, cx, then),
+                    1 => {
+                        if let Some(workspace) = &shell.workspace {
                             crate::persist::forget_unsaved(&workspace.read(cx).location(cx));
-                            true
                         }
-                        _ => answer == 1,
-                    };
-                    // Text that could not be saved stays open rather than be lost with the window's document.
-                    if answer != 2 && saved {
                         then(shell, window, cx);
                     }
+                    _ => {}
                 })
                 .ok();
         })

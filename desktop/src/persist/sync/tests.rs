@@ -639,3 +639,70 @@ fn the_pacer_tries_a_failed_save_again() {
     assert_eq!(pacer.next(start + RETRY), Next::Save);
     assert_eq!(pacer.next(start + RETRY), Next::Idle);
 }
+
+#[test]
+fn closing_writes_what_changed_and_says_so() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
+    assert!(fixture.disk(ONE).contains("Mine."));
+    assert!(!fixture.session.is_dirty());
+}
+
+#[test]
+fn closing_keeps_the_text_and_asks_only_when_the_write_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::new();
+    fs::set_permissions(fixture.one(), fs::Permissions::from_mode(0o444)).unwrap();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    let closing = fixture.sync.write_all(&mut fixture.session);
+    assert!(
+        matches!(&closing, Closing::Failed { file, .. } if *file == fixture.one()),
+        "{closing:?}"
+    );
+    assert!(fixture.text(ONE).contains("Mine."));
+    assert!(!fixture.disk(ONE).contains("Mine."));
+    assert!(
+        fixture
+            .sync
+            .copies()
+            .unwrap()
+            .load()
+            .iter()
+            .any(|copy| copy.text.contains("Mine."))
+    );
+}
+
+#[test]
+fn closing_with_a_conflict_the_footer_holds_asks_nothing_and_keeps_both_versions() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    let theirs = "# One\n\nTheirs.\n\nSecond line.\n";
+    fixture.outside(ONE, theirs);
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Held);
+    assert_eq!(fixture.disk(ONE), theirs, "their version stays in the file");
+    let copies = fixture.sync.copies().unwrap().load();
+    assert!(
+        copies.iter().any(|copy| copy.text.contains("Mine.")),
+        "mine is in a recovery copy"
+    );
+    assert_eq!(
+        fixture.sync.conflicts().count(),
+        1,
+        "the footer still holds the question"
+    );
+}
+
+#[test]
+fn closing_merges_a_change_that_arrived_between_the_last_look_and_the_write() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    // Written without the watcher having reported it, so the session still holds the old file's hash.
+    fs::write(fixture.one(), "# One\n\nFirst line.\n\nSecond line, changed.\n").unwrap();
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
+    let disk = fixture.disk(ONE);
+    assert!(
+        disk.contains("Mine.") && disk.contains("Second line, changed."),
+        "{disk}"
+    );
+}

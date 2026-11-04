@@ -251,11 +251,6 @@ impl Workspace {
         self.parts.editor.read(cx).session().location().to_owned()
     }
 
-    /// Writes everything that changed and waits for it, before the document is replaced. Returns whether it all went.
-    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        self.parts.editor.update(cx, |editor, cx| editor.save_all(window, cx))
-    }
-
     /// Gives the side panels what the session says now.
     fn sync_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session = self.parts.editor.read(cx).session();

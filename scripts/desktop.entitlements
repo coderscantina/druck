@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- None. The app is not sandboxed, loads no plug-ins, and generates no code at run time, so the hardened runtime
+     needs no exception. Add a key here only for a failure that names it, with the reason beside it. -->
+<plist version="1.0">
+<dict/>
+</plist>
