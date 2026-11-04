@@ -14,7 +14,7 @@ use crate::source::{Edit, EditKind};
 
 /// Where a new key goes among the keys already written.
 pub(crate) const ORDER: &[&str] = &[
-    "title", "subtitle", "author", "date", "lang", "cover", "meta", "chapters", "exports",
+    "title", "subtitle", "author", "date", "lang", "cover", "theme", "meta", "chapters", "exports",
 ];
 
 /// The languages the engine sets, as `lang` writes them, with what the panel shows.
@@ -52,6 +52,7 @@ pub enum Field {
     Date,
     Language,
     Cover,
+    Theme,
 }
 
 impl Field {
@@ -63,6 +64,7 @@ impl Field {
             Self::Date => "date",
             Self::Language => "lang",
             Self::Cover => "cover",
+            Self::Theme => "theme",
         }
     }
 
@@ -84,6 +86,7 @@ impl Field {
                 .and_then(|lang| lang.as_str().map(str::to_owned))
                 .unwrap_or_default(),
             Self::Cover => settings.cover.clone().unwrap_or_default(),
+            Self::Theme => settings.theme.clone().unwrap_or_default(),
         }
     }
 

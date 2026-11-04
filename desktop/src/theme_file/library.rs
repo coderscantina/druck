@@ -36,6 +36,7 @@ fn check_name(name: &str) -> Result<(), String> {
 }
 
 /// A theme by name. A project theme wins over a common one of the same name.
+#[cfg(test)]
 pub fn locate(name: &str, project: Option<&Path>, common: Option<&Path>) -> Option<Entry> {
     let project = project.map(|project| (Scope::Project, theme_path::project_file(project, name)));
     let common = common.map(|common| (Scope::Common, common_path(common, name)));
@@ -134,6 +135,32 @@ pub fn rename(common: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
     }
     fs::rename(&source, &target).map_err(|e| format!("cannot rename {}: {e}", source.display()))?;
     Ok(target)
+}
+
+/// A copy of a common theme under another name. The copy sits beside the original, so paths in it keep resolving.
+pub fn duplicate(common: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
+    check_name(to)?;
+    let source = common_path(common, from);
+    let target = common_path(common, to);
+    if !source.is_file() {
+        return Err(format!("no common theme named \"{from}\""));
+    }
+    if target.exists() {
+        return Err(format!("a theme named \"{to}\" already exists"));
+    }
+    fs::copy(&source, &target).map_err(|e| format!("cannot copy {}: {e}", source.display()))?;
+    Ok(target)
+}
+
+/// The first of `name-copy`, `name-copy-2`, and so on that no theme in the common folder has.
+pub fn free_copy_name(common: &Path, name: &str) -> String {
+    let mut candidate = format!("{name}-copy");
+    let mut number = 1;
+    while common_path(common, &candidate).exists() {
+        number += 1;
+        candidate = format!("{name}-copy-{number}");
+    }
+    candidate
 }
 
 /// Deletes a common theme file. Fonts and images next to it may be shared with other themes and stay.
@@ -314,6 +341,19 @@ mod tests {
         assert!(rename(&common, "first", "third").is_err());
         delete(&common, "second").unwrap();
         assert!(list(None, Some(&common)).is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_sits_beside_the_original_and_gets_a_free_name() {
+        let scratch = Scratch::new();
+        let common = scratch.0.join("common");
+        scratch.write("common/a.json", "{ \"version\": 1 }");
+        assert_eq!(free_copy_name(&common, "a"), "a-copy");
+        let copy = duplicate(&common, "a", "a-copy").unwrap();
+        assert_eq!(fs::read_to_string(copy).unwrap(), "{ \"version\": 1 }");
+        assert_eq!(free_copy_name(&common, "a"), "a-copy-2");
+        assert!(duplicate(&common, "a", "a-copy").is_err());
+        assert!(duplicate(&common, "missing", "b").is_err());
     }
 
     #[test]

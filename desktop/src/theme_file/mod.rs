@@ -1,13 +1,13 @@
 //! A theme JSON file the app edits. Changes are partial: only the touched member changes in the text, and
 //! every change is checked through the engine before it can reach disk. Holds no gpui types.
 
-#![allow(
-    dead_code,
-    reason = "the theme picker and the JSON view of the integration wave use the rest"
-)]
-
+pub mod blocks;
+pub mod editor;
+pub mod font_info;
+pub mod geometry;
 pub mod library;
-mod patch;
+pub mod patch;
+pub mod tokens;
 mod validate;
 
 use std::fs;
@@ -19,6 +19,9 @@ use serde_json::Value;
 
 pub use validate::Problem;
 
+/// The bundled specimen: every element of a document, to see a theme on and to try a change against.
+pub const SPECIMEN: &str = include_str!("../../assets/specimen.md");
+
 pub struct ThemeFile {
     path: PathBuf,
     text: String,
@@ -26,6 +29,8 @@ pub struct ThemeFile {
     own: Value,
     /// The file merged over the bundled default: what a document using it gets.
     effective: Value,
+    /// What the engine says about `own`, kept so a change is only checked once.
+    problems: Vec<Problem>,
     saved: bool,
 }
 
@@ -37,10 +42,12 @@ impl ThemeFile {
             path,
             own: Value::Null,
             effective: Value::Null,
+            problems: Vec::new(),
             text,
             saved: true,
         };
         file.load()?;
+        file.problems = validate::check(&file.path, &file.own);
         if !file.own.is_object() {
             return Err(format!("{}: a theme must be a JSON object", file.path.display()));
         }
@@ -49,8 +56,8 @@ impl ThemeFile {
 
     /// What the engine reports about the file as it stands. A file with problems still opens, so they can
     /// be fixed in place.
-    pub fn problems(&self) -> Vec<Problem> {
-        validate::check(&self.path, &self.own)
+    pub fn problems(&self) -> &[Problem] {
+        &self.problems
     }
 
     pub fn path(&self) -> &Path {
@@ -62,6 +69,7 @@ impl ThemeFile {
     }
 
     /// Whether the text differs from what is on disk.
+    #[cfg(test)]
     pub fn is_dirty(&self) -> bool {
         !self.saved
     }
@@ -82,6 +90,28 @@ impl ThemeFile {
         self.replace(text, path, Some(&value))
     }
 
+    /// The file's own value: what it sets, nothing inherited.
+    pub fn value(&self) -> &Value {
+        &self.own
+    }
+
+    /// The file merged over the bundled default.
+    pub fn merged(&self) -> &Value {
+        &self.effective
+    }
+
+    /// Takes the text a change produces from the current text, if it is valid JSON that adds no problem the
+    /// file did not have. For changes that touch more than one property, such as renaming a token.
+    pub fn rewrite(&mut self, change: impl FnOnce(&str) -> Result<String, String>) -> Result<(), Vec<Problem>> {
+        let text = change(&self.text).map_err(Problem::internal)?;
+        self.accept(text)
+    }
+
+    /// Replaces the whole text, as the JSON view does. It must be a JSON object that adds no problem.
+    pub fn replace_text(&mut self, text: &str) -> Result<(), Vec<Problem>> {
+        self.accept(text.to_owned())
+    }
+
     /// Removes one property, which returns it to the inherited value.
     pub fn remove(&mut self, path: &[&str]) -> Result<(), Vec<Problem>> {
         let text = patch::remove(&self.text, path).map_err(Problem::internal)?;
@@ -100,23 +130,54 @@ impl ThemeFile {
 
     /// Takes new text if it parses, holds `expected` at `path`, and adds no problem the old text did not have.
     fn replace(&mut self, text: String, path: &[&str], expected: Option<&Value>) -> Result<(), Vec<Problem>> {
-        let own: Value = serde_json::from_str(&text).map_err(|e| Problem::internal(e.to_string()))?;
+        let own = Self::parse(&text)?;
         if lookup(&own, path) != expected {
             return Err(Problem::internal(format!(
                 "the edit of {} did not apply",
                 path.join(".")
             )));
         }
-        let introduced = validate::introduced(&self.path, &self.own, &own);
+        self.take(text, own)
+    }
+
+    fn accept(&mut self, text: String) -> Result<(), Vec<Problem>> {
+        let own = Self::parse(&text)?;
+        self.take(text, own)
+    }
+
+    fn parse(text: &str) -> Result<Value, Vec<Problem>> {
+        let own: Value = serde_json::from_str(text).map_err(|e| Problem::internal(e.to_string()))?;
+        if own.is_object() {
+            Ok(own)
+        } else {
+            Err(Problem::internal("a theme must be a JSON object".to_owned()))
+        }
+    }
+
+    fn take(&mut self, text: String, own: Value) -> Result<(), Vec<Problem>> {
+        let now = validate::check(&self.path, &own);
+        let introduced: Vec<Problem> = now
+            .iter()
+            .filter(|problem| !self.problems.contains(problem))
+            .cloned()
+            .collect();
         if !introduced.is_empty() {
             return Err(introduced);
         }
-        let previous = std::mem::replace(&mut self.text, text);
-        if self.text == previous {
+        if text == self.text {
             return Ok(());
         }
+        // A theme that already failed to typeset may be mended in steps, so only one that rendered must keep rendering.
+        if let Err(problem) = validate::renders(&self.path, &text)
+            && validate::renders(&self.path, &self.text).is_ok()
+        {
+            return Err(vec![problem]);
+        }
+        self.text = text;
         self.saved = false;
-        self.load().map_err(Problem::internal)
+        self.load().map_err(Problem::internal)?;
+        self.problems = now;
+        Ok(())
     }
 
     fn load(&mut self) -> Result<(), String> {

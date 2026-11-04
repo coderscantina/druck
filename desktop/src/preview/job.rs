@@ -12,8 +12,18 @@ use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSele
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Renderer};
 
+use super::fonts::{FontUse, fonts_in_use};
 use super::raster::{Painter, family_name, fingerprint};
 use crate::session::{Joined, Kind, LiveResolver};
+
+/// What one layout typesets: a text, in a theme, which is the specimen or the document.
+#[derive(Clone)]
+pub struct Job {
+    pub joined: Joined,
+    /// The theme file to use instead of the document's.
+    pub theme: Option<PathBuf>,
+    pub specimen: bool,
+}
 
 /// A request to start: its number, the job, and the token that stops it.
 pub type Started<T> = (u64, T, Cancel);
@@ -79,6 +89,8 @@ pub struct Layout {
     /// Configuration and typesetting warnings.
     pub warnings: Vec<Diagnostic>,
     pub body: BodyStyle,
+    /// The font families the styles use, for the Fonts tab.
+    pub fonts: Vec<FontUse>,
     pub timing: Timing,
 }
 
@@ -164,6 +176,11 @@ impl Typesetter {
         }
     }
 
+    /// Typesets the next runs in this theme, or in the document's when `None`.
+    pub fn set_theme(&mut self, theme: Option<PathBuf>) {
+        self.theme = theme;
+    }
+
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
     /// of stack, and a debug build needs about as much for deserializing a theme alone. The schema's nesting
     /// is fixed, so one size covers any input.
@@ -198,6 +215,7 @@ impl Typesetter {
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
             body: BodyStyle::of(config, &laid),
+            fonts: fonts_in_use(config, &laid),
             laid,
             painter,
             fingerprints,

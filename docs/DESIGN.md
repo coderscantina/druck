@@ -68,3 +68,12 @@ The window has three places to mount a view without touching the shell, listed i
 - The saving state is one line at the left of the footer: faint "Saved", "Edited", or "Saving…". It does not move the text or take focus.
 - A note, such as a merge that happened, uses the quiet text color and leaves after 6 seconds. A problem or a conflict uses the accent color and stays until it is over.
 - A conflict never opens a dialog. It is a line in the footer with its choices as small raised buttons, and the galley keeps the focus and keeps taking keys. A modal prompt would catch keys typed while it appeared, and agents can cause many of these. The keys are Ctrl+Cmd+M, T, and B.
+
+## Theme panels
+
+- The Styles tab holds four panels behind a strip of four segments at its top: Styles, Tokens, Page, and Source. The Fonts tab has its own. Each panel starts with the small section label, and a detail view starts with a quiet back link before its title.
+- A field is a label row, then its control. The label row has the label at the start, and at the end what the value comes to when it is a token (quiet), a small `▾ $` link when the field takes tokens, and an accent Reset link only when the theme itself sets the property. Values the theme inherits show in the faint text color, its own values in the full one.
+- A token list opens inline below its field, never as a floating menu, so it cannot be clipped by the narrow panel. Colors have a swatch left of the field.
+- The engine's refusal shows under the field in the accent color. A field the engine refused keeps what was typed.
+- The theme picker and the specimen switch sit in the title bar before the canvas switch. The picker's menu hangs from its button, lists the project themes, then the common ones, and keeps a `⋯` on each common row for rename, duplicate, and delete. Deleting asks first, in the system's dialog.
+- The question about a common theme is a card near the sidebar, like the section dialog. The recommended choice, a copy in the project, has the accent border.

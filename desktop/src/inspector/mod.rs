@@ -1,10 +1,19 @@
 //! Right pane: the panel of the active tab, then the tab rail at the window's edge.
 
 pub mod details;
+mod fonts;
+mod fork_prompt;
+mod geometry;
 pub mod input;
+mod model;
+mod picker;
+mod source_view;
 mod strings;
 mod style_property;
 mod styles;
+mod theme_tabs;
+mod theme_tokens;
+mod widgets;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,11 +21,25 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, svg};
 
+use fonts::FontsPanel;
+pub use fork_prompt::ForkPrompt;
+use geometry::GeometryPanel;
+pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
+pub use picker::ThemePicker;
+use source_view::SourceView;
 use styles::StylesPanel;
-pub use styles::ThemeChanged;
+use theme_tabs::ThemeTabs;
+use theme_tokens::TokensPanel;
 
 use self::strings::Key;
+use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
+
+/// The keys of the block styles the Styles tab lists.
+#[cfg(test)]
+pub fn style_keys() -> impl Iterator<Item = &'static str> {
+    strings::STYLES.iter().map(|(key, _)| *key)
+}
 
 /// A tab of the rail. A panel takes one with [`InspectorView::mount`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +64,15 @@ impl Tab {
         Self::Notes,
     ];
     const BOTTOM: [Self; 2] = [Self::Diagnostics, Self::Export];
+
+    /// The tab `DRUCK_TAB` names, for screenshots.
+    fn from_env() -> Option<Self> {
+        let name = std::env::var("DRUCK_TAB").ok()?;
+        Self::TOP
+            .into_iter()
+            .chain(Self::BOTTOM)
+            .find(|tab| tab.label().eq_ignore_ascii_case(&name))
+    }
 
     fn id(self) -> &'static str {
         match self {
@@ -87,23 +119,68 @@ pub struct InspectorView {
     /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
     panels: HashMap<Tab, AnyView>,
     styles: Entity<StylesPanel>,
-    _subscription: Subscription,
+    fonts: Entity<FontsPanel>,
+    model: Entity<ThemeModel>,
+    _subscriptions: Vec<Subscription>,
 }
 
 /// The inspector announces what its panels change, for the shell to pass on to the galley and the preview.
 impl EventEmitter<ThemeChanged> for InspectorView {}
 
 impl InspectorView {
-    /// `theme` is the JSON file the Styles tab edits.
-    pub fn new(theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let styles = cx.new(|cx| StylesPanel::new(theme, window, cx));
-        let subscription = cx.subscribe(&styles, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone()));
-        Self {
-            active: Tab::Details,
-            panels: HashMap::from([(Tab::Styles, styles.clone().into())]),
-            styles,
-            _subscription: subscription,
+    /// `theme` is the JSON file the theme tabs edit, and `dirs` the folders themes may be changed in.
+    pub fn new(theme: Option<PathBuf>, dirs: Dirs, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        input::bind_keys(cx);
+        let model = cx.new(|_| ThemeModel::new(theme.as_deref(), dirs));
+        let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
+        let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
+        let geometry = cx.new(|cx| GeometryPanel::new(model.clone(), window, cx));
+        let source = cx.new(|cx| SourceView::new(model.clone(), window, cx));
+        let fonts = cx.new(|cx| FontsPanel::new(model.clone(), window, cx));
+        let theme_tabs = cx.new(|_| {
+            ThemeTabs::new(vec![
+                (Key::PanelStyles, styles.clone().into()),
+                (Key::PanelTokens, tokens_panel.into()),
+                (Key::PanelPage, geometry.into()),
+                (Key::PanelSource, source.into()),
+            ])
+        });
+        let subscriptions = vec![
+            cx.subscribe(&model, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone())),
+            cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
+        ];
+        // `DRUCK_PROBE_EDIT=1` makes one edit at the start, for screenshots of what an edit asks.
+        if std::env::var_os("DRUCK_PROBE_EDIT").is_some() {
+            let probe = model.clone();
+            cx.defer(move |cx| {
+                probe.update(cx, |model, cx| {
+                    model
+                        .change(
+                            crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into()),
+                            cx,
+                        )
+                        .ok();
+                });
+            });
         }
+        Self {
+            active: Tab::from_env().unwrap_or(Tab::Details),
+            panels: HashMap::from([(Tab::Styles, theme_tabs.into()), (Tab::Fonts, fonts.clone().into())]),
+            styles,
+            fonts,
+            model,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Gives the Fonts tab the families the pages use.
+    pub fn set_fonts(&mut self, fonts: Vec<crate::preview::FontUse>, cx: &mut Context<Self>) {
+        self.fonts.update(cx, |panel, cx| panel.set_fonts(fonts, cx));
+    }
+
+    /// The theme the panels edit.
+    pub fn model(&self) -> &Entity<ThemeModel> {
+        &self.model
     }
 
     /// Gives a tab its panel.
@@ -119,7 +196,7 @@ impl InspectorView {
 
     /// Reads the theme file again after it changed outside the app.
     pub fn reload_theme(&mut self, cx: &mut Context<Self>) {
-        self.styles.update(cx, |styles, cx| styles.reload_theme(cx));
+        self.model.update(cx, |model, cx| model.reload(cx));
     }
 
     /// Sets the body size as if typed into its field. For measurements.
@@ -195,4 +272,16 @@ impl Render for InspectorView {
             .child(div().flex().flex_col().children(bottom));
         div().flex_none().h_full().flex().child(panel).child(rail)
     }
+}
+
+/// Mounts the theme picker in the title bar and the question about common themes over the window.
+pub fn mount_theme(parts: &crate::workspace::Parts, slots: &mut crate::workspace::Slots, cx: &mut gpui::App) {
+    let model = parts.inspector.read(cx).model().clone();
+    slots.toolbar.push(
+        cx.new(|cx| ThemePicker::new(parts.editor.clone(), parts.preview.clone(), model.clone(), cx))
+            .into(),
+    );
+    slots
+        .overlays
+        .push(cx.new(|cx| ForkPrompt::new(model, parts.editor.clone(), cx)).into());
 }

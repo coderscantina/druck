@@ -4,6 +4,7 @@
 
 mod bench;
 mod cache;
+pub mod fonts;
 pub(crate) mod job;
 mod raster;
 mod sheets;
@@ -28,15 +29,22 @@ use resvg::tiny_skia::Pixmap;
 use self::bench::Bench;
 pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
+pub use self::fonts::FontUse;
 pub use self::job::BodyStyle;
-use self::job::{Layout, Scheduler, Started, Typesetter};
+use self::job::{Job, Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
 use self::strings::Key;
 use crate::session::{Joined, Kind};
+use crate::theme_file::blocks::{self, Target};
 use crate::tokens::{self, Tokens};
 
 actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
+
+/// The bundled specimen: every element of a document, to see a theme on.
+use crate::theme_file::SPECIMEN;
+/// Where the specimen pretends to be, beside the document, so relative paths in a theme resolve as for the document.
+const SPECIMEN_FILE: &str = "specimen.md";
 
 /// Fixed zoom levels, as logical pixels per point.
 const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
@@ -95,8 +103,16 @@ struct CaretMark {
 
 pub struct PreviewView {
     focus: FocusHandle,
-    scheduler: Scheduler<Joined>,
+    scheduler: Scheduler<Job>,
     typesetter: Arc<Mutex<Typesetter>>,
+    /// Typesets the bundled specimen in the same theme, for a view of every element.
+    specimen_typesetter: Arc<Mutex<Typesetter>>,
+    /// The theme to typeset with, if not the document's, which the next layout follows.
+    theme: Option<PathBuf>,
+    /// The document's text as last asked for, to typeset again when the theme changes or the specimen goes.
+    latest: Option<Joined>,
+    /// Whether the pages show the specimen instead of the document.
+    specimen: bool,
     layout: Option<Arc<Layout>>,
     /// Why the latest text has no pages. The last good pages stay on screen meanwhile.
     diagnostics: Vec<Diagnostic>,
@@ -141,7 +157,16 @@ impl PreviewView {
         let mut view = Self {
             focus: cx.focus_handle(),
             scheduler: Scheduler::new(),
-            typesetter: Arc::new(Mutex::new(Typesetter::new(kind, theme))),
+            specimen_typesetter: Arc::new(Mutex::new(Typesetter::new(
+                Kind::Single {
+                    path: kind.base_dir().join(SPECIMEN_FILE),
+                },
+                None,
+            ))),
+            typesetter: Arc::new(Mutex::new(Typesetter::new(kind, theme.clone()))),
+            theme,
+            latest: None,
+            specimen: false,
             layout: None,
             diagnostics: Vec::new(),
             cache: PageCache::new(CACHE_BYTES),
@@ -171,9 +196,87 @@ impl PreviewView {
         if let Some(bench) = &mut self.bench {
             bench.requested(&joined.text);
         }
-        if let Some(started) = self.scheduler.request(joined) {
+        self.latest = Some(joined);
+        // The specimen stays as it is while the document changes. A theme edit asks for it again with `refresh`.
+        if !self.specimen || self.layout.is_none() {
+            self.typeset_latest(cx);
+        }
+    }
+
+    /// Typesets again what the pages show, since the theme file changed.
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.typeset_latest(cx);
+    }
+
+    /// The font families the pages on screen use.
+    pub fn fonts(&self) -> &[FontUse] {
+        self.layout.as_ref().map_or(&[], |layout| &layout.fonts)
+    }
+
+    /// Typesets what the pages show: the specimen, or the document as last asked for.
+    fn typeset_latest(&mut self, cx: &mut Context<Self>) {
+        let Some(joined) = self.latest.clone() else {
+            return;
+        };
+        let joined = if self.specimen {
+            Joined::single(SPECIMEN.to_owned(), joined.revision)
+        } else {
+            joined
+        };
+        let job = Job {
+            joined,
+            theme: self.theme.clone(),
+            specimen: self.specimen,
+        };
+        if let Some(started) = self.scheduler.request(job) {
             self.start_layout(started, cx);
         }
+    }
+
+    /// Typesets with another theme file, or with the document's own when `None`. The next layout takes it.
+    pub fn set_theme(&mut self, theme: Option<PathBuf>, cx: &mut Context<Self>) {
+        if self.theme != theme {
+            self.theme = theme;
+            self.typeset_latest(cx);
+        }
+    }
+
+    /// Shows the bundled specimen in pages, or the document again.
+    pub fn set_specimen(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.specimen != on {
+            self.specimen = on;
+            self.typeset_latest(cx);
+        }
+    }
+
+    pub fn is_specimen(&self) -> bool {
+        self.specimen
+    }
+
+    /// Scrolls to the top of a page.
+    pub fn show_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        if let Some(sheets) = self.sheets(self.current_zoom) {
+            self.scroll.1 = sheets.top(page.min(sheets.len().saturating_sub(1)));
+            cx.notify();
+        }
+    }
+
+    /// Where the first block set in `style` is written, or that the style is on the first page. `text_of` reads a
+    /// block's text as written, by file and byte range.
+    pub fn find_style(
+        &self,
+        style: &str,
+        prefer: Option<&Path>,
+        text_of: &dyn Fn(&Path, std::ops::Range<usize>) -> Option<String>,
+    ) -> Option<Target> {
+        let map = self.layout.as_ref()?.laid.source_map()?;
+        blocks::find(map, style, prefer, text_of)
+    }
+
+    /// The file and offset a block's place stands for, if it is in the pages on screen.
+    pub fn place_of(&self, at: SourcePos) -> Option<PathBuf> {
+        let chapters = self.layout.as_ref()?.laid.source_map()?.chapters();
+        chapters.get(at.chapter.0 as usize).map(|chapter| chapter.path.clone())
     }
 
     /// Whether the pages on screen were set from `revision` of the text, so offsets in one are offsets in the other.
@@ -269,17 +372,29 @@ impl PreviewView {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
     }
 
-    fn start_layout(&mut self, (number, joined, cancel): Started<Joined>, cx: &mut Context<Self>) {
-        let typesetter = self.typesetter.clone();
+    fn start_layout(&mut self, (number, job, cancel): Started<Job>, cx: &mut Context<Self>) {
+        let Job {
+            joined,
+            theme,
+            specimen,
+        } = job;
+        let typesetter = if specimen {
+            self.specimen_typesetter.clone()
+        } else {
+            self.typesetter.clone()
+        };
         let revision = joined.revision;
-        let layout =
-            cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(joined, &cancel) });
+        let layout = cx.background_spawn(async move {
+            let mut typesetter = typesetter.lock().expect("no panic in layout");
+            typesetter.set_theme(theme);
+            typesetter.run(joined, &cancel)
+        });
         cx.spawn(async move |this, cx| {
             let result = layout.await;
             this.update(cx, |view, cx| {
                 let (publish, next) = view.scheduler.finished(number);
                 if publish {
-                    view.publish(number, revision, result, cx);
+                    view.publish(number, revision, specimen, result, cx);
                 }
                 if let Some(next) = next {
                     view.start_layout(next, cx);
@@ -290,11 +405,19 @@ impl PreviewView {
         .detach();
     }
 
-    fn publish(&mut self, number: u64, revision: u64, result: Result<Layout, Failure>, cx: &mut Context<Self>) {
+    fn publish(
+        &mut self,
+        number: u64,
+        revision: u64,
+        specimen: bool,
+        result: Result<Layout, Failure>,
+        cx: &mut Context<Self>,
+    ) {
         match result {
             Ok(layout) => {
                 self.published = number;
-                self.revision = Some(revision);
+                // Offsets in the specimen are not offsets in any chapter.
+                self.revision = (!specimen).then_some(revision);
                 self.caret = None;
                 self.diagnostics.clear();
                 if let Some(bench) = &mut self.bench {

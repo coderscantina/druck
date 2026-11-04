@@ -47,6 +47,7 @@ const SCREEN_MARGIN: f32 = 80.;
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     crate::persist::mount(parts, slots, window, cx);
     shell::mount(parts, slots, window, cx);
+    crate::inspector::mount_theme(parts, slots, cx);
     slots.footer.push(cx.new(|_| AgentView::new()).into());
     crate::editor::mount(parts, slots, cx);
 }

@@ -85,7 +85,7 @@ impl DetailsPanel {
                 Field::Subtitle => &details.subtitle,
                 Field::Authors => &details.authors,
                 Field::Date => &details.date,
-                Field::Language | Field::Cover => continue,
+                Field::Language | Field::Cover | Field::Theme => continue,
             };
             set_unless_editing(input, text, window, cx);
         }
@@ -326,7 +326,7 @@ impl Render for DetailsPanel {
                     Field::Subtitle => crate::t!(Key::FieldSubtitle),
                     Field::Authors => crate::t!(Key::FieldAuthors),
                     Field::Date => crate::t!(Key::FieldDate),
-                    Field::Language | Field::Cover => "",
+                    Field::Language | Field::Cover | Field::Theme => "",
                 };
                 Self::field(&tokens, label, input.clone())
             })
