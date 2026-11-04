@@ -7,9 +7,12 @@ use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 
 use super::text::Key;
 use crate::app::{NewBook, NewOffer, NewReport, Open, Quit};
-use crate::editor::{Copy, Cut, Paste, Redo, Save, SelectAll, TogglePrintLines, Undo};
+use crate::editor::{
+    Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
+    ShowSpelling, TogglePrintLines, ToggleSpelling, Undo,
+};
 use crate::preview::{ZoomIn, ZoomOut, ZoomToFit};
-use crate::workspace::{ShowPages, ShowSplit, ShowWrite};
+use crate::workspace::{FocusNext, FocusPrevious, ShowPages, ShowSplit, ShowWrite};
 
 actions!(
     shell,
@@ -21,6 +24,14 @@ actions!(
         ShowSettings,
         ShowExport,
         ShowDiagnostics,
+        ShowSelection,
+        ShowStyles,
+        ShowFonts,
+        ShowImages,
+        ShowDetails,
+        ShowNotes,
+        ShowAgent,
+        FocusEditor,
         CloseDocument,
         ToggleSidebar,
         FocusSidebar,
@@ -62,6 +73,18 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-d", ShowDiagnostics, None),
         KeyBinding::new("cmd-alt-s", ToggleSidebar, None),
         KeyBinding::new("cmd-alt-1", FocusSidebar, None),
+        KeyBinding::new("cmd-alt-0", FocusEditor, None),
+        KeyBinding::new("ctrl-cmd-1", ShowSelection, None),
+        KeyBinding::new("ctrl-cmd-2", ShowStyles, None),
+        KeyBinding::new("ctrl-cmd-3", ShowFonts, None),
+        KeyBinding::new("ctrl-cmd-4", ShowImages, None),
+        KeyBinding::new("ctrl-cmd-5", ShowDetails, None),
+        KeyBinding::new("ctrl-cmd-6", ShowNotes, None),
+        KeyBinding::new("ctrl-cmd-7", ShowAgent, None),
+        KeyBinding::new("tab", FocusNext, Some("Workspace")),
+        KeyBinding::new("shift-tab", FocusPrevious, Some("Workspace")),
+        KeyBinding::new("ctrl-tab", FocusNext, Some("Workspace")),
+        KeyBinding::new("ctrl-shift-tab", FocusPrevious, Some("Workspace")),
         KeyBinding::new("cmd-alt-i", ToggleInspector, None),
         KeyBinding::new("cmd-h", HideApp, None),
         KeyBinding::new("cmd-alt-h", HideOthers, None),
@@ -154,6 +177,9 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::FindNext, FindNext),
             item(Key::FindPrevious, FindPrevious),
             item(Key::FindInProject, FindInProject),
+            MenuItem::separator(),
+            item(Key::NextMisspelled, ShowSpelling),
+            item(Key::CheckSpelling, ToggleSpelling),
         ]),
         Menu::new(crate::t!(Key::MenuView)).items([
             item(Key::ViewWrite, ShowWrite),
@@ -171,12 +197,30 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
                 item(Key::ShowSidebar, ToggleSidebar)
             },
             item(Key::FocusSidebar, FocusSidebar),
-            item(Key::ShowDiagnostics, ShowDiagnostics),
+            item(Key::FocusEditor, FocusEditor),
+            MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items([
+                item(Key::ShowSelection, ShowSelection),
+                item(Key::ShowStyles, ShowStyles),
+                item(Key::ShowFonts, ShowFonts),
+                item(Key::ShowImages, ShowImages),
+                item(Key::ShowDetails, ShowDetails),
+                item(Key::ShowNotes, ShowNotes),
+                item(Key::ShowAgent, ShowAgent),
+                item(Key::ShowDiagnostics, ShowDiagnostics),
+                item(Key::ExportItem, ShowExport),
+            ])),
             if state.inspector_shown {
                 item(Key::HideInspector, ToggleInspector)
             } else {
                 item(Key::ShowInspector, ToggleInspector)
             },
+        ]),
+        Menu::new(crate::t!(Key::MenuInsert)).items([
+            item(Key::InsertFootnote, InsertFootnote),
+            item(Key::InsertCitation, InsertCitation),
+            item(Key::InsertReference, InsertReference),
+            item(Key::InsertImage, InsertImage),
+            item(Key::InsertTable, InsertTable),
         ]),
         Menu::new(crate::t!(Key::MenuWindow))
             .items([item(Key::Minimize, MinimizeWindow), item(Key::WindowZoom, ZoomWindow)]),
@@ -189,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_menu_bar_has_the_five_menus_in_the_language_set() {
+    fn the_menu_bar_has_its_menus_in_the_language_set() {
         let _guard = super::super::strings::LANGUAGE_TEST
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -198,7 +242,15 @@ mod tests {
         let names: Vec<_> = menus.iter().map(|menu| menu.name.to_string()).collect();
         assert_eq!(
             names,
-            ["Druck", "Ablage", "Bearbeiten", "Darstellung", "Fenster", "Hilfe"]
+            [
+                "Druck",
+                "Ablage",
+                "Bearbeiten",
+                "Darstellung",
+                "Einfügen",
+                "Fenster",
+                "Hilfe"
+            ]
         );
         super::super::strings::set_language(super::super::strings::Language::English);
         assert_eq!(build(&MenuState::default())[1].name, "File");

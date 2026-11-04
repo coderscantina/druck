@@ -41,6 +41,7 @@ crate::strings! {
         NewSection => ("New section", "Neuer Abschnitt"),
         SourceView => ("Source", "Quelltext"),
         PrintLines => ("Print lines", "Druckzeilen"),
+        AddToWords => ("Add to the project's words", "Zu den Wörtern des Projekts"),
         NotesTitle => ("NOTES", "NOTIZEN"),
         NotesEmpty => (
             "This chapter opens with no comment. A comment at its very start shows here.",

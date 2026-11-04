@@ -2,6 +2,8 @@
 //! Each is drawn by the galley's own frame, so it sits where the selection is in that same frame, and keyboard focus stays
 //! in the text except in the link field.
 
+use std::ops::Range;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, AnyView, App, AvailableSpace, Bounds, Context, Entity, Focusable, MouseButton, MouseDownEvent, Pixels,
@@ -16,6 +18,7 @@ use super::place::{self, Rect};
 use super::rich::view::RichFloat;
 use super::strings::Key;
 use super::{EditorView, MenuAccept, MenuDown, MenuUp};
+use crate::a11y::Control as _;
 use crate::inspector::input::{Submitted, TextInput};
 use crate::session::TEMPLATES;
 use crate::source::{EditKind, Selection, motion};
@@ -50,6 +53,11 @@ enum MenuKind {
         targets: Vec<BlockType>,
         anchor: Bounds<Pixels>,
     },
+    /// The suggestions for a misspelled word, then a row that adds it to the project's words.
+    Spelling {
+        word: Range<usize>,
+        suggestions: Vec<String>,
+    },
 }
 
 impl Menu {
@@ -57,6 +65,7 @@ impl Menu {
         match &self.kind {
             MenuKind::Slash { items, .. } => items.len(),
             MenuKind::Convert { targets, .. } => targets.len(),
+            MenuKind::Spelling { suggestions, .. } => suggestions.len() + 1,
         }
     }
 }
@@ -256,6 +265,8 @@ impl EditorView {
         let on = state == MarkState::On;
         div()
             .id(("toolbar", id))
+            .role(gpui::Role::Button)
+            .aria_label(tip.clone())
             .flex_none()
             .size(tokens::TOOLBAR_BUTTON)
             .flex()
@@ -451,6 +462,7 @@ impl EditorView {
                 row.child(
                     div()
                         .id("remove-link")
+                        .button(&tokens, crate::t!(Key::RemoveLink))
                         .flex_none()
                         .px(tokens::SPACE_2)
                         .h(tokens::FIELD_HEIGHT)
@@ -593,8 +605,31 @@ impl EditorView {
                     self.run_command(command, window, cx);
                 }
             }
+            Float::Menu(Menu {
+                kind: MenuKind::Spelling { word, suggestions },
+                ..
+            }) => match suggestions.get(index) {
+                Some(suggestion) => self.apply_suggestion(word, suggestion, window, cx),
+                None => self.add_to_word_list(word, cx),
+            },
             other => self.float = other,
         }
+        cx.notify();
+    }
+
+    /// Inserts a table at the caret and opens its grid, as the slash menu does.
+    pub(super) fn insert_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let caret = self.selection.head;
+        self.apply_slash(caret, &Action::Insert(slash::Standalone::Table), window, cx);
+    }
+
+    /// Opens the menu of suggestions under a word.
+    pub(super) fn open_spelling_menu(&mut self, word: Range<usize>, suggestions: Vec<String>, cx: &mut Context<Self>) {
+        self.float = Float::Menu(Menu {
+            kind: MenuKind::Spelling { word, suggestions },
+            selected: 0,
+            scroll: ScrollHandle::new(),
+        });
         cx.notify();
     }
 
@@ -677,6 +712,13 @@ impl EditorView {
                     )
                 })
                 .collect(),
+            MenuKind::Spelling { suggestions, .. } => {
+                let suggested = suggestions
+                    .iter()
+                    .map(|suggestion| (suggestion.clone().into(), None, "icons/block-text.svg"));
+                let add = (crate::t!(Key::AddToWords).into(), None, "icons/plus.svg");
+                suggested.chain(std::iter::once(add)).collect()
+            }
         }
     }
 
@@ -700,6 +742,9 @@ impl EditorView {
                 let chosen = index == selected;
                 div()
                     .id(("menu-row", index))
+                    .role(gpui::Role::MenuItem)
+                    .aria_label(label.clone())
+                    .aria_selected(chosen)
                     .flex_none()
                     .h(tokens::MENU_ROW_HEIGHT)
                     .px(tokens::SPACE_2)
@@ -733,6 +778,7 @@ impl EditorView {
             .collect();
         div()
             .id("command-menu")
+            .role(gpui::Role::Menu)
             .occlude()
             .w(wanted.width)
             .h(wanted.height)
@@ -783,6 +829,7 @@ impl EditorView {
                 let target = match &menu.kind {
                     MenuKind::Slash { .. } => caret,
                     MenuKind::Convert { anchor, .. } => Some(*anchor),
+                    MenuKind::Spelling { .. } => Self::selection_box(selection),
                 };
                 let Some(target) = target else {
                     return Vec::new();

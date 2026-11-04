@@ -709,6 +709,8 @@ impl Render for PreviewView {
             });
         div()
             .id("preview")
+            .role(gpui::Role::Group)
+            .aria_label(crate::t!(crate::shell::text::Key::Pages))
             .key_context("Preview")
             .track_focus(&self.focus)
             .flex_1()

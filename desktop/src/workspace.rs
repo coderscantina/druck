@@ -14,6 +14,7 @@ use gpui::{
     div, px,
 };
 
+use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
@@ -32,7 +33,7 @@ const TITLE_INSET: gpui::Pixels = px(240.);
 /// How long typing must stop before the pages catch up.
 const REFRESH_PAUSE: Duration = Duration::from_millis(150);
 
-gpui::actions!(workspace, [ShowWrite, ShowPages, ShowSplit]);
+gpui::actions!(workspace, [ShowWrite, ShowPages, ShowSplit, FocusNext, FocusPrevious]);
 
 /// What the centre pane shows.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -643,6 +644,7 @@ impl Workspace {
                 let active = canvas == self.canvas;
                 div()
                     .id(label)
+                    .toggle(tokens, label, active)
                     .px(tokens::SPACE_2)
                     .rounded(tokens::RADIUS)
                     .cursor_pointer()
@@ -695,8 +697,9 @@ pub fn titlebar(title: String, tokens: &Tokens, end: impl IntoElement) -> impl I
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
+        let accessible = window.is_a11y_active();
         let switch = self.canvas_switch(&tokens, cx);
         let location = self.parts.editor.read(cx).session().location();
         // Only the name: three slices' toolbar needs the room, and the window's own title has the whole path.
@@ -745,6 +748,9 @@ impl Render for Workspace {
             .relative()
             .flex()
             .flex_col()
+            .key_context("Workspace")
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
             .on_action(cx.listener(|workspace, _: &ShowWrite, window, cx| workspace.show(Canvas::Write, window, cx)))
             .on_action(cx.listener(|workspace, _: &ShowPages, window, cx| workspace.show(Canvas::Pages, window, cx)))
             .on_action(cx.listener(|workspace, _: &ShowSplit, window, cx| workspace.show(Canvas::Split, window, cx)))
@@ -757,28 +763,33 @@ impl Render for Workspace {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    // Cached, so a key repaints the galley and not every row and field beside it.
+                    // Cached, so a key repaints the galley and not every row and field beside it. A cached view that
+                    // is reused reports no accessibility nodes in gpui, so with assistive technology nothing is.
                     .when(self.sidebar_shown, |row| {
-                        row.child(
-                            self.parts
-                                .sidebar
-                                .clone()
-                                .cached(StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full()),
-                        )
+                        let style = StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full();
+                        row.child(pane(self.parts.sidebar.clone(), style, accessible))
                     })
                     .child(canvas)
                     .when(self.inspector_shown, |row| {
-                        row.child(
-                            self.parts.inspector.clone().cached(
-                                StyleRefinement::default()
-                                    .flex_none()
-                                    .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
-                                    .h_full(),
-                            ),
-                        )
+                        let style = StyleRefinement::default()
+                            .flex_none()
+                            .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
+                            .h_full();
+                        row.child(pane(self.parts.inspector.clone(), style, accessible))
                     }),
             )
             .children(self.slots.overlays.clone())
+    }
+}
+
+/// A side pane: cached unless accessibility is on, when its plain view has the same style on a box around it.
+fn pane<V: Render>(view: Entity<V>, style: StyleRefinement, accessible: bool) -> gpui::AnyElement {
+    if accessible {
+        let mut holder = div();
+        *holder.style() = style;
+        holder.child(view).into_any_element()
+    } else {
+        view.cached(style).into_any_element()
     }
 }
 

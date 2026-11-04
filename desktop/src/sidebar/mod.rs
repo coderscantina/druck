@@ -10,11 +10,12 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, ElementId, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton, ObjectFit,
+    Context, ElementId, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton, ObjectFit, Role,
     SharedString, Window, div, img, svg,
 };
 
 use self::strings::Key;
+use crate::a11y::Control as _;
 use crate::session::{ChapterId, Contents, Row, RowKind};
 use crate::tokens::{self, Tokens};
 
@@ -152,6 +153,21 @@ impl SidebarView {
     fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let ids = self.visible();
         match event.keystroke.key.as_str() {
+            // The keys for what a row's hover buttons and a drag do.
+            "enter" if event.keystroke.modifiers.platform => {
+                if let Some(id) = self.data.active {
+                    cx.emit(if self.in_book(id) {
+                        SidebarEvent::Edit(id)
+                    } else {
+                        SidebarEvent::AddToBook(id)
+                    });
+                }
+            }
+            key @ ("up" | "down") if event.keystroke.modifiers.alt => {
+                if let Some((id, place)) = self.moved(key == "up") {
+                    cx.emit(SidebarEvent::Move(id, place));
+                }
+            }
             "enter" | "escape" => {
                 if let Some(id) = self.data.active {
                     cx.emit(SidebarEvent::Select(id));
@@ -172,6 +188,24 @@ impl SidebarView {
             _ => return,
         }
         cx.stop_propagation();
+    }
+
+    /// The book's rows, in order.
+    fn book_ids(&self) -> Vec<ChapterId> {
+        self.data.contents.book.iter().map(|row| row.id).collect()
+    }
+
+    fn in_book(&self, id: ChapterId) -> bool {
+        self.book_ids().contains(&id)
+    }
+
+    /// The active chapter and the place in the book that moves it one row up or down, if it can go.
+    fn moved(&self, up: bool) -> Option<(ChapterId, usize)> {
+        let id = self.data.active?;
+        let book = self.book_ids();
+        let at = book.iter().position(|other| *other == id)?;
+        let place = if up { at.checked_sub(1)? } else { at + 2 };
+        (place <= book.len()).then_some((id, place))
     }
 
     pub fn set_data(&mut self, data: SidebarData, cx: &mut Context<Self>) {
@@ -265,6 +299,9 @@ impl SidebarView {
         };
         div()
             .id(ElementId::from(("chapter", id.number())))
+            .role(Role::ListItem)
+            .aria_label(row.title.clone())
+            .aria_selected(selected)
             .group("row")
             .flex_none()
             .h(tokens::LIST_ROW_HEIGHT)
@@ -381,6 +418,7 @@ impl SidebarView {
         };
         Self::label(tokens, text)
             .id(id)
+            .button(tokens, text)
             .cursor_pointer()
             .on_click(cx.listener(move |view, _, _, cx| {
                 if !view.folded.remove(&fold) {
@@ -404,6 +442,7 @@ impl Render for SidebarView {
         let contents = self.data.contents.clone();
         let identity = div()
             .id("identity")
+            .button(&tokens, crate::t!(Key::Details))
             .flex_none()
             .p(tokens::SPACE_3)
             .flex()
@@ -522,6 +561,7 @@ impl Render for SidebarView {
             .child(
                 div()
                     .id("new-section")
+                    .button(&tokens, crate::t!(Key::NewSection))
                     .w(tokens::SECTION_HEIGHT)
                     .flex()
                     .items_center()
@@ -544,6 +584,9 @@ impl Render for SidebarView {
             .h_full()
             .flex()
             .flex_col()
+            .id("sidebar")
+            .role(Role::Navigation)
+            .aria_label(crate::t!(Key::TheContents))
             .key_context("Sidebar")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))

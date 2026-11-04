@@ -11,6 +11,7 @@ use gpui::{
 
 use super::input::{Committed, TextInput};
 use super::strings::Key;
+use crate::a11y::Control as _;
 use crate::session::{Details, Field, LANGUAGES, MetaRow};
 use crate::tokens::{self, Tokens};
 
@@ -45,7 +46,14 @@ impl DetailsPanel {
         let mut subscriptions = Vec::new();
         let mut fields = Vec::new();
         for field in [Field::Title, Field::Subtitle, Field::Authors, Field::Date] {
-            let input = cx.new(|cx| TextInput::new(window, cx));
+            let input = cx.new(|cx| {
+                TextInput::new(window, cx).with_label(crate::t!(match field {
+                    Field::Title => Key::FieldTitle,
+                    Field::Subtitle => Key::FieldSubtitle,
+                    Field::Authors => Key::FieldAuthors,
+                    _ => Key::FieldDate,
+                }))
+            });
             subscriptions.push(cx.subscribe(&input, move |_, _, Committed(text), cx| {
                 cx.emit(DetailsEdit::Field(field, text.clone()));
             }));
@@ -109,7 +117,7 @@ impl DetailsPanel {
         if let Some(input) = self.meta_inputs.get(key) {
             return input.clone();
         }
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let input = cx.new(|cx| TextInput::new(window, cx).with_label(key.to_owned()));
         let owned = key.to_owned();
         self._subscriptions
             .push(cx.subscribe(&input, move |_, _, Committed(text), cx| {
@@ -165,6 +173,7 @@ impl DetailsPanel {
             let active = self.details.language == code;
             div()
                 .id(code)
+                .toggle(tokens, name, active)
                 .flex_1()
                 .h(tokens::FIELD_HEIGHT)
                 .flex()

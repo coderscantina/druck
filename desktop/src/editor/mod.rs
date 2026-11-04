@@ -17,6 +17,7 @@ mod place;
 pub(crate) mod rich;
 mod scrollbar;
 mod source_toggle;
+mod spelling;
 mod strings;
 mod trace;
 
@@ -124,11 +125,14 @@ actions!(
         OpenLink,
         ToggleSource,
         TogglePrintLines,
+        ToggleSpelling,
+        ShowSpelling,
         Cancel,
         InsertFootnote,
         InsertCitation,
         InsertReference,
         InsertImage,
+        InsertTable,
         EditRich,
         MenuUp,
         MenuDown,
@@ -203,11 +207,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-k", OpenLink, context),
         KeyBinding::new("cmd-/", ToggleSource, context),
         KeyBinding::new("cmd-alt-l", TogglePrintLines, context),
+        KeyBinding::new("cmd-;", ShowSpelling, context),
         KeyBinding::new("escape", Cancel, context),
         KeyBinding::new("cmd-alt-f", InsertFootnote, context),
         KeyBinding::new("cmd-alt-c", InsertCitation, context),
         KeyBinding::new("cmd-alt-r", InsertReference, context),
         KeyBinding::new("cmd-shift-i", InsertImage, context),
+        KeyBinding::new("cmd-alt-t", InsertTable, context),
+        // A Tab in the text stays in the text. Control-Tab leaves it.
+        KeyBinding::new("tab", gpui::NoAction, context),
+        KeyBinding::new("shift-tab", gpui::NoAction, context),
         KeyBinding::new("cmd-enter", EditRich, context),
     ]);
     rich::view::bind_keys(cx);
@@ -386,6 +395,8 @@ pub struct EditorView {
     rich_labels: Task<()>,
     /// The print-composer lines. See [`composed`].
     print: composed::PrintLines,
+    /// Misspelled words. See [`spelling`].
+    spelling: spelling::Spelling,
     /// The newest revision and body style painted, and when each first was.
     painted_revision: (u64, Instant),
     painted_style: (u64, Instant),
@@ -414,6 +425,7 @@ impl EditorView {
     pub fn new(session: Session, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let spelling_folder = session.base_dir();
         let blocks = Blocks::parse(session.active_buffer().text());
         let caret = notes::leading_region(session.active_buffer().text(), &blocks)
             .filter(|region| region.start == 0)
@@ -470,6 +482,7 @@ impl EditorView {
             rich_pause: Task::ready(()),
             rich_labels: Task::ready(()),
             print: composed::PrintLines::default(),
+            spelling: spelling::Spelling::new(cx, &spelling_folder),
             painted_revision: (0, Instant::now()),
             painted_style: (0, Instant::now()),
             style_generation: 0,
@@ -861,6 +874,7 @@ impl EditorView {
         self.trace.handled(started);
         self.schedule_rich(window, cx);
         self.schedule_composer(window, cx);
+        self.restart_spelling(window, cx);
         cx.emit(TextChanged);
     }
 
@@ -1741,6 +1755,17 @@ impl EditorView {
         }
     }
 
+    /// The blocks on screen, for assistive technology.
+    fn a11y_lines(&self) -> Vec<ShownBlock> {
+        self.visible
+            .iter()
+            .filter_map(|(index, _)| {
+                let layout = self.slots[*index].layout.clone()?;
+                Some((self.blocks.as_slice()[*index].range.start, layout))
+            })
+            .collect()
+    }
+
     /// Moves the scroll position so the caret is on screen, if it is not.
     fn scroll_to_caret(&mut self, window: &Window) {
         let here = self.locate(self.selection.head, self.upstream, window);
@@ -1907,7 +1932,14 @@ impl Render for EditorView {
             .text_color(tokens.text_faint)
             .children(self.session.active_chapter().heading().map(str::to_owned))
             .child(self.status.clone());
+        let chapter = self.session.active_chapter().heading().unwrap_or_default().to_owned();
+        let shown = self.a11y_lines();
+        let selection = self.selection;
         let pane = div()
+            .id("galley")
+            .role(gpui::Role::MultilineTextInput)
+            .aria_label(chapter)
+            .a11y_synthetic_children(move |builder| a11y_text(&shown, selection, builder))
             .flex_1()
             .min_w_0()
             .flex()
@@ -1955,12 +1987,15 @@ impl Render for EditorView {
             .on_action(cx.listener(|this, _: &OpenLink, window, cx| this.open_link(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSource, window, cx| this.toggle_source(window, cx)))
             .on_action(cx.listener(|this, _: &TogglePrintLines, window, cx| this.toggle_print_lines(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSpelling, _, cx| this.toggle_spelling(cx)))
+            .on_action(cx.listener(|this, _: &ShowSpelling, window, cx| this.show_spelling(window, cx)))
             .on_action(cx.listener(|this, _: &InsertFootnote, window, cx| this.insert_footnote(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertCitation, window, cx| this.open_citation_picker(None, window, cx)))
             .on_action(
                 cx.listener(|this, _: &InsertReference, window, cx| this.open_reference_picker(None, window, cx)),
             )
             .on_action(cx.listener(|this, _: &InsertImage, window, cx| this.choose_image(None, window, cx)))
+            .on_action(cx.listener(|this, _: &InsertTable, window, cx| this.insert_table(window, cx)))
             .on_action(cx.listener(|this, _: &EditRich, window, cx| this.edit_rich_at_caret(window, cx)))
             .on_drop(cx.listener(Self::drop_paths))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
@@ -1983,6 +2018,50 @@ impl Render for EditorView {
         )
         .child(header)
         .child(Galley::new(cx.entity()))
+    }
+}
+
+/// A shown line of the galley, with where its block starts.
+type ShownBlock = (usize, Rc<BlockLayout>);
+
+/// The galley's lines on screen for assistive technology: one text run per line, with the caret or selection where a run
+/// holds it. What is off screen is not in the tree, as the toolkit's own lists leave it out.
+fn a11y_text(shown: &[ShownBlock], selection: Selection, builder: &mut gpui::A11ySubtreeBuilder) {
+    let mut anchor = None;
+    let mut focus = None;
+    let mut key = 0usize;
+    for (start, layout) in shown {
+        for line in &layout.lines {
+            if line.height == px(0.) || line.skipped {
+                continue;
+            }
+            let id = builder.synthetic_node_id(("run", key));
+            key += 1;
+            let value = format!("{}\n", line.display.text);
+            let mut run = gpui::accesskit::Node::new(gpui::Role::TextRun);
+            let lengths: Vec<u8> = value.chars().map(|character| character.len_utf8() as u8).collect();
+            run.set_character_lengths(lengths);
+            run.set_value(value);
+            let source = start + line.display.source.start..=start + line.display.source.end;
+            let position = |offset: usize| gpui::accesskit::TextPosition {
+                node: id,
+                character_index: line.display.text[..line.display.to_display(offset - start)]
+                    .chars()
+                    .count(),
+            };
+            if source.contains(&selection.anchor) {
+                anchor.get_or_insert(position(selection.anchor));
+            }
+            if source.contains(&selection.head) {
+                focus.get_or_insert(position(selection.head));
+            }
+            builder.push_child(id, run);
+        }
+    }
+    if let (Some(anchor), Some(focus)) = (anchor.or(focus), focus.or(anchor)) {
+        builder
+            .parent_node()
+            .set_text_selection(gpui::accesskit::TextSelection { anchor, focus });
     }
 }
 

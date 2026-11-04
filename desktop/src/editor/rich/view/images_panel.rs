@@ -6,6 +6,7 @@ use gpui::{
     Context, Entity, FontWeight, ObjectFit, ScrollHandle, SharedString, Subscription, Task, Window, div, img, px, svg,
 };
 
+use crate::a11y::Control as _;
 use crate::editor::rich::images::{self, Listed};
 use crate::editor::rich::view::RichChanged;
 use crate::editor::rich::{Key, view::shapes::size_label};
@@ -150,6 +151,7 @@ impl Render for ImagesPanel {
                 let editor = self.editor.clone();
                 div()
                     .id(("image-row", index))
+                    .button(&tokens, row.listed.path.clone())
                     .flex_none()
                     .min_h(THUMB + tokens::SPACE_2 * 2.)
                     .px(tokens::SPACE_3)

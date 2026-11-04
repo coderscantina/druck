@@ -6,6 +6,7 @@ use gpui::{Context, Entity, Subscription, div, svg};
 
 use super::strings::Key;
 use super::{EditorView, SessionChanged, SourceViewChanged};
+use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 pub struct SourceToggle {
@@ -34,6 +35,7 @@ impl Render for SourceToggle {
         let raised = tokens.raised;
         div()
             .id("source-view")
+            .toggle(tokens, crate::t!(Key::SourceView), on)
             .px(tokens::SPACE_2)
             .flex()
             .items_center()
@@ -81,6 +83,7 @@ impl Render for PrintToggle {
         let raised = tokens.raised;
         div()
             .id("print-lines")
+            .toggle(tokens, crate::t!(Key::PrintLines), on && available)
             .px(tokens::SPACE_2)
             .flex()
             .items_center()

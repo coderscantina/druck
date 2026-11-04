@@ -3,6 +3,7 @@
 use gpui::prelude::*;
 use gpui::{Context, EventEmitter, FontWeight, SharedString, Window, div, svg};
 
+use crate::a11y::Control as _;
 use crate::session::{STARTERS, Starter};
 use crate::tokens::{self, Tokens};
 
@@ -43,6 +44,7 @@ impl LaunchView {
     ) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
+            .button(tokens, name)
             .px(tokens::SPACE_3)
             .py(tokens::SPACE_2)
             .flex()
@@ -97,6 +99,9 @@ impl Render for LaunchView {
             .flex()
             .items_center()
             .justify_center()
+            .key_context("Workspace")
+            .on_action(|_: &crate::workspace::FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &crate::workspace::FocusPrevious, window, cx| window.focus_prev(cx))
             .bg(tokens.canvas)
             .child(
                 div()

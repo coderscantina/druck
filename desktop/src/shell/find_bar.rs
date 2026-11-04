@@ -4,6 +4,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, EventEmitter, Focusable, SharedString, Subscription, Window, div, px, svg};
 
 use super::text::Key;
+use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
 
@@ -99,9 +100,14 @@ impl Render for FindBar {
             None if searching => crate::t!(Key::NoMatches).into(),
             None => SharedString::default(),
         };
-        let step = |id: &'static str, icon: &'static str, event: fn() -> FindEvent, cx: &mut Context<Self>| {
+        let step = |id: &'static str,
+                    label: &'static str,
+                    icon: &'static str,
+                    event: fn() -> FindEvent,
+                    cx: &mut Context<Self>| {
             div()
                 .id(id)
+                .button(&tokens, label)
                 .flex_none()
                 .size(tokens::FIELD_HEIGHT)
                 .flex()
@@ -141,11 +147,18 @@ impl Render for FindBar {
             )
             .child(step(
                 "find-previous",
+                crate::t!(Key::FindPrevious),
                 "icons/chevron-left.svg",
                 || FindEvent::Previous,
                 cx,
             ))
-            .child(step("find-next", "icons/chevron-right.svg", || FindEvent::Next, cx))
+            .child(step(
+                "find-next",
+                crate::t!(Key::FindNext),
+                "icons/chevron-right.svg",
+                || FindEvent::Next,
+                cx,
+            ))
             .into_any_element()
     }
 }

@@ -22,6 +22,7 @@ use self::figure::FigureFloat;
 use self::grid::GridFloat;
 use self::note::NoteFloat;
 use self::picker::PickerFloat;
+use crate::a11y::Control as _;
 use crate::editor::commands::{Command, normalized, selection_after};
 use crate::editor::float::{Float, placed_at_caret};
 use crate::editor::place::Rect;
@@ -109,8 +110,10 @@ pub(super) fn small_button(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
 ) -> gpui::Stateful<gpui::Div> {
+    let label = label.into();
     div()
         .id(id)
+        .button(tokens, label.clone())
         .flex_none()
         .h(px(22.))
         .px(tokens::SPACE_2)
@@ -125,7 +128,7 @@ pub(super) fn small_button(
         .cursor_pointer()
         .hover(|button| button.bg(tokens.raised))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(label.into())
+        .child(label)
 }
 
 /// The card behind a float.

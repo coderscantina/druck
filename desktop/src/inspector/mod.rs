@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Subscription, Window, div, px, svg};
+use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Role, Subscription, Window, div, px, svg};
 
 use fonts::FontsPanel;
 pub use fork_prompt::ForkPrompt;
@@ -32,6 +32,7 @@ use theme_tabs::ThemeTabs;
 use theme_tokens::TokensPanel;
 
 use self::strings::Key;
+use crate::a11y::Control as _;
 use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
 
@@ -229,6 +230,8 @@ impl InspectorView {
         let attention = self.attention.contains(&tab) && !active;
         div()
             .id(tab.id())
+            .control(&tokens, Role::Tab, tab.label())
+            .aria_selected(active)
             .relative()
             .flex_none()
             .h(tokens::RAIL_WIDTH)
@@ -266,6 +269,9 @@ impl Render for InspectorView {
         let bottom: Vec<_> = Tab::BOTTOM.iter().map(|&tab| self.rail_button(tab, cx)).collect();
         let tokens = Tokens::get(cx);
         let panel = div()
+            .id("inspector-panel")
+            .role(Role::TabPanel)
+            .aria_label(self.active.label())
             .flex_none()
             .w(tokens::INSPECTOR_WIDTH)
             .flex()
@@ -292,6 +298,8 @@ impl Render for InspectorView {
             )
         };
         let rail = div()
+            .id("inspector-rail")
+            .role(Role::TabList)
             .flex_none()
             .w(tokens::RAIL_WIDTH)
             .flex()

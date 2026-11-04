@@ -4,6 +4,7 @@ use super::approval::SessionLabel;
 
 crate::strings! {
     pub enum Key {
+        RemoveChip => ("Remove", "Entfernen"),
         Title => ("AGENT", "AGENT"),
         NewConversation => ("New", "Neu"),
         Model => ("Model", "Modell"),

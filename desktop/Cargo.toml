@@ -34,3 +34,8 @@ similar = { version = "3.2", default-features = false, features = ["std"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # renamex_np, so an autosave cannot overwrite a file another program wrote a moment before.
 libc = "0.2"
+# NSSpellChecker, see spell/macos.rs. MIT, and MIT, Apache-2.0, or Zlib for objc2-app-kit. All are in the lockfile through gpui.
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSSpellChecker"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSOrthography", "NSRange", "NSString", "NSTextCheckingResult"] }

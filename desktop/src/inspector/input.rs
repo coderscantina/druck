@@ -189,6 +189,7 @@ pub struct TextInput {
     keep_focus: bool,
     /// Shown in the quiet color while the field is empty.
     placeholder: SharedString,
+    label: SharedString,
     focus: FocusHandle,
     /// Inside a drag that started in the text.
     dragging: bool,
@@ -222,7 +223,7 @@ impl TextInput {
     }
 
     fn build(multiline: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle();
+        let focus = cx.focus_handle().tab_stop(true);
         let subscriptions = vec![
             cx.on_focus_in(&focus, window, |input, _, cx| {
                 // A one-line field selects everything on focus, as a form field does.
@@ -249,6 +250,7 @@ impl TextInput {
             prose: false,
             keep_focus: false,
             placeholder: SharedString::default(),
+            label: SharedString::default(),
             focus,
             dragging: false,
             scroll_x: px(0.),
@@ -267,6 +269,12 @@ impl TextInput {
     /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
     pub fn keep_focus_on_enter(mut self) -> Self {
         self.keep_focus = true;
+        self
+    }
+
+    /// What assistive technology calls the field. The label a person sees stands apart from it on screen.
+    pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = label.into();
         self
     }
 
@@ -1054,6 +1062,17 @@ impl Render for TextInput {
         let multiline = self.multiline;
         let field = div()
             .id("text-input")
+            .role(if multiline {
+                gpui::Role::MultilineTextInput
+            } else {
+                gpui::Role::TextInput
+            })
+            .aria_label(if self.label.is_empty() {
+                self.placeholder.clone()
+            } else {
+                self.label.clone()
+            })
+            .aria_value(self.buffer.text().to_owned())
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|input, _: &Left, _, cx| input.move_to(Motion::Left, false, cx)))

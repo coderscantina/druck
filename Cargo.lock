@@ -1257,6 +1257,7 @@ dependencies = [
 name = "druck-desktop"
 version = "0.0.0"
 dependencies = [
+ "block2 0.6.2",
  "clap",
  "druck",
  "futures",
@@ -1265,6 +1266,9 @@ dependencies = [
  "image",
  "libc",
  "notify",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "pulldown-cmark",
  "regex",
  "resvg 0.47.0",

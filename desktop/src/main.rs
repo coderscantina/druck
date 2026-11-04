@@ -1,5 +1,6 @@
 //! Druck desktop: a native composer and theme editor on the same engine as the CLI.
 
+mod a11y;
 mod agent;
 mod app;
 mod assets;
@@ -14,6 +15,7 @@ mod session;
 mod shell;
 mod sidebar;
 mod source;
+mod spell;
 mod theme_file;
 mod tokens;
 mod workspace;

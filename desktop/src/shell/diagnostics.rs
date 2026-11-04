@@ -7,6 +7,7 @@ use gpui::{Context, EventEmitter, FontWeight, ScrollHandle, SharedString, Window
 use super::report::{Entry, Kind, Report};
 use super::text::Key;
 use super::ui;
+use crate::a11y::Control as _;
 use crate::session::ChapterId;
 use crate::tokens::{self, Tokens};
 
@@ -94,6 +95,7 @@ impl DiagnosticsPanel {
                 };
                 div()
                     .id(("entry", at))
+                    .button(tokens, format!("{label}: {}", entry.message))
                     .h(ENTRY_HEIGHT)
                     .px(tokens::SPACE_3)
                     .py(tokens::SPACE_1)
@@ -173,6 +175,7 @@ impl Render for DiagnosticsPanel {
                         .child(
                             div()
                                 .id("dismiss")
+                                .button(&tokens, crate::t!(Key::Dismiss))
                                 .flex_none()
                                 .text_color(tokens.text_quiet)
                                 .cursor_pointer()

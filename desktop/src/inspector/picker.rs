@@ -342,6 +342,9 @@ impl Render for ThemePicker {
         let button = |id: &'static str, active: bool| {
             div()
                 .id(id)
+                .role(gpui::Role::Button)
+                .focusable()
+                .tab_stop(true)
                 .px(tokens::SPACE_2)
                 .rounded(tokens::RADIUS)
                 .cursor_pointer()
@@ -364,6 +367,7 @@ impl Render for ThemePicker {
                         picker.error = None;
                         cx.notify();
                     }))
+                    .aria_label(format!("{}: {name}", crate::t!(Key::Theme)))
                     .child(format!("{}: {name} ▾", crate::t!(Key::Theme))),
             )
             .child(
@@ -372,6 +376,7 @@ impl Render for ThemePicker {
                         let on = !picker.preview.read(cx).is_specimen();
                         picker.preview.update(cx, |preview, cx| preview.set_specimen(on, cx));
                     }))
+                    .aria_label(crate::t!(Key::Specimen))
                     .child(crate::t!(Key::Specimen)),
             )
             .when(self.open, |bar| {

@@ -2,10 +2,11 @@
 //! A strip at the top switches between them.
 
 use gpui::prelude::*;
-use gpui::{AnyView, Context, SharedString, Window, div};
+use gpui::{AnyView, Context, Role, SharedString, Window, div};
 
 use super::Key;
 use super::widgets;
+use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 pub struct ThemeTabs {
@@ -43,6 +44,8 @@ impl Render for ThemeTabs {
                 (
                     div()
                         .id(SharedString::from(format!("theme-tab-{index}")))
+                        .control(&tokens, Role::Tab, *label)
+                        .aria_selected(index == self.active)
                         .child(*label)
                         .on_click(cx.listener(move |tabs, _, _, cx| tabs.show(index, cx))),
                     index == self.active,

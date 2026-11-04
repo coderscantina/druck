@@ -9,6 +9,8 @@ crate::strings! {
         Research => ("RESEARCH", "RECHERCHE"),
 
         NewSection => ("New section", "Neuer Abschnitt"),
+        Details => ("Details", "Angaben"),
+        TheContents => ("Contents", "Inhalt"),
         EditSection => ("Edit \"{title}\"", "\u{201e}{title}\u{201c} bearbeiten"),
         Name => ("Name", "Name"),
         RemoveFromBook => ("Remove from book", "Aus Buch entfernen"),

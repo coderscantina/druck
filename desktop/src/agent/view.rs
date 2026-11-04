@@ -16,6 +16,7 @@ use super::diff::{DiffLine, Mark};
 use super::markdown::{self, Block, Inline};
 use super::strings::{self, Key};
 use super::{AgentView, HunkKey, MODELS, Standing};
+use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 /// The tallest a diff in an approval grows before it scrolls.
@@ -556,6 +557,7 @@ impl AgentView {
             .child(
                 div()
                     .id(("chip-remove", kind as usize))
+                    .button(tokens, crate::t!(Key::RemoveChip))
                     .flex_none()
                     .size(px(16.))
                     .flex()
@@ -691,6 +693,7 @@ impl AgentView {
 fn small_button(id: impl Into<gpui::ElementId>, label: String, tokens: &Tokens) -> Stateful<Div> {
     div()
         .id(id)
+        .button(tokens, label.clone())
         .flex_none()
         .h(px(22.))
         .px(tokens::SPACE_2)

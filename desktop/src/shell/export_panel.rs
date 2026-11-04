@@ -11,6 +11,7 @@ use super::export::{Stage, Target};
 use super::manifest::Def;
 use super::text::Key;
 use super::ui;
+use crate::a11y::Control as _;
 use crate::inspector::input::{Committed, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
 
@@ -312,6 +313,7 @@ impl ExportPanel {
             .join(" \u{b7} ");
         let header = div()
             .id(SharedString::from(format!("card-{name}")))
+            .button(tokens, name.clone())
             .flex()
             .items_center()
             .gap(tokens::SPACE_2)
@@ -450,6 +452,7 @@ impl Render for ExportPanel {
             } else {
                 div()
                     .id("export-add")
+                    .button(&tokens, crate::t!(Key::ExportAdd))
                     .flex()
                     .items_center()
                     .gap(tokens::SPACE_1)

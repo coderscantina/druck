@@ -31,6 +31,7 @@ use self::strings::Key;
 use self::sync::{ChangeKind, FileSync, Next, Pacer, Problem};
 pub use self::sync::{Closing, FileChange};
 use self::watch::{Ready, Signal, Waiting, Watcher};
+use crate::a11y::Control as _;
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
 use crate::session::disk::Outgoing;
@@ -735,6 +736,7 @@ impl PersistView {
         let tokens = Tokens::get(cx);
         div()
             .id(id)
+            .button(&tokens, label)
             .flex_none()
             .px(tokens::SPACE_2)
             .rounded(tokens::RADIUS)

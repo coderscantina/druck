@@ -4,6 +4,7 @@
 use gpui::prelude::*;
 use gpui::{Div, ElementId, FontWeight, SharedString, Stateful, div};
 
+use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 /// A panel's top bar: the small section label on a divider.
@@ -34,8 +35,10 @@ pub fn section(tokens: &Tokens, title: impl Into<SharedString>) -> Div {
 
 /// A line of the list: the label, and a quiet tag at the end.
 pub fn row(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .button(tokens, label.clone())
         .flex_none()
         .h(tokens::ROW_HEIGHT)
         .px(tokens::SPACE_3)
@@ -47,7 +50,7 @@ pub fn row(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedStr
         .border_color(tokens.divider)
         .cursor_pointer()
         .hover(|row| row.bg(tokens.raised))
-        .child(div().min_w_0().truncate().child(label.into()))
+        .child(div().min_w_0().truncate().child(label))
 }
 
 pub fn tag(tokens: &Tokens, text: impl Into<SharedString>, accent: bool) -> Div {
@@ -60,20 +63,24 @@ pub fn tag(tokens: &Tokens, text: impl Into<SharedString>, accent: bool) -> Div 
 
 /// A small text button in the accent color, like the Reset link.
 pub fn link(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .control(tokens, gpui::Role::Link, label.clone())
         .flex_none()
         .text_size(tokens::TEXT_SMALL)
         .text_color(tokens.accent)
         .cursor_pointer()
         .hover(|link| link.opacity(0.8))
-        .child(label.into())
+        .child(label)
 }
 
 /// A bordered button with a label, for actions.
 pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .button(tokens, label.clone())
         .flex_none()
         .h(tokens::FIELD_HEIGHT)
         .px(tokens::SPACE_3)
@@ -86,7 +93,7 @@ pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<Shared
         .text_color(tokens.text)
         .cursor_pointer()
         .hover(|button| button.bg(tokens.raised))
-        .child(label.into())
+        .child(label)
 }
 
 pub fn error_line(tokens: &Tokens, message: impl Into<SharedString>) -> Div {
@@ -157,8 +164,10 @@ pub fn menu_item(
     detail: Option<String>,
     active: bool,
 ) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .control(tokens, gpui::Role::MenuItem, label.clone())
         .flex_none()
         .h(tokens::FIELD_HEIGHT)
         .px(tokens::SPACE_2)
@@ -169,7 +178,7 @@ pub fn menu_item(
         .cursor_pointer()
         .hover(|item| item.bg(tokens.raised))
         .text_color(if active { tokens.accent } else { tokens.text })
-        .child(div().min_w_0().truncate().child(label.into()))
+        .child(div().min_w_0().truncate().child(label))
         .when_some(detail, |item, detail| {
             item.child(
                 div()

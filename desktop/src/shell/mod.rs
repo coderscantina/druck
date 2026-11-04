@@ -219,6 +219,14 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::FindInProject, cx| with_hub(cx, Hub::search_project));
     cx.on_action(|_: &menus::ShowSettings, cx| with_hub(cx, |hub, _, cx| hub.settings.update(cx, |s, cx| s.open(cx))));
     cx.on_action(|_: &menus::ShowExport, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Export, w, cx)));
+    cx.on_action(|_: &menus::ShowSelection, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Selection, w, cx)));
+    cx.on_action(|_: &menus::ShowStyles, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Styles, w, cx)));
+    cx.on_action(|_: &menus::ShowFonts, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Fonts, w, cx)));
+    cx.on_action(|_: &menus::ShowImages, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Images, w, cx)));
+    cx.on_action(|_: &menus::ShowDetails, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Details, w, cx)));
+    cx.on_action(|_: &menus::ShowNotes, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Notes, w, cx)));
+    cx.on_action(|_: &menus::ShowAgent, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Agent, w, cx)));
+    cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
         with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Diagnostics, w, cx));
     });
@@ -956,6 +964,11 @@ impl Hub {
     }
 
     /// Moves the keys to the sidebar, showing it first if it is hidden.
+    fn focus_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.parts.editor.read(cx).focus_handle(cx);
+        focus.focus(window, cx);
+    }
+
     fn focus_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut hidden = false;
         self.with_workspace(cx, |workspace, _| hidden = !workspace.sidebar_shown());

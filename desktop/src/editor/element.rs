@@ -22,6 +22,9 @@ pub struct Galley {
     view: Entity<EditorView>,
 }
 
+/// How far up a line a misspelled word's underline stands, as a share of the line's height.
+const MISSPELLED_RISE: f32 = 0.14;
+
 impl Galley {
     pub fn new(view: Entity<EditorView>) -> Self {
         Self { view }
@@ -43,6 +46,8 @@ pub struct Frame {
     sheet: Bounds<Pixels>,
     selection: Vec<Bounds<Pixels>>,
     marks: Vec<Bounds<Pixels>>,
+    /// Misspelled words, from the rectangles a selection of them would have.
+    misspelled: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
     hitbox: Hitbox,
     gutter_hitbox: Hitbox,
@@ -116,6 +121,7 @@ impl Element for Galley {
                 view.scroll_to_caret(window);
             }
             view.lay_out_visible(window);
+            view.spelling_wanted(window, cx);
             view.update_scrollbar();
             let gutter_hitbox = window.insert_hitbox(
                 Bounds::new(
@@ -175,6 +181,7 @@ impl Element for Galley {
         let selection_color = Hsla::from(tokens.accent).opacity(0.25);
         let thumb_color = Hsla::from(tokens.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
         let mark_color = Hsla::from(tokens.added).opacity(0.2);
+        let misspelled_color = Hsla::from(tokens.accent).opacity(0.6);
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             window.paint_quad(fill(frame.sheet, sheet_color));
@@ -189,6 +196,13 @@ impl Element for Galley {
             }
             for block in &frame.blocks {
                 paint_block_text(block, frame, window, cx);
+            }
+            for word in &frame.misspelled {
+                let line = Bounds::new(
+                    point(word.left(), word.bottom() - word.size.height * MISSPELLED_RISE),
+                    size(word.size.width, px(1.)),
+                );
+                window.paint_quad(fill(line, misspelled_color));
             }
             for image in &mut frame.images {
                 image.paint(window, cx);
@@ -401,6 +415,11 @@ impl EditorView {
             .iter()
             .flat_map(|mark| self.range_rectangles(mark.clone(), &blocks))
             .collect();
+        let misspelled = self
+            .spelling_ranges()
+            .into_iter()
+            .flat_map(|word| self.range_rectangles(word, &blocks))
+            .collect();
         let caret = if self.selection.is_empty() {
             self.caret_bounds(window)
         } else {
@@ -413,6 +432,7 @@ impl EditorView {
             sheet,
             selection,
             marks,
+            misspelled,
             caret,
             hitbox,
             gutter_hitbox,
