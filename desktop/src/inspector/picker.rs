@@ -52,7 +52,8 @@ impl ThemePicker {
             editor,
             preview,
             model,
-            open: false,
+            // `DRUCK_PICKER=1` opens the menu, for screenshots.
+            open: std::env::var_os("DRUCK_PICKER").is_some(),
             expanded: None,
             naming: None,
             error: None,

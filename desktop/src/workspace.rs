@@ -16,11 +16,12 @@ use gpui::{
 
 use crate::editor::{CaretMoved, EditorView, Save, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
-use crate::inspector::{InspectorView, Tab, ThemeChanged};
+use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
 use crate::preview::{BodyStyle, PageClicked, PreviewView, Typeset};
 use crate::session::{Group, Session};
 use crate::sidebar::dialogs::{DialogEvent, SectionDialog};
 use crate::sidebar::{SidebarData, SidebarEvent, SidebarView};
+use crate::theme_file::blocks::Target;
 use crate::tokens::{self, Tokens};
 
 /// Below this window width each side of a split is too narrow to write in, so the app opens on Write.
@@ -92,6 +93,12 @@ pub struct Workspace {
     fonts: HashSet<u64>,
     /// Where the caret went while the pages were behind the text, to show once they catch up.
     caret: Option<usize>,
+    /// The theme file named on the command line or left by a fork, which the document's `theme:` does not decide.
+    explicit: Option<PathBuf>,
+    /// What the document's `theme:` said when last looked at, to tell when the author changed it.
+    theme_setting: Option<String>,
+    /// The style whose block to show once the pages catch up with the theme.
+    jump: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,9 +114,10 @@ impl Workspace {
             common: dirs.shared,
         };
         let editor = cx.new(|cx| EditorView::new(session, window, cx));
-        let preview = cx.new(|cx| PreviewView::new(kind, asked, cx));
+        let preview = cx.new(|cx| PreviewView::new(kind, asked.clone(), cx));
         let inspector = cx.new(|cx| InspectorView::new(theme, dirs, window, cx));
         let sidebar = cx.new(|_| SidebarView::new());
+        let model = inspector.read(cx).model().clone();
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
         inspector.update(cx, |inspector, _| inspector.mount(Tab::Details, details.clone().into()));
@@ -120,12 +128,18 @@ impl Workspace {
             cx.subscribe_in(&editor, window, |workspace, _, _: &SessionChanged, window, cx| {
                 workspace.session_changed(window, cx);
             }),
-            cx.subscribe(&inspector, |workspace, _, _: &ThemeChanged, cx| {
-                workspace.request_pages(cx)
+            cx.subscribe(&inspector, |workspace, _, event: &ThemeChanged, cx| {
+                workspace.theme_changed(event, cx)
             }),
-            cx.subscribe(&preview, |workspace, _, Typeset(body), cx| {
+            cx.subscribe(&model, |workspace, _, _: &ThemeSwitched, cx| workspace.theme_switched(cx)),
+            cx.subscribe(&model, |workspace, _, _: &SpecimenRequested, cx| {
+                workspace.specimen_requested(cx)
+            }),
+            cx.subscribe_in(&preview, window, |workspace, _, Typeset(body), window, cx| {
                 workspace.set_body(body, cx);
                 workspace.show_caret(cx);
+                workspace.show_fonts(cx);
+                workspace.jump_to_style(window, cx);
             }),
             cx.subscribe(&editor, |workspace, _, CaretMoved(offset), cx| {
                 workspace.caret = Some(*offset);
@@ -161,9 +175,17 @@ impl Workspace {
             body: None,
             fonts: HashSet::new(),
             caret: None,
+            theme_setting: None,
+            explicit: asked,
+            jump: None,
             _subscriptions: subscriptions,
         };
+        workspace.theme_setting = workspace.parts.editor.read(cx).session().theme_setting();
         workspace.sync_panels(window, cx);
+        // `DRUCK_SPECIMEN=1` opens on the specimen, for screenshots.
+        if std::env::var_os("DRUCK_SPECIMEN").is_some() {
+            workspace.parts.preview.update(cx, |preview, cx| preview.set_specimen(true, cx));
+        }
         workspace.request_pages(cx);
         crate::gate::start(
             workspace.parts.editor.clone(),
@@ -211,6 +233,7 @@ impl Workspace {
                 .update_in(cx, |workspace, window, cx| {
                     workspace.parts.editor.update(cx, |editor, _| editor.refresh_outline());
                     workspace.sync_panels(window, cx);
+                    workspace.sync_theme(cx);
                     workspace.request_if_changed(cx);
                 })
                 .ok();
@@ -219,7 +242,100 @@ impl Workspace {
 
     fn session_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_panels(window, cx);
+        self.sync_theme(cx);
         self.request_if_changed(cx);
+    }
+
+    /// Opens in the inspector the theme the document uses now. The pages follow the document by themselves.
+    fn sync_theme(&mut self, cx: &mut Context<Self>) {
+        let session = self.parts.editor.read(cx).session();
+        let setting = session.theme_setting();
+        if setting != self.theme_setting {
+            // The author chose a theme in the document, which ends an override from the command line.
+            self.theme_setting = setting;
+            if self.explicit.take().is_some() {
+                self.parts.preview.update(cx, |preview, cx| preview.set_theme(None, cx));
+            }
+        }
+        let wanted = self
+            .explicit
+            .clone()
+            .or_else(|| self.parts.editor.read(cx).session().theme_file());
+        let model = self.parts.inspector.read(cx).model().clone();
+        let open = model.read(cx).file().ok().map(|file| file.path().to_owned());
+        if open != wanted {
+            model.update(cx, |model, cx| model.open(wanted.as_deref(), cx));
+        }
+    }
+
+    /// A fork opened another file than the one the document names, which the pages must use from now on.
+    fn theme_switched(&mut self, cx: &mut Context<Self>) {
+        let model = self.parts.inspector.read(cx).model().clone();
+        let open = model.read(cx).file().ok().map(|file| file.path().to_owned());
+        let wanted = self
+            .explicit
+            .clone()
+            .or_else(|| self.parts.editor.read(cx).session().theme_file());
+        if open != wanted {
+            self.explicit.clone_from(&open);
+            self.parts.preview.update(cx, |preview, cx| preview.set_theme(open, cx));
+        }
+    }
+
+    /// The theme file changed: typeset again, and show a block in the style that changed.
+    fn theme_changed(&mut self, event: &ThemeChanged, cx: &mut Context<Self>) {
+        self.jump = style_of(&event.property);
+        self.parts.preview.update(cx, |preview, cx| preview.refresh(cx));
+    }
+
+    fn specimen_requested(&mut self, cx: &mut Context<Self>) {
+        let model = self.parts.inspector.read(cx).model().clone();
+        self.jump = model.read(cx).missing().map(str::to_owned);
+        self.parts.preview.update(cx, |preview, cx| preview.set_specimen(true, cx));
+    }
+
+    /// Gives the Fonts tab the families the pages on screen use.
+    fn show_fonts(&mut self, cx: &mut Context<Self>) {
+        let fonts = self.parts.preview.read(cx).fonts().to_vec();
+        self.parts.inspector.update(cx, |inspector, cx| inspector.set_fonts(fonts, cx));
+    }
+
+    /// Shows, on the pages and in the galley, the first block set in the style that was edited. A style with no block
+    /// in the document is noted for the Styles panel, which offers the specimen.
+    fn jump_to_style(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(style) = self.jump.take() else {
+            return;
+        };
+        let editor = self.parts.editor.clone();
+        let session = editor.read(cx).session();
+        let prefer = session.chapter(session.active()).map(|chapter| chapter.path().to_owned());
+        let text_of = |file: &std::path::Path, range: std::ops::Range<usize>| {
+            let (id, start) = session.locate(file, range.start)?;
+            let text = session.buffer(id).text();
+            text.get(start..(start + range.len()).min(text.len())).map(str::to_owned)
+        };
+        let preview = self.parts.preview.clone();
+        let target = preview.read(cx).find_style(&style, prefer.as_deref(), &text_of);
+        let place = match &target {
+            Some(Target::Block(at)) => preview.read(cx).place_of(*at).map(|file| (file, at.offset as usize)),
+            _ => None,
+        };
+        let galley = place.as_ref().and_then(|(file, offset)| session.locate(file, *offset));
+        let specimen = preview.read(cx).is_specimen();
+        let model = self.parts.inspector.read(cx).model().clone();
+        model.update(cx, |model, cx| model.set_missing(target.is_none().then(|| style.clone()), cx));
+        match target {
+            Some(Target::Block(_)) => {
+                if let Some((file, offset)) = place {
+                    preview.update(cx, |preview, cx| preview.show_source(&file, offset, cx));
+                }
+                if let (Some((id, offset)), false) = (galley, specimen) {
+                    editor.update(cx, |editor, cx| editor.show_place(id, offset, window, cx));
+                }
+            }
+            Some(Target::FirstPage) => preview.update(cx, |preview, cx| preview.show_page(0, cx)),
+            None => {}
+        }
     }
 
     /// Asks for pages unless they are set from this revision or being set from it.
@@ -592,5 +708,25 @@ impl Render for Workspace {
                     ),
             )
             .children(self.slots.overlays.clone())
+    }
+}
+
+/// The style a dotted theme property belongs to, such as `heading-2` for `styles.heading-2.size`.
+fn style_of(property: &str) -> Option<String> {
+    let mut parts = property.split('.');
+    matches!(parts.next()?, "styles" | "custom-styles").then(|| parts.next().map(str::to_owned))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_style_property_names_its_style() {
+        assert_eq!(style_of("styles.heading-2.size").as_deref(), Some("heading-2"));
+        assert_eq!(style_of("custom-styles.lead").as_deref(), Some("lead"));
+        assert_eq!(style_of("tokens.sizes.big"), None);
+        assert_eq!(style_of("styles"), None);
+        assert_eq!(style_of(""), None);
     }
 }

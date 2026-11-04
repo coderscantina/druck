@@ -157,7 +157,7 @@ impl TokensPanel {
             .model
             .read(cx)
             .file()
-            .map(|file| tokens::uses(file.value(), &reference))
+            .map(|file| tokens::uses(file.merged(), &reference))
             .unwrap_or_default();
         let own_places: Vec<String> = places
             .into_iter()
@@ -231,7 +231,7 @@ impl TokensPanel {
         };
         let own = file.get(&["tokens", group.key(), name]).is_some();
         let inherited = tokens::of(&default_theme(), group).iter().any(|(known, _)| known == name);
-        let uses = tokens::uses(file.value(), &group.reference(name))
+        let uses = tokens::uses(file.merged(), &group.reference(name))
             .into_iter()
             .filter(|place| *place != format!("tokens.{}.{name}", group.key()))
             .count();

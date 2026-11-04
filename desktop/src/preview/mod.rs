@@ -40,7 +40,7 @@ use crate::tokens::{self, Tokens};
 actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
 
 /// The bundled specimen: every element of a document, to see a theme on.
-const SPECIMEN: &str = include_str!("../../assets/specimen.md");
+use crate::theme_file::SPECIMEN;
 /// Where the specimen pretends to be, beside the document, so relative paths in a theme resolve as for the document.
 const SPECIMEN_FILE: &str = "specimen.md";
 
@@ -191,7 +191,7 @@ impl PreviewView {
         }
         self.latest = Some(joined);
         // The specimen stays as it is while the document changes. A theme edit asks for it again with `refresh`.
-        if !self.specimen {
+        if !self.specimen || self.layout.is_none() {
             self.typeset_latest(cx);
         }
     }

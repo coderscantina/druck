@@ -35,6 +35,12 @@ pub mod resolved_config {
     }
 }
 
+/// Installed fonts: the theme validator asks for the families a theme takes from the machine as a layout does, so a
+/// font family that is neither in `fonts` nor installed is refused when it is typed and not when the pages fail.
+pub mod installed_fonts {
+    pub use crate::installed::lookup;
+}
+
 /// Which theme file a selection or a document means: the Styles tab edits that file.
 pub mod engine {
     pub use crate::pipeline::{document_theme, theme_file};

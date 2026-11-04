@@ -32,6 +32,14 @@ impl Selected {
         }
     }
 
+    /// The style's key in the theme.
+    fn key(&self) -> &str {
+        match self {
+            Self::Builtin(key) => key,
+            Self::Custom(name) => name,
+        }
+    }
+
     fn title(&self) -> String {
         match self {
             Self::Builtin(key) => style_label(key).to_owned(),
@@ -370,6 +378,24 @@ impl StylesPanel {
         }
         if let Some(message) = &self.notice {
             fields.push(div().px(chrome::SPACE_3).child(widgets::error_line(tokens, message.clone())).into_any_element());
+        }
+        if self.model.read(cx).missing() == Some(selected.key()) {
+            fields.push(
+                div()
+                    .px(chrome::SPACE_3)
+                    .pb(chrome::SPACE_2)
+                    .flex()
+                    .flex_col()
+                    .gap(chrome::SPACE_1)
+                    .child(widgets::note(tokens, strings::MISSING_STYLE_BLOCK.with(&selected.title())))
+                    .child(
+                        widgets::link(tokens, "show-specimen", strings::SHOW_SPECIMEN)
+                            .on_click(cx.listener(|panel, _, _, cx| {
+                                panel.model.update(cx, |model, cx| model.request_specimen(cx));
+                            })),
+                    )
+                    .into_any_element(),
+            );
         }
         for property in properties {
             fields.push(self.field(property, selected, tokens, cx).into_any_element());

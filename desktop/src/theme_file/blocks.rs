@@ -146,4 +146,27 @@ mod tests {
         assert_eq!(styles_of(BlockKind::Directive, &[], "::: toc\n"), ["toc-heading", "toc-entry"]);
         assert_eq!(styles_of(BlockKind::Directive, &[], "::: page-break"), Vec::<String>::new());
     }
+
+    #[test]
+    fn the_specimen_has_a_block_for_every_style_the_theme_has() {
+        use crate::preview::job::Typesetter;
+        use crate::session::{Joined, Kind};
+        use druck::cancel::Cancel;
+
+        let specimen = include_str!("../../assets/specimen.md");
+        let path = std::env::temp_dir().join("druck-specimen-probe.md");
+        let Ok(layout) = Typesetter::new(Kind::Single { path: path.clone() }, None)
+            .run(Joined::single(specimen.to_owned(), 0), &Cancel::default())
+        else {
+            panic!("the specimen typesets in the bundled theme")
+        };
+        let map = layout.laid.source_map().expect("the app asks for a source map");
+        let text_of = |_: &Path, range: Range<usize>| specimen.get(range).map(str::to_owned);
+        let missing: Vec<&str> = crate::inspector::style_keys()
+            // A bibliography needs a `.bib` file beside the document, which a bundled text cannot bring.
+            .filter(|style| *style != "bibliography")
+            .filter(|style| find(map, style, None, &text_of).is_none())
+            .collect();
+        assert!(missing.is_empty(), "no block in the specimen for {missing:?}");
+    }
 }

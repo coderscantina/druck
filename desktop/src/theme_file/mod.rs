@@ -19,6 +19,9 @@ use serde_json::Value;
 
 pub use validate::Problem;
 
+/// The bundled specimen: every element of a document, to see a theme on and to try a change against.
+pub const SPECIMEN: &str = include_str!("../../assets/specimen.md");
+
 pub struct ThemeFile {
     path: PathBuf,
     text: String,
@@ -26,6 +29,8 @@ pub struct ThemeFile {
     own: Value,
     /// The file merged over the bundled default: what a document using it gets.
     effective: Value,
+    /// What the engine says about `own`, kept so a change is only checked once.
+    problems: Vec<Problem>,
     saved: bool,
 }
 
@@ -37,10 +42,12 @@ impl ThemeFile {
             path,
             own: Value::Null,
             effective: Value::Null,
+            problems: Vec::new(),
             text,
             saved: true,
         };
         file.load()?;
+        file.problems = validate::check(&file.path, &file.own);
         if !file.own.is_object() {
             return Err(format!("{}: a theme must be a JSON object", file.path.display()));
         }
@@ -49,8 +56,8 @@ impl ThemeFile {
 
     /// What the engine reports about the file as it stands. A file with problems still opens, so they can
     /// be fixed in place.
-    pub fn problems(&self) -> Vec<Problem> {
-        validate::check(&self.path, &self.own)
+    pub fn problems(&self) -> &[Problem] {
+        &self.problems
     }
 
     pub fn path(&self) -> &Path {
@@ -150,16 +157,25 @@ impl ThemeFile {
     }
 
     fn take(&mut self, text: String, own: Value) -> Result<(), Vec<Problem>> {
-        let introduced = validate::introduced(&self.path, &self.own, &own);
+        let now = validate::check(&self.path, &own);
+        let introduced: Vec<Problem> = now.iter().filter(|problem| !self.problems.contains(problem)).cloned().collect();
         if !introduced.is_empty() {
             return Err(introduced);
         }
-        let previous = std::mem::replace(&mut self.text, text);
-        if self.text == previous {
+        if text == self.text {
             return Ok(());
         }
+        // A theme that already failed to typeset may be mended in steps, so only one that rendered must keep rendering.
+        if let Err(problem) = validate::renders(&self.path, &text)
+            && validate::renders(&self.path, &self.text).is_ok()
+        {
+            return Err(vec![problem]);
+        }
+        self.text = text;
         self.saved = false;
-        self.load().map_err(Problem::internal)
+        self.load().map_err(Problem::internal)?;
+        self.problems = now;
+        Ok(())
     }
 
     fn load(&mut self) -> Result<(), String> {

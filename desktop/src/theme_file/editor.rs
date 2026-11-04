@@ -81,6 +81,8 @@ pub struct Editor {
     file: Result<ThemeFile, String>,
     dirs: Dirs,
     place: Place,
+    /// The folder every write stays inside: the project, the common folder, or for a loose file its own folder.
+    root: Option<PathBuf>,
     /// A change waiting for the author's choice about a common theme.
     pending: Option<Change>,
     /// The author chose to change the shared file.
@@ -94,10 +96,12 @@ impl Editor {
             |path| ThemeFile::open(path),
         );
         let place = file.as_ref().map_or(Place::Loose, |file| place_of(file.path(), &dirs));
+        let root = file.as_ref().ok().and_then(|file| root_of(file.path(), place, &dirs));
         Self {
             file,
             dirs,
             place,
+            root,
             pending: None,
             shared: false,
         }
@@ -159,6 +163,7 @@ impl Editor {
         let forked = library::fork(&project, &common, &name, &name)?;
         self.file = ThemeFile::open(&forked.path);
         self.place = Place::Project;
+        self.root = Some(project);
         match self.pending.take() {
             Some(change) => self.write(change),
             None => Ok(Outcome::Saved),
@@ -178,7 +183,19 @@ impl Editor {
         self.pending = None;
     }
 
+    /// Refuses a path outside the folder this editor may write to, however it was reached.
+    fn confine(&self, path: &Path) -> Result<(), String> {
+        let path = druck::resource::normalize(path);
+        match &self.root {
+            Some(root) if path.starts_with(druck::resource::normalize(root)) => Ok(()),
+            _ => Err(format!("{} is outside the folders this theme may be changed in", path.display())),
+        }
+    }
+
     fn write(&mut self, change: Change) -> Result<Outcome, String> {
+        if let Ok(file) = &self.file {
+            self.confine(file.path())?;
+        }
         let file = self.file.as_mut().map_err(|message| message.clone())?;
         let refused = |problems: Vec<Problem>| {
             problems
@@ -206,8 +223,10 @@ impl Editor {
         let bytes = fs::read(from).map_err(|error| format!("cannot read {}: {error}", from.display()))?;
         crate::theme_file::font_info::FontInfo::read(&bytes, 0)
             .map_err(|_| format!("{} is not an OpenType or TrueType font", from.display()))?;
+        let theme = self.file.as_ref().map_err(|message| message.clone())?.path().to_owned();
+        let folder = theme.parent().unwrap_or(Path::new("")).join("fonts");
+        self.confine(&folder)?;
         let file = self.file.as_mut().map_err(|message| message.clone())?;
-        let folder = file.path().parent().unwrap_or(Path::new("")).join("fonts");
         let name = from
             .file_name()
             .map_or_else(|| "font.otf".to_owned(), |name| name.to_string_lossy().into_owned());
@@ -233,6 +252,15 @@ impl Editor {
 
 fn keys(path: &[String]) -> Vec<&str> {
     path.iter().map(String::as_str).collect()
+}
+
+/// The folder writes for a theme file stay inside.
+fn root_of(path: &Path, place: Place, dirs: &Dirs) -> Option<PathBuf> {
+    match place {
+        Place::Project => dirs.project.clone(),
+        Place::Common => dirs.common.clone(),
+        Place::Loose => path.parent().map(Path::to_owned),
+    }
 }
 
 /// Where a theme file is.
@@ -403,5 +431,117 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&path).unwrap(), before);
         assert!(!scratch.0.join("project/themes/t/fonts/notes.txt").exists());
+    }
+
+    #[test]
+    fn a_change_the_engine_resolves_but_cannot_typeset_is_refused() {
+        let scratch = Scratch::new();
+        let path = scratch.write("project/themes/t/theme.json", THEME);
+        let mut editor = Editor::open(Some(&path), dirs(&scratch));
+        // The bundled italic has no glyph for the bullet of a nested list, which only a layout finds out.
+        let refused = editor.apply(Change::set(&["styles", "list", "style"], json!("italic"))).unwrap_err();
+        assert!(refused.contains("no glyph"), "{refused}");
+        let refused = editor.apply(Change::set(&["styles", "body", "weight"], json!(600))).unwrap_err();
+        assert!(refused.contains("600"), "{refused}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), THEME);
+        assert!(!path.with_file_name(".theme.druck-check.json").exists(), "the trial file is removed");
+    }
+
+    #[test]
+    fn a_theme_that_already_fails_to_typeset_can_still_be_mended() {
+        let scratch = Scratch::new();
+        let broken = THEME.replace("\"version\": 1", "\"version\": 1, \"styles\": { \"list\": { \"style\": \"italic\" } }").replace(
+            "\"styles\": { \"title\": { \"size\": \"$sizes.big\" } },",
+            "",
+        );
+        let path = scratch.write("project/themes/t/theme.json", &broken);
+        let mut editor = Editor::open(Some(&path), dirs(&scratch));
+        assert_eq!(
+            editor.apply(Change::set(&["styles", "body", "align"], json!("left"))),
+            Ok(Outcome::Saved)
+        );
+        assert_eq!(editor.apply(Change::remove(&["styles", "list", "style"])), Ok(Outcome::Saved));
+    }
+
+    /// Every file below a folder with its size and time of change.
+    fn listing(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+        let mut files = Vec::new();
+        let mut folders = vec![dir.to_owned()];
+        while let Some(folder) = folders.pop() {
+            for entry in fs::read_dir(&folder).into_iter().flatten().flatten() {
+                let path = entry.path();
+                match entry.metadata() {
+                    Ok(meta) if meta.is_dir() => folders.push(path),
+                    Ok(meta) => files.push((path, meta.len(), meta.modified().unwrap())),
+                    Err(_) => {}
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn no_write_reaches_a_path_outside_the_temp_root() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let outside: Vec<PathBuf> = [library::common_dir(), Some(repo.join("fonts")), Some(repo.join("samples")), Some(repo.join("themes"))]
+            .into_iter()
+            .flatten()
+            .collect();
+        let before: Vec<_> = outside.iter().map(|dir| listing(dir)).collect();
+
+        let scratch = Scratch::new();
+        let font = repo.join("fonts/LibertinusSerif-Italic.otf");
+        let dirs = dirs(&scratch);
+        let common_dir = dirs.common.clone().unwrap();
+        let project_dir = dirs.project.clone().unwrap();
+
+        // Edits to a project theme, a fork of a common one, and the common folder's own operations.
+        let project = scratch.write("project/themes/t/theme.json", THEME);
+        let mut editor = Editor::open(Some(&project), dirs.clone());
+        editor.apply(Change::set(&["styles", "title", "align"], json!("right"))).unwrap();
+        editor.apply(Change::RenameToken(Group::Sizes, "big".into(), "large".into())).unwrap();
+        editor.apply(Change::RenameCustomStyle("lead".into(), "intro".into())).unwrap();
+        editor
+            .apply(Change::AddFont { family: "../../escape".into(), face: "regular".into(), from: font.clone() })
+            .unwrap();
+        let shared = scratch.write("common/shared.json", THEME);
+        let mut forking = Editor::open(Some(&shared), dirs.clone());
+        forking.apply(Change::set(&["styles", "title", "align"], json!("left"))).unwrap();
+        forking.fork().unwrap();
+        library::create(&common_dir, "fresh").unwrap();
+        library::duplicate(&common_dir, "fresh", "fresh-copy").unwrap();
+        library::rename(&common_dir, "fresh-copy", "renamed").unwrap();
+        library::delete(&common_dir, "renamed").unwrap();
+
+        // Names that climb out of a folder are refused before anything is written.
+        assert!(library::create(&common_dir, "../escape").is_err());
+        assert!(library::rename(&common_dir, "fresh", "../escape").is_err());
+        assert!(library::duplicate(&common_dir, "fresh", "../escape").is_err());
+        assert!(library::fork(&project_dir, &common_dir, "shared", "../escape").is_err());
+        assert!(library::fork(&project_dir, &common_dir, "../shared", "x").is_err());
+        assert!(editor.confine(&project_dir.join("themes/../../outside.json")).is_err());
+        assert!(editor.confine(&common_dir.join("any.json")).is_err(), "a project theme may not write to the common folder");
+        assert!(editor.confine(&project_dir.join("themes/t/fonts/a.otf")).is_ok());
+
+        // A file named on the command line may change only inside its own folder.
+        let loose = scratch.write("elsewhere/mine.json", THEME);
+        let mut loose_editor = Editor::open(Some(&loose), dirs);
+        assert_eq!(loose_editor.place(), Place::Loose);
+        loose_editor.apply(Change::set(&["styles", "title", "align"], json!("right"))).unwrap();
+        assert!(loose_editor.confine(&scratch.0.join("project/themes/t/theme.json")).is_err());
+
+        // Everything written is under the scratch root, and nothing outside it changed.
+        let mut written: Vec<String> = fs::read_dir(&scratch.0)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        written.sort();
+        assert_eq!(written, ["common", "elsewhere", "project"]);
+        assert!(!scratch.0.parent().unwrap().join("escape").exists());
+        assert!(!scratch.0.join("..").join("escape.json").exists());
+        let after: Vec<_> = outside.iter().map(|dir| listing(dir)).collect();
+        assert_eq!(before, after, "a folder outside the temp root changed");
     }
 }

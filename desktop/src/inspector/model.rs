@@ -46,7 +46,7 @@ impl ThemeModel {
     }
 
     fn refresh(&mut self) {
-        self.problems = self.editor.file().map(ThemeFile::problems).unwrap_or_default();
+        self.problems = self.editor.file().map(|file| file.problems().to_vec()).unwrap_or_default();
     }
 
     pub fn editor(&self) -> &Editor {

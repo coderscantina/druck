@@ -34,6 +34,12 @@ use theme_tokens::TokensPanel;
 use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
 
+/// The keys of the block styles the Styles tab lists.
+#[cfg(test)]
+pub fn style_keys() -> impl Iterator<Item = &'static str> {
+    strings::STYLES.iter().map(|(key, _)| *key)
+}
+
 /// A tab of the rail. A panel takes one with [`InspectorView::mount`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
@@ -128,6 +134,17 @@ impl InspectorView {
             cx.subscribe(&model, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone())),
             cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
         ];
+        // `DRUCK_PROBE_EDIT=1` makes one edit at the start, for screenshots of what an edit asks.
+        if std::env::var_os("DRUCK_PROBE_EDIT").is_some() {
+            let probe = model.clone();
+            cx.defer(move |cx| {
+                probe.update(cx, |model, cx| {
+                    model
+                        .change(crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into()), cx)
+                        .ok();
+                });
+            });
+        }
         Self {
             active: Tab::from_env().unwrap_or(Tab::Details),
             panels: HashMap::from([(Tab::Styles, theme_tabs.into()), (Tab::Fonts, fonts.clone().into())]),
