@@ -349,6 +349,14 @@ pub(crate) struct Sources {
 }
 
 impl Sources {
+    /// Whether a block's lines are running text set by the paragraph composer, and not a heading, a table, or code.
+    pub fn is_prose(&self, block: u32) -> bool {
+        matches!(
+            self.blocks.get(block as usize).map(|block| block.kind),
+            Some(BlockKind::Paragraph | BlockKind::ListItem)
+        )
+    }
+
     /// The number of a block of the document. A block layout made has none.
     pub fn block_of(&self, block: &Block) -> Option<u32> {
         let kind = match block {
@@ -502,6 +510,22 @@ impl Texts {
         };
         self.entries.push(entry);
         TextId::global(self.entries.len() - 1)
+    }
+
+    /// The block of a text, the document offset its first byte stands for, and whether its last byte is inserted.
+    /// `None` for text the engine generated, which has no place of its own.
+    pub fn place(&self, id: TextId) -> Option<(u32, u32, bool)> {
+        let text = self.entries[id.index()];
+        let (first, last) = match text.head() {
+            Head::Generated => return None,
+            Head::One(source) => (source, source),
+            Head::Many(first) => {
+                let pieces = &self.more[first as usize..];
+                let count = 1 + pieces[1..].iter().take_while(|piece| piece.start != 0).count();
+                (pieces[0].source, pieces[count - 1].source)
+            }
+        };
+        Some((text.block(), first & !INSERTED, last & INSERTED != 0))
     }
 }
 
@@ -824,6 +848,12 @@ impl SourceMap {
             block = self.blocks.get(block.parent?.0 as usize)?;
         }
     }
+}
+
+/// A chapter-relative place for a document offset, for the composer.
+pub(crate) fn place_in(source: &InputSource, document: &std::path::Path) -> impl Fn(u32) -> SourcePos + use<> {
+    let chapters = chapters(source, document);
+    move |offset| position_in(&chapters, offset)
 }
 
 fn position_in(chapters: &[Chapter], offset: u32) -> SourcePos {

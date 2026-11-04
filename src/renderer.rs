@@ -137,7 +137,7 @@ pub struct Configured<'r> {
     pub(crate) job: JobContext<'r>,
     pub(crate) config: Config,
     pub(crate) document: DocumentFile,
-    today: Date,
+    pub(crate) today: Date,
     one_thread: PhantomData<Cell<()>>,
 }
 

@@ -72,6 +72,30 @@ pub mod statistics {
     }
 }
 
+/// The print-composer lines of the galley: where the engine's own paragraph composer breaks the running text at a
+/// measure, so the galley can show the page's line breaks. This is the page layout's flow without its pages.
+pub mod composer {
+    use crate::config::values::Pt;
+    use crate::renderer::{Configured, Failure};
+
+    pub use crate::layout::SetLine;
+
+    /// The width of the document's prose on the page, in points.
+    pub fn page_measure(configured: &Configured<'_>) -> f64 {
+        configured.config.page.prose_width.0
+    }
+
+    /// The lines of running text in written order, in a frame `measure` points wide. Headings, tables, and code are
+    /// left out. It fails as a layout does, also for a word wider than `measure`.
+    pub fn lines(configured: &Configured<'_>, measure: f64) -> Result<Vec<SetLine>, Failure> {
+        let mut config = configured.config.clone();
+        let page = &mut config.page;
+        page.width = Pt(page.width.0 + measure - page.prose_width.0);
+        page.prose_width = Pt(measure);
+        crate::pipeline::set_lines(&configured.job, &config, &configured.document, configured.today)
+    }
+}
+
 /// What the galley's rich blocks ask of the engine, so a chip, a picker, or a refused edit says what the pages say.
 pub mod rich {
     use std::collections::HashMap;

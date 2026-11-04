@@ -84,7 +84,7 @@ use crate::highlight;
 use crate::image::Image;
 use crate::output::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::renderer::Failure;
-use crate::source_map::{BlockKind, SourceMap, Sources, Spans, TextId, Texts};
+use crate::source_map::{BlockKind, SourceMap, SourcePos, Sources, Spans, TextId, Texts};
 use crate::tags::{self, Id, Kind, Mark, Tree};
 use crate::text::{Fonts, ShapedRun};
 
@@ -361,6 +361,97 @@ fn settle<T>(
             .collect();
     }
 }
+
+/// A line of running text as the paragraph composer set it, for a client that shows the same line breaks elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetLine {
+    /// Where the line starts in the written text. A word cut at a hyphen starts at the cut.
+    pub start: SourcePos,
+    /// The line ends in a hyphen the composer added, which is not in the text.
+    pub hyphen: bool,
+    /// The line reaches the end of the measure, as a justified line does.
+    pub fills: bool,
+    /// How far in from the frame's left edge the line starts, in points.
+    pub left: f64,
+}
+
+/// The lines of running text that [`layout`] would set with this `config`, in written order, without making pages.
+/// One pass only, so a page reference takes its text from page 1 and not from where it ends up.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the inputs of layout, each prepared separately"
+)]
+pub fn set_lines(
+    document: &Document,
+    cited: &Cited,
+    images: &[Image],
+    theme_images: &HashMap<Resource, Image>,
+    config: &Config,
+    fonts: &Fonts,
+    source: &InputSource,
+    document_path: &Path,
+    today: Date,
+    cancel: &Cancel,
+) -> Result<Vec<SetLine>, Failure> {
+    let fields = Fields::new(document, config, today);
+    check(document, config, &fields, source)?;
+    let structure = Structure::new(document, config, cited.references());
+    let notes = NoteStyles::new(config);
+    let title_tags = Tree::default();
+    let pass = Pass {
+        document,
+        cited,
+        images,
+        theme_images,
+        config,
+        fields: &fields,
+        fonts,
+        source,
+        structure: &structure,
+        notes: &notes,
+        title_tags: &title_tags,
+        cancel,
+        first: 0,
+    };
+    let assumed = vec!["1".to_owned(); structure.anchors.len()];
+    let (content, _, _, texts) = pass.content(&assumed)?;
+    let (Some(texts), Some(sources)) = (texts, document.sources.as_ref()) else {
+        return Ok(Vec::new());
+    };
+    let place = crate::source_map::place_in(source, document_path);
+    let width = config.page.text_width().0;
+    Ok(content
+        .body
+        .iter()
+        .filter_map(|line| {
+            let places = line.line.items.iter().filter_map(|item| match item {
+                Item::Text {
+                    x,
+                    run,
+                    source: Some(id),
+                    ..
+                } if !id.is_local() => Some((*x, run, texts.place(*id)?)),
+                _ => None,
+            });
+            let mut first = None;
+            let mut last = None;
+            for item in places {
+                first.get_or_insert(item);
+                last = Some(item);
+            }
+            let ((x, _, (block, offset, _)), (end_x, end_run, (_, _, inserted))) = (first?, last?);
+            sources.is_prose(block).then(|| SetLine {
+                start: place(offset),
+                hyphen: line.line.hyphenated && inserted && end_run.text.ends_with(['-', '\u{2010}']),
+                fills: end_x.0 + end_run.width.0 >= width - FILLS,
+                left: x.0,
+            })
+        })
+        .collect())
+}
+
+/// How close to the measure's end a line counts as reaching it, in points.
+const FILLS: f64 = 1.5;
 
 /// What every layout pass shares.
 struct Pass<'a> {

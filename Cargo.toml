@@ -29,6 +29,10 @@ required-features = ["cli"]
 name = "parity"
 required-features = ["cli"]
 
+[[test]]
+name = "composer"
+required-features = ["editor"]
+
 [features]
 default = ["cli"]
 # The binary's own dependencies. A library user can turn them off with `default-features = false`.
