@@ -18,10 +18,10 @@ mod index;
 mod installed;
 mod layout;
 mod markdown;
-mod page;
 mod pdf;
 mod pipeline;
 mod project;
+mod source_map;
 mod spacing;
 mod statistics;
 mod tags;
@@ -55,3 +55,5 @@ mod cancel_tests;
 mod diagnostic_tests;
 #[cfg(test)]
 mod renderer_tests;
+#[cfg(test)]
+mod source_map_tests;

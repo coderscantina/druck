@@ -36,16 +36,15 @@ pub fn document_text<'a>(configured: &'a crate::Configured<'_>) -> (&'a Path, &'
     (&configured.document.path, &configured.document.text)
 }
 
-/// Page and glyph data for the desktop painter. Temporary: `Layout`, `Face`, and `Picture` replace all of this once
-/// the display list is public.
+/// Finding themes and faces by the rules of the engine.
 pub mod engine {
-    pub use crate::image::{Image, Pixels};
-    pub use crate::page::{Item, Output, Page, Rect};
-    pub use crate::pipeline::{document_theme, theme_file};
-    pub use crate::text::{FaceId, FontSet, Fonts, ShapedRun};
+    use crate::config::theme::{FontStyle, Weight};
+    use crate::output::{FaceId, Layout};
 
-    /// A layout's pages and the fonts its runs name.
-    pub fn into_parts(layout: crate::output::Layout) -> (Output, FontSet) {
-        (layout.laid, layout.fonts)
+    pub use crate::pipeline::{document_theme, theme_file};
+
+    /// The face a style of `family`, `weight`, and `style` uses in `layout`.
+    pub fn face_of(layout: &Layout, family: &str, weight: Weight, style: FontStyle) -> FaceId {
+        layout.fonts.face(family, weight, style)
     }
 }

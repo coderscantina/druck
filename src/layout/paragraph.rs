@@ -12,12 +12,13 @@ pub(super) mod protrusion;
 use std::collections::HashMap;
 
 use self::breaking::{Defect, Hang, Item as Element, Measure};
-use super::{Flaw, Line, NoteRef, anchor_item, inline_face, text_item};
+use super::{Flaw, Line, NoteRef, anchor_item, inline_face, mapped_item};
 use crate::config::resolved::{Config, InlineStyles, Style};
 use crate::config::theme::{Align, Figures, FontStyle, Lang, Weight};
 use crate::config::values::{Color, Pt};
 use crate::document::{Inline, Link};
-use crate::page::{Item, Rect};
+use crate::output::{Item, Rect};
+use crate::source_map::{Spans, TextId};
 use crate::tags;
 use crate::text::{FaceId, Fonts, Metrics, ShapedRun};
 
@@ -55,6 +56,8 @@ struct Fragment {
     strike: bool,
     /// Anchors placed where the fragment starts, from index marks next to it.
     anchors: Vec<usize>,
+    /// Where the fragment's text is written, in a layout with a source map.
+    spans: Spans,
 }
 
 /// Where a fragment may break inside a word.
@@ -301,13 +304,14 @@ impl Prepared<'_> {
             .enumerate()
             .map(|(index, breaking::Chosen { at: mark, defect })| {
                 let runs = line_runs(&self.words, start, mark, fonts, lang);
-                let notes = runs.iter().filter_map(|(_, fragment, ..)| fragment.note).collect();
+                let notes = runs.iter().filter_map(|run| run.fragment.note).collect();
                 // A fragment broken at the end of the line ends on the next one, with its margin notes.
                 let broken = (mark.at.offset > 0).then(|| &self.words[mark.at.word].fragments[mark.at.fragment]);
                 let marks = runs
                     .iter()
-                    .flat_map(|(_, fragment, ..)| {
-                        let ends = !broken.is_some_and(|broken| std::ptr::eq(broken, *fragment));
+                    .flat_map(|run| {
+                        let fragment = run.fragment;
+                        let ends = !broken.is_some_and(|broken| std::ptr::eq(broken, fragment));
                         let margin = fragment.margin.iter().filter(move |_| ends);
                         let notes = fragment.note.map(NoteRef::Footnote).into_iter();
                         notes.chain(margin.map(|&index| NoteRef::Margin(index)))
@@ -316,7 +320,7 @@ impl Prepared<'_> {
                     .collect();
                 start = mark.at;
                 let line_indent = if index < count { indent } else { 0.0 };
-                let items = position(
+                let (items, sources) = position(
                     runs,
                     &self.spaces,
                     style.align,
@@ -339,6 +343,7 @@ impl Prepared<'_> {
                         Defect::Hyphens => Flaw::Hyphens,
                         Defect::ShortLast => Flaw::ShortLast,
                     }),
+                    sources,
                 }
             })
             .collect())
@@ -606,16 +611,21 @@ fn leading_at(word: &Word, fragment: usize, offset: usize) -> f64 {
     }
 }
 
-/// The shaped runs of one line, each with its fragment, whether a space comes before it, and whether it
-/// starts the fragment. Fragments cut by a break are reshaped; the hyphen of a hyphenated line joins its
+/// A shaped run of one line.
+struct LineRun<'a> {
+    run: ShapedRun,
+    fragment: &'a Fragment,
+    /// The word whose space comes before the run, if one does.
+    space: Option<usize>,
+    /// Whether the run starts its fragment.
+    starts: bool,
+    /// Where the run's text is written, in a layout with a source map.
+    spans: Spans,
+}
+
+/// The shaped runs of one line. Fragments cut by a break are reshaped; the hyphen of a hyphenated line joins its
 /// fragment.
-fn line_runs<'a>(
-    words: &'a [Word],
-    start: Cursor,
-    end: Mark,
-    fonts: &Fonts,
-    lang: Lang,
-) -> Vec<(ShapedRun, &'a Fragment, Option<usize>, bool)> {
+fn line_runs<'a>(words: &'a [Word], start: Cursor, end: Mark, fonts: &Fonts, lang: Lang) -> Vec<LineRun<'a>> {
     let last_word = if end.at.fragment == 0 && end.at.offset == 0 {
         end.at.word
     } else {
@@ -643,6 +653,10 @@ fn line_runs<'a>(
                 continue;
             }
             let hyphen = at_end && end.hyphen;
+            let mut spans = fragment.spans.slice(low..high);
+            if hyphen && !spans.is_empty() {
+                spans.hyphenated(high - low);
+            }
             let run = if low == 0 && high == text.len() && !hyphen {
                 fragment.run.clone()
             } else {
@@ -662,17 +676,24 @@ fn line_runs<'a>(
                 )
             };
             let space = (first && index > start.word).then_some(index);
-            runs.push((run, fragment, space, low == 0));
+            runs.push(LineRun {
+                run,
+                fragment,
+                space,
+                starts: low == 0,
+                spans,
+            });
             first = false;
         }
     }
     runs
 }
 
-/// Positions the runs of one line of `available` width, starting at `indent`.
+/// Positions the runs of one line of `available` width, starting at `indent`. Also returns the spans of the text
+/// items, which refer to them by a number local to the line.
 #[allow(clippy::too_many_arguments)]
 fn position(
-    runs: Vec<(ShapedRun, &Fragment, Option<usize>, bool)>,
+    runs: Vec<LineRun>,
     spaces: &[f64],
     align: Align,
     available: f64,
@@ -680,20 +701,17 @@ fn position(
     last: bool,
     baseline: f64,
     underline: bool,
-) -> Vec<Item> {
-    let space_total: f64 = runs
-        .iter()
-        .filter_map(|(_, _, space, _)| space.map(|word| spaces[word]))
-        .sum();
-    let natural = space_total + runs.iter().map(|(run, ..)| run.width.0).sum::<f64>();
+) -> (Vec<Item>, Vec<Spans>) {
+    let space_total: f64 = runs.iter().filter_map(|run| run.space.map(|word| spaces[word])).sum();
+    let natural = space_total + runs.iter().map(|run| run.run.width.0).sum::<f64>();
     // Justified lines hang punctuation into the margins; every line ends at its last glyph, not
     // at the tracking after it.
     let (left, right) = match (runs.first(), runs.last()) {
-        (Some((first, ..)), Some((last, ..))) if align == Align::Justify => (
-            protrusion::leading(first, 0),
-            last.spacing.0 + protrusion::trailing(last, last.text.len()),
+        (Some(first), Some(last)) if align == Align::Justify => (
+            protrusion::leading(&first.run, 0),
+            last.run.spacing.0 + protrusion::trailing(&last.run, last.run.text.len()),
         ),
-        (_, Some((last, ..))) => (0.0, last.spacing.0),
+        (_, Some(last)) => (0.0, last.run.spacing.0),
         _ => (0.0, 0.0),
     };
     let slack = available + left + right - natural;
@@ -706,6 +724,7 @@ fn position(
     };
 
     let mut items = Vec::new();
+    let mut sources = Vec::new();
     let mut open_link: Option<usize> = None;
     let mut open_code: Option<(usize, usize)> = None;
     // The rectangles of the underline and strikethrough that run on from the previous fragment.
@@ -713,7 +732,14 @@ fn position(
     // The link whose text is marked, for tagging.
     let mut marked_link: Option<&Link> = None;
     let mut x = indent + start;
-    for (run, fragment, space, starts) in runs {
+    for LineRun {
+        run,
+        fragment,
+        space,
+        starts,
+        spans,
+    } in runs
+    {
         if let Some(word) = space {
             x += spaces[word] * (1.0 + adjust);
         }
@@ -805,7 +831,11 @@ fn position(
             });
             extend_line(&mut items, open, rect, fragment.color);
         }
-        let text = text_item(x, base, run, fragment.color);
+        let source = (!spans.is_empty()).then(|| {
+            sources.push(spans);
+            TextId::local(sources.len() - 1)
+        });
+        let text = mapped_item(x, base, run, fragment.color, source);
         match fragment.note {
             Some(note) => items.extend([Item::Begin(tags::Mark::Note(note)), text, Item::End]),
             None => items.push(text),
@@ -815,7 +845,7 @@ fn position(
     if marked_link.is_some() {
         items.push(Item::End);
     }
-    items
+    (items, sources)
 }
 
 /// Draws `rect`, a line under or through a fragment, or extends the open line `open` to its end, so the line
@@ -899,8 +929,18 @@ fn tokens(
     let mut anchors = Vec::new();
     // Margin notes referenced before any text, which go with the first fragment.
     let mut leading = Vec::new();
+    // Where the last written text ended, which text the engine made in between stands for.
+    let mut written_end = None;
+    let mut mapped = |spans: Spans, length: usize| {
+        let spans = match written_end {
+            Some(end) if spans.is_empty() => Spans::inserted(end),
+            _ => spans,
+        };
+        written_end = spans.end(length).or(written_end);
+        spans
+    };
     for (span, piece) in content.iter().enumerate() {
-        let (text, text_style) = match piece {
+        let (text, text_style, source) = match piece {
             Inline::LineBreak => {
                 finish(&mut word, &mut tokens);
                 tokens.push(Token::LineBreak);
@@ -920,7 +960,7 @@ fn tokens(
                 }
                 continue;
             }
-            Inline::Text { text, style } => (text, style),
+            Inline::Text { text, style, source } => (text, style, source),
             Inline::Anchor(id) => {
                 match word.fragments.last_mut() {
                     Some(fragment) => fragment.anchors.push(*id),
@@ -942,6 +982,7 @@ fn tokens(
                     return Err(problem);
                 }
                 word.fragments.push(Fragment {
+                    spans: mapped(Spans::default(), run.text.len()),
                     run,
                     color: style.color,
                     link: None,
@@ -985,11 +1026,11 @@ fn tokens(
             (size, 0.0)
         };
         let upper;
-        let text = if style.uppercase && !text_style.code {
+        let (text, source) = if style.uppercase && !text_style.code {
             upper = text.to_uppercase();
-            &upper
+            (&upper, source.uppercased(text))
         } else {
-            text
+            (text, source.clone())
         };
         let color = match (&text_style.link, text_style.code) {
             (Some(_), _) => inline.link_color,
@@ -1013,7 +1054,12 @@ fn tokens(
         // Small capitals are never hyphenated, since a word cut by a break is reshaped without them.
         let small_caps = text_style.small_caps && !text_style.code;
         let synthetic = small_caps && !fonts.has_small_caps(face);
+        let mut part_end = 0;
         for (index, part) in parts.into_iter().enumerate() {
+            // Parts are separated by one space.
+            let part_start = part_end + usize::from(index > 0);
+            part_end = part_start + part.len();
+            let part_spans = source.slice(part_start..part_end);
             if index > 0 {
                 finish(&mut word, &mut tokens);
                 let space = *space_widths
@@ -1028,17 +1074,23 @@ fn tokens(
                 continue;
             }
             if synthetic {
+                let mut piece_end = 0;
                 for (lower, piece) in case_runs(part) {
-                    let (piece, size) = if lower {
-                        (piece.to_uppercase(), Pt(size.0 * SYNTHETIC_SMALL_CAPS))
+                    let piece_start = piece_end;
+                    piece_end += piece.len();
+                    let piece_spans = part_spans.slice(piece_start..piece_end);
+                    let (piece, piece_spans, size) = if lower {
+                        let spans = piece_spans.uppercased(piece);
+                        (piece.to_uppercase(), spans, Pt(size.0 * SYNTHETIC_SMALL_CAPS))
                     } else {
-                        (piece.to_owned(), size)
+                        (piece.to_owned(), piece_spans, size)
                     };
                     let run = fonts.shape_with(&piece, face, size, lang, tracking, false, figures);
                     if let Some(problem) = missing_glyph(&run) {
                         return Err(problem);
                     }
                     word.fragments.push(Fragment {
+                        spans: mapped(piece_spans, piece.len()),
                         run,
                         color,
                         link: text_style.link.clone(),
@@ -1079,6 +1131,7 @@ fn tokens(
                 Breaks::Prose
             };
             word.fragments.push(Fragment {
+                spans: mapped(part_spans, part.len()),
                 run,
                 color,
                 link: text_style.link.clone(),

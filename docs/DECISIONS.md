@@ -1143,6 +1143,47 @@ Where the design was wrong or contradicts itself:
 - `Layout::pdf(&self, options)` in sections 2 and 5 against section 8's check per page, as above.
 - Section 7 lists `pipeline::load` and `Job::open_project` as printing in the engine. Neither does any more.
 
+## 2026-11-04: Phase 2 step 4, choices beyond the design
+
+The layout result and source map follow [the design](PHASE_2_API.md). These go beyond it or differ from it.
+
+- **A text item holds a `TextId`, and `SourceMap` holds the rest.** The design has `source: Option<TextSource>` on each item, with an `Arc<[Span]>`, and estimates 25,000 runs because it takes a run for a line fragment. A run is a fragment of a word, and the corpus has 39,645, so an allocation per run would not fit the estimate. A `TextId` is 4 bytes that fit in the padding of `Item::Text`, so an item stays 112 bytes with or without a map. A text is 8 bytes in the map, a place 8 more, and only runs of several pieces use more. `SourceMap::text` gives the design's `TextSource` for inspection.
+- **`TextId`s follow the written order.** The map sorts its texts by offset when a layout ends and renumbers the items. So `locate` is a binary search over all text and needs no table per block, and a table caption, written outside its table's range, is found like anything else. The design's "innermost block" decides only one case: a place in the syntax that starts a block goes to that block's first text.
+- **`position` is exact, and `nearest` is what a click wants.** `position` returns `None` for a byte the engine inserted, as the design says. The design also says a click on generated text yields the block's start. That is `nearest`, which does better where it can: inserted text records the place it stands for, so a click on a dash goes to its `--`, and a footnote marker or citation goes to where the word before it ends. Only text with no written text before it in its paragraph, such as a heading's number, goes to the block's start.
+- **`Span` in the map is 8 bytes and private; the public `Span` is built on request.** The public one has the design's fields, with `source` as a `SourcePos`.
+- **`Layout::hit`, `position_at`, and `locate` are in the engine.** The design leaves the hit test to the painter, but both directions then need the run's glyphs in the same way in every client. `Located::rect` is as tall as the run's size around its baseline, not the ink, since a face's metrics would need a parse.
+- **`Inline::Text` gets a `source` field.** A side table would have to follow layout's edits of content: lead-ins, drop capitals, typed numbers, and resolved citations. With the field, those edits slice it. Blocks do use a side table, `Document::sources`, keyed by location and kind, because they already carry a location and adding a field to all 18 variants changes more.
+- **Spans count in the document's whole text until the map is built.** A span can then cross nothing it should not: a comment splits it in the parser, and the chapter comes from the offset. `ChapterMap` gains each chapter's byte start and what its file has before that, a byte order mark. `ChapterId` is `u32`, since a `u16` could wrap.
+- **Running heads have no `TextId`.** The design lists them as generated text of a block. They are drawn after the pages and name a section, not a block, and a click on one has no clear target. Title blocks, page numbers, and watermarks have none either.
+- **`Structure` is the engine's `tags::Mark`, re-exported, with an opaque `StructureId`.** The design reduces it to a small enum, which would mean a second type and a conversion at every `Item::Begin` for values a painter skips. The element's kind stays private.
+- **`Picture::pixels` gives `Raster { width, height }`, not RGBA.** The engine keeps krilla's image and does not hold decoded samples of its own. Holding them for painters would double the memory of every image. `Picture::source` gives the file, as the desktop already reads it. `usvg::Tree` stays exposed for SVG, as the design has it.
+- **`Face::space` is a cmap lookup done once when a face is built,** so the PDF writer holds no shaper and `Layout::pdf` parses nothing. The bytes are unchanged on all samples and the corpus.
+- **`Layout` holds copies of the metadata, language, conformance, day, and source** instead of `Arc`s of the configuration and the document's text, so a layout keeps what it needs and not the manuscript.
+- **There is no `Layout::epub`.** An EPUB has no pages to reuse: readers set the text. `Configured::epub` stays where it is.
+- **`SourceMap::memory` is `#[doc(hidden)]`,** there so the measurement can run through the public crate.
+
+The desktop's painter moved to `druck::output` in this step, since the click needs the layout and `into_parts` could then go. It takes `Arc<Face>`s from the layout and is kept while they are the same objects.
+
+The desktop's click sync: a click on a page moves the galley caret to that text, and in Split gives the galley focus, and a moved caret shows a 2 px accent line on the page and scrolls the page to it if it is off screen. Pages set from an older revision of the text have other offsets, so a click on them does nothing and a caret move waits for the next layout. The app always asks for a map. The line's look has not been reviewed by the owner.
+
+Measured on the corpus in release builds, through the public crate, from a scratch project of the book with its 78 comments: 203 pages, 39,645 text items, 206,232 glyphs, 1,148 blocks, 27 chapters.
+
+- **Map memory:** 682,526 bytes, 0.68 MB, against the design's estimate of under 1 MB.
+- **Layout, median of 40, alternating in one process:** 273.1 ms without a map, 280.4 ms with one, 2.6 percent more.
+- **No map against the base build, median of 40, alternating in one process:** 285.9 ms base, 287.4 ms this build. Peak memory footprint 47.2 and 49.3 MB base, 47.7 and 47.8 MB this build, so no change shows. With a map the peak is 48.2 MB.
+- **Queries over all 39,317 mapped items:** `position_at` median 3.0 microseconds, maximum 37. `locate` median 83 nanoseconds, maximum 4.8 microseconds.
+- **Exactness:** all 199,114 written bytes hold the same text as their chapter's file and `locate` returns their item, with none wrong. 845 spans are inserted and 968 items generated.
+
+The click was proven through gpui's `Window::dispatch_event`, from a probe in a scratch build that is not committed, because mouse events sent with `CGEventPostToPid` never reached the window, focused or not, on this macOS. Keys sent that way do arrive, and caret moves were proven with them. A click from a real mouse is still to be tried.
+
+Temporary until step 5: `editor::engine::face_of`, which the galley's body style uses to find a face by family. `into_parts` and `FontSet` left the `editor` module here.
+
+Where the design was wrong or contradicts itself:
+
+- Section 6 estimates runs as line fragments, as above. The estimate holds anyway, because the map is stored differently.
+- Section 6 has `locate` take the layout. Numbering texts in written order and storing their places makes that unnecessary.
+- Section 6 lists smart punctuation as `None`, which `pulldown-cmark`'s events give, but its encoding says the parser "records whether the text is verbatim". Comparing the event's text with the source at its offset is what says so, and also handles entities, escapes, and code spans without a flag.
+
 ## Recording a decision
 
 Add a short dated entry when a choice affects future work. State the choice, reason, affected interface or behavior, and any unresolved consequence. Link to code, schema, or tests once they exist. Replace superseded guidance with a reference to the newer decision.

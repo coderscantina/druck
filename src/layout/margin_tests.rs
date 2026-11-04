@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::config::front_matter::FrontMatter;
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
-use crate::page::{Aside, NoteKind};
+use crate::output::{Aside, NoteKind};
 
 const PROSE: &str = "The design of a page begins with its proportions. A text block that is too wide tires the \
     eye, which must travel far to return to the start of the next line; a block that is too narrow breaks the \

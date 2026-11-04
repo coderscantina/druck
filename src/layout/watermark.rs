@@ -9,7 +9,7 @@ use super::paragraph;
 use crate::config::resolved::{Config, Watermark};
 use crate::config::template::{Placeholder, Value};
 use crate::config::values::Pt;
-use crate::page::{Item, Page};
+use crate::output::{Item, Page};
 use crate::text::Fonts;
 
 /// The share of the page width and height the turned line may fill.

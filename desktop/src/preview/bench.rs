@@ -115,7 +115,7 @@ impl Bench {
         let timing = layout.timing;
         eprintln!(
             "layout: {} pages in {:?} (configure {:?}, typeset {:?}, fingerprints {:?})",
-            layout.output.pages.len(),
+            layout.laid.pages().len(),
             self.requested.elapsed(),
             timing.configure,
             timing.typeset,
@@ -197,7 +197,7 @@ pub fn frame(
     bench.ticking = true;
     if let Some(round) = next_text {
         let text = edited(&bench.text, round);
-        view.request(text, cx);
+        view.request(text, round as u64, cx);
     }
     if start_ticking {
         cx.spawn(async move |this, cx| {
@@ -215,7 +215,7 @@ pub fn frame(
 /// Paints every page on one thread, then on the view's raster threads, and starts scrolling after.
 fn paint_all(layout: Arc<Layout>, resolution: f32, cx: &mut Context<PreviewView>) {
     let timed = cx.background_spawn(async move {
-        let count = layout.output.pages.len();
+        let count = layout.laid.pages().len();
         let start = Instant::now();
         paint_range(&layout.painter, &layout, 0, 1, resolution);
         let one = start.elapsed();
@@ -255,7 +255,7 @@ fn paint_all(layout: Arc<Layout>, resolution: f32, cx: &mut Context<PreviewView>
 }
 
 fn paint_range(painter: &Painter, layout: &Layout, offset: usize, every: usize, resolution: f32) {
-    for page in layout.output.pages.iter().skip(offset).step_by(every) {
+    for page in layout.laid.pages().iter().skip(offset).step_by(every) {
         std::hint::black_box(painter.paint(page, resolution));
     }
 }

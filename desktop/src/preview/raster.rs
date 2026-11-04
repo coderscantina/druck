@@ -9,8 +9,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use druck::editor::engine::{FaceId, FontSet, Image, Item, Page, Pixels, Rect, ShapedRun};
-use druck::editor::resolved_config::Color;
+use druck::output::{Color, Face, FaceId, Item, Layout, Page, Picture, Pixels, Rect, Run};
 use image::RgbaImage;
 use image::imageops::{self, FilterType};
 use resvg::tiny_skia::{self, FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Transform};
@@ -37,20 +36,21 @@ struct Outline {
     units_per_em: f32,
 }
 
-/// Paints pages with one set of loaded fonts. Shared by the threads that rasterize pages.
+/// Paints pages with one set of faces, which a layout's runs name by number. Shared by the threads that rasterize
+/// pages, and by layouts with the same faces, since it keeps their outlines.
 pub struct Painter {
     id: u64,
-    fonts: FontSet,
+    faces: Vec<Arc<Face>>,
     outlines: RwLock<HashMap<(FaceId, u16), Arc<Outline>>>,
     decoded: Mutex<HashMap<u64, Arc<Option<RgbaImage>>>>,
 }
 
 impl Painter {
-    pub fn new(fonts: FontSet) -> Self {
+    pub fn new(layout: &Layout) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
-            fonts,
+            faces: layout.faces().cloned().collect(),
             outlines: RwLock::default(),
             decoded: Mutex::default(),
         }
@@ -60,8 +60,10 @@ impl Painter {
         self.id
     }
 
-    pub fn fonts(&self) -> &FontSet {
-        &self.fonts
+    /// Whether `layout` has these faces. The renderer gives unchanged fonts the same faces, so a replaced file
+    /// makes a new painter.
+    pub fn draws(&self, layout: &Layout) -> bool {
+        layout.faces().count() == self.faces.len() && layout.faces().zip(&self.faces).all(|(a, b)| Arc::ptr_eq(a, b))
     }
 
     /// The whole `page` at `resolution` pixels per point, on white as on paper. Links, anchors, and tag marks
@@ -73,7 +75,7 @@ impl Painter {
         let base = Transform::from_scale(resolution, resolution);
         for item in &page.items {
             match item {
-                Item::Text { x, y, run, color } => {
+                Item::Text { x, y, run, color, .. } => {
                     self.draw_run(&mut pixmap, base, run, x.0 as f32, y.0 as f32, *color);
                 }
                 Item::TurnedText {
@@ -99,14 +101,14 @@ impl Painter {
                         pixmap.fill_rect(area, &solid(*color), base, None);
                     }
                 }
-                Item::Image { rect, image } => self.draw_image(&mut pixmap, base, resolution, rect, image),
+                Item::Image { rect, picture } => self.draw_image(&mut pixmap, base, resolution, rect, picture),
                 Item::Link { .. } | Item::Anchor { .. } | Item::Begin(_) | Item::End => {}
             }
         }
         pixmap
     }
 
-    fn draw_run(&self, pixmap: &mut Pixmap, base: Transform, run: &ShapedRun, x: f32, y: f32, color: Color) {
+    fn draw_run(&self, pixmap: &mut Pixmap, base: Transform, run: &Run, x: f32, y: f32, color: Color) {
         let paint = solid(color);
         let size = run.size.0 as f32;
         let mut pen = x;
@@ -142,12 +144,12 @@ impl Painter {
     }
 
     fn load_outline(&self, face: FaceId, glyph: u16) -> Outline {
-        let source = self.fonts.outlines(face);
-        let font = FontRef::from_index(source.data, source.index).expect("the engine has parsed this face");
+        let source = &self.faces[face.0];
+        let font = FontRef::from_index(source.data(), source.index()).expect("the engine has parsed this face");
         let units_per_em = f32::from(font.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
         let location = font.axes().location(
             source
-                .coordinates
+                .coordinates()
                 .iter()
                 .map(|(tag, value)| (skrifa::Tag::new(tag), *value)),
         );
@@ -160,7 +162,7 @@ impl Painter {
         Outline { path, units_per_em }
     }
 
-    fn draw_image(&self, pixmap: &mut Pixmap, base: Transform, resolution: f32, rect: &Rect, image: &Image) {
+    fn draw_image(&self, pixmap: &mut Pixmap, base: Transform, resolution: f32, rect: &Rect, image: &Picture) {
         let (x, y) = (rect.x.0 as f32, rect.y.0 as f32);
         let (width, height) = (rect.width.0 as f32, rect.height.0 as f32);
         match image.pixels() {
@@ -171,7 +173,7 @@ impl Painter {
                     .pre_scale(width / size.width(), height / size.height());
                 resvg::render(tree, at, &mut pixmap.as_mut());
             }
-            Pixels::Raster(_) => {
+            Pixels::Raster { .. } => {
                 let target = (
                     (width * resolution).round() as u32,
                     (height * resolution).round() as u32,
@@ -187,7 +189,7 @@ impl Painter {
     }
 
     /// The image at exactly `target` pixels, premultiplied. The engine has already validated the file.
-    fn scaled_raster(&self, image: &Image, (width, height): (u32, u32)) -> Option<Pixmap> {
+    fn scaled_raster(&self, image: &Picture, (width, height): (u32, u32)) -> Option<Pixmap> {
         let decoded = self.decoded(image.source());
         let source = decoded.as_ref().as_ref()?;
         let size = IntSize::from_wh(width, height)?;
@@ -233,7 +235,7 @@ pub fn fingerprint(page: &Page) -> u64 {
     page.height.0.to_bits().hash(&mut hasher);
     for item in &page.items {
         match item {
-            Item::Text { x, y, run, color } => {
+            Item::Text { x, y, run, color, .. } => {
                 (0_u8, x.0.to_bits(), y.0.to_bits(), color.0).hash(&mut hasher);
                 hash_run(run, &mut hasher);
             }
@@ -252,10 +254,10 @@ pub fn fingerprint(page: &Page) -> u64 {
                 hash_rect(rect, &mut hasher);
                 color.0.hash(&mut hasher);
             }
-            Item::Image { rect, image } => {
+            Item::Image { rect, picture } => {
                 3_u8.hash(&mut hasher);
                 hash_rect(rect, &mut hasher);
-                Hash::hash(&image.source().hash(), &mut hasher);
+                Hash::hash(&picture.source().hash(), &mut hasher);
             }
             Item::Link { .. } | Item::Anchor { .. } | Item::Begin(_) | Item::End => {}
         }
@@ -263,7 +265,7 @@ pub fn fingerprint(page: &Page) -> u64 {
     hasher.finish()
 }
 
-fn hash_run(run: &ShapedRun, hasher: &mut DefaultHasher) {
+fn hash_run(run: &Run, hasher: &mut DefaultHasher) {
     (run.face, run.size.0.to_bits()).hash(hasher);
     for glyph in &run.glyphs {
         (
@@ -322,7 +324,6 @@ mod tests {
     use std::path::Path as FilePath;
 
     use druck::cancel::Cancel;
-    use druck::editor::resolved_config::{FontStyle, Lang, Weight};
     use druck::output::Pt;
 
     use super::*;
@@ -385,10 +386,10 @@ mod tests {
     }
 
     /// A shaped run from the sample, the first on its first page.
-    fn first_run(layout: &super::super::job::Layout) -> ShapedRun {
+    fn first_run(layout: &super::super::job::Layout) -> Run {
         let run = layout
-            .output
-            .pages
+            .laid
+            .pages()
             .iter()
             .flat_map(|page| &page.items)
             .find_map(|item| match item {
@@ -411,6 +412,7 @@ mod tests {
                 y,
                 run: run.clone(),
                 color,
+                source: None,
             }]),
             4.0,
         );
@@ -468,41 +470,34 @@ mod tests {
     #[test]
     fn variable_fonts_draw_at_the_instance_they_were_shaped_for() {
         let font = FilePath::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/fonts/PublicSans.ttf");
-        let theme = format!(
-            r#"{{"version": 1, "fonts": {{"Var": {{"regular": {{"file": {:?}, "variable": true}}}}}}}}"#,
-            font.display()
-        );
         let dir = std::env::temp_dir().join(format!("druck-preview-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp folder");
-        let theme_path = dir.join("variable.json");
-        std::fs::write(&theme_path, theme).expect("theme");
-        let typeset =
-            Typesetter::new(&dir.join("doc.md"), Some(theme_path)).run("Body\n".to_owned(), &Cancel::default());
-        std::fs::remove_dir_all(&dir).expect("temp folder");
-        let Ok(layout) = typeset else {
-            panic!("the theme is valid and the font loads")
-        };
-        let painter = layout.painter;
-        let shaper = painter.fonts().fonts();
-        let shaped: Vec<_> = [100, 900]
+        let ink: Vec<usize> = [100, 900]
             .map(|weight| {
-                let face = painter.fonts().face("Var", Weight::of_font(weight), FontStyle::Normal);
-                shaper.shape("Hamburg", face, Pt(12.0), Lang::En)
-            })
-            .into();
-        let ink: Vec<usize> = shaped
-            .into_iter()
-            .map(|run| {
+                let theme = format!(
+                    r#"{{"version": 1, "fonts": {{"Var": {{"regular": {{"file": {:?}, "variable": true}}}}}},
+                        "styles": {{"body": {{"font": "Var", "weight": {weight}}}}}}}"#,
+                    font.display()
+                );
+                let theme_path = dir.join("variable.json");
+                std::fs::write(&theme_path, theme).expect("theme");
+                let typeset = Typesetter::new(&dir.join("doc.md"), Some(theme_path))
+                    .run("Hamburg\n".to_owned(), &Cancel::default());
+                let Ok(layout) = typeset else {
+                    panic!("the theme is valid and the font loads")
+                };
                 let text = Item::Text {
                     x: Pt(5.0),
                     y: Pt(50.0),
-                    run,
+                    run: first_run(&layout),
                     color: Color([0, 0, 0]),
+                    source: None,
                 };
-                let pixmap = painter.paint(&page(vec![text]), 4.0);
+                let pixmap = layout.painter.paint(&page(vec![text]), 4.0);
                 pixmap.pixels().iter().filter(|pixel| pixel.red() < 128).count()
             })
-            .collect();
+            .into();
+        std::fs::remove_dir_all(&dir).expect("temp folder");
         assert!(
             ink[1] > ink[0] * 2,
             "weight 900 is much darker than weight 100: {ink:?}"
@@ -523,8 +518,8 @@ mod tests {
             let path = fixtures.join(name);
             let extension = path.extension().and_then(|e| e.to_str()).expect("extension");
             let data = std::fs::read(&path).expect("fixture");
-            let image = Image::decode(data, extension).expect("decodes");
-            let pixmap = layout.painter.paint(&page(vec![Item::Image { rect, image }]), 2.0);
+            let picture = Picture::decode(data, extension).expect("decodes");
+            let pixmap = layout.painter.paint(&page(vec![Item::Image { rect, picture }]), 2.0);
             let inside = (20..120).any(|x| (20..120).any(|y| pixel(&pixmap, x, y) != [255, 255, 255]));
             assert!(inside, "{name} draws inside its rect");
             assert_eq!(pixel(&pixmap, 5, 5), [255, 255, 255], "{name} stays inside its rect");

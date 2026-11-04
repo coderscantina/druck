@@ -256,6 +256,7 @@ mod tests {
         Inline::Text {
             text: text.to_owned(),
             style: InlineStyle::default(),
+            source: Default::default(),
         }
     }
 
@@ -308,6 +309,7 @@ mod tests {
                 todo: true,
                 ..InlineStyle::default()
             },
+            source: Default::default(),
         };
         let statistics = count(vec![paragraph(vec![text("Two words. "), todo])], Lang::En);
         assert_eq!((statistics.words, statistics.chars), (2, "Two words.".len()));

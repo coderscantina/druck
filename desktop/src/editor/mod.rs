@@ -192,6 +192,11 @@ pub struct TextChanged;
 
 impl EventEmitter<TextChanged> for EditorView {}
 
+/// The caret moved, to this byte of the text.
+pub struct CaretMoved(pub usize);
+
+impl EventEmitter<CaretMoved> for EditorView {}
+
 pub struct EditorView {
     focus: FocusHandle,
     path: Option<PathBuf>,
@@ -393,6 +398,9 @@ impl EditorView {
     }
 
     fn set_selection(&mut self, selection: Selection, upstream: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if selection.head != self.selection.head {
+            cx.emit(CaretMoved(selection.head));
+        }
         self.selection = selection;
         self.upstream = upstream;
         self.goal_x = None;

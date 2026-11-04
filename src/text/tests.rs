@@ -342,7 +342,7 @@ fn variable_files_supply_weights_and_separate_italics_with_matching_pdf_instance
                 &[(krilla::text::Tag::new(b"wght"), weight as f32)],
             )
             .unwrap();
-            assert_eq!(fonts.pdf_font(id), &expected);
+            assert_eq!(fonts.set().pdf_font(id), &expected);
         }
     }
     assert_ne!(widths[0], widths[6], "weight changes measured advances");
@@ -351,7 +351,7 @@ fn variable_files_supply_weights_and_separate_italics_with_matching_pdf_instance
     files.insert("bold".parse().unwrap(), bundled("LibertinusSerif-Bold.otf"));
     let fonts = load(files);
     let id = fonts.face("Test", Weight::BOLD, FontStyle::Normal);
-    assert!(fonts.file(id).contains("LibertinusSerif-Bold"));
+    assert!(fonts.set().file(id).contains("LibertinusSerif-Bold"));
 }
 
 /// Replaces the fixture's weight axis in memory to exercise italic and bounded ranges.

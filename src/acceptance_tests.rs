@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
-use crate::page::{Item, Output};
+use crate::output::{Item, Output};
 use crate::renderer::{LayoutOptions, PdfOptions, Renderer};
 use crate::resource::FileResolver;
 

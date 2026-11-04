@@ -1,7 +1,9 @@
 //! Faces kept across jobs. A [`Face`] owns its font file and everything that can outlive a job: the handle the
-//! PDF writer embeds and the shape plans. A job parses its own borrowed `rustybuzz::Face` from it.
+//! PDF writer embeds and the shape plans. A job parses its own borrowed `rustybuzz::Face` from it. Which file a face
+//! came from belongs to the job, since the same bytes may sit under another name in the next one.
 
 use std::collections::HashMap;
+use std::fmt;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,14 +19,15 @@ use crate::resource::Bytes;
 /// What decides a shape plan of a face: the script, the language, and the values of the features.
 pub(super) type PlanKey = (rustybuzz::Script, &'static str, [u32; 7]);
 
-/// One instance of a font file. Immutable once built, apart from plans it gains.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
+/// One instance of a font file, shared and immutable. It is all a painter needs to draw a run's glyphs.
 pub struct Face {
     data: Bytes,
     index: u32,
     /// The instance, by axis tag, in the axis's own units.
     coordinates: Vec<([u8; 4], f32)>,
     pdf: krilla::text::Font,
+    /// The glyph of a space, if the font has one.
+    space: Option<u16>,
     /// Whether the font's OS/2 `fsType` restricts embedding or subsetting.
     restricted: bool,
     /// Building a plan takes about as long as shaping a word with it, and a document needs few of them. A plan
@@ -32,21 +35,35 @@ pub struct Face {
     plans: RwLock<HashMap<PlanKey, Arc<rustybuzz::ShapePlan>>>,
 }
 
+impl fmt::Debug for Face {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Face({} bytes, index {})", self.data.len(), self.index)
+    }
+}
+
 impl Face {
+    /// The font file.
     pub fn data(&self) -> &Bytes {
         &self.data
     }
 
+    /// The face's index in its file, for collections.
     pub fn index(&self) -> u32 {
         self.index
     }
 
+    /// The variation instance, by axis tag, in the axis's own units.
     pub fn coordinates(&self) -> &[([u8; 4], f32)] {
         &self.coordinates
     }
 
     pub(super) fn pdf(&self) -> &krilla::text::Font {
         &self.pdf
+    }
+
+    /// The glyph of a space, if the font has one.
+    pub(crate) fn space(&self) -> Option<u16> {
+        self.space
     }
 
     pub(super) fn restricted(&self) -> bool {
@@ -123,6 +140,7 @@ impl FaceCache {
             index: file.index,
             coordinates,
             pdf,
+            space: buzz.glyph_index(' ').map(|glyph| glyph.0).filter(|id| *id != 0),
             restricted: super::restricts_embedding(&buzz),
             plans: RwLock::default(),
         });

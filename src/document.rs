@@ -6,6 +6,7 @@
 use crate::bibliography::syntax;
 use crate::config::template::Placeholder;
 use crate::config::theme::CalloutKind;
+use crate::source_map::{Sources, Spans};
 
 /// A 1-based line and column in a source file. Columns count characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub struct Document {
     pub index_marks: Vec<IndexMark>,
     /// The `{todo: text}` placeholders in source order. A final export fails while any remain.
     pub todos: Vec<Todo>,
+    /// Where the blocks are written, when a source map was asked for.
+    pub sources: Option<Sources>,
 }
 
 /// A `{todo: text}` placeholder: a note to the author that shows in the output. Its text is also set in
@@ -306,8 +309,13 @@ pub enum ColumnAlign {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Inline {
-    /// Text without line breaks. Soft breaks become a single space in the surrounding text.
-    Text { text: String, style: InlineStyle },
+    /// Text without line breaks. Soft breaks become a single space in the surrounding text. `source` says where
+    /// its bytes are written, when a source map was asked for and the parser read it from the document.
+    Text {
+        text: String,
+        style: InlineStyle,
+        source: Spans,
+    },
     /// A hard line break.
     LineBreak,
     /// A footnote reference: an index into [`Document::footnotes`].

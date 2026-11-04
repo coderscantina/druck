@@ -238,7 +238,8 @@ fn join(chapters: &[ReadChapter], manifest: PathBuf) -> Result<(ChapterMap, Stri
             Err(message) => errors.push(Diagnostic::new(Some(source), message).at(1, 1)),
         }
         let body = text.strip_prefix('\u{feff}').unwrap_or(&text);
-        map.push(path.clone(), next_line, body.lines().count() as u64);
+        let skip = text.len() - body.len();
+        map.push(path.clone(), next_line, body.lines().count() as u64, joined.len(), skip);
         joined.push_str(body);
         if !body.is_empty() && !body.ends_with('\n') {
             joined.push('\n');

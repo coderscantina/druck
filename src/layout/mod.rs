@@ -64,6 +64,7 @@ mod watermark;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::Path;
 
 use self::fields::Fields;
 use self::notes::NoteStyles;
@@ -81,8 +82,9 @@ use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location, Matter, Placement};
 use crate::highlight;
 use crate::image::Image;
-use crate::page::{Bookmark, Item, Output, Page, Position, Rect};
+use crate::output::{Bookmark, Item, Output, Page, Position, Rect};
 use crate::renderer::Failure;
+use crate::source_map::{BlockKind, SourceMap, Sources, Spans, TextId, Texts};
 use crate::tags::{self, Id, Kind, Mark, Tree};
 use crate::text::{Fonts, ShapedRun};
 
@@ -95,6 +97,8 @@ const DROP_CAP_GAP: f64 = 0.25;
 
 /// The most layout passes spent on page numbers that change the layout they come from.
 const PASSES: usize = 5;
+/// The spaces code sets for a tab.
+const TAB: usize = 4;
 
 /// Lays out `document` on pages with its title, table of contents, bibliography, headers, and footers.
 /// `cited` holds its formatted citations, `images` the loaded [`Document::images`], and `theme_images`
@@ -112,6 +116,7 @@ pub fn layout(
     config: &Config,
     fonts: &Fonts,
     source: &InputSource,
+    document_path: &Path,
     today: Date,
     cancel: &Cancel,
 ) -> Result<Output, Failure> {
@@ -162,6 +167,7 @@ pub fn layout(
             mut body,
             numbering,
             tags,
+            texts,
         },
         anchors,
     ) = settle(&structure.anchors, &shown, source, cancel, |assumed| pass.run(assumed))?;
@@ -193,6 +199,8 @@ pub fn layout(
     bands::draw(
         &mut pages, pass.first, &blanks, &structure, &anchors, &numbering, config, &fields, fonts,
     )?;
+    let source_map = (texts.zip(document.sources.as_ref()))
+        .map(|(texts, sources)| SourceMap::build(texts, sources, &mut pages, source, document_path));
     let outline = structure
         .headings
         .iter()
@@ -219,6 +227,7 @@ pub fn layout(
         tags,
         asides,
         warnings,
+        source_map,
     })
 }
 
@@ -247,6 +256,7 @@ pub(crate) fn uncancelled(
         config,
         fonts,
         source,
+        Path::new("test.md"),
         today,
         &cancel,
     )
@@ -375,7 +385,7 @@ impl Pass<'_> {
     /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages with the
     /// numbers of all pages, where each anchor is in the whole document, and the number each page shows.
     fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Failure> {
-        let (content, matters, tags) = self.content(assumed)?;
+        let (content, matters, tags, texts) = self.content(assumed)?;
         let body = pages::compose(content, self.first, self.config, self.source, self.cancel)?;
         let mut positions = vec![None; self.structure.anchors.len()];
         for (index, page) in body.pages.iter().enumerate() {
@@ -403,12 +413,22 @@ impl Pass<'_> {
             .collect();
         let numbering = Numbering::new(self.first + body.pages.len(), &starts, self.config);
         let numbers = numbering.texts();
-        Ok((Laid { body, numbering, tags }, positions, numbers))
+        Ok((
+            Laid {
+                body,
+                numbering,
+                tags,
+                texts,
+            },
+            positions,
+            numbers,
+        ))
     }
 
     /// Sets the body and the footnotes as lines with their break rules, with `assumed` page numbers for
-    /// the anchors. Also returns the line each part of the book starts at and the document's elements.
-    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts, Tree), Failure> {
+    /// the anchors. Also returns the line each part of the book starts at, the document's elements, and the text
+    /// items for a source map.
+    fn content(&self, assumed: &[String]) -> Result<(pages::Content, Parts, Tree, Option<Texts>), Failure> {
         let config = self.config;
         let mut flow = Flow {
             config,
@@ -444,6 +464,9 @@ impl Pass<'_> {
             leaf: None,
             errors: Vec::new(),
             cancel: self.cancel,
+            sources: self.document.sources.as_ref(),
+            texts: self.document.sources.as_ref().map(|_| Texts::default()),
+            block: None,
         };
         let frame = Frame::prose(&config.styles.body, &config.page);
         if !config.document.title_page
@@ -504,7 +527,7 @@ impl Pass<'_> {
             floats,
             margin,
         };
-        Ok((content, matters, flow.tags))
+        Ok((content, matters, flow.tags, flow.texts))
     }
 }
 
@@ -513,6 +536,7 @@ struct Laid {
     body: pages::Composed,
     numbering: Numbering,
     tags: Tree,
+    texts: Option<Texts>,
 }
 
 /// The line each part of a book starts at, in order.
@@ -542,6 +566,18 @@ struct Line {
     hyphenated: bool,
     /// The paragraph rule the line breaks, since no better break was found.
     flaw: Option<Flaw>,
+    /// The spans of the items whose [`TextId`] is local to this line, until the flow adopts them.
+    sources: Vec<Spans>,
+}
+
+impl Line {
+    /// Keeps `spans` for a text item of this line, and returns the number to give the item.
+    fn source(&mut self, spans: Spans) -> Option<TextId> {
+        (!spans.is_empty()).then(|| {
+            self.sources.push(spans);
+            TextId::local(self.sources.len() - 1)
+        })
+    }
 }
 
 /// A paragraph rule a line breaks, reported as a warning.
@@ -701,6 +737,12 @@ struct Flow<'a> {
     leaf: Option<Id>,
     errors: Vec<Diagnostic>,
     cancel: &'a Cancel,
+    /// Where the document's blocks are written, when a source map was asked for.
+    sources: Option<&'a Sources>,
+    /// The text items so far, when a source map was asked for.
+    texts: Option<Texts>,
+    /// The block being set, whose text items get its number.
+    block: Option<u32>,
 }
 
 /// The elements a [`Flow::close`] returns to.
@@ -736,6 +778,7 @@ impl<'a> Flow<'a> {
                 let space = Inline::Text {
                     text: " ".to_owned(),
                     style: InlineStyle::default(),
+                    source: Spans::default(),
                 };
                 content.splice(0..0, [marker, space]);
             }
@@ -759,6 +802,7 @@ impl<'a> Flow<'a> {
                 emphasis: true,
                 ..InlineStyle::default()
             },
+            source: Spans::default(),
         };
         let content = vec![Inline::FootnoteRef(index), label];
         let frame = Frame::prose(&self.config.styles.footnote, &self.config.page);
@@ -790,11 +834,19 @@ impl<'a> Flow<'a> {
     }
 
     fn blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
+        let around = self.block;
+        self.set_blocks(blocks, frame);
+        self.block = around;
+    }
+
+    fn set_blocks(&mut self, blocks: &[Block], frame: Frame<'a>) {
+        let around = self.block;
         let mut previous: Option<&Block> = None;
         for block in blocks {
             if self.cancel.stopped(CheckPoint::Block) {
                 return;
             }
+            self.block = self.block_of(block).or(around);
             let kind = match block {
                 Block::Table { .. } => Some(WideBlock::Table),
                 Block::Image { .. } => Some(WideBlock::Figure),
@@ -895,6 +947,7 @@ impl<'a> Flow<'a> {
                             let number = [Inline::Text {
                                 text,
                                 style: InlineStyle::default(),
+                                source: Spans::default(),
                             }];
                             // The number takes the heading's place at the top, and its own space after
                             // separates it from the heading text.
@@ -954,13 +1007,13 @@ impl<'a> Flow<'a> {
                     self.space(style.space_after.0);
                 }
                 Block::Code {
+                    at,
                     first_line,
                     language,
                     lines,
-                    ..
                 } => {
                     let scope = self.open(Kind::Code, true);
-                    self.code(*first_line, language.as_deref(), lines, frame);
+                    self.code(*at, *first_line, language.as_deref(), lines, frame);
                     self.close(scope);
                 }
                 Block::Image { .. } | Block::Table { .. } => self.figure_or_table(block, frame),
@@ -1128,6 +1181,7 @@ impl<'a> Flow<'a> {
                 marks: Vec::new(),
                 hyphenated: false,
                 flaw: None,
+                sources: Vec::new(),
             };
             self.push(sink, at, Break::Never);
         }
@@ -1157,12 +1211,13 @@ impl<'a> Flow<'a> {
             baseline: height,
             items: vec![Item::Image {
                 rect,
-                image: image.clone(),
+                picture: image.clone(),
             }],
             notes: Vec::new(),
             marks: Vec::new(),
             hyphenated: false,
             flaw: None,
+            sources: Vec::new(),
         };
         self.push(line, at, Break::Never);
         self.space(style.space_after.0);
@@ -1181,6 +1236,7 @@ impl<'a> Flow<'a> {
                 let content = [Inline::Text {
                     text: text.clone(),
                     style: InlineStyle::default(),
+                    source: Spans::default(),
                 }];
                 match self.set(&content, style, width - 2.0 * style.indent.0, 0.0) {
                     Ok(lines) => lines
@@ -1214,12 +1270,13 @@ impl<'a> Flow<'a> {
                     baseline: height,
                     items: vec![Item::Image {
                         rect,
-                        image: image.clone(),
+                        picture: image.clone(),
                     }],
                     notes: Vec::new(),
                     marks: Vec::new(),
                     hyphenated: false,
                     flaw: None,
+                    sources: Vec::new(),
                 }]
             }
         };
@@ -1240,7 +1297,7 @@ impl<'a> Flow<'a> {
         let chapters = &self.config.chapters;
         let content = lead_in(content, chapters.lead_in);
         let span = chapters.drop_cap;
-        let Some((initial, rest)) = (span > 0).then(|| drop_initial(&content)).flatten() else {
+        let Some((initial, initial_spans, rest)) = (span > 0).then(|| drop_initial(&content)).flatten() else {
             self.text_block(at, &content, style, frame, 0.0, Role::Text);
             return;
         };
@@ -1279,7 +1336,8 @@ impl<'a> Flow<'a> {
         };
         let baseline = lines[..span - 1].iter().map(|line| line.height).sum::<f64>() + lines[span - 1].baseline;
         // First in the line and joined to the text after it, so the letter is read as the start of its word.
-        let initial = text_item(0.0, baseline, run, style.color);
+        let source = lines[0].source(initial_spans);
+        let initial = mapped_item(0.0, baseline, run, style.color, source);
         lines[0]
             .items
             .splice(0..0, [Item::Begin(Mark::Joined), initial, Item::End]);
@@ -1376,9 +1434,10 @@ impl<'a> Flow<'a> {
         };
         let first = self.lines.len();
         self.text_block(at, content, style, text, 0.0, Role::Heading(anchor));
+        let source = self.generated(self.block);
         if let Some(line) = self.lines.get_mut(first) {
             let y = line.line.baseline;
-            tags::prepend(&mut line.line.items, text_item(x, y, run, style.color));
+            tags::prepend(&mut line.line.items, mapped_item(x, y, run, style.color, source));
         }
     }
 
@@ -1514,7 +1573,8 @@ impl<'a> Flow<'a> {
                         unbreakable: true,
                         ..reference.style.clone()
                     };
-                    resolved.push(Inline::Text { text, style });
+                    let source = Spans::default();
+                    resolved.push(Inline::Text { text, style, source });
                 }
                 Inline::Citation { index, style } => {
                     resolved.extend(self.cited.citations[*index].iter().map(|part| Inline::Text {
@@ -1523,11 +1583,13 @@ impl<'a> Flow<'a> {
                             link: part.target.map(|target| Link::Anchor(self.structure.entries[target])),
                             ..style.clone()
                         },
+                        source: Spans::default(),
                     }));
                 }
                 Inline::Field { placeholder, style, .. } => resolved.push(Inline::Text {
                     text: self.fields.text(placeholder).expect("fields are checked before layout"),
                     style: style.clone(),
+                    source: Spans::default(),
                 }),
                 Inline::IndexMark(mark) => resolved.push(Inline::Anchor(self.structure.marks[*mark])),
                 inline => resolved.push(inline.clone()),
@@ -1604,9 +1666,12 @@ impl<'a> Flow<'a> {
             }
             self.close(body);
             self.close(list_item);
+            let y = self.lines[first].line.baseline;
+            // A marker goes to the text of its item.
+            let block = item.first().and_then(|block| self.block_of(block)).or(self.block);
+            let source = self.generated(block);
             let line = &mut self.lines[first].line;
-            let y = line.baseline;
-            let marker = text_item(x, y, run, marker_style.color);
+            let marker = mapped_item(x, y, run, marker_style.color, source);
             line.items
                 .extend([Item::Begin(Mark::Element(label)), marker, Item::End]);
         }
@@ -1716,7 +1781,7 @@ impl<'a> Flow<'a> {
         };
         let mut items = vec![Item::Image {
             rect,
-            image: image.clone(),
+            picture: image.clone(),
         }];
         if let Some(figure) = figure {
             items.push(anchor_item(figure.anchor, frame.left));
@@ -1729,6 +1794,7 @@ impl<'a> Flow<'a> {
             marks: Vec::new(),
             hyphenated: false,
             flaw: None,
+            sources: Vec::new(),
         };
         let count = caption.len();
         let after = if count == 0 { Break::Allowed(0.0) } else { Break::Never };
@@ -1767,6 +1833,7 @@ impl<'a> Flow<'a> {
         let label = Inline::Text {
             text: format!("{label} {number}{}", self.config.caption_separator),
             style: InlineStyle::default(),
+            source: Spans::default(),
         };
         let content: Vec<Inline> = std::iter::once(label).chain(caption.iter().cloned()).collect();
         let mut width = width - 2.0 * style.indent.0;
@@ -1804,7 +1871,7 @@ impl<'a> Flow<'a> {
     }
 
     /// Code lines are set as they are. A line wider than the available width is an error.
-    fn code(&mut self, first_line: u64, language: Option<&str>, lines: &[String], frame: Frame<'a>) {
+    fn code(&mut self, at: Location, first_line: u64, language: Option<&str>, lines: &[String], frame: Frame<'a>) {
         let style = if self.in_notes {
             &self.notes.code_block
         } else {
@@ -1814,7 +1881,8 @@ impl<'a> Flow<'a> {
         let width = self.width(frame) - 2.0 * style.indent.0;
         let x = frame.left + style.indent.0;
         self.space(style.space_before.0);
-        let lines: Vec<String> = lines.iter().map(|text| text.replace('\t', "    ")).collect();
+        let written = lines;
+        let lines: Vec<String> = lines.iter().map(|text| text.replace('\t', &" ".repeat(TAB))).collect();
         let palette = self.config.highlight.as_ref();
         let spans = language
             .zip(palette)
@@ -1840,13 +1908,23 @@ impl<'a> Flow<'a> {
                     );
                     self.errors.push(self.error(line_at, message));
                 }
+                let source = (self.sources.and_then(|sources| sources.code_line(at, index)))
+                    .map_or_else(Spans::default, |source| source.detabbed(&written[index], TAB));
                 match (&spans, palette) {
                     (Some(spans), Some(palette)) => {
+                        let mut byte = 0;
                         for (dx, run, color) in highlighted::split(run, &spans[index], palette, style.color) {
-                            line.items.push(text_item(x + dx.0, line.baseline, run, color));
+                            let next = byte + run.text.len();
+                            let source = line.source(source.slice(byte..next));
+                            line.items
+                                .push(mapped_item(x + dx.0, line.baseline, run, color, source));
+                            byte = next;
                         }
                     }
-                    _ => line.items.push(text_item(x, line.baseline, run, style.color)),
+                    _ => {
+                        let source = line.source(source);
+                        line.items.push(mapped_item(x, line.baseline, run, style.color, source));
+                    }
                 }
             }
             self.push(line, line_at, pages::line_break(index, lines.len()));
@@ -1866,6 +1944,7 @@ impl<'a> Flow<'a> {
             marks: Vec::new(),
             hyphenated: false,
             flaw: None,
+            sources: Vec::new(),
         }
     }
 
@@ -1877,6 +1956,7 @@ impl<'a> Flow<'a> {
         } else {
             after
         };
+        self.adopt(&mut line);
         line.items = self.tag(std::mem::take(&mut line.items));
         if let Some(element) = self.leaf.filter(|_| !self.in_notes) {
             for &(note, _) in &line.marks {
@@ -1895,6 +1975,45 @@ impl<'a> Flow<'a> {
             callout: None,
             rule: None,
         });
+    }
+
+    /// Gives the text items of `line` their numbers in the document: from the spans the line holds, or as text the
+    /// engine generated for the block being set. Does nothing without a source map.
+    fn adopt(&mut self, line: &mut Line) {
+        let Some(texts) = &mut self.texts else {
+            return;
+        };
+        let block = self.block;
+        let mut held = std::mem::take(&mut line.sources);
+        for item in &mut line.items {
+            let Item::Text { source, .. } = item else {
+                continue;
+            };
+            match (&*source, block) {
+                (Some(id), Some(block)) if id.is_local() => {
+                    *source = Some(texts.add(block, std::mem::take(&mut held[id.index()])));
+                }
+                // Text set outside every block, such as a title, has no place in the map.
+                (Some(id), None) if id.is_local() => *source = None,
+                (Some(_), _) | (None, None) => {}
+                (None, Some(block)) => *source = Some(texts.add(block, Spans::default())),
+            }
+        }
+    }
+
+    /// The number of a block of the document, if a source map was asked for.
+    fn block_of(&self, block: &Block) -> Option<u32> {
+        self.sources?.block_of(block)
+    }
+
+    /// The number for an item of generated text in `block`, added after its line was pushed.
+    fn generated(&mut self, block: Option<u32>) -> Option<TextId> {
+        Some(self.texts.as_mut()?.add(block?, Spans::default()))
+    }
+
+    /// The block of the heading at `at`, for what the engine sets on its behalf.
+    fn heading_block(&self, at: Location, level: u8) -> Option<u32> {
+        self.sources?.block_at(at, BlockKind::Heading(level))
     }
 
     /// Opens an element of `kind` in the current one. Until [`Flow::close`], elements opened belong to it,
@@ -1946,7 +2065,7 @@ fn introduces(content: &[Inline]) -> bool {
 /// A number such as "2." typed at the start of a heading and followed by a space, and the content
 /// after it, or `None` without one.
 fn typed_number(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
-    let Some(Inline::Text { text, style }) = content.first() else {
+    let Some(Inline::Text { text, style, source }) = content.first() else {
         return None;
     };
     let digits = text.find(|c: char| !c.is_ascii_digit())?;
@@ -1962,6 +2081,7 @@ fn typed_number(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
         content[0] = Inline::Text {
             text: rest.to_owned(),
             style: style.clone(),
+            source: source.slice(text.len() - rest.len()..text.len()),
         };
     }
     (!content.is_empty()).then(|| (text[..=digits].to_owned(), content))
@@ -1973,7 +2093,7 @@ pub(crate) fn lead_in(content: &[Inline], words: usize) -> Vec<Inline> {
     let mut started = false;
     let mut result = Vec::with_capacity(content.len() + 1);
     for inline in content {
-        let Inline::Text { text, style } = inline else {
+        let Inline::Text { text, style, source } = inline else {
             result.push(inline.clone());
             continue;
         };
@@ -2007,22 +2127,24 @@ pub(crate) fn lead_in(content: &[Inline], words: usize) -> Vec<Inline> {
             result.push(Inline::Text {
                 text: text[..end].to_owned(),
                 style: small,
+                source: source.slice(0..end),
             });
         }
         if end < text.len() {
             result.push(Inline::Text {
                 text: text[end..].to_owned(),
                 style: style.clone(),
+                source: source.slice(end..text.len()),
             });
         }
     }
     result
 }
 
-/// The first letter of content that starts with text, with any punctuation before it, and the content
+/// The first letter of content that starts with text, with any punctuation before it, its spans, and the content
 /// without it. `None` if the content starts otherwise, with code, or without a letter.
-fn drop_initial(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
-    let Some(Inline::Text { text, style }) = content.first() else {
+fn drop_initial(content: &[Inline]) -> Option<(String, Spans, Vec<Inline>)> {
+    let Some(Inline::Text { text, style, source }) = content.first() else {
         return None;
     };
     if style.code {
@@ -2040,9 +2162,10 @@ fn drop_initial(content: &[Inline]) -> Option<(String, Vec<Inline>)> {
         rest[0] = Inline::Text {
             text: text[end..].to_owned(),
             style: style.clone(),
+            source: source.slice(end..text.len()),
         };
     }
-    Some((text[..end].to_owned(), rest))
+    Some((text[..end].to_owned(), source.slice(0..end), rest))
 }
 
 /// Heading content after its number and a space.
@@ -2050,6 +2173,7 @@ fn numbered(number: &str, content: &[Inline]) -> Vec<Inline> {
     let number = Inline::Text {
         text: format!("{number} "),
         style: InlineStyle::default(),
+        source: Spans::default(),
     };
     std::iter::once(number).chain(content.iter().cloned()).collect()
 }
@@ -2076,11 +2200,16 @@ fn heading_style(config: &Config, level: u8) -> &Style {
 }
 
 fn text_item(x: f64, y: f64, run: ShapedRun, color: Color) -> Item {
+    mapped_item(x, y, run, color, None)
+}
+
+fn mapped_item(x: f64, y: f64, run: ShapedRun, color: Color, source: Option<TextId>) -> Item {
     Item::Text {
         x: Pt(x),
         y: Pt(y),
         run,
         color,
+        source,
     }
 }
 
@@ -2096,7 +2225,13 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
         ..rect
     };
     match item {
-        Item::Text { x, y, run, color } => text_item(x.0 + dx, y.0 + dy, run, color),
+        Item::Text {
+            x,
+            y,
+            run,
+            color,
+            source,
+        } => mapped_item(x.0 + dx, y.0 + dy, run, color, source),
         Item::TurnedText {
             x,
             y,
@@ -2112,7 +2247,7 @@ fn translate(item: Item, dx: f64, dy: f64) -> Item {
         },
         Item::Rect { rect: r, color } => Item::Rect { rect: rect(r), color },
         Item::Link { rect: r, link } => Item::Link { rect: rect(r), link },
-        Item::Image { rect: r, image } => Item::Image { rect: rect(r), image },
+        Item::Image { rect: r, picture } => Item::Image { rect: rect(r), picture },
         Item::Anchor { id, x, y } => Item::Anchor {
             id,
             x: Pt(x.0 + dx),

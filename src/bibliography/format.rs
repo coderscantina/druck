@@ -14,6 +14,7 @@
 
 use crate::config::theme::Lang;
 use crate::document::{Inline, InlineStyle, Link};
+use crate::source_map::Spans;
 
 use super::entry::{Entry, Kind, Lead, ThesisKind};
 use super::words::{Words, words};
@@ -30,6 +31,7 @@ impl Sentence {
         if let Some(Inline::Text {
             text: last,
             style: last_style,
+            ..
         }) = self.0.last_mut()
             && *last_style == style
         {
@@ -38,6 +40,7 @@ impl Sentence {
             self.0.push(Inline::Text {
                 text: text.to_owned(),
                 style,
+                source: Spans::default(),
             });
         }
     }
@@ -76,7 +79,7 @@ impl Sentence {
     /// Adds the closing period if the sentence needs one.
     fn finish(mut self) -> Vec<Inline> {
         let needs_period = match self.0.last() {
-            Some(Inline::Text { text, style }) => style.link.is_none() && !text.ends_with(['.', '?', '!']),
+            Some(Inline::Text { text, style, .. }) => style.link.is_none() && !text.ends_with(['.', '?', '!']),
             _ => false,
         };
         if needs_period {
@@ -135,6 +138,7 @@ pub fn reference(entry: &Entry, lang: Lang, suffix: &str) -> Vec<Inline> {
             inlines.push(Inline::Text {
                 text: " ".to_owned(),
                 style: InlineStyle::default(),
+                source: Spans::default(),
             });
         }
         inlines.extend(sentence.finish());
@@ -263,7 +267,7 @@ fn merge_adjacent(inlines: Vec<Inline>) -> Vec<Inline> {
     let mut merged = Sentence::default();
     for inline in inlines {
         match inline {
-            Inline::Text { text, style } => merged.push(&text, style),
+            Inline::Text { text, style, .. } => merged.push(&text, style),
             other => merged.0.push(other),
         }
     }

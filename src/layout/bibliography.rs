@@ -10,6 +10,7 @@
 use super::{Flow, Frame, Role, anchor_item, heading_style, pages, text_item, translate_line};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
+use crate::source_map::Spans;
 use crate::tags::Kind;
 
 impl<'a> Flow<'a> {
@@ -24,6 +25,7 @@ impl<'a> Flow<'a> {
         let title = [Inline::Text {
             text: heading.text.clone(),
             style: InlineStyle::default(),
+            source: Spans::default(),
         }];
         let role = Role::Heading(Some(heading.anchor));
         let scope = self.open(

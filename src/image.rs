@@ -93,28 +93,36 @@ fn sniff(data: &[u8]) -> Sniffed {
     }
 }
 
-/// A decoded, validated image. Cheap to clone.
+/// A decoded, validated image. Cheap to clone, and shared with whatever else holds it.
 #[derive(Clone)]
 pub struct Image {
     /// The file as read, for the EPUB and for a painter that draws raster images itself.
     source: Bytes,
-    pixels: Pixels,
+    drawn: Drawn,
     width: f64,
     height: f64,
 }
 
 /// The decoded content, as the PDF writer draws it.
 #[derive(Clone)]
-pub enum Pixels {
+pub(crate) enum Drawn {
     Raster(RasterImage),
     Svg(Arc<Tree>),
 }
 
+/// What a painter draws for a [`Image`].
+pub enum Pixels<'a> {
+    /// A raster image of this many pixels. [`Image::source`] holds the PNG or JPEG file to decode.
+    Raster { width: u32, height: u32 },
+    /// A parsed SVG, drawn from its tree.
+    Svg(&'a Tree),
+}
+
 impl fmt::Debug for Image {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let format = match self.pixels {
-            Pixels::Raster(_) => "raster",
-            Pixels::Svg(_) => "SVG",
+        let format = match self.drawn {
+            Drawn::Raster(_) => "raster",
+            Drawn::Svg(_) => "SVG",
         };
         write!(f, "Image({format} {} x {} pt)", self.width, self.height)
     }
@@ -144,18 +152,29 @@ impl Image {
 
     /// Roughly what keeping this image costs: the file, and the samples krilla decodes a raster image into.
     fn cost(&self) -> usize {
-        let samples = match &self.pixels {
-            Pixels::Raster(image) => {
+        let samples = match &self.drawn {
+            Drawn::Raster(image) => {
                 let (width, height) = image.size();
                 width as usize * height as usize * 4
             }
-            Pixels::Svg(_) => 0,
+            Drawn::Svg(_) => 0,
         };
         self.source.len() + samples
     }
 
-    pub fn pixels(&self) -> &Pixels {
-        &self.pixels
+    /// What a painter draws.
+    pub fn pixels(&self) -> Pixels<'_> {
+        match &self.drawn {
+            Drawn::Raster(image) => {
+                let (width, height) = image.size();
+                Pixels::Raster { width, height }
+            }
+            Drawn::Svg(tree) => Pixels::Svg(tree),
+        }
+    }
+
+    pub(crate) fn drawn(&self) -> &Drawn {
+        &self.drawn
     }
 }
 
@@ -287,7 +306,7 @@ fn raster(source: Bytes, image: RasterImage, density: Option<Density>) -> Result
         source,
         width: f64::from(width) * per_pixel_x,
         height: f64::from(height) * per_pixel_y,
-        pixels: Pixels::Raster(image),
+        drawn: Drawn::Raster(image),
     })
 }
 
@@ -301,7 +320,7 @@ fn decode_svg(data: Bytes) -> Result<Image, String> {
         source: data,
         width: f64::from(size.width()) * PT_PER_SVG_PX,
         height: f64::from(size.height()) * PT_PER_SVG_PX,
-        pixels: Pixels::Svg(Arc::new(tree)),
+        drawn: Drawn::Svg(Arc::new(tree)),
     })
 }
 

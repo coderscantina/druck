@@ -30,7 +30,8 @@ use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
 use crate::image::Image;
-use crate::page::{Item, Page, Rect};
+use crate::output::{Item, Page, Rect};
+use crate::source_map::Spans;
 use crate::tags::{Kind, Tree};
 use crate::text::Fonts;
 
@@ -322,6 +323,7 @@ fn plain(text: &str) -> Vec<Inline> {
     vec![Inline::Text {
         text: text.to_owned(),
         style: InlineStyle::default(),
+        source: Spans::default(),
     }]
 }
 
@@ -345,11 +347,12 @@ fn image_line(image: &Image, width: Pt, align: Align, frame_width: f64) -> Line 
         baseline: height,
         items: vec![Item::Image {
             rect,
-            image: image.clone(),
+            picture: image.clone(),
         }],
         notes: Vec::new(),
         marks: Vec::new(),
         hyphenated: false,
         flaw: None,
+        sources: Vec::new(),
     }
 }

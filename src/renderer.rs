@@ -7,7 +7,6 @@
 
 use std::cell::Cell;
 use std::marker::PhantomData;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cancel::Cancel;
@@ -125,8 +124,8 @@ impl<'r> Job<'r> {
                 number: renderer.begin(),
                 files,
             },
-            config: Arc::new(config),
-            document: Arc::new(document),
+            config,
+            document,
             today: input.today,
             one_thread: PhantomData,
         })
@@ -136,8 +135,8 @@ impl<'r> Job<'r> {
 /// A document with its configuration resolved and its resources read.
 pub struct Configured<'r> {
     job: JobContext<'r>,
-    pub(crate) config: Arc<Config>,
-    pub(crate) document: Arc<DocumentFile>,
+    pub(crate) config: Config,
+    pub(crate) document: DocumentFile,
     today: Date,
     one_thread: PhantomData<Cell<()>>,
 }
@@ -150,7 +149,7 @@ impl Configured<'_> {
 
     /// The resolved configuration as pretty JSON, in schema order.
     pub fn config_json(&self) -> String {
-        serde_json::to_string_pretty(&*self.config).expect("configuration serializes")
+        serde_json::to_string_pretty(&self.config).expect("configuration serializes")
     }
 
     /// Fails with one error per open placeholder, at its real location, naming the final `export`.
@@ -159,25 +158,28 @@ impl Configured<'_> {
     }
 
     /// Lays out the document, reporting everything a render reports before writing.
-    pub fn layout(&self, _options: &LayoutOptions) -> Result<Layout, Failure> {
-        let typeset = pipeline::typeset(&self.job, &self.config, &self.document, self.today);
+    pub fn layout(&self, options: &LayoutOptions) -> Result<Layout, Failure> {
+        let typeset = pipeline::typeset(&self.job, &self.config, &self.document, self.today, options.source_map);
         let (fonts, laid) = self.job.renderer.count(typeset)?;
         Ok(Layout {
-            config: self.config.clone(),
-            document: self.document.clone(),
-            fonts,
             laid,
+            fonts,
+            metadata: self.config.metadata.clone(),
+            lang: self.config.document.lang,
+            conformance: self.config.document.conformance.clone(),
             today: self.today,
+            source: self.document.source.clone(),
         })
     }
 
-    /// Writes an EPUB, which needs no layout. `parts` is the number of content documents.
+    /// Writes an EPUB, which needs no layout: a reader sets the text itself, so there is no `Layout::epub`. `parts`
+    /// is the number of content documents.
     pub fn epub(&self, options: &EpubOptions) -> Result<Rendered, Failure> {
         self.job.renderer.count(self.write_epub(options))
     }
 
     fn write_epub(&self, options: &EpubOptions) -> Result<Rendered, Failure> {
-        let (config, document) = (&*self.config, &*self.document);
+        let (config, document) = (&self.config, &self.document);
         let prepared = pipeline::prepare(&self.job, config, document)?;
         let iso = config.metadata.date.as_deref().and_then(|text| Date::iso(text.trim()));
         let written = epub::write(&epub::Book {
@@ -208,8 +210,13 @@ pub struct Rendered {
     pub parts: usize,
 }
 
-#[derive(Default)]
-pub struct LayoutOptions {}
+/// What a layout includes besides its pages.
+#[derive(Clone, Copy, Default)]
+pub struct LayoutOptions {
+    /// Whether to connect the text items to the written text, see [`Layout::source_map`]. A batch render needs no
+    /// map, and without it the parser records nothing.
+    pub source_map: bool,
+}
 
 /// Export settings. They never change the layout.
 #[derive(Clone, Copy)]

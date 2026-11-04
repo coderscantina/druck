@@ -8,18 +8,18 @@
 //! standard structure type in one function, `pdf::structure_type`.
 
 use crate::document::{Link, Location};
-use crate::page::Item;
+use crate::output::Item;
 
-/// An element of a [`Tree`]. Elements are numbered in document order.
+/// An element of the document's logical structure. Elements are numbered in document order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(usize);
 
 impl Id {
-    pub fn new(index: usize) -> Self {
+    pub(crate) fn new(index: usize) -> Self {
         Self(index)
     }
 
-    pub fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self.0
     }
 }
@@ -78,15 +78,15 @@ pub struct Node {
     pub parent: Option<Id>,
 }
 
-/// What an [`Item::Begin`] starts.
+/// What an [`Item::Begin`] starts. A painter has no need of it. PDF export turns it into structure tags.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mark {
     /// The content of an element.
     Element(Id),
-    /// Link text, from paragraph layout. Becomes a [`Kind::Link`] when the line is tagged.
+    /// Link text, from paragraph layout. Becomes a link element when the line is tagged.
     Link(Link),
-    /// The reference to footnote `index`, from paragraph layout. Becomes a [`Kind::Reference`] followed by
-    /// the note's [`Kind::Note`] when the line is tagged.
+    /// The reference to footnote `index`, from paragraph layout. Becomes a reference element followed by the
+    /// note's element when the line is tagged.
     Note(usize),
     /// Decoration inside an element's content, such as leader dots.
     Artifact,
@@ -218,7 +218,7 @@ pub fn prepend(items: &mut Vec<Item>, item: Item) {
 mod tests {
     use super::*;
     use crate::config::values::{Color, Pt};
-    use crate::page::Rect;
+    use crate::output::Rect;
 
     /// A drawn item, standing in for text.
     fn content() -> Item {

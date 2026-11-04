@@ -15,11 +15,11 @@ use std::time::Instant;
 
 use druck::Failure;
 use druck::diagnostic::Diagnostic;
-use druck::editor::engine::Item;
+use druck::output::{ChapterId, Item, Pt, SourcePos};
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, Pixels, RenderImage, ScrollEvent, Window,
-    actions, canvas, div, fill, point, px, size,
+    App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, MouseDownEvent, Pixels, RenderImage,
+    ScrollEvent, Window, actions, canvas, div, fill, point, px, size,
 };
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
@@ -45,6 +45,14 @@ const CACHE_BYTES: usize = 128 * 1024 * 1024;
 const RASTER_THREADS: usize = 3;
 /// Pages rasterized beyond each end of the view, so normal scrolling shows finished pages.
 const PREFETCH_PAGES: usize = 2;
+/// The line that shows the editor's caret on a page.
+const CARET_WIDTH: Pixels = px(2.);
+
+/// Text to lay out and the revision of the document it is.
+struct Request {
+    text: String,
+    revision: u64,
+}
 
 /// How large sheets are drawn.
 #[derive(Clone, Copy, PartialEq)]
@@ -57,6 +65,8 @@ enum Zoom {
 struct Placed {
     bounds: Bounds<Pixels>,
     image: Option<Arc<RenderImage>>,
+    /// Where the editor's caret is on this sheet, in window pixels.
+    caret: Option<Bounds<Pixels>>,
 }
 
 /// New pages were published, with the body style they were set in.
@@ -64,9 +74,23 @@ pub struct Typeset(pub BodyStyle);
 
 impl EventEmitter<Typeset> for PreviewView {}
 
+/// A click on a page landed on text written at this byte of the document.
+pub struct PageClicked(pub usize);
+
+impl EventEmitter<PageClicked> for PreviewView {}
+
+/// A line on a sheet, in the page's points, that shows the editor's caret.
+#[derive(Clone, Copy)]
+struct CaretMark {
+    page: usize,
+    x: f32,
+    y: f32,
+    height: f32,
+}
+
 pub struct PreviewView {
     focus: FocusHandle,
-    scheduler: Scheduler<String>,
+    scheduler: Scheduler<Request>,
     typesetter: Option<Arc<Mutex<Typesetter>>>,
     layout: Option<Arc<Layout>>,
     /// Why the latest text has no pages. The last good pages stay on screen meanwhile.
@@ -85,6 +109,11 @@ pub struct PreviewView {
     bench: Option<Bench>,
     /// The request whose pages are published.
     published: u64,
+    /// The revision of the text those pages were set from, which their source map's offsets refer to.
+    revision: Option<u64>,
+    /// Where the canvas of pages is in the window.
+    origin: (f32, f32),
+    caret: Option<CaretMark>,
     /// The newest request whose visible pages were all exact in a frame, and when.
     painted: (u64, Instant),
 }
@@ -120,6 +149,9 @@ impl PreviewView {
             page: 0,
             bench: Bench::from_env(),
             published: 0,
+            revision: None,
+            origin: (0.0, 0.0),
+            caret: None,
             painted: (0, Instant::now()),
         };
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
@@ -129,14 +161,62 @@ impl PreviewView {
         view
     }
 
-    /// Lays out `text` on a background thread and publishes the pages when done. A newer request cancels this
-    /// one. Does nothing without a document.
-    pub fn request(&mut self, text: String, cx: &mut Context<Self>) {
+    /// Lays out `text`, which is `revision` of the document, on a background thread and publishes the pages when
+    /// done. A newer request cancels this one. Does nothing without a document.
+    pub fn request(&mut self, text: String, revision: u64, cx: &mut Context<Self>) {
         if let Some(bench) = &mut self.bench {
             bench.requested(&text);
         }
-        if let Some(started) = self.scheduler.request(text) {
+        if let Some(started) = self.scheduler.request(Request { text, revision }) {
             self.start_layout(started, cx);
+        }
+    }
+
+    /// Whether the pages on screen were set from `revision` of the text, so offsets in one are offsets in the other.
+    pub fn shows(&self, revision: u64) -> bool {
+        self.revision == Some(revision)
+    }
+
+    /// Marks the text written at byte `offset` of the document, and scrolls to it if it is off screen.
+    pub fn show_source(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let at = SourcePos {
+            chapter: ChapterId(0),
+            offset: offset as u32,
+        };
+        let Some(located) = self.layout.as_ref().and_then(|layout| layout.laid.locate(at)) else {
+            return;
+        };
+        let (y, height) = (located.rect.y.0 as f32, located.rect.height.0 as f32);
+        self.caret = Some(CaretMark {
+            page: located.page,
+            x: located.rect.x.0 as f32,
+            y,
+            height,
+        });
+        if let Some(sheets) = self.sheets(self.current_zoom) {
+            self.scroll.1 = sheets.scroll_to_show(located.page, (y, y + height), self.view.1, self.scroll.1);
+        }
+        cx.notify();
+    }
+
+    /// Reports the written place of the text at a window position, if the position is on a page.
+    fn page_clicked(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let at = (
+            f32::from(event.position.x) - self.origin.0,
+            f32::from(event.position.y) - self.origin.1,
+        );
+        let Some(sheets) = self.sheets(self.current_zoom) else {
+            return;
+        };
+        let Some((page, x, y)) = sheets.point_at(at, self.view.0, self.scroll) else {
+            return;
+        };
+        let position = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.laid.position_at(page, Pt(f64::from(x)), Pt(f64::from(y))));
+        if let Some(position) = position {
+            cx.emit(PageClicked(position.offset as usize));
         }
     }
 
@@ -153,7 +233,7 @@ impl PreviewView {
     /// The page a run of text containing `needle` is on, and shows it.
     pub fn show_text(&mut self, needle: &str, cx: &mut Context<Self>) -> Option<usize> {
         let layout = self.layout.as_ref()?;
-        let page = layout.output.pages.iter().position(|page| {
+        let page = layout.laid.pages().iter().position(|page| {
             page.items
                 .iter()
                 .any(|item| matches!(item, Item::Text { run, .. } if run.text.contains(needle)))
@@ -175,10 +255,11 @@ impl PreviewView {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
     }
 
-    fn start_layout(&mut self, (number, text, cancel): Started<String>, cx: &mut Context<Self>) {
+    fn start_layout(&mut self, (number, request, cancel): Started<Request>, cx: &mut Context<Self>) {
         let Some(typesetter) = self.typesetter.clone() else {
             return;
         };
+        let Request { text, revision } = request;
         let layout =
             cx.background_spawn(async move { typesetter.lock().expect("no panic in layout").run(text, &cancel) });
         cx.spawn(async move |this, cx| {
@@ -186,7 +267,7 @@ impl PreviewView {
             this.update(cx, |view, cx| {
                 let (publish, next) = view.scheduler.finished(number);
                 if publish {
-                    view.publish(number, result, cx);
+                    view.publish(number, revision, result, cx);
                 }
                 if let Some(next) = next {
                     view.start_layout(next, cx);
@@ -197,10 +278,12 @@ impl PreviewView {
         .detach();
     }
 
-    fn publish(&mut self, number: u64, result: Result<Layout, Failure>, cx: &mut Context<Self>) {
+    fn publish(&mut self, number: u64, revision: u64, result: Result<Layout, Failure>, cx: &mut Context<Self>) {
         match result {
             Ok(layout) => {
                 self.published = number;
+                self.revision = Some(revision);
+                self.caret = None;
                 self.diagnostics.clear();
                 if let Some(bench) = &mut self.bench {
                     bench.published(&layout);
@@ -231,11 +314,7 @@ impl PreviewView {
 
     fn sheets(&self, zoom: f32) -> Option<Sheets> {
         let layout = self.layout.as_ref()?;
-        let pages = layout
-            .output
-            .pages
-            .iter()
-            .map(|page| (page.width.0 as f32, page.height.0 as f32));
+        let pages = (layout.laid.pages().iter()).map(|page| (page.width.0 as f32, page.height.0 as f32));
         Some(Sheets::new(pages, zoom, f32::from(tokens::SPACE_4)))
     }
 
@@ -261,6 +340,7 @@ impl PreviewView {
             window.drop_image(image).ok();
         }
         self.view = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+        self.origin = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
         let device_scale = window.scale_factor();
         let zoom = self.resolve_zoom(self.view.0);
         let Some(layout) = self.layout.clone() else {
@@ -294,7 +374,7 @@ impl PreviewView {
         let wanted: Vec<usize> = visible.clone().chain(before).chain(after).collect();
         // What is on screen and next to it always fits, or pages would evict each other forever.
         let bytes_each = |page: &usize| {
-            let (width, height) = pixel_size(&layout.output.pages[*page], resolution);
+            let (width, height) = pixel_size(&layout.laid.pages()[*page], resolution);
             width as usize * height as usize * 4
         };
         self.cache
@@ -313,7 +393,7 @@ impl PreviewView {
         let mut exact = 0;
         for page in visible.clone() {
             let (width, height) = sheets.size(page);
-            let centred = ((self.view.0 - width) / 2.0).max(f32::from(tokens::SPACE_4)) - self.scroll.0;
+            let centred = sheets.left(page, self.view.0, self.scroll.0);
             let top = sheets.top(page) - self.scroll.1;
             // Whole device pixels, so an image at full resolution maps one to one.
             let snap = |length: f32| (length * device_scale).round() / device_scale;
@@ -330,6 +410,15 @@ impl PreviewView {
                     size(px(snap(width)), px(snap(height))),
                 ),
                 image,
+                caret: self.caret.filter(|mark| mark.page == page).map(|mark| {
+                    Bounds::new(
+                        point(
+                            bounds.origin.x + px(snap(centred + mark.x * zoom)),
+                            bounds.origin.y + px(snap(top + mark.y * zoom)),
+                        ),
+                        size(CARET_WIDTH, px(mark.height * zoom)),
+                    )
+                }),
             });
         }
         if exact == visible.len() && self.published > self.painted.0 && self.published == self.scheduler.latest() {
@@ -359,7 +448,7 @@ impl PreviewView {
         self.rastering.insert(key);
         let raster =
             cx.background_spawn(
-                async move { render_image(layout.painter.paint(&layout.output.pages[page], resolution)) },
+                async move { render_image(layout.painter.paint(&layout.laid.pages()[page], resolution)) },
             );
         cx.spawn(async move |this, cx| {
             let (image, bytes) = raster.await;
@@ -389,7 +478,7 @@ impl PreviewView {
                 "No pages".to_owned()
             };
         };
-        let pages = layout.output.pages.len();
+        let pages = layout.laid.pages().len();
         let page = (self.page + 1).min(pages);
         let percent = (self.current_zoom * 100.0).round();
         format!("Page {page} of {pages} \u{00b7} {percent}%")
@@ -420,6 +509,7 @@ impl Render for PreviewView {
         let tokens = Tokens::get(cx);
         let this = cx.entity();
         let painted = this.clone();
+        let caret_color = tokens.accent;
         let pages = canvas(
             move |bounds, window, cx| this.update(cx, |view, cx| view.frame(bounds, window, cx)),
             move |bounds, placed, window, cx| {
@@ -431,6 +521,9 @@ impl Render for PreviewView {
                             window
                                 .paint_image(sheet.bounds, sheet.bounds, corners, image, 0, false)
                                 .ok();
+                        }
+                        if let Some(caret) = sheet.caret {
+                            window.paint_quad(fill(caret, caret_color));
                         }
                     }
                 });
@@ -474,7 +567,10 @@ impl Render for PreviewView {
             .flex_col()
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|view, _, window, cx| window.focus(&view.focus, cx)),
+                cx.listener(|view, event, window, cx| {
+                    window.focus(&view.focus, cx);
+                    view.page_clicked(event, cx);
+                }),
             )
             .on_scroll(cx.listener(Self::on_scroll))
             .on_action(cx.listener(|view, _: &ZoomIn, _, cx| view.zoom_step(1, cx)))

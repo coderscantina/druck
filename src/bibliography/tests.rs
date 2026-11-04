@@ -44,8 +44,8 @@ fn plain(content: &[Inline]) -> String {
     content
         .iter()
         .map(|inline| match inline {
-            Inline::Text { text, style } if style.emphasis => format!("*{text}*"),
-            Inline::Text { text, style } if style.link.is_some() => format!("<{text}>"),
+            Inline::Text { text, style, .. } if style.emphasis => format!("*{text}*"),
+            Inline::Text { text, style, .. } if style.link.is_some() => format!("<{text}>"),
             Inline::Text { text, .. } => text.clone(),
             _ => String::new(),
         })

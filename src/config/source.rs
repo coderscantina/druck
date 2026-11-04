@@ -37,6 +37,9 @@ struct MappedChapter {
     /// The joined line this chapter's first line became.
     first_line: u64,
     lines: u64,
+    /// The joined byte this chapter's text starts at, and the bytes of its file before that text.
+    start: usize,
+    skip: usize,
 }
 
 impl ChapterMap {
@@ -47,13 +50,21 @@ impl ChapterMap {
         }
     }
 
-    /// Records the next chapter, of `lines` lines, starting at joined line `first_line`.
-    pub fn push(&mut self, path: PathBuf, first_line: u64, lines: u64) {
+    /// Records the next chapter, of `lines` lines, starting at joined line `first_line` and joined byte `start`.
+    /// `skip` is what its file holds before that byte: a byte order mark.
+    pub fn push(&mut self, path: PathBuf, first_line: u64, lines: u64, start: usize, skip: usize) {
         self.chapters.push(MappedChapter {
             path,
             first_line,
             lines,
+            start,
+            skip,
         });
+    }
+
+    /// Each chapter's path, the joined byte its text starts at, and the bytes its file has before that.
+    pub(crate) fn bytes(&self) -> impl Iterator<Item = (&Path, usize, usize)> {
+        (self.chapters.iter()).map(|chapter| (chapter.path.as_path(), chapter.start, chapter.skip))
     }
 
     /// The chapter file and line behind a joined line. The blank lines that join two chapters, and any line
@@ -191,9 +202,9 @@ mod tests {
     #[test]
     fn a_joined_line_maps_to_its_chapter_and_joining_lines_to_the_chapter_before() {
         let mut map = ChapterMap::new("/book/druck.yaml".into());
-        map.push("/book/one.md".into(), 1, 3);
-        map.push("/book/empty.md".into(), 5, 0);
-        map.push("/book/two.md".into(), 6, 2);
+        map.push("/book/one.md".into(), 1, 3, 0, 0);
+        map.push("/book/empty.md".into(), 5, 0, 20, 0);
+        map.push("/book/two.md".into(), 6, 2, 21, 0);
         let source = InputSource::Chapters(Arc::new(map));
         let at = |line| source.chapter_line(line).expect("mapped");
         let chapter = |path: &str| InputSource::Document(path.into());

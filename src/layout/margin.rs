@@ -11,7 +11,7 @@ use crate::config::resolved::Config;
 use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Document, Footnote};
-use crate::page::NoteKind;
+use crate::output::NoteKind;
 use crate::tags::Kind;
 
 /// Reports a note column that runs off the page, or one inside the margin frame where wide blocks would

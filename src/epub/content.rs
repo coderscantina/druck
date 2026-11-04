@@ -672,7 +672,7 @@ impl Writer<'_> {
         };
         for inline in content {
             match inline {
-                Inline::Text { text: piece, style } => text(&mut runs, piece, style.clone()),
+                Inline::Text { text: piece, style, .. } => text(&mut runs, piece, style.clone()),
                 Inline::LineBreak => runs.push(Run::LineBreak),
                 Inline::FootnoteRef(note) => runs.push(Run::Note(*note)),
                 Inline::MarginNote(note) => self.margin_notes.push(*note),

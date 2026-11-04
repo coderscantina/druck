@@ -14,9 +14,9 @@ use gpui::{
 
 use crate::agent::AgentView;
 use crate::document::Opened;
-use crate::editor::{EditorView, TextChanged};
+use crate::editor::{CaretMoved, EditorView, TextChanged};
 use crate::inspector::{InspectorView, ThemeChanged};
-use crate::preview::{BodyStyle, PreviewView, Typeset};
+use crate::preview::{BodyStyle, PageClicked, PreviewView, Typeset};
 use crate::sidebar::SidebarView;
 use crate::tokens::{self, Scheme, Tokens};
 
@@ -135,6 +135,8 @@ struct Shell {
     body: Option<BodyStyle>,
     /// The content hashes of the font files the toolkit has.
     fonts: HashSet<u64>,
+    /// Where the caret went while the pages were behind the text, to show once they catch up.
+    caret: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -165,7 +167,17 @@ impl Shell {
         let subscriptions = vec![
             cx.subscribe(&editor, |shell, _, _: &TextChanged, cx| shell.text_changed(cx)),
             cx.subscribe(&inspector, |shell, _, _: &ThemeChanged, cx| shell.request_pages(cx)),
-            cx.subscribe(&preview, |shell, _, Typeset(body), cx| shell.set_body(body, cx)),
+            cx.subscribe(&preview, |shell, _, Typeset(body), cx| {
+                shell.set_body(body, cx);
+                shell.show_caret(cx);
+            }),
+            cx.subscribe(&editor, |shell, _, CaretMoved(offset), cx| {
+                shell.caret = Some(*offset);
+                shell.show_caret(cx);
+            }),
+            cx.subscribe_in(&preview, window, |shell, _, PageClicked(offset), window, cx| {
+                shell.page_clicked(*offset, window, cx);
+            }),
         ];
         let canvas = Canvas::from_env().unwrap_or(if f32::from(window.bounds().size.width) < SPLIT_MIN_WIDTH {
             Canvas::Write
@@ -183,6 +195,7 @@ impl Shell {
             refresh: Task::ready(()),
             body: None,
             fonts: HashSet::new(),
+            caret: None,
             _subscriptions: subscriptions,
         };
         if has_document {
@@ -207,8 +220,34 @@ impl Shell {
     }
 
     fn request_pages(&mut self, cx: &mut Context<Self>) {
-        let text = self.editor.read(cx).text().to_owned();
-        self.preview.update(cx, |preview, cx| preview.request(text, cx));
+        let editor = self.editor.read(cx);
+        let (text, revision) = (editor.text().to_owned(), editor.revision());
+        self.preview
+            .update(cx, |preview, cx| preview.request(text, revision, cx));
+    }
+
+    /// Shows the caret's text on the pages, once they are set from the text the caret is in.
+    fn show_caret(&mut self, cx: &mut Context<Self>) {
+        let revision = self.editor.read(cx).revision();
+        if !self.preview.read(cx).shows(revision) {
+            return;
+        }
+        if let Some(offset) = self.caret.take() {
+            self.preview.update(cx, |preview, cx| preview.show_source(offset, cx));
+        }
+    }
+
+    /// Moves the galley's caret to the text clicked on a page. Pages behind the text have other offsets, so a click
+    /// on them does nothing until they catch up.
+    fn page_clicked(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let editor = self.editor.clone();
+        if !self.preview.read(cx).shows(editor.read(cx).revision()) {
+            return;
+        }
+        editor.update(cx, |editor, cx| editor.jump_to(offset, window, cx));
+        if self.canvas == Canvas::Split {
+            window.focus(&editor.focus_handle(cx), cx);
+        }
     }
 
     /// Gives the galley the theme's body style when it changed, with its font files if the toolkit lacks them.

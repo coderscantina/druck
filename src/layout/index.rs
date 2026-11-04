@@ -16,6 +16,7 @@ use super::{Flow, Frame, Role, heading_style, pages, translate_line};
 use crate::config::values::Pt;
 use crate::document::{Inline, InlineStyle, Link, Location};
 use crate::index::{Entry, locators};
+use crate::source_map::Spans;
 use crate::tags::Kind;
 
 impl<'a> Flow<'a> {
@@ -135,6 +136,7 @@ impl<'a> Flow<'a> {
             })
             .collect();
         let page = |(number, anchor): &(String, usize)| Inline::Text {
+            source: Spans::default(),
             text: number.clone(),
             style: InlineStyle {
                 link: Some(Link::Anchor(*anchor)),
@@ -152,6 +154,7 @@ impl<'a> Flow<'a> {
                         unbreakable: true,
                         ..InlineStyle::default()
                     },
+                    source: Spans::default(),
                 });
                 content.push(page(last));
             }
@@ -172,6 +175,7 @@ impl<'a> Flow<'a> {
                     emphasis: true,
                     ..InlineStyle::default()
                 },
+                source: Spans::default(),
             });
             content.push(plain(&format!(" {}", targets.join("; "))));
         }
@@ -183,5 +187,6 @@ fn plain(text: &str) -> Inline {
     Inline::Text {
         text: text.to_owned(),
         style: InlineStyle::default(),
+        source: Spans::default(),
     }
 }

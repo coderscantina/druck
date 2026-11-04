@@ -8,7 +8,7 @@
 use crate::config::resolved::Config;
 use crate::config::theme::NumberFormat;
 use crate::document::Matter;
-use crate::page::PageNumber;
+use crate::output::PageNumber;
 
 pub(super) struct Numbering {
     /// The number of each physical page, `None` for a page without one.

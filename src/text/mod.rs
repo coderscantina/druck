@@ -19,18 +19,9 @@ use crate::config::theme::{Face, FigureSpacing, FigureStyle, Figures, FontStyle,
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::renderer::Failure;
-use crate::resource::{Bytes, Files};
+use crate::resource::Files;
 
-/// What a painter needs to draw a face's glyphs: its font file, the face in it, and the variation
-/// coordinates of this instance by axis tag, in the axis's own units.
-#[cfg_attr(not(feature = "editor"), allow(dead_code))]
-pub struct FaceOutlines<'a> {
-    pub data: &'a Bytes,
-    pub index: u32,
-    pub coordinates: &'a [([u8; 4], f32)],
-}
-
-/// Index of a face in its [`FontSet`] and [`Fonts`].
+/// The number of a face in its layout: [`crate::output::Layout::face`] finds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FaceId(pub usize);
 
@@ -52,15 +43,6 @@ const FEATURES: [&[u8; 4]; 7] = [b"kern", b"liga", b"smcp", b"lnum", b"onum", b"
 pub struct FontSet {
     faces: Vec<Named>,
     families: BTreeMap<String, Vec<(Face, FaceId)>>,
-}
-
-/// Two sets are equal when their faces are the same objects, as a renderer gives for unchanged fonts.
-impl PartialEq for FontSet {
-    fn eq(&self, other: &Self) -> bool {
-        self.families == other.families
-            && self.faces.len() == other.faces.len()
-            && std::iter::zip(&self.faces, &other.faces).all(|(a, b)| Arc::ptr_eq(&a.face, &b.face))
-    }
 }
 
 impl FontSet {
@@ -238,15 +220,14 @@ impl FontSet {
         &self.faces[face.0].file
     }
 
-    /// The font data of a face, for drawing its glyphs by id.
-    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
-    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
-        let face = &self.faces[face.0].face;
-        FaceOutlines {
-            data: face.data(),
-            index: face.index(),
-            coordinates: face.coordinates(),
-        }
+    /// A face by its number.
+    pub(crate) fn face_of(&self, face: FaceId) -> &face::Face {
+        &self.faces[face.0].face
+    }
+
+    /// Every face, in [`FaceId`] order.
+    pub(crate) fn faces(&self) -> impl Iterator<Item = &Arc<face::Face>> {
+        self.faces.iter().map(|named| &named.face)
     }
 
     /// The font handle krilla embeds and subsets for a face.
@@ -262,31 +243,16 @@ pub struct Fonts<'j> {
     buzz: Vec<rustybuzz::Face<'j>>,
 }
 
-impl Fonts<'_> {
+impl<'j> Fonts<'j> {
     /// See [`FontSet::face`].
     pub fn face(&self, family: &str, weight: Weight, style: FontStyle) -> FaceId {
         self.set.face(family, weight, style)
     }
 
-    /// See [`FontSet::file`].
-    pub fn file(&self, face: FaceId) -> &str {
-        self.set.file(face)
-    }
-
-    /// See [`FontSet::resource`].
-    pub(crate) fn resource(&self, face: FaceId) -> &Resource {
-        self.set.resource(face)
-    }
-
-    /// See [`FontSet::pdf_font`].
-    pub(crate) fn pdf_font(&self, face: FaceId) -> &krilla::text::Font {
-        self.set.pdf_font(face)
-    }
-
-    /// See [`FontSet::outlines`].
-    #[cfg_attr(not(feature = "editor"), allow(dead_code))]
-    pub fn outlines(&self, face: FaceId) -> FaceOutlines<'_> {
-        self.set.outlines(face)
+    /// The faces these were parsed from.
+    #[cfg(test)]
+    pub(crate) fn set(&self) -> &'j FontSet {
+        self.set
     }
 
     /// Vertical metrics of a face at `size`.
@@ -354,6 +320,8 @@ impl Fonts<'_> {
         small_caps: bool,
         figures: Figures,
     ) -> ShapedRun {
+        #[cfg(test)]
+        SHAPED.with(|shaped| shaped.set(shaped.get() + 1));
         let buzz = &self.buzz[face.0];
         let mut buffer = rustybuzz::UnicodeBuffer::new();
         buffer.push_str(text);
@@ -460,6 +428,12 @@ fn weight_rank(wanted: Weight, have: Weight) -> (u8, u16) {
 }
 
 #[cfg(test)]
+std::thread_local! {
+    /// How many runs this thread has shaped, for tests that show something does not shape.
+    pub(crate) static SHAPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 impl Fonts<'static> {
     /// Faces for a test that needs no renderer, read from files. The set lives as long as the test process.
     pub(crate) fn load(config: &Config, installed: &BTreeMap<String, FontFiles>) -> Result<Self, Vec<Diagnostic>> {
@@ -509,7 +483,8 @@ pub struct Metrics {
     pub strikeout_position: Pt,
 }
 
-/// Shaped text in one face and size. Glyphs are in visual (left-to-right) order.
+/// Shaped text in one face and size: a word or part of one, or a line of code. Glyphs are in visual (left-to-right)
+/// order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapedRun {
     pub text: String,
@@ -519,13 +494,13 @@ pub struct ShapedRun {
     /// The sum of the glyph advances.
     pub width: Pt,
     /// Tracking after each character, included in the advances.
-    pub spacing: Pt,
+    pub(crate) spacing: Pt,
 }
 
 impl ShapedRun {
     /// The width up to the last glyph, without the tracking after it. Alignment measures this, so
     /// tracked text ends at its edge.
-    pub fn set_width(&self) -> Pt {
+    pub(crate) fn set_width(&self) -> Pt {
         if self.text.is_empty() {
             self.width
         } else {

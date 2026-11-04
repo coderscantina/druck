@@ -39,6 +39,7 @@ fn paragraph(line: u64, text: &str) -> Block {
         content: vec![Inline::Text {
             text: text.to_owned(),
             style: InlineStyle::default(),
+            source: Default::default(),
         }],
         class: None,
     }
@@ -829,6 +830,7 @@ fn text(text: &str, style: InlineStyle) -> Inline {
     Inline::Text {
         text: text.to_owned(),
         style,
+        source: Default::default(),
     }
 }
 

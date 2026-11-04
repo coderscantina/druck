@@ -13,7 +13,8 @@ use super::titles::FRONT_MATTER;
 use super::{Flow, Frame, Role, pages, text_item, translate_line};
 use crate::config::values::Pt;
 use crate::document::{Inline, InlineStyle, Link};
-use crate::page::{Item, Rect};
+use crate::output::{Item, Rect};
+use crate::source_map::Spans;
 use crate::tags::{Kind, Mark};
 use crate::text::{Glyph, ShapedRun};
 
@@ -29,6 +30,7 @@ impl<'a> Flow<'a> {
         let label = Inline::Text {
             text: config.labels.contents.clone(),
             style: InlineStyle::default(),
+            source: Spans::default(),
         };
         let scope = self.open(Kind::Paragraph, true);
         self.text_block(
@@ -43,13 +45,17 @@ impl<'a> Flow<'a> {
         let depth = config.document.toc_depth.get();
         let structure = self.structure;
         let contents = self.open(Kind::Contents, false);
+        let around = self.block;
         for heading in (structure.headings.iter()).filter(|heading| heading.listed && heading.level <= depth) {
+            // An entry goes to its heading.
+            self.block = self.heading_block(heading.at, heading.level).or(around);
             let entry = self.open(Kind::ContentsEntry, false);
             let link = self.open(Kind::Link, true);
             self.entry(heading, frame);
             self.close(link);
             self.close(entry);
         }
+        self.block = around;
         self.close(contents);
         self.after_paragraph = false;
     }
@@ -78,6 +84,7 @@ impl<'a> Flow<'a> {
         let content = [Inline::Text {
             text: heading.title(),
             style: InlineStyle::default(),
+            source: Spans::default(),
         }];
         self.space(style.space_before.0);
         let lines = match self.set(&content, style, measure, -hang) {

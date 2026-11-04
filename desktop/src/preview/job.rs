@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::engine::{self, FontSet};
+use druck::editor::engine;
 use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
 use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
@@ -71,7 +71,8 @@ impl<T> Scheduler<T> {
 
 /// The result of one layout.
 pub struct Layout {
-    pub output: engine::Output,
+    /// The pages, with what they draw and where their text is written.
+    pub laid: druck::output::Layout,
     pub painter: Arc<Painter>,
     /// One per page, see [`fingerprint`].
     pub fingerprints: Vec<u64>,
@@ -93,9 +94,8 @@ pub struct BodyStyle {
 }
 
 impl BodyStyle {
-    fn of(config: &Config, painter: &Painter) -> Self {
+    fn of(config: &Config, laid: &druck::output::Layout) -> Self {
         let style = &config.styles.body;
-        let fonts = painter.fonts();
         let mut files: Vec<Bytes> = Vec::new();
         let mut family = String::new();
         for (weight, font_style) in [
@@ -104,12 +104,12 @@ impl BodyStyle {
             (style.weight, FontStyle::Italic),
             (Weight::BOLD, FontStyle::Italic),
         ] {
-            let outlines = fonts.outlines(fonts.face(&style.font, weight, font_style));
+            let face = laid.face(engine::face_of(laid, &style.font, weight, font_style));
             if family.is_empty() {
-                family = family_name(outlines.data, outlines.index).unwrap_or_else(|| style.font.clone());
+                family = family_name(face.data(), face.index()).unwrap_or_else(|| style.font.clone());
             }
-            if !files.contains(outlines.data) {
-                files.push(outlines.data.clone());
+            if !files.contains(face.data()) {
+                files.push(face.data().clone());
             }
         }
         Self {
@@ -179,17 +179,16 @@ impl Typesetter {
         let input = self.input(text)?;
         let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
         let configured_at = Instant::now();
-        let layout = configured.layout(&LayoutOptions::default())?;
+        let laid = configured.layout(&LayoutOptions { source_map: true })?;
         let typeset = Instant::now();
         let config = resolved_config::of(&configured);
-        let warnings = config.warnings.iter().chain(layout.warnings()).cloned().collect();
-        let (output, fonts) = engine::into_parts(layout);
-        let painter = same_fonts(&mut self.painter, fonts);
+        let warnings = config.warnings.iter().chain(laid.warnings()).cloned().collect();
+        let painter = same_fonts(&mut self.painter, &laid);
         let fingerprints_from = Instant::now();
-        let fingerprints = output.pages.iter().map(fingerprint).collect();
+        let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
-            body: BodyStyle::of(config, &painter),
-            output,
+            body: BodyStyle::of(config, &laid),
+            laid,
             painter,
             fingerprints,
             warnings,
@@ -229,12 +228,11 @@ impl Typesetter {
     }
 }
 
-/// The painter of the previous layout while the fonts are the same, since it keeps their outlines. The renderer
-/// gives unchanged fonts the same faces, so a replaced file makes a new painter.
-fn same_fonts(painter: &mut Option<Arc<Painter>>, fonts: FontSet) -> Arc<Painter> {
+/// The painter of the previous layout while the fonts are the same, since it keeps their outlines.
+fn same_fonts(painter: &mut Option<Arc<Painter>>, laid: &druck::output::Layout) -> Arc<Painter> {
     match painter {
-        Some(painter) if *painter.fonts() == fonts => painter.clone(),
-        _ => painter.insert(Arc::new(Painter::new(fonts))).clone(),
+        Some(painter) if painter.draws(laid) => painter.clone(),
+        _ => painter.insert(Arc::new(Painter::new(laid))).clone(),
     }
 }
 
@@ -354,6 +352,31 @@ mod tests {
         let result = typesetter.run(text.clone(), &cancelled);
         assert!(matches!(result, Err(Failure::Cancelled)));
         assert!(typesetter.run(text, &Cancel::default()).is_ok());
+    }
+
+    #[test]
+    fn source_offsets_count_the_front_matter_the_engine_strips() {
+        let text = "---\ntitle: A title\n---\n\nFirst word here.\n";
+        let mut typesetter = Typesetter::new(&sample("report.md"), None);
+        let Ok(layout) = typesetter.run(text.to_owned(), &Cancel::default()) else {
+            panic!("typesets")
+        };
+        let map = layout.laid.source_map().expect("the app asks for a map");
+        let source = layout
+            .laid
+            .pages()
+            .iter()
+            .flat_map(|page| &page.items)
+            .find_map(|item| match item {
+                druck::output::Item::Text {
+                    run, source: Some(id), ..
+                } if run.text == "word" => Some(*id),
+                _ => None,
+            });
+        let at = map
+            .position(source.expect("the word is on a page"), 0)
+            .expect("written");
+        assert_eq!(&text[at.offset as usize..at.offset as usize + 4], "word");
     }
 
     #[test]

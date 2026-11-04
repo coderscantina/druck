@@ -54,6 +54,7 @@ use crate::document::{
     InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See, Todo,
 };
 use crate::highlight;
+use crate::source_map::{BlockKind, MAPPED_LENGTH, Recorder, Spans};
 use crate::spacing;
 
 mod comments;
@@ -77,6 +78,31 @@ pub fn parse_with(
     source: &InputSource,
     lang: Lang,
     no_break_spaces: bool,
+) -> Result<Document, Vec<Diagnostic>> {
+    parse_text(original, first_line, source, lang, no_break_spaces, None)
+}
+
+/// Like [`parse_with`], and records where blocks and text are written, for a source map. `base` is where `original`
+/// starts in the document's whole text, which is what recorded offsets count in.
+pub fn parse_mapped(
+    original: &str,
+    first_line: u64,
+    source: &InputSource,
+    lang: Lang,
+    no_break_spaces: bool,
+    base: usize,
+) -> Result<Document, Vec<Diagnostic>> {
+    let base = (base + original.len() < MAPPED_LENGTH).then_some(base);
+    parse_text(original, first_line, source, lang, no_break_spaces, base)
+}
+
+fn parse_text(
+    original: &str,
+    first_line: u64,
+    source: &InputSource,
+    lang: Lang,
+    no_break_spaces: bool,
+    base: Option<usize>,
 ) -> Result<Document, Vec<Diagnostic>> {
     // Task lists are enabled only so they can be recognised and reported. GFM adds only the alert kinds of
     // block quotations.
@@ -104,6 +130,8 @@ pub fn parse_with(
     let directives = directives.into_iter().map(|line| (line.start, &body[line])).collect();
     let mut builder = Builder::new(&text, original, cuts, first_line, source, lang, directives);
     builder.no_break_spaces = no_break_spaces;
+    builder.base = base.unwrap_or_default();
+    builder.recorder = base.map(|_| Recorder::new());
     if let Some(start) = comments.unterminated {
         let at = builder.locate(start);
         builder.report_at(at, "this comment is never closed; end it with -->");
@@ -251,6 +279,8 @@ struct CodeBlock {
     first_line: u64,
     language: Option<String>,
     text: String,
+    /// Where each text event starts in `text`, and its range in the parsed text. Only for a source map.
+    events: Vec<(usize, Range<usize>)>,
 }
 
 struct Builder<'a> {
@@ -317,6 +347,10 @@ struct Builder<'a> {
     /// Whether text gets no-break spaces, see [`crate::spacing`].
     no_break_spaces: bool,
     placed_tables: HashSet<(u64, u64)>,
+    /// What a source map needs to know about blocks, if one was asked for.
+    recorder: Option<Recorder>,
+    /// Where the written text starts in the document's whole text.
+    base: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -372,7 +406,65 @@ impl<'a> Builder<'a> {
             quotes: Quotes::new(lang),
             no_break_spaces: false,
             placed_tables: HashSet::new(),
+            recorder: None,
+            base: 0,
         }
+    }
+
+    /// `offset` in the parsed text as an offset in the document's whole text.
+    fn document_offset(&self, offset: usize) -> usize {
+        self.base + self.cuts.original(offset)
+    }
+
+    /// Records a block that holds others, until [`Recorder::close`].
+    fn record_open(&mut self, kind: BlockKind, at: Location, range: &Range<usize>) {
+        let range = self.document_offset(range.start)..self.document_offset(range.end);
+        if let Some(recorder) = &mut self.recorder {
+            recorder.open(kind, at, range);
+        }
+    }
+
+    /// Records a block that holds no others.
+    fn record_block(&mut self, kind: BlockKind, at: Location, range: &Range<usize>) {
+        let range = self.document_offset(range.start)..self.document_offset(range.end);
+        if let Some(recorder) = &mut self.recorder {
+            recorder.block(kind, at, range);
+        }
+    }
+
+    /// Where `text`, read at `offset` of the parsed text, is written: there, if it is the same bytes, and otherwise
+    /// inserted in its place.
+    fn spans(&self, offset: usize, text: &str) -> Spans {
+        if self.recorder.is_none() {
+            return Spans::default();
+        }
+        let range = offset..offset + text.len();
+        if self.body.get(range.clone()) != Some(text) {
+            return Spans::inserted(self.document_offset(offset));
+        }
+        let parts = self.cuts.parts(range).into_iter();
+        Spans::written(parts.map(|(byte, written)| (byte, self.base + written)))
+    }
+
+    /// The spans of each line of a code block, from the text events it was read from.
+    fn code_spans(&self, code: &CodeBlock) -> Vec<Spans> {
+        let mut start = 0;
+        let mut lines = Vec::new();
+        for line in code.text.split_inclusive('\n') {
+            let length = line.trim_end_matches('\n').trim_end_matches('\r').len();
+            let mut spans = Spans::default();
+            for (event, range) in &code.events {
+                let (from, to) = ((*event).max(start), (event + range.len()).min(start + length));
+                if from < to {
+                    let read = &code.text[from..to];
+                    let part = self.spans(range.start + from - event, read);
+                    spans.append(part, from - start);
+                }
+            }
+            lines.push(spans);
+            start += line.len();
+        }
+        lines
     }
 
     fn finish(mut self) -> Result<Document, Vec<Diagnostic>> {
@@ -440,12 +532,15 @@ impl<'a> Builder<'a> {
                 }
             });
         }
+        let end = self.body.trim_end().len();
         if !self.citations.is_empty() && self.bibliography.is_none() {
-            let at = self.location(self.body.trim_end().len());
+            let at = self.location(end);
+            self.record_block(BlockKind::Directive, at, &(end..end));
             blocks.push(Block::Bibliography { at });
         }
         if !self.index_marks.is_empty() && self.index.is_none() {
-            let at = self.location(self.body.trim_end().len());
+            let at = self.location(end);
+            self.record_block(BlockKind::Directive, at, &(end..end));
             blocks.push(Block::Index { at });
         }
         Ok(Document {
@@ -456,6 +551,7 @@ impl<'a> Builder<'a> {
             citations: self.citations,
             index_marks: self.index_marks,
             todos: self.todos,
+            sources: self.recorder.map(Recorder::finish),
         })
     }
 
@@ -480,6 +576,7 @@ impl<'a> Builder<'a> {
     fn directive(&mut self, offset: usize, text: &str) {
         self.misplaced_class();
         let at = self.location(offset);
+        let written = offset..offset + text.len();
         let line = text.trim_start_matches(':').trim();
         let (name, attributes) = line.split_at(line.find([' ', '\t', '{']).unwrap_or(line.len()));
         let attributes = attributes.trim_start();
@@ -512,6 +609,13 @@ impl<'a> Builder<'a> {
                     self.report(offset, "\":::\" closes no open layout directive");
                     return;
                 };
+                let end = self.document_offset(written.end);
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.close(Some(end));
+                    if fence == Some(Fence::Table) {
+                        recorder.directive_is_table(at);
+                    }
+                }
                 let blocks = self.blocks.pop().unwrap_or_default();
                 match fence {
                     Some(Fence::Keep) => self.push_block(Block::Keep { at, blocks }),
@@ -527,6 +631,7 @@ impl<'a> Builder<'a> {
                 if let Some(kept) = kept {
                     self.report(offset, format!("page-break is not allowed inside {kept}"));
                 } else {
+                    self.record_block(BlockKind::Directive, at, &written);
                     self.push_block(Block::PageBreak { at });
                 }
                 return;
@@ -542,6 +647,7 @@ impl<'a> Builder<'a> {
                     self.report(offset, message);
                 } else {
                     self.bibliography = Some(at);
+                    self.record_block(BlockKind::Directive, at, &written);
                     self.push_block(Block::Bibliography { at });
                 }
                 return;
@@ -554,6 +660,7 @@ impl<'a> Builder<'a> {
                     self.report(offset, message);
                 } else {
                     self.index = Some(at);
+                    self.record_block(BlockKind::Directive, at, &written);
                     self.push_block(Block::Index { at });
                 }
                 return;
@@ -579,6 +686,7 @@ impl<'a> Builder<'a> {
                     }
                     _ => {
                         self.matter = Some((matter, at));
+                        self.record_block(BlockKind::Directive, at, &written);
                         self.push_block(Block::Matter { at, matter });
                     }
                 }
@@ -595,6 +703,7 @@ impl<'a> Builder<'a> {
                     self.report(offset, message);
                 } else {
                     self.contents = Some(at);
+                    self.record_block(BlockKind::Directive, at, &written);
                     self.push_block(Block::Contents { at });
                 }
                 return;
@@ -633,6 +742,7 @@ impl<'a> Builder<'a> {
                 None
             }
         };
+        self.record_open(BlockKind::Directive, at, &written);
         self.containers.push(Container::Directive { at, fence, columns });
         self.blocks.push(Vec::new());
     }
@@ -762,8 +872,13 @@ impl<'a> Builder<'a> {
                 and footnotes";
             self.report(offset, message);
         }
+        let kind = level.map_or(BlockKind::Paragraph, BlockKind::Heading);
+        let (at, start) = (self.location(offset), self.document_offset(offset));
+        if let Some(recorder) = &mut self.recorder {
+            recorder.open_leaf(kind, at, start);
+        }
         self.leaf = Some(Leaf {
-            at: self.location(offset),
+            at,
             level,
             implicit,
             content: Vec::new(),
@@ -1016,6 +1131,12 @@ impl<'a> Builder<'a> {
         else {
             return;
         };
+        if let Some(recorder) = &mut self.recorder {
+            if let Some(image) = &image {
+                recorder.leaf_is_image(image.at);
+            }
+            recorder.close_leaf();
+        }
         self.unclosed_span();
         self.close_marks();
         if level.is_none() {
@@ -1079,7 +1200,7 @@ impl<'a> Builder<'a> {
     /// Removes a `{.name}` attribute from the end of a paragraph whose last text event ended at
     /// `text_end`, and returns it with whether it stands on a line of its own.
     fn take_class(&self, content: &mut Vec<Inline>, text_end: usize) -> Option<(Class, bool)> {
-        let Some(Inline::Text { text, style }) = content.last_mut() else {
+        let Some(Inline::Text { text, style, source }) = content.last_mut() else {
             return None;
         };
         let open = text.rfind("{.").filter(|_| !style.code)?;
@@ -1103,6 +1224,7 @@ impl<'a> Builder<'a> {
         };
         text.truncate(open);
         text.truncate(text.trim_end().len());
+        source.truncate(text.len());
         if text.is_empty() {
             content.pop();
         }
@@ -1167,7 +1289,7 @@ impl<'a> Builder<'a> {
         at: Location,
         content: &mut Vec<Inline>,
     ) -> (Option<String>, Option<(Placement, Location)>) {
-        let Some(Inline::Text { text, style }) = content.last_mut() else {
+        let Some(Inline::Text { text, style, source }) = content.last_mut() else {
             return (None, None);
         };
         let trimmed = text.trim_end();
@@ -1193,6 +1315,7 @@ impl<'a> Builder<'a> {
         }
         text.truncate(start);
         text.truncate(text.trim_end().len());
+        source.truncate(text.len());
         if text.is_empty() {
             content.pop();
         }
@@ -1268,31 +1391,50 @@ impl<'a> Builder<'a> {
                 Some(Inline::Text {
                     text: last,
                     style: last_style,
+                    source: last_source,
                 }),
-                Inline::Text { text, style },
-            ) if !style.code && *last_style == style => last.push_str(&text),
+                Inline::Text { text, style, source },
+            ) if !style.code && *last_style == style => {
+                last_source.append(source, last.len());
+                last.push_str(&text);
+            }
             (_, inline) => leaf.content.push(inline),
         }
     }
 
     fn push_text(&mut self, offset: usize, text: &str, code: bool) {
         let style = self.style(code);
-        let text = if self.no_break_spaces && !code {
-            spacing::join(text)
+        // A code span's text starts after its backticks and a space that may pad it.
+        let written = if code {
+            let ticks = self.body[offset..].len() - self.body[offset..].trim_start_matches('`').len();
+            let same = |at: &usize| self.body.get(*at..*at + text.len()) == Some(text);
+            [offset + ticks, offset + ticks + 1]
+                .into_iter()
+                .find(same)
+                .unwrap_or(offset)
         } else {
-            text.into()
+            offset
+        };
+        let source = self.spans(written, text);
+        let (text, source) = if self.no_break_spaces && !code {
+            let joined = spacing::join(text);
+            let source = source.joined(text, &joined);
+            (joined, source)
+        } else {
+            (text.into(), source)
         };
         self.push_inline(
             offset,
             Inline::Text {
                 text: text.into_owned(),
                 style,
+                source,
             },
         );
     }
 
     fn event(&mut self, event: Event<'_>, range: Range<usize>) {
-        let offset = range.start;
+        let (offset, end_offset) = (range.start, range.end);
         if self.depth == 0 {
             // A block's range can include the blank lines after it, which may be blanked directives.
             let end = range.start + self.body[range.clone()].trim_end().len();
@@ -1319,7 +1461,12 @@ impl<'a> Builder<'a> {
             Event::End(TagEnd::Image) => self.end_image(range.end),
             Event::End(tag) => self.end(tag),
             Event::Text(text) => match self.code.as_mut() {
-                Some(code) => code.text.push_str(&text),
+                Some(code) => {
+                    if self.recorder.is_some() {
+                        code.events.push((code.text.len(), range));
+                    }
+                    code.text.push_str(&text);
+                }
                 None => {
                     // Opened before the text is read, so attributes at the start of a table item are seen.
                     if self.leaf.is_none() {
@@ -1342,6 +1489,7 @@ impl<'a> Builder<'a> {
             Event::Rule => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                self.record_block(BlockKind::SceneBreak, at, &range);
                 self.push_block(Block::SceneBreak { at });
             }
             Event::InlineHtml(_) if offset < self.consumed => {}
@@ -1350,6 +1498,10 @@ impl<'a> Builder<'a> {
             Event::TaskListMarker(_) => self.report(offset, "task lists are not supported"),
             // Block HTML is skipped with its tag; math and the rest are not enabled.
             _ => {}
+        }
+        let end = self.document_offset(end_offset);
+        if let Some(recorder) = &mut self.recorder {
+            recorder.extend_leaf(end);
         }
     }
 
@@ -1833,11 +1985,16 @@ impl<'a> Builder<'a> {
                 at: self.location(offset),
                 text: text.clone(),
             });
+            let source = match self.recorder {
+                Some(_) => Spans::inserted(self.document_offset(offset)),
+                None => Spans::default(),
+            };
             self.push_inline(
                 offset,
                 Inline::Text {
                     text: format!("TODO: {text}"),
                     style,
+                    source,
                 },
             );
         }
@@ -2045,6 +2202,12 @@ impl<'a> Builder<'a> {
             Tag::BlockQuote(kind) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                let block = if kind.is_some() {
+                    BlockKind::Callout
+                } else {
+                    BlockKind::Quote
+                };
+                self.record_open(block, at, &range);
                 self.containers.push(match kind {
                     Some(kind) => Container::Callout(at, callout_kind(kind)),
                     None => Container::Quote(at),
@@ -2054,6 +2217,7 @@ impl<'a> Builder<'a> {
             Tag::List(start) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                self.record_open(BlockKind::List, at, &range);
                 let class = self.pending_class.take();
                 self.containers.push(Container::List {
                     at,
@@ -2063,8 +2227,10 @@ impl<'a> Builder<'a> {
                 });
             }
             Tag::Item => {
+                let at = self.location(offset);
+                self.record_open(BlockKind::ListItem, at, &range);
                 self.containers.push(Container::Item(ListItem {
-                    at: self.location(offset),
+                    at,
                     blocks: Vec::new(),
                     attributes: None,
                     cells: None,
@@ -2078,11 +2244,13 @@ impl<'a> Builder<'a> {
                     CodeBlockKind::Fenced(info) => (at.line + 1, highlight::language_of(info).map(str::to_owned)),
                     CodeBlockKind::Indented => (at.line, None),
                 };
+                self.record_block(BlockKind::Code, at, &range);
                 self.code = Some(CodeBlock {
                     at,
                     first_line,
                     language,
                     text: String::new(),
+                    events: Vec::new(),
                 });
             }
             Tag::Emphasis => self.emphasis += 1,
@@ -2100,6 +2268,7 @@ impl<'a> Builder<'a> {
                 }
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                self.record_open(BlockKind::Table, at, &range);
                 self.table = Some(TableState {
                     at,
                     columns: align
@@ -2132,8 +2301,12 @@ impl<'a> Builder<'a> {
                 let end = self.table.as_ref().map_or(offset, |table| table.row_source.end);
                 let start = offset.min(end);
                 let start = start + (self.body[start..end].len() - self.body[start..end].trim_start().len());
+                let (at, written) = (self.location(start), self.document_offset(start));
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.open_leaf(BlockKind::Paragraph, at, written);
+                }
                 self.leaf = Some(Leaf {
-                    at: self.location(start),
+                    at,
                     level: None,
                     implicit: false,
                     content: Vec::new(),
@@ -2149,6 +2322,7 @@ impl<'a> Builder<'a> {
             Tag::FootnoteDefinition(label) => {
                 self.close_implicit_leaf();
                 let at = self.location(offset);
+                self.record_open(BlockKind::Footnote, at, &range);
                 self.containers.push(Container::Footnote {
                     at,
                     offset,
@@ -2232,6 +2406,13 @@ impl<'a> Builder<'a> {
     }
 
     fn end(&mut self, tag: TagEnd) {
+        let holds_blocks = matches!(
+            tag,
+            TagEnd::BlockQuote(_) | TagEnd::List(_) | TagEnd::Item | TagEnd::Table | TagEnd::FootnoteDefinition
+        );
+        if let Some(recorder) = self.recorder.as_mut().filter(|_| holds_blocks) {
+            recorder.close(None);
+        }
         match tag {
             TagEnd::Paragraph | TagEnd::Heading(_) => self.close_leaf(),
             TagEnd::BlockQuote(_) => {
@@ -2263,13 +2444,20 @@ impl<'a> Builder<'a> {
                 }
             }
             TagEnd::CodeBlock => {
-                if let Some(CodeBlock {
-                    at,
-                    first_line,
-                    language,
-                    text,
-                }) = self.code.take()
-                {
+                if let Some(code) = self.code.take() {
+                    if self.recorder.is_some() {
+                        let spans = self.code_spans(&code);
+                        if let Some(recorder) = &mut self.recorder {
+                            recorder.code(code.at, spans);
+                        }
+                    }
+                    let CodeBlock {
+                        at,
+                        first_line,
+                        language,
+                        text,
+                        ..
+                    } = code;
                     let lines = text.lines().map(str::to_owned).collect();
                     self.push_block(Block::Code {
                         at,
@@ -2300,6 +2488,9 @@ impl<'a> Builder<'a> {
                 }
             }
             TagEnd::TableCell => {
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.close_leaf();
+                }
                 self.unclosed_span();
                 if let Some(leaf) = &self.leaf {
                     let content = leaf.content.clone();
@@ -2670,13 +2861,15 @@ fn strip_margin_mark(blocks: &mut Vec<Block>) -> bool {
     let Some(Block::Paragraph { content, .. }) = blocks.first_mut() else {
         return false;
     };
-    let Some(Inline::Text { text, style }) = content.first_mut() else {
+    let Some(Inline::Text { text, style, source }) = content.first_mut() else {
         return false;
     };
     let Some(rest) = text.strip_prefix("{-}").filter(|_| !style.code) else {
         return false;
     };
-    *text = rest.trim_start().to_owned();
+    let rest = rest.trim_start();
+    *source = source.slice(text.len() - rest.len()..text.len());
+    *text = rest.to_owned();
     if text.is_empty() {
         content.remove(0);
         if content.is_empty() {
@@ -2815,7 +3008,7 @@ fn column_attributes(name: &str, text: &str) -> Result<ColumnAttributes, String>
 }
 
 fn starts_with_caption_marker(content: &[Inline]) -> bool {
-    matches!(content.first(), Some(Inline::Text { text, style }) if !style.code && text.starts_with(": "))
+    matches!(content.first(), Some(Inline::Text { text, style, .. }) if !style.code && text.starts_with(": "))
 }
 
 /// Removes the `: ` that starts a table caption and returns whether there was one.
@@ -2823,7 +3016,8 @@ fn strip_caption_marker(content: &mut Vec<Inline>) -> bool {
     if !starts_with_caption_marker(content) {
         return false;
     }
-    if let Some(Inline::Text { text, .. }) = content.first_mut() {
+    if let Some(Inline::Text { text, source, .. }) = content.first_mut() {
+        *source = source.slice(2..text.len());
         text.drain(..2);
         if text.is_empty() {
             content.remove(0);
@@ -2903,6 +3097,7 @@ mod tests {
         Inline::Text {
             text: text.into(),
             style,
+            source: Spans::default(),
         }
     }
 
@@ -3110,7 +3305,7 @@ mod tests {
         content
             .iter()
             .map(|inline| match inline {
-                Inline::Text { text, style } if style.code => format!("`{text}`"),
+                Inline::Text { text, style, .. } if style.code => format!("`{text}`"),
                 Inline::Text { text, .. } => text.clone(),
                 other => panic!("unexpected {other:?}"),
             })
@@ -3131,7 +3326,7 @@ mod tests {
             content
                 .iter()
                 .map(|inline| match inline {
-                    Inline::Text { text, style } if style.code => format!("`{text}`"),
+                    Inline::Text { text, style, .. } if style.code => format!("`{text}`"),
                     Inline::Text { text, .. } => text.clone(),
                     other => panic!("unexpected {other:?}"),
                 })

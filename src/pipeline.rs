@@ -18,8 +18,8 @@ use crate::image::Image;
 use crate::input::{Input, ThemeDirs, ThemeSelection};
 use crate::renderer::{Failure, Renderer};
 use crate::resource::{Bytes, Files, ResolveError, Resolver};
-use crate::text::{FontSet, Fonts};
-use crate::{citations, document, installed, layout, markdown, page, pdf, theme_path};
+use crate::text::FontSet;
+use crate::{citations, document, installed, layout, markdown, output, theme_path};
 
 /// What one job reads from and reuses.
 pub struct JobContext<'r> {
@@ -82,9 +82,30 @@ pub fn parse(config: &Config, document: &DocumentFile) -> Result<document::Docum
     )
 }
 
+/// Like [`parse`], and records where blocks and text are written, for a source map.
+fn parse_mapped(config: &Config, document: &DocumentFile) -> Result<document::Document, Vec<Diagnostic>> {
+    let (body, first_line) = document.body();
+    markdown::parse_mapped(
+        body,
+        first_line,
+        &document.source,
+        config.document.lang,
+        config.typesetting.no_break_spaces,
+        document.text.len() - body.len(),
+    )
+}
+
 /// Parses the Markdown body, loads its images, the theme's, and the bibliography, and formats citations.
 pub fn prepare(job: &JobContext, config: &Config, document: &DocumentFile) -> Result<Prepared, Failure> {
-    let content = parse(config, document)?;
+    prepare_parsed(job, config, document, parse(config, document)?)
+}
+
+fn prepare_parsed(
+    job: &JobContext,
+    config: &Config,
+    document: &DocumentFile,
+    content: document::Document,
+) -> Result<Prepared, Failure> {
     let bibliography = load_bibliography(job, config)?;
     let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source, job.cancel)?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
@@ -98,16 +119,23 @@ pub fn prepare(job: &JobContext, config: &Config, document: &DocumentFile) -> Re
     })
 }
 
-/// Finds the fonts and lays out the document, reporting everything `render` reports before writing.
+/// Finds the fonts and lays out the document, reporting everything `render` reports before writing. With
+/// `source_map`, the result connects its text to the written text.
 pub fn typeset(
     job: &JobContext,
     config: &Config,
     document: &DocumentFile,
     today: Date,
-) -> Result<(FontSet, page::Output), Failure> {
+    source_map: bool,
+) -> Result<(FontSet, output::Output), Failure> {
     let set = load_fonts(job, config)?;
     let fonts = set.fonts();
-    let prepared = prepare(job, config, document)?;
+    let content = if source_map {
+        parse_mapped(config, document)?
+    } else {
+        parse(config, document)?
+    };
+    let prepared = prepare_parsed(job, config, document, content)?;
     let laid = layout::layout(
         &prepared.content,
         &prepared.cited,
@@ -116,6 +144,7 @@ pub fn typeset(
         config,
         &fonts,
         &document.source,
+        &document.path,
         today,
         job.cancel,
     )?;
@@ -507,24 +536,4 @@ fn parse_theme(text: &str, source: InputSource) -> Result<ThemeInput, Vec<Diagno
         vec![Diagnostic::new(Some(source.clone()), message).at(e.line() as u64, e.column() as u64)]
     })?;
     Ok(ThemeInput { source, value })
-}
-
-/// The laid out document as a PDF, checked against the standards it must conform to.
-pub fn write_pdf(
-    config: &Config,
-    document: &DocumentFile,
-    fonts: &Fonts,
-    laid: &page::Output,
-    print: pdf::Print,
-    today: Date,
-    cancel: &Cancel,
-) -> Result<Vec<u8>, Failure> {
-    let settings = pdf::Settings {
-        lang: config.document.lang,
-        print,
-        conformance: &config.document.conformance,
-        today,
-        source: &document.source,
-    };
-    pdf::write(laid, fonts, &config.metadata, &settings, cancel)
 }

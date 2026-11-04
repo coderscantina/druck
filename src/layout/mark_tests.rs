@@ -54,7 +54,7 @@ fn runs(output: &Output) -> Vec<(f64, f64, Color, &ShapedRun)> {
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::Text { x, y, run, color } => Some((x.0, y.0, *color, run)),
+            Item::Text { x, y, run, color, .. } => Some((x.0, y.0, *color, run)),
             _ => None,
         })
         .collect()

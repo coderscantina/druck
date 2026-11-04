@@ -40,7 +40,7 @@ use crate::config::source::InputSource;
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::Location;
-use crate::page::{Aside, Item, NoteKind, Page, Position, Rect};
+use crate::output::{Aside, Item, NoteKind, Page, Position, Rect};
 use crate::renderer::Failure;
 
 /// Space between blocks may grow by this share of its natural height.
@@ -1553,6 +1553,7 @@ mod tests {
                 marks: Vec::new(),
                 hyphenated: false,
                 flaw: None,
+                sources: Vec::new(),
             },
             space_before: 0.0,
             after,

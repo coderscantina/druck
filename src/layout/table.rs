@@ -25,7 +25,7 @@ use crate::config::resolved::{CustomStyle, Rule, Style};
 use crate::config::theme::{Align, RuleBelow};
 use crate::config::values::Pt;
 use crate::document::{Block, Cell, Column, ColumnAlign, ColumnWidth, Inline, Location, Row};
-use crate::page::{Item, Rect};
+use crate::output::{Item, Rect};
 use crate::tags::{self, Kind};
 
 /// Added to a column's width when its cells are set, so text measured to fit exactly is not
@@ -182,6 +182,7 @@ impl<'a> Flow<'a> {
         let caption_tag = self.tags.add(Kind::Caption, self.parent);
         let table_tag = self.open(Kind::Table, false);
         let mut lines = Vec::with_capacity(rows.len());
+        let around = self.block;
         for (index, ((row, frames), prepared)) in rows.iter().zip(frames).zip(&prepared).enumerate() {
             let mut cells = Vec::with_capacity(row.cells.len());
             let row_tag = self.open(Kind::TableRow, false);
@@ -201,6 +202,8 @@ impl<'a> Flow<'a> {
                             lines
                                 .into_iter()
                                 .map(|mut line| {
+                                    self.block = self.block_of(&cell.blocks[0]).or(self.block);
+                                    self.adopt(&mut line);
                                     line.items = self.tag(std::mem::take(&mut line.items));
                                     (0.0, translate_line(line, *indent))
                                 })
@@ -240,6 +243,7 @@ impl<'a> Flow<'a> {
             let above = if index == 0 { rules.top_rule } else { None };
             lines.push(row_line(cells, (left, x), padding, above, below));
         }
+        self.block = around;
         self.close(table_tag);
 
         if self.wide.is_some() {
@@ -551,6 +555,7 @@ fn row_line(
     rect(0.0, above);
     rect(height - bottom, below);
     Line {
+        sources: Vec::new(),
         height,
         baseline,
         items,

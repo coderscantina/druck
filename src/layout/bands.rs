@@ -34,7 +34,7 @@ use crate::config::template::{Placeholder, Value};
 use crate::config::theme::{Align, Vertical};
 use crate::config::values::Color;
 use crate::diagnostic::Diagnostic;
-use crate::page::{Item, Page, Position};
+use crate::output::{Item, Page, Position};
 use crate::text::{Fonts, ShapedRun};
 
 /// Draws the header, footer, and watermark of every page but the `blanks`. `first` is the index of the

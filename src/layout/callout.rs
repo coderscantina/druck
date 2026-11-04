@@ -9,7 +9,8 @@ use crate::config::resolved::Rule;
 use crate::config::theme::CalloutKind;
 use crate::config::values::{Color, Pt};
 use crate::document::{Block, Inline, InlineStyle, Location};
-use crate::page::{Item, Rect};
+use crate::output::{Item, Rect};
+use crate::source_map::Spans;
 use crate::tags::Kind;
 
 /// The box a line of a callout is part of. `x` and `width` are in line coordinates.
@@ -82,6 +83,7 @@ impl<'a> Flow<'a> {
             let content = [Inline::Text {
                 text: label.to_owned(),
                 style: InlineStyle::default(),
+                source: Spans::default(),
             }];
             // Set as a heading, which never ends a page, so the label stays with the text below it.
             self.text_block(

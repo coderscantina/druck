@@ -9,7 +9,7 @@
 //! krilla uses the same coordinates as [`Page`]: points from the top-left corner, y growing down.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64};
 
 use krilla::action::LinkAction;
@@ -41,11 +41,11 @@ use crate::config::values::{Color, Pt};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::document::Link;
-use crate::image::{Image, Pixels};
-use crate::page::{Bookmark, Item, Output, PageNumber, Rect};
+use crate::image::{Drawn, Image};
+use crate::output::{Bookmark, Item, Output, PageNumber, Rect};
 use crate::renderer::Failure;
 use crate::tags::{Id, Kind, Mark, Node as TreeNode, Tree};
-use crate::text::{FaceId, Fonts, ShapedRun};
+use crate::text::{FaceId, FontSet, ShapedRun};
 
 /// The application, as named in the creator and producer fields of every PDF.
 const CREATOR: &str = concat!("Druck ", env!("CARGO_PKG_VERSION"));
@@ -105,7 +105,7 @@ pub struct Settings<'a> {
 /// problem is a diagnostic, at the content it concerns where that has a place in the document.
 pub fn write(
     output: &Output,
-    fonts: &Fonts,
+    fonts: &FontSet,
     metadata: &Metadata,
     settings: &Settings,
     cancel: &Cancel,
@@ -135,7 +135,7 @@ impl From<String> for Stop {
 /// The document ready to be finished, with the faces its text uses.
 fn compose(
     output: &Output,
-    fonts: &Fonts,
+    fonts: &FontSet,
     metadata: &Metadata,
     settings: &Settings,
     cancel: &Cancel,
@@ -181,7 +181,6 @@ fn compose(
     ));
     let mut contents = Contents::new(&output.tags);
     let mut faces = BTreeSet::new();
-    let mut spaces = HashMap::new();
     for (index, page) in output.pages.iter().enumerate() {
         if cancel.stopped(CheckPoint::Page) {
             return Err(Stop::Cancelled);
@@ -241,16 +240,12 @@ fn compose(
                 }
                 Item::Link { rect, link } => links.push((rect, link, element)),
                 Item::Anchor { .. } => {}
-                Item::Text { x, y, run, color } => {
+                Item::Text { x, y, run, color, .. } => {
                     contents.switch(&mut surface, &mut open, element.map(|id| (id, true)));
                     contents.read(element, &run.text);
                     faces.insert(run.face);
-                    let space = match contents.breaks_word(element, x.0, y.0, run) {
-                        true => *spaces
-                            .entry(run.face)
-                            .or_insert_with(|| space_glyph(fonts, run, settings.lang)),
-                        false => None,
-                    };
+                    let breaks = contents.breaks_word(element, x.0, y.0, run);
+                    let space = breaks.then(|| fonts.face_of(run.face).space()).flatten();
                     let start = Point::from_xy(x.0 as f32, y.0 as f32);
                     draw_run(&mut surface, fonts, run, start, *color, space)
                 }
@@ -274,9 +269,9 @@ fn compose(
                     contents.switch(&mut surface, &mut open, None);
                     draw_rect(&mut surface, rect, *color)?
                 }
-                Item::Image { rect, image } => {
+                Item::Image { rect, picture } => {
                     contents.switch(&mut surface, &mut open, element.map(|id| (id, false)));
-                    draw_image(&mut surface, rect, image)?
+                    draw_image(&mut surface, rect, picture)?
                 }
             }
         }
@@ -539,7 +534,7 @@ fn structure_type(kind: &Kind, id: Id) -> TagKind {
 fn problems(
     error: KrillaError,
     output: &Output,
-    fonts: &Fonts,
+    fonts: &FontSet,
     faces: &BTreeSet<FaceId>,
     settings: &Settings,
 ) -> Vec<Diagnostic> {
@@ -698,7 +693,7 @@ fn fill(color: Color) -> Fill {
 /// Draws a shaped run with its baseline at `start`. krilla takes glyph metrics as fractions of the
 /// font size, and the run text so the PDF can map glyphs back to text for search and copy.
 /// With `space`, a space glyph without advance comes first, so the text reads as a new word.
-fn draw_run(surface: &mut Surface, fonts: &Fonts, run: &ShapedRun, start: Point, color: Color, space: Option<u16>) {
+fn draw_run(surface: &mut Surface, fonts: &FontSet, run: &ShapedRun, start: Point, color: Color, space: Option<u16>) {
     if run.glyphs.is_empty() {
         return;
     }
@@ -726,12 +721,6 @@ fn draw_run(surface: &mut Surface, fonts: &Fonts, run: &ShapedRun, start: Point,
     };
     surface.set_fill(Some(fill(color)));
     surface.draw_glyphs(start, &glyphs, fonts.pdf_font(run.face).clone(), &text, size, false);
-}
-
-/// The space glyph of `run`'s face, if it has one.
-fn space_glyph(fonts: &Fonts, run: &ShapedRun, lang: Lang) -> Option<u16> {
-    let space = fonts.shape(" ", run.face, run.size, lang);
-    space.glyphs.first().map(|glyph| glyph.id).filter(|id| *id != 0)
 }
 
 /// Draws two marks at each corner of the `width` by `height` trim box, which starts `print.margin()` from
@@ -776,9 +765,9 @@ fn draw_image(surface: &mut Surface, rect: &Rect, image: &Image) -> Result<(), S
     let size = Size::from_wh(rect.width.0 as f32, rect.height.0 as f32)
         .ok_or_else(|| format!("invalid image size {} x {} pt", rect.width.0, rect.height.0))?;
     surface.push_transform(&Transform::from_translate(rect.x.0 as f32, rect.y.0 as f32));
-    match image.pixels() {
-        Pixels::Raster(raster) => surface.draw_image(raster.clone(), size),
-        Pixels::Svg(tree) => {
+    match image.drawn() {
+        Drawn::Raster(raster) => surface.draw_image(raster.clone(), size),
+        Drawn::Svg(tree) => {
             surface
                 .draw_svg(tree, size, SvgSettings::default())
                 .ok_or("cannot draw SVG image")?;
@@ -807,7 +796,7 @@ mod tests {
     use crate::config::source::{Origin, Resource};
     use crate::config::theme::{Face, FontStyle, Weight};
     use crate::config::values::Pt;
-    use crate::page::{Page, Position};
+    use crate::output::{Page, Position};
 
     const PLAIN: Print = Print {
         bleed: Pt(0.0),
@@ -817,7 +806,7 @@ mod tests {
     /// Writes a PDF without a standard to conform to.
     fn write_plain(
         output: &Output,
-        fonts: &Fonts,
+        fonts: &crate::text::Fonts,
         metadata: &Metadata,
         lang: Lang,
         print: Print,
@@ -829,10 +818,10 @@ mod tests {
             today: Date::from_unix(0),
             source: &InputSource::Document("doc.md".into()),
         };
-        write(output, fonts, metadata, &settings, &Cancel::default()).map_err(Failure::into_errors)
+        write(output, fonts.set(), metadata, &settings, &Cancel::default()).map_err(Failure::into_errors)
     }
 
-    fn fonts() -> Fonts<'static> {
+    fn fonts() -> crate::text::Fonts<'static> {
         let regular = FaceFile {
             resource: Resource {
                 origin: Origin::Bundled,
@@ -842,7 +831,7 @@ mod tests {
             variable: false,
         };
         let files = BTreeMap::from([(Face::REGULAR, regular)]);
-        Fonts::from_files(&BTreeMap::from([("Serif".to_owned(), files)])).expect("bundled font")
+        crate::text::Fonts::from_files(&BTreeMap::from([("Serif".to_owned(), files)])).expect("bundled font")
     }
 
     #[test]
@@ -865,6 +854,7 @@ mod tests {
                     color: Color([250, 230, 230]),
                 },
                 Item::Text {
+                    source: None,
                     x: Pt(10.0),
                     y: Pt(20.0),
                     run,
@@ -895,6 +885,7 @@ mod tests {
             tags: Tree::default(),
             asides: Vec::new(),
             warnings: Vec::new(),
+            source_map: None,
         }
     }
 
@@ -938,6 +929,7 @@ mod tests {
             tags: Tree::default(),
             asides: Vec::new(),
             warnings: Vec::new(),
+            source_map: None,
         };
         let bytes = write_plain(&output, &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
         let pdf = String::from_utf8_lossy(&bytes);
@@ -1017,7 +1009,7 @@ mod tests {
                 width: Pt(80.0),
                 height: Pt(40.0),
             };
-            Item::Image { rect, image }
+            Item::Image { rect, picture: image }
         };
         let page = Page {
             width: Pt(100.0),

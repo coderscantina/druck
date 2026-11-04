@@ -87,6 +87,17 @@ impl Cuts {
         let cut = self.0.partition_point(|&(at, _)| at <= offset);
         offset + cut.checked_sub(1).map_or(0, |last| self.0[last].1)
     }
+
+    /// The contiguous written parts of `range` of the remaining text: for each, its byte from the start of the
+    /// range and its offset in the written text. A comment inside the range starts a new part.
+    pub fn parts(&self, range: Range<usize>) -> Vec<(usize, usize)> {
+        let mut parts = vec![(0, self.original(range.start))];
+        let first = self.0.partition_point(|&(at, _)| at <= range.start);
+        for &(at, _) in self.0[first..].iter().take_while(|(at, _)| *at < range.end) {
+            parts.push((at - range.start, self.original(at)));
+        }
+        parts
+    }
 }
 
 #[cfg(test)]
@@ -128,5 +139,6 @@ mod tests {
         assert_eq!(text, "abcdef");
         let written: Vec<usize> = (0..=text.len()).map(|offset| cuts.original(offset)).collect();
         assert_eq!(written, [0, 1, 11, 12, 21, 22, 23]);
+        assert_eq!(cuts.parts(1..5), [(0, 1), (1, 11), (3, 21)]);
     }
 }
