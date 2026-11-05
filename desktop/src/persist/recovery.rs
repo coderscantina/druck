@@ -123,11 +123,6 @@ impl Copies {
         atomic::write(&target, text.as_bytes())?;
         Ok(target)
     }
-
-    /// Where kept copies go, to tell the person.
-    pub fn kept_folder(&self) -> &Path {
-        &self.kept
-    }
 }
 
 #[cfg(test)]
@@ -178,7 +173,7 @@ mod tests {
         let dir = data("kept");
         let copies = Copies::new(&dir, Path::new("/books/one"));
         let kept = copies.keep(Path::new("/books/one/a.md"), "theirs", "text").unwrap();
-        assert!(kept.starts_with(copies.kept_folder()));
+        assert!(kept.starts_with(&copies.kept));
         assert!(kept.to_string_lossy().ends_with(".theirs.md"));
         assert_eq!(fs::read_to_string(&kept).unwrap(), "text");
         fs::remove_dir_all(dir).ok();

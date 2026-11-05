@@ -45,7 +45,8 @@ crate::strings! {
             "Took back the change from outside. Redo brings it back.",
             "Änderung von außen zurückgenommen. Wiederholen bringt sie zurück."
         ),
-        CopyIn => ("A copy is in", "Eine Kopie liegt in"),
+        CopyKept => ("The other version is kept in the folder \"{folder}\".", "Die andere Fassung liegt im Ordner „{folder}“."),
+        ShowInFinder => ("Show in Finder", "Im Finder zeigen"),
         NotUtf8 => ("{file} is not UTF-8 text.", "{file} ist kein UTF-8-Text."),
         NotAsSeen => (
             "the file is not as the app last saw it",

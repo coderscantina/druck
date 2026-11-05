@@ -143,6 +143,8 @@ pub struct PersistView {
     watcher: Option<Watcher>,
     theme: Option<PathBuf>,
     note: Option<SharedString>,
+    /// A kept copy the note is about, which Show in Finder shows.
+    note_file: Option<PathBuf>,
     note_task: Task<()>,
     gone_task: Option<Task<()>>,
     /// The hash of each file's newest recovery copy, so unchanged text is not written again.
@@ -243,6 +245,7 @@ impl PersistView {
             watcher: None,
             theme,
             note: None,
+            note_file: None,
             note_task: Task::ready(()),
             gone_task: None,
             recovered: HashMap::new(),
@@ -770,11 +773,26 @@ impl PersistView {
     }
 
     fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_note_about(text, None, window, cx);
+    }
+
+    /// A note about a kept copy: it names the folder, and Show in Finder shows the copy in it.
+    fn note_kept(&mut self, before: Option<&str>, kept: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let folder = (kept.parent().and_then(Path::file_name))
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let says = crate::t!(Key::CopyKept, folder = folder);
+        let text = before.map_or_else(|| says.clone(), |before| format!("{before} {says}"));
+        self.show_note_about(text, Some(kept), window, cx);
+    }
+
+    fn show_note_about(&mut self, text: String, file: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         self.note = Some(text.into());
+        self.note_file = file;
         self.note_task = cx.spawn_in(window, async move |view, cx| {
             cx.background_executor().timer(NOTE_TIME).await;
             view.update(cx, |view, cx| {
                 view.note = None;
+                view.note_file = None;
                 cx.notify();
             })
             .ok();
@@ -796,16 +814,13 @@ impl PersistView {
         // The file still holds what the undo just took out of the buffer.
         let session = self.session(cx);
         let path = session.active_chapter().path().to_owned();
-        let kept = std::fs::read_to_string(&path).ok().and_then(|text| {
-            let copies = self.sync.copies()?;
-            copies.keep(&path, "from-outside", &text).ok()?;
-            Some(copies.kept_folder().display().to_string())
-        });
-        let text = match kept {
-            Some(folder) => format!("{} {} {folder}", crate::t!(Key::UndoDone), crate::t!(Key::CopyIn)),
-            None => crate::t!(Key::UndoDone).to_owned(),
-        };
-        self.show_note(text, window, cx);
+        let kept = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| self.sync.copies()?.keep(&path, "from-outside", &text).ok());
+        match kept {
+            Some(kept) => self.note_kept(Some(crate::t!(Key::UndoDone)), kept, window, cx),
+            None => self.show_note(crate::t!(Key::UndoDone).to_owned(), window, cx),
+        }
     }
 
     /// Says at the foot that something about `path` went wrong outside saving, or, with `None`, that a problem of
@@ -838,10 +853,7 @@ impl PersistView {
             editor.update_session(|session| sync.resolve(session, path, choice), window, cx)
         });
         match result {
-            Ok(Some(kept)) => {
-                let folder = kept.parent().unwrap_or(&kept).display().to_string();
-                self.show_note(format!("{} {folder}", crate::t!(Key::CopyIn)), window, cx);
-            }
+            Ok(Some(kept)) => self.note_kept(None, kept, window, cx),
             Ok(None) => {}
             Err(error) => {
                 self.show_note(format!("{}: {error}", crate::t!(Key::CannotSave)), window, cx);
@@ -971,10 +983,22 @@ impl Render for PersistView {
                 .into_any_element();
         }
         if let Some(note) = &self.note {
+            let reveal = self.note_file.clone().map(|file| {
+                div()
+                    .id("show-kept")
+                    .control(&tokens, gpui::Role::Link, crate::t!(Key::ShowInFinder))
+                    .flex_none()
+                    .cursor_pointer()
+                    .text_color(tokens.text)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, cx| cx.reveal_path(&file))
+                    .child(crate::t!(Key::ShowInFinder))
+            });
             return root
                 .flex_1()
                 .text_color(tokens.text_quiet)
                 .child(div().min_w_0().truncate().child(note.clone()))
+                .children(reveal)
                 .into_any_element();
         }
         // All is well, so there is nothing to say.
