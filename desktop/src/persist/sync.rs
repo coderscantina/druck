@@ -17,12 +17,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::atomic::{Outcome, content_hash};
-use super::merge::{Choice, Merged, edits_between, git_conflict, starting_point, three_way};
+use super::merge::{Choice, Merged, Sides, edits_between, git_conflict, starting_point, three_way};
 use super::recovery::Copies;
 use super::strings::Key;
 use super::watch::Ready;
 use crate::session::disk::Outgoing;
 use crate::session::{ChapterId, Session};
+use crate::shell::strings::{Language, Table as _};
 use crate::source::EditKind;
 
 /// How long typing must stop before unsaved text goes to the recovery copy, cheap as that is.
@@ -116,6 +117,52 @@ pub struct FileChange {
     pub kind: ChangeKind,
     pub base: Arc<str>,
     pub theirs: Option<Arc<str>>,
+    pub source: Source,
+}
+
+/// What changed a file the author did not write, as a note and "See both"'s markers name it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Source {
+    /// Another program, or a sync.
+    #[default]
+    Elsewhere,
+    /// The writing partner, during its turn.
+    Agent,
+    /// A Git command the author ran here, and the branch it is about.
+    Git(GitMove, String),
+}
+
+/// What a Git command did to the files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitMove {
+    Merge,
+    Pull,
+    Switch,
+    /// A merge was called off, and the files went back to the branch.
+    Abort,
+}
+
+impl Source {
+    /// The name a marker line of "See both" gives the other side, in `language`.
+    fn side_name(&self, language: Language) -> String {
+        match self {
+            Self::Elsewhere => Key::BothElsewhere.text(language).to_owned(),
+            Self::Agent => Key::BothAgent.text(language).to_owned(),
+            Self::Git(_, branch) => branch.clone(),
+        }
+    }
+}
+
+/// The book's language, from its `lang`, or the app's when it names none the app speaks.
+fn book_language(session: &Session) -> Language {
+    let lang = &session.details().language;
+    if lang.starts_with("de") {
+        Language::German
+    } else if lang.starts_with("en") {
+        Language::English
+    } else {
+        crate::shell::strings::language()
+    }
 }
 
 /// A conflict waiting for a person.
@@ -125,6 +172,8 @@ struct Pending {
     theirs: Option<Arc<str>>,
     /// Git reported this as a conflict, so nothing here merges by sentences and only a person settles it.
     from_git: bool,
+    /// What wrote their side.
+    source: Source,
 }
 
 impl Pending {
@@ -200,6 +249,8 @@ pub struct FileSync {
     pending: BTreeMap<PathBuf, Pending>,
     problems: BTreeMap<PathBuf, Problem>,
     copies: Option<Copies>,
+    /// What is writing the files now, for the changes taken in next.
+    source: Source,
 }
 
 impl FileSync {
@@ -209,7 +260,13 @@ impl FileSync {
             pending: BTreeMap::new(),
             problems: BTreeMap::new(),
             copies,
+            source: Source::Elsewhere,
         }
+    }
+
+    /// Says what writes the files from now on, so what comes in is named after it.
+    pub fn set_source(&mut self, source: Source) {
+        self.source = source;
     }
 
     pub fn conflicts(&self) -> impl Iterator<Item = &Path> {
@@ -293,6 +350,7 @@ impl FileSync {
             kind: ChangeKind::Conflict,
             base: base.clone(),
             theirs: Some(theirs.clone()),
+            source: self.source.clone(),
         };
         self.pending.insert(
             path.to_owned(),
@@ -300,6 +358,7 @@ impl FileSync {
                 base,
                 theirs: Some(theirs),
                 from_git: true,
+                source: self.source.clone(),
             },
         );
         session.hold_file(path, true);
@@ -337,6 +396,7 @@ impl FileSync {
             kind,
             base,
             theirs: Some(theirs.clone()),
+            source: self.source.clone(),
         };
         if mine == *theirs {
             let change = change(ChangeKind::Unchanged, known.base.clone());
@@ -360,12 +420,13 @@ impl FileSync {
                     base,
                     theirs: Some(theirs),
                     from_git: false,
+                    source: self.source.clone(),
                 },
             );
             session.hold_file(path, true);
             return Some(change);
         }
-        let text = merged.text(Choice::Mine);
+        let text = merged.one_side(Choice::Mine);
         let kind = if text == *theirs {
             ChangeKind::Reloaded
         } else {
@@ -413,6 +474,7 @@ impl FileSync {
             },
             base: base.clone(),
             theirs: None,
+            source: self.source.clone(),
         };
         if dirty {
             self.pending.insert(
@@ -421,6 +483,7 @@ impl FileSync {
                     base,
                     theirs: None,
                     from_git: false,
+                    source: self.source.clone(),
                 },
             );
             session.hold_file(path, true);
@@ -442,12 +505,19 @@ impl FileSync {
             None => self.resolve_removal(session, path, choice, &mine)?,
             Some(theirs) => {
                 let merged = pending.merged(&mine, &theirs);
+                let language = book_language(session);
+                let theirs_name = pending.source.side_name(language);
+                let sides = Sides {
+                    mine: Key::BothMine.text(language),
+                    theirs: &theirs_name,
+                };
+                let text = merged.text(choice, sides);
                 let kept = match choice {
                     Choice::Mine => self.keep(path, "theirs", &theirs)?,
                     Choice::Theirs => self.keep(path, "mine", &mine)?,
                     Choice::Both => None,
                 };
-                self.take_text(session, path, &mine, &merged.text(choice), &theirs);
+                self.take_text(session, path, &mine, &text, &theirs);
                 kept
             }
         };

@@ -19,22 +19,59 @@ use crate::source::Edit;
 /// A diff that takes longer gives a coarser result, which is still correct. Only a rewrite of a whole file gets here.
 const DIFF_TIME: Duration = Duration::from_millis(100);
 
-/// Lines of a comment around a [`Choice::Both`], so the pages and the engine see both versions as plain text. The
-/// usual marker characters, so a search for them finds these too.
-const BOTH_MINE: &str = "<!-- <<<<<<< yours -->\n";
-const BOTH_BETWEEN: &str = "<!-- ======= -->\n";
-const BOTH_THEIRS: &str = "<!-- >>>>>>> from outside -->\n";
+/// The lines of a comment around a [`Choice::Both`], so the pages and the engine see both versions as plain text. The
+/// usual marker characters, so a search for them finds these too. The first and last name their side.
+const BOTH_MINE: &str = "<!-- <<<<<<< ";
+const BOTH_BETWEEN: &str = "<!-- ======= -->";
+const BOTH_THEIRS: &str = "<!-- >>>>>>> ";
+const COMMENT_END: &str = " -->";
 
-const MARKERS: [&str; 3] = [BOTH_MINE, BOTH_BETWEEN, BOTH_THEIRS];
+/// What the marker lines of a [`Choice::Both`] name: the author's side, and what changed the file, in the book's language.
+#[derive(Debug, Clone, Copy)]
+pub struct Sides<'a> {
+    pub mine: &'a str,
+    pub theirs: &'a str,
+}
+
+#[derive(PartialEq)]
+enum MarkerLine {
+    Mine,
+    Between,
+    Theirs,
+}
+
+/// Which marker line `line` is, whatever side it names, so markers written in any language or an older form are found.
+fn marker_line(line: &str) -> Option<MarkerLine> {
+    let line = line.trim_end();
+    let names_a_side = |start: &str| {
+        line.strip_prefix(start)
+            .and_then(|rest| rest.strip_suffix(COMMENT_END))
+            .is_some_and(|side| !side.is_empty() && !side.contains("--"))
+    };
+    if line == BOTH_BETWEEN {
+        Some(MarkerLine::Between)
+    } else if names_a_side(BOTH_MINE) {
+        Some(MarkerLine::Mine)
+    } else if names_a_side(BOTH_THEIRS) {
+        Some(MarkerLine::Theirs)
+    } else {
+        None
+    }
+}
+
+/// A marker line naming `side`. A comment cannot hold `--`, which a branch's name may.
+fn marker(start: &str, side: &str) -> String {
+    format!("{start}{}{COMMENT_END}\n", side.replace("--", "-"))
+}
 
 /// Whether a text still has the marker comments of a [`Choice::Both`].
 pub fn has_markers(text: &str) -> bool {
-    MARKERS.iter().any(|marker| text.contains(marker))
+    text.lines().any(|line| marker_line(line).is_some())
 }
 
 /// Whether a block or line is one of the marker comments of a [`Choice::Both`].
 pub fn is_marker(text: &str) -> bool {
-    MARKERS.iter().any(|marker| text.trim_end() == marker.trim_end())
+    !text.trim_end().contains('\n') && marker_line(text).is_some()
 }
 
 /// The text with the versions [`Choice::Both`] left in it reduced to `choice`'s side, and the marker lines gone.
@@ -48,11 +85,11 @@ pub fn keep_one(text: &str, choice: Choice) -> String {
     let mut part = Part::Outside;
     let mut kept = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
-        match line.trim_end() {
-            marker if marker == BOTH_MINE.trim_end() => part = Part::Mine,
-            marker if marker == BOTH_BETWEEN.trim_end() => part = Part::Theirs,
-            marker if marker == BOTH_THEIRS.trim_end() => part = Part::Outside,
-            _ => {
+        match marker_line(line) {
+            Some(MarkerLine::Mine) => part = Part::Mine,
+            Some(MarkerLine::Between) => part = Part::Theirs,
+            Some(MarkerLine::Theirs) => part = Part::Outside,
+            None => {
                 let keep = match part {
                     Part::Outside => true,
                     Part::Mine => choice != Choice::Theirs,
@@ -102,8 +139,8 @@ impl Merged {
         })
     }
 
-    /// The text, with every conflict settled by `choice`.
-    pub fn text(&self, choice: Choice) -> String {
+    /// The text, with every conflict settled by `choice`. [`Choice::Both`] names `sides` in its marker lines.
+    pub fn text(&self, choice: Choice, sides: Sides) -> String {
         let mut text = String::new();
         for chunk in &self.chunks {
             match (chunk, choice) {
@@ -111,15 +148,22 @@ impl Merged {
                 (Chunk::Conflict { mine, .. }, Choice::Mine) => text.push_str(mine),
                 (Chunk::Conflict { theirs, .. }, Choice::Theirs) => text.push_str(theirs),
                 (Chunk::Conflict { mine, theirs }, Choice::Both) => {
-                    text.push_str(BOTH_MINE);
+                    text.push_str(&marker(BOTH_MINE, sides.mine));
                     push_line(&mut text, mine);
                     text.push_str(BOTH_BETWEEN);
+                    text.push('\n');
                     push_line(&mut text, theirs);
-                    text.push_str(BOTH_THEIRS);
+                    text.push_str(&marker(BOTH_THEIRS, sides.theirs));
                 }
             }
         }
         text
+    }
+
+    /// The text with every conflict settled by one side, which needs no names.
+    pub fn one_side(&self, choice: Choice) -> String {
+        debug_assert_ne!(choice, Choice::Both);
+        self.text(choice, Sides { mine: "", theirs: "" })
     }
 
     fn clean(&mut self, tokens: &[&str]) {
@@ -440,7 +484,7 @@ pub fn starting_point<'a>(current: &'a str, earlier: &'a [impl AsRef<str>], thei
 /// change nothing.
 fn undoes_since(version: &str, current: &str, theirs: &str) -> bool {
     let merged = three_way(current, version, theirs);
-    merged.is_clean() && merged.text(Choice::Mine) == theirs
+    merged.is_clean() && merged.one_side(Choice::Mine) == theirs
 }
 
 #[cfg(test)]
@@ -450,7 +494,7 @@ mod tests {
     fn clean(base: &str, mine: &str, theirs: &str) -> String {
         let merged = three_way(base, mine, theirs);
         assert!(merged.is_clean(), "expected a clean merge: {merged:?}");
-        merged.text(Choice::Mine)
+        merged.one_side(Choice::Mine)
     }
 
     fn apply(old: &str, edits: &[Edit]) -> String {
@@ -527,8 +571,8 @@ mod tests {
             "Before.\nThe sly fox.\nAfter.\n",
         );
         assert!(!merged.is_clean());
-        assert_eq!(merged.text(Choice::Mine), "Before.\nThe slow fox.\nAfter.\n");
-        assert_eq!(merged.text(Choice::Theirs), "Before.\nThe sly fox.\nAfter.\n");
+        assert_eq!(merged.one_side(Choice::Mine), "Before.\nThe slow fox.\nAfter.\n");
+        assert_eq!(merged.one_side(Choice::Theirs), "Before.\nThe sly fox.\nAfter.\n");
     }
 
     /// Git reported a conflict, so even different sentences of one line stay one.
@@ -542,7 +586,7 @@ mod tests {
         assert!(three_way(base, mine, theirs).is_clean());
         let merged = git_conflict(base, mine, theirs);
         assert_eq!(merged.first_conflict(), Some((mine, theirs)));
-        assert_eq!(merged.text(Choice::Theirs), theirs);
+        assert_eq!(merged.one_side(Choice::Theirs), theirs);
     }
 
     #[test]
@@ -550,7 +594,7 @@ mod tests {
         let base = "a\nb\nc\nd\ne\nf\n";
         let merged = git_conflict(base, "a\nB\nc\nd\ne\nf\n", "a\nb\nC\nd\ne\nF\n");
         assert!(!merged.is_clean());
-        assert_eq!(merged.text(Choice::Mine), "a\nB\nc\nd\ne\nF\n");
+        assert_eq!(merged.one_side(Choice::Mine), "a\nB\nc\nd\ne\nF\n");
     }
 
     #[test]
@@ -559,20 +603,36 @@ mod tests {
         assert_eq!(merged.first_conflict(), Some(("b\n", "b\n")));
     }
 
+    const SIDES: Sides = Sides {
+        mine: "deins",
+        theirs: "entwurf--2",
+    };
+
     #[test]
     fn marker_comments_are_found() {
         let merged = three_way("x\nold\ny\n", "x\nmine\ny\n", "x\ntheirs\ny\n");
-        assert!(has_markers(&merged.text(Choice::Both)));
-        assert!(!has_markers(&merged.text(Choice::Mine)));
+        assert!(has_markers(&merged.text(Choice::Both, SIDES)));
+        assert!(!has_markers(&merged.one_side(Choice::Mine)));
     }
 
     #[test]
-    fn seeing_both_keeps_both_between_comments() {
+    fn seeing_both_keeps_both_between_comments_that_name_the_sides() {
         let merged = three_way("x\nold\ny\n", "x\nmine\ny\n", "x\ntheirs\ny\n");
+        let both = merged.text(Choice::Both, SIDES);
         assert_eq!(
-            merged.text(Choice::Both),
-            "x\n<!-- <<<<<<< yours -->\nmine\n<!-- ======= -->\ntheirs\n<!-- >>>>>>> from outside -->\ny\n"
+            both,
+            "x\n<!-- <<<<<<< deins -->\nmine\n<!-- ======= -->\ntheirs\n<!-- >>>>>>> entwurf-2 -->\ny\n"
         );
+        assert_eq!(keep_one(&both, Choice::Theirs), "x\ntheirs\ny\n");
+    }
+
+    #[test]
+    fn markers_written_in_the_old_form_still_settle() {
+        let old = "x\n<!-- <<<<<<< yours -->\nmine\n<!-- ======= -->\ntheirs\n<!-- >>>>>>> from outside -->\ny\n";
+        assert!(has_markers(old));
+        assert!(is_marker("<!-- >>>>>>> from outside -->\n"));
+        assert_eq!(keep_one(old, Choice::Mine), "x\nmine\ny\n");
+        assert!(!is_marker("<!-- a note -->\n"));
     }
 
     #[test]
@@ -590,8 +650,8 @@ mod tests {
     fn both_sides_inserting_at_the_end_ask() {
         let merged = three_way("a\n", "a\nmine\n", "a\ntheirs\n");
         assert!(!merged.is_clean());
-        assert_eq!(merged.text(Choice::Mine), "a\nmine\n");
-        assert_eq!(merged.text(Choice::Theirs), "a\ntheirs\n");
+        assert_eq!(merged.one_side(Choice::Mine), "a\nmine\n");
+        assert_eq!(merged.one_side(Choice::Theirs), "a\ntheirs\n");
     }
 
     #[test]
@@ -624,8 +684,8 @@ mod tests {
     fn a_deletion_against_an_edit_inside_it_conflicts() {
         let merged = three_way("a\nb\nc\nd\n", "a\nd\n", "a\nb\nC\nd\n");
         assert!(!merged.is_clean());
-        assert_eq!(merged.text(Choice::Mine), "a\nd\n");
-        assert_eq!(merged.text(Choice::Theirs), "a\nb\nC\nd\n");
+        assert_eq!(merged.one_side(Choice::Mine), "a\nd\n");
+        assert_eq!(merged.one_side(Choice::Theirs), "a\nb\nC\nd\n");
     }
 
     #[test]
@@ -698,7 +758,7 @@ mod tests {
     #[test]
     fn keeping_one_side_takes_the_markers_and_the_other_side_out() {
         let merged = three_way("A.\nB.\nC.\n", "A.\nMine.\nC.\n", "A.\nTheirs.\nC.\n");
-        let both = merged.text(Choice::Both);
+        let both = merged.text(Choice::Both, SIDES);
         assert!(both.lines().filter(|line| is_marker(line)).count() == 3, "{both}");
         assert_eq!(keep_one(&both, Choice::Mine), "A.\nMine.\nC.\n");
         assert_eq!(keep_one(&both, Choice::Theirs), "A.\nTheirs.\nC.\n");

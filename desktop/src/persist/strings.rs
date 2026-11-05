@@ -28,7 +28,17 @@ crate::strings! {
         TakeTheirs => ("Take theirs", "Das andere nehmen"),
         SeeBoth => ("See both", "Beides zeigen"),
         Merged => ("Merged changes from outside into", "Änderungen von außen eingefügt in"),
+        MergedAgent => ("Merged the agent's changes into", "Änderungen des Agenten eingefügt in"),
+        MergedGit => ("Merged changes from Git into", "Änderungen aus Git eingefügt in"),
         Reloaded => ("Updated from outside:", "Von außen aktualisiert:"),
+        ReloadedAgent => ("Updated by the agent:", "Vom Agenten aktualisiert:"),
+        ReloadedMerge => ("Updated by merging {branch}:", "Durch den Merge von {branch} aktualisiert:"),
+        ReloadedPull => ("Updated by the pull from {branch}:", "Durch den Pull von {branch} aktualisiert:"),
+        ReloadedSwitch => ("Updated by switching to {branch}:", "Durch den Wechsel zu {branch} aktualisiert:"),
+        ReloadedAbort => ("Updated by stopping the merge:", "Durch den Abbruch des Merges aktualisiert:"),
+        BothMine => ("yours", "deins"),
+        BothAgent => ("the agent", "der Agent"),
+        BothElsewhere => ("another app", "andere App"),
         Removed => (
             "was deleted outside. Its text is still here.",
             "wurde von außen gelöscht. Der Text ist noch hier."

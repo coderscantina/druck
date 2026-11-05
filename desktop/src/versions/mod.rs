@@ -50,7 +50,7 @@ use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
 use crate::persist::merge::{Choice, edits_between, has_markers, keep_one};
 use crate::persist::recovery::data_dir;
-use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, PersistView};
+use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, GitMove, PersistView, Source};
 use crate::session::{ChapterId, Kind, Session};
 use crate::source::EditKind;
 use crate::tokens::{self, Tokens};
@@ -672,7 +672,12 @@ impl Versions {
             let takeable: HashSet<PathBuf> = (session.files().into_iter())
                 .filter(|path| session.file_text(path).is_some() && session.chapter_of_file(path).is_some())
                 .collect();
-            view.persist.update(cx, |persist, _| persist.hold_outside_changes(true));
+            let source = match &from {
+                MergeFrom::Branch(branch) => Source::Git(GitMove::Merge, branch.clone()),
+                MergeFrom::Upstream => Source::Git(GitMove::Pull, view.upstream_name()),
+            };
+            view.persist
+                .update(cx, |persist, _| persist.hold_outside_changes(source));
             let job = move || merge_job(&git, &book, from, &takeable);
             let done: Done<MergeEnd> = Box::new(|view, result, window, cx| view.merge_finished(result, window, cx));
             view.work(job, done, window, cx);
@@ -682,11 +687,20 @@ impl Versions {
     /// `git` is done moving the files. What it changed comes in as the repo's own move, which was labelled before it began.
     fn release_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.quiet = true;
-        self.persist.update(cx, |persist, cx| {
-            persist.hold_outside_changes(false);
-            persist.scan_now(window, cx);
-        });
+        self.persist
+            .update(cx, |persist, cx| persist.release_outside_changes(window, cx));
         self.quiet = false;
+    }
+
+    /// The branch a pull brings text from, as the remote names it.
+    fn upstream_name(&self) -> String {
+        match &self.state {
+            RepoState::Ready(overview) => match &overview.remote {
+                Some(remote) => format!("{remote}/{}", overview.branch),
+                None => overview.branch.clone(),
+            },
+            _ => String::new(),
+        }
     }
 
     fn merge_finished(&mut self, result: Result<MergeEnd, String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -787,7 +801,13 @@ impl Versions {
         self.error = None;
         self.awaiting_merge = false;
         self.both_stand_in = None;
-        self.persist.update(cx, |persist, _| persist.hold_outside_changes(true));
+        let branch = match &self.state {
+            RepoState::Ready(overview) => overview.branch.clone(),
+            _ => String::new(),
+        };
+        let source = Source::Git(GitMove::Abort, branch);
+        self.persist
+            .update(cx, |persist, _| persist.hold_outside_changes(source));
         let job = move || git.abort_merge(&book);
         let done: Done<()> = Box::new(|view, result, window, cx| {
             view.error = result.err();
@@ -806,7 +826,9 @@ impl Versions {
                 return;
             };
             view.label_all(&crate::t!(Key::BeforeSwitch, branch = branch), cx);
-            view.persist.update(cx, |persist, _| persist.hold_outside_changes(true));
+            let source = Source::Git(GitMove::Switch, branch.clone());
+            view.persist
+                .update(cx, |persist, _| persist.hold_outside_changes(source));
             let job = move || git.switch(&book, &branch).map_err(|refused| describe_refused(&refused));
             let done: Done<()> = Box::new(|view, result, window, cx| {
                 view.error = result.err();

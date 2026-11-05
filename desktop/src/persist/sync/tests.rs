@@ -229,6 +229,24 @@ fn seeing_both_writes_both_and_the_comments_set_nothing() {
 }
 
 #[test]
+fn seeing_both_names_the_agent_and_the_author_in_the_books_language() {
+    let mut fixture = Fixture::new();
+    fs::write(fixture.path("druck.yaml"), format!("{MANIFEST}lang: de\n")).unwrap();
+    fixture.session = Session::open(&fixture.dir).unwrap();
+    fixture.sync.set_source(Source::Agent);
+    fixture.type_in(ONE, "First line.", "Mine.");
+    let change = fixture
+        .outside(ONE, "# One\n\nTheirs.\n\nSecond line.\n")
+        .expect("a conflict");
+    assert_eq!(change.source, Source::Agent);
+    let path = fixture.one();
+    fixture.sync.resolve(&mut fixture.session, &path, Choice::Both).unwrap();
+    let text = fixture.text(ONE);
+    assert!(text.contains("<!-- <<<<<<< deins -->\n"), "{text}");
+    assert!(text.contains("<!-- >>>>>>> der Agent -->\n"), "{text}");
+}
+
+#[test]
 fn typing_that_removes_the_overlap_settles_the_conflict() {
     let mut fixture = Fixture::new();
     fixture.type_in(ONE, "First line.", "Mine.");

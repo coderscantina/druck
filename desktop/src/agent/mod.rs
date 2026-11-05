@@ -569,6 +569,7 @@ impl AgentView {
             Effect::ProcessEnded => {
                 let never_started = self.running.as_ref().is_some_and(|running| !running.started);
                 self.running = None;
+                self.persist.update(cx, |persist, _| persist.set_agent_working(false));
                 // A resume the CLI did not understand would fail the same way again.
                 if never_started && self.conversation.session_id().is_some() {
                     self.conversation.set_session_id(None);
@@ -789,6 +790,7 @@ impl AgentView {
         self.conversation.begin_turn(shown, context);
         self.collecting = self.conversation.current_turn();
         self.collecting_end = Task::ready(());
+        self.persist.update(cx, |persist, _| persist.set_agent_working(true));
         self.resumable = false;
         self.sent_at = Some(Instant::now());
         self.first_event = None;
@@ -974,6 +976,7 @@ impl AgentView {
             view.update(cx, |view, cx| {
                 view.take_in_new_files(cx);
                 view.collecting = None;
+                view.persist.update(cx, |persist, _| persist.set_agent_working(false));
             })
             .ok();
         });

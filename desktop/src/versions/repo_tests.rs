@@ -656,7 +656,7 @@ fn a_git_conflict_on_adjacent_lines_stays_one_and_the_clean_part_comes_along() {
         &text("zwei", "DREI", "ACHT"),
     );
     assert!(!merged.is_clean());
-    assert_eq!(merged.text(Choice::Mine), text("ZWEI", "drei", "ACHT"));
+    assert_eq!(merged.one_side(Choice::Mine), text("ZWEI", "drei", "ACHT"));
 }
 
 #[test]

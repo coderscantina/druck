@@ -29,7 +29,7 @@ use self::merge::Choice;
 use self::recovery::{Copies, data_dir};
 use self::strings::Key;
 use self::sync::{ChangeKind, ConflictPassage, FileSync, Next, Pacer, Problem};
-pub use self::sync::{Closing, FileChange};
+pub use self::sync::{Closing, FileChange, GitMove, Source};
 use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::a11y::Control as _;
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
@@ -151,6 +151,10 @@ pub struct PersistView {
     recovered: HashMap<PathBuf, u64>,
     /// A Git command is moving the files, and what they hold now is not for taking in yet.
     holding_outside: bool,
+    /// The Git command that moves the files, which what comes in until it lets go is named after.
+    git_move: Option<Source>,
+    /// The writing partner's turn is running, so what comes in is named after it.
+    agent_working: bool,
     /// What a merge stopped on is being merged in, which the conflict line names.
     merging: Option<String>,
     /// The first place the first conflict is about, as the conflict line shows it.
@@ -255,6 +259,8 @@ impl PersistView {
             gone_task: None,
             recovered: HashMap::new(),
             holding_outside: false,
+            git_move: None,
+            agent_working: false,
             merging: None,
             passage: None,
             _incoming: incoming,
@@ -291,10 +297,31 @@ impl PersistView {
         );
     }
 
-    /// While a Git command moves the files: what the watcher reports waits. Whoever holds it lets go and calls
-    /// [`Self::scan_now`].
-    pub fn hold_outside_changes(&mut self, holding: bool) {
-        self.holding_outside = holding;
+    /// While a Git command moves the files: what the watcher reports waits. Whoever holds it lets go with
+    /// [`Self::release_outside_changes`].
+    pub fn hold_outside_changes(&mut self, git: Source) {
+        self.holding_outside = true;
+        self.git_move = Some(git);
+    }
+
+    /// The Git command is done: what it changed comes in now, named after it.
+    pub fn release_outside_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.holding_outside = false;
+        self.scan_now(window, cx);
+        self.git_move = None;
+    }
+
+    /// Whether the writing partner's turn is running, so what comes in meanwhile is named after it.
+    pub fn set_agent_working(&mut self, working: bool) {
+        self.agent_working = working;
+    }
+
+    fn source(&self) -> Source {
+        match (&self.git_move, self.agent_working) {
+            (Some(git), _) => git.clone(),
+            (None, true) => Source::Agent,
+            (None, false) => Source::Elsewhere,
+        }
     }
 
     /// Whether a conflict waits on the line at the window's foot.
@@ -324,6 +351,7 @@ impl PersistView {
         cx: &mut Context<Self>,
     ) -> std::io::Result<()> {
         atomic::write(path, theirs.as_bytes())?;
+        self.sync.set_source(self.source());
         let sync = &mut self.sync;
         let change = self.editor.update(cx, |editor, cx| {
             editor.update_session(
@@ -720,6 +748,7 @@ impl PersistView {
                 (!session.knows_file(path) && disk.is_some()) || self.sync.differs(session, path, disk.as_deref())
             });
         if anything {
+            self.sync.set_source(self.source());
             let sync = &mut self.sync;
             let report = self.editor.update(cx, |editor, cx| {
                 editor.update_session(|session| sync.process(session, &ready), window, cx)
@@ -767,9 +796,22 @@ impl PersistView {
         let name = change
             .chapter
             .map_or_else(|| file_name(&change.path), |chapter| self.session(cx).title_of(chapter));
+        let updated = |source: &Source| match source {
+            Source::Elsewhere => crate::t!(Key::Reloaded).to_owned(),
+            Source::Agent => crate::t!(Key::ReloadedAgent).to_owned(),
+            Source::Git(GitMove::Merge, branch) => crate::t!(Key::ReloadedMerge, branch = branch),
+            Source::Git(GitMove::Pull, branch) => crate::t!(Key::ReloadedPull, branch = branch),
+            Source::Git(GitMove::Switch, branch) => crate::t!(Key::ReloadedSwitch, branch = branch),
+            Source::Git(GitMove::Abort, _) => crate::t!(Key::ReloadedAbort).to_owned(),
+        };
+        let merged = |source: &Source| match source {
+            Source::Elsewhere => crate::t!(Key::Merged),
+            Source::Agent => crate::t!(Key::MergedAgent),
+            Source::Git(..) => crate::t!(Key::MergedGit),
+        };
         match change.kind {
-            ChangeKind::Merged => self.show_note(format!("{} {name}", crate::t!(Key::Merged)), window, cx),
-            ChangeKind::Reloaded => self.show_note(format!("{} {name}", crate::t!(Key::Reloaded)), window, cx),
+            ChangeKind::Merged => self.show_note(format!("{} {name}", merged(&change.source)), window, cx),
+            ChangeKind::Reloaded => self.show_note(format!("{} {name}", updated(&change.source)), window, cx),
             ChangeKind::Removed => self.show_note(format!("{name} {}", crate::t!(Key::Removed)), window, cx),
             ChangeKind::Conflict | ChangeKind::Unchanged => {}
         }
