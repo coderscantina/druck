@@ -46,6 +46,8 @@ pub struct Diagnostic {
     pub source: Option<Source>,
     /// Where in `source`.
     pub location: Option<Location>,
+    /// The physical index of the page a typesetting warning is about, from zero.
+    pub page: Option<usize>,
     /// Dotted property path, such as `styles.body.size`.
     pub property: Option<String>,
     /// The font, image, or other file concerned, with the origin its path starts from.
@@ -75,6 +77,7 @@ impl Diagnostic {
             message: message.into(),
             source: source.map(Source::from),
             location: None,
+            page: None,
             property: None,
             resource: None,
             position: (0, 0),
@@ -99,6 +102,12 @@ impl Diagnostic {
             self.source = Some(Source::Document(chapter.to_owned()));
             self.location = Some(Location { line: real, column });
         }
+        self
+    }
+
+    /// Names the page a typesetting warning is about.
+    pub(crate) fn on_page(mut self, page: usize) -> Self {
+        self.page = Some(page);
         self
     }
 

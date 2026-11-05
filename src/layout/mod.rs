@@ -303,7 +303,7 @@ fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source:
         ),
         IssueKind::Line(Flaw::ShortLast) => format!("this paragraph ends in a short last line on {page}"),
     };
-    let warning = Diagnostic::warning(Some(source.clone()), message);
+    let warning = Diagnostic::warning(Some(source.clone()), message).on_page(issue.page);
     match issue.at {
         Some(at) => warning.at(at.line, at.column),
         None => warning,
