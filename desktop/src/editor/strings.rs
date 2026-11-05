@@ -2,6 +2,16 @@
 
 crate::strings! {
     pub enum Key {
+        Accept => ("Accept", "Annehmen"),
+        Reject => ("Reject", "Ablehnen"),
+        TryAgain => ("Try again", "Neu versuchen"),
+        Apply => ("Apply", "Anwenden"),
+        Reply => ("Reply", "Antworten"),
+        Dismiss => ("Dismiss", "Verwerfen"),
+        NoteTextGone => (
+            "The text this note was about is gone.",
+            "Der Text zu dieser Notiz ist nicht mehr da."
+        ),
         Bold => ("Bold", "Fett"),
         Italic => ("Italic", "Kursiv"),
         Underline => ("Underline", "Unterstrichen"),

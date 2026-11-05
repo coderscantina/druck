@@ -6,10 +6,27 @@ crate::strings! {
     pub enum Key {
         RemoveChip => ("Remove", "Entfernen"),
         Title => ("AGENT", "AGENT"),
+        Close => ("Close", "Schließen"),
+        SelectionPlaceholder => ("Say what to change\u{2026}", "Sag, was sich ändern soll\u{2026}"),
+        ReviewHereOne => ("1 change to review in this chapter", "1 Änderung in diesem Kapitel zu prüfen"),
+        ReviewHereMany => ("{count} changes to review in this chapter", "{count} Änderungen in diesem Kapitel zu prüfen"),
+        ReviewElsewhereOne => ("1 change to review elsewhere", "1 Änderung anderswo zu prüfen"),
+        ReviewElsewhereMany => ("{count} changes to review elsewhere", "{count} Änderungen anderswo zu prüfen"),
+        ReviewAlsoElsewhere => ("{count} elsewhere", "{count} anderswo"),
+        AcceptAll => ("Accept all", "Alle annehmen"),
+        RejectAll => ("Reject all", "Alle ablehnen"),
+        NextChange => ("Next", "Weiter"),
+        ReplyingTo => ("Replying to: {title}", "Antwort auf: {title}"),
+        ToolNote => ("Note", "Notiz"),
+        TryAgainShown => ("Try again: {place}", "Neu versuchen: {place}"),
+        TurnBusy => (
+            "Claude Code is still working. Try again when it has finished.",
+            "Claude Code arbeitet noch. Versuche es danach erneut."
+        ),
         NewConversation => ("New", "Neu"),
         Model => ("Model", "Modell"),
         ModelDefault => ("Default", "Standard"),
-        Placeholder => ("Ask about this text\u{2026}", "Frag etwas zu diesem Text\u{2026}"),
+        Placeholder => ("Ask about the book\u{2026}", "Frag etwas zum Buch\u{2026}"),
         Send => ("Send", "Senden"),
         Stop => ("Stop", "Stopp"),
         Checking => ("Looking for Claude Code\u{2026}", "Suche nach Claude Code\u{2026}"),
@@ -22,12 +39,12 @@ crate::strings! {
         ),
         SetupTitle => ("Set up Claude Code", "Claude Code einrichten"),
         SetupMissing => (
-            "The agent panel runs the Claude Code program on this computer. It is not installed or not on the search path.",
-            "Das Agent-Panel startet das Programm Claude Code auf diesem Computer. Es ist nicht installiert oder nicht im Suchpfad."
+            "The agent runs the Claude Code program on this computer. It is not installed or not on the search path.",
+            "Der Agent startet das Programm Claude Code auf diesem Computer. Es ist nicht installiert oder nicht im Suchpfad."
         ),
         SetupSteps => (
-            "1. Install Claude Code.\n2. Set it up with an API key, as Anthropic's documentation describes.\n3. Reopen this tab.",
-            "1. Claude Code installieren.\n2. Mit einem API-Schlüssel einrichten, wie in Anthropics Dokumentation beschrieben.\n3. Diesen Tab erneut öffnen."
+            "1. Install Claude Code.\n2. Set it up with an API key, as Anthropic's documentation describes.\n3. Reopen Druck.",
+            "1. Claude Code installieren.\n2. Mit einem API-Schlüssel einrichten, wie in Anthropics Dokumentation beschrieben.\n3. Druck erneut öffnen."
         ),
         SetupOwner => (
             "Druck holds no keys and sends nothing itself. Claude Code does the login, and Druck only starts it. Everything else in Druck works without it.",
@@ -42,8 +59,8 @@ crate::strings! {
             "Claude Code meldet, dass niemand angemeldet ist. Vor dem ersten Prompt mit einem API-Schlüssel einrichten."
         ),
         Intro => (
-            "Ask Claude Code about this project. It works in the project folder and reads its CLAUDE.md, skills, and MCP servers as in a terminal. What it changes shows here, and you can take it back.",
-            "Frag Claude Code zu diesem Projekt. Es arbeitet im Projektordner und liest CLAUDE.md, Skills und MCP-Server wie im Terminal. Was es ändert, steht hier, und du kannst es zurücknehmen."
+            "Ask Claude Code about the book. It works in the project folder and reads its CLAUDE.md, skills, and MCP servers as in a terminal. What it changes shows in the text for you to accept or reject.",
+            "Frag Claude Code zum Buch. Es arbeitet im Projektordner und liest CLAUDE.md, Skills und MCP-Server wie im Terminal. Was es ändert, steht im Text und du nimmst es an oder lehnst es ab."
         ),
         AllowOnce => ("Allow once", "Einmal erlauben"),
         Deny => ("Deny", "Ablehnen"),
@@ -65,9 +82,9 @@ crate::strings! {
         ToolDenied => ("denied", "abgelehnt"),
         ToolFailed => ("failed", "fehlgeschlagen"),
         ToolWaiting => ("waiting", "wartet"),
-        Revert => ("Revert", "Rückgängig"),
+        Revert => ("Reject", "Ablehnen"),
         Show => ("Show", "Zeigen"),
-        HunkReverted => ("Reverted", "Zurückgesetzt"),
+        HunkReverted => ("Rejected", "Abgelehnt"),
         HunkMoved => ("Text changed since", "Text seither geändert"),
         HunkNotOpen => ("Not open here", "Hier nicht geöffnet"),
         CliUnreadable => (
@@ -120,6 +137,43 @@ crate::strings! {
 /// What the CLI is told a denial means. For the model, so never translated.
 pub const DENIED_DEFAULT: &str = "The author declined this change.";
 pub const STOPPED_DENIAL: &str = "The author stopped the turn.";
+/// What a prompt at a selection adds. For the model, so never translated.
+pub const SELECTION_ONLY: &str = "Work on the selected text only, and edit it in its file. Change nothing around it.";
+
+/// What a reply to a note tells the model. Never translated.
+pub fn note_reply(chapter: &str, quote: &str, title: &str, text: &str) -> String {
+    format!(
+        "<druck-note chapter=\"{chapter}\">\nYour margin note \"{title}\" on \"{quote}\" said: {text}\n</druck-note>\nThe author replies:"
+    )
+}
+
+/// What Try again tells the model. Never translated.
+pub fn try_again(path: &str, old: &str, new: &str) -> String {
+    format!(
+        "The author rejected your change to {path}. The text is back as it was:\n> {}\nYou had written:\n> {}\nTry again, differently, by editing the file.",
+        old.trim_end().replace('\n', "\n> "),
+        new.trim_end().replace('\n', "\n> ")
+    )
+}
+
+pub fn review_foot(here: usize, elsewhere: usize) -> String {
+    match (here, elsewhere) {
+        (0, 1) => crate::t!(Key::ReviewElsewhereOne).to_owned(),
+        (0, count) => crate::t!(Key::ReviewElsewhereMany, count = count),
+        (1, 0) => crate::t!(Key::ReviewHereOne).to_owned(),
+        (count, 0) => crate::t!(Key::ReviewHereMany, count = count),
+        (1, others) => format!(
+            "{} \u{b7} {}",
+            crate::t!(Key::ReviewHereOne),
+            crate::t!(Key::ReviewAlsoElsewhere, count = others)
+        ),
+        (count, others) => format!(
+            "{} \u{b7} {}",
+            crate::t!(Key::ReviewHereMany, count = count),
+            crate::t!(Key::ReviewAlsoElsewhere, count = others)
+        ),
+    }
+}
 
 pub fn context_sent_with(labels: &[String]) -> String {
     format!("{}: {}", crate::t!(Key::ContextSent), labels.join(", "))

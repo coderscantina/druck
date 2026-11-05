@@ -56,6 +56,8 @@ pub struct Settings {
     pub selection_toolbar: bool,
     pub binder: bool,
     pub spelling: bool,
+    /// The writing partner: Claude Code, spawned on request. Off leaves no trace on screen and spawns nothing.
+    pub agent: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +72,7 @@ impl Default for Settings {
             selection_toolbar: true,
             binder: false,
             spelling: true,
+            agent: false,
         }
     }
 }
@@ -169,6 +172,7 @@ const FIELDS: &[Field] = &[
     switch!("selection_toolbar", selection_toolbar),
     switch!("binder", binder),
     switch!("spelling", spelling),
+    switch!("agent", agent),
 ];
 
 fn wanted(key: &str, what: &str) -> String {

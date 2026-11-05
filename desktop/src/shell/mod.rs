@@ -124,6 +124,7 @@ pub fn init(forced: Option<Scheme>, cx: &mut App) {
         forced,
         menu: MenuState {
             binder_shown: settings::get(cx).binder,
+            agent: settings::get(cx).agent,
             ..MenuState::default()
         },
         window: None,
@@ -180,14 +181,16 @@ fn settings_changed(cx: &mut App) {
         let settings = settings::get(cx);
         (settings.language, settings.appearance, settings.binder)
     };
+    let agent = settings::get(cx).agent;
     let prefs = cx.global_mut::<Prefs>();
     let was = prefs.applied;
     prefs.applied = (language, appearance);
     if appearance != was.1 {
         prefs.forced = None;
     }
-    let binder_changed = prefs.menu.binder_shown != binder;
+    let binder_changed = prefs.menu.binder_shown != binder || prefs.menu.agent != agent;
     prefs.menu.binder_shown = binder;
+    prefs.menu.agent = agent;
     apply_appearance(cx);
     if language != was.0 {
         strings::set_language(language.resolve());
@@ -275,6 +278,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::ShowImages, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Images, w, cx)));
     cx.on_action(|_: &menus::ShowDetails, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Details, w, cx)));
     cx.on_action(|_: &menus::ShowAgent, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Agent, w, cx)));
+    cx.on_action(|_: &menus::AskAgent, cx| crate::agent::ask(cx));
     cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
         with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Diagnostics, w, cx));

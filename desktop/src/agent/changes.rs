@@ -8,20 +8,39 @@
 //! Hunks come from what Persistence sees on disk, `base` to `theirs` of each [`FileChange`](crate::persist::FileChange),
 //! so an edit through Bash has them too. Persistence takes the text into the buffer. This module answers where a hunk
 //! is now and what the author's text would be without it. A file the session does not have keeps the hunks of the CLI's
-//! own patch, which can only be shown.
+//! own patch, whose lines are all there is to take back with.
+//!
+//! The author reviews these hunks as passages. Accepting one moves it into what its change started from, so it is no
+//! longer a change. Rejecting one takes it out of the text and leaves it tracked, so undo brings it back under review.
 
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
 use super::diff::{Mark, lines};
-use crate::persist::merge::{Choice, line_changes, three_way};
+use crate::editor::review::Passage;
+use crate::persist::merge::{edits_between, line_changes};
 use crate::session::ChapterId;
+use crate::source::{BlockKind, Blocks};
 
 /// Unchanged lines kept around a change, to find it again by.
 const CONTEXT: usize = 2;
+/// How many lines from where a hunk was last seen its changed lines may stand, when they are found more than once.
+const CLOSE_BY: usize = 8;
+/// Changes in a line closer than this many words read as one.
+const WORDS_APART: usize = 3;
+/// What stands for a paragraph break in removed text, which shows inside a line.
+const PARAGRAPH_MARK: &str = " \u{b6} ";
+
+/// A hunk's name for as long as it exists. Hunks are worked out again when a new write arrives, and get new names.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// One line of a patch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +142,11 @@ impl Hunk {
         }
     }
 
+    /// One side's changed lines as text, for a hunk known only from the CLI's patch.
+    fn core_lines(&self, side: Side) -> String {
+        self.sides(side).core.iter().map(|line| format!("{line}\n")).collect()
+    }
+
     /// The lines before the change, for a hunk's own line number to guess from.
     fn first_changed_line(&self, side: Side) -> usize {
         let start = match side {
@@ -190,13 +214,40 @@ pub struct Place {
 fn locate(hunk: &Hunk, side: Side, text: &Text, near: usize) -> Option<Place> {
     let sides = hunk.sides(side);
     let whole: Vec<&str> = [&sides.before[..], &sides.core[..], &sides.after[..]].concat();
-    let first = match text.find(&whole, near.saturating_sub(sides.before.len())).first() {
-        Some(at) => at + sides.before.len(),
+    if whole.is_empty() {
+        return text.text.is_empty().then_some(Place { range: 0..0, line: 0 });
+    }
+    let before = sides.before.len();
+    let mut found = text
+        .find(&whole, near.saturating_sub(before))
+        .first()
+        .map(|at| at + before);
+    if found.is_none() && !sides.core.is_empty() {
+        // The lines on one side may be gone, as another passage's when it was rejected.
+        let leading = [&sides.before[..], &sides.core[..]].concat();
+        let trailing = [&sides.core[..], &sides.after[..]].concat();
+        found = (!sides.before.is_empty())
+            .then(|| {
+                text.find(&leading, near.saturating_sub(before))
+                    .first()
+                    .map(|at| at + before)
+            })
+            .flatten()
+            .or_else(|| {
+                (!sides.after.is_empty())
+                    .then(|| text.find(&trailing, near).first().copied())
+                    .flatten()
+            });
+    }
+    let first = match found {
+        Some(first) => first,
         None => {
-            // The lines around may have been edited. The changed lines alone count if they are found once.
+            // The lines around were edited. The changed lines alone count if they are found once, or stand close by, as
+            // a scene break does when the passages around it were rejected.
             let alone = text.find(&sides.core, near);
             match alone[..] {
                 [only] => only,
+                [nearest, ..] if nearest.abs_diff(near) <= CLOSE_BY => nearest,
                 _ => return None,
             }
         }
@@ -224,6 +275,8 @@ pub enum Presence {
 /// One file's change on disk, for taking a hunk of it back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OnDisk {
+    /// The change's place among the file's steps.
+    step: usize,
     base: Arc<str>,
     theirs: Arc<str>,
     /// The hunk's bytes in `base` and in `theirs`.
@@ -234,6 +287,7 @@ struct OnDisk {
 /// A hunk together with where it was last seen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tracked {
+    pub id: u64,
     pub hunk: Hunk,
     /// The change this hunk is part of. Only a file the session has can be taken back from.
     on_disk: Option<OnDisk>,
@@ -245,6 +299,7 @@ impl Tracked {
     pub fn new(hunk: Hunk) -> Self {
         let near = hunk.first_changed_line(Side::New);
         Self {
+            id: next_id(),
             hunk,
             on_disk: None,
             near,
@@ -264,59 +319,206 @@ impl Tracked {
     }
 
     /// What the author's text `mine` becomes with this hunk taken back, keeping everything else in it. `None` when the
-    /// hunk's lines are not as the agent left them, since a revert must not touch the author's words.
+    /// hunk's lines are not as the agent left them, since a reject must not touch the author's words.
     pub fn revert(&mut self, mine: &str) -> Option<String> {
-        if !matches!(self.presence(mine), Presence::Applied(_)) {
+        let Presence::Applied(place) = self.presence(mine) else {
             return None;
+        };
+        let mut old = self.old_core();
+        // A last line that had no line break, with text the author added after it.
+        let now_inside = place.range.end < mine.len() && mine[place.range.clone()].ends_with('\n');
+        if now_inside && !old.is_empty() && !old.ends_with('\n') {
+            old.push('\n');
         }
-        let disk = self.on_disk.as_ref()?;
-        let without = format!(
-            "{}{}{}",
-            &disk.theirs[..disk.new.start],
-            &disk.base[disk.old.clone()],
-            &disk.theirs[disk.new.end..]
-        );
-        let merged = three_way(&disk.theirs, mine, &without);
-        merged.is_clean().then(|| merged.text(Choice::Mine))
+        Some(format!(
+            "{}{old}{}",
+            &mine[..place.range.start],
+            &mine[place.range.end..]
+        ))
+    }
+
+    /// The hunk's text from before the change.
+    pub fn old_core(&self) -> String {
+        match &self.on_disk {
+            Some(disk) => disk.base[disk.old.clone()].to_owned(),
+            None => self.hunk.core_lines(Side::Old),
+        }
+    }
+
+    /// The hunk's text from after the change.
+    pub fn new_core(&self) -> String {
+        match &self.on_disk {
+            Some(disk) => disk.theirs[disk.new.clone()].to_owned(),
+            None => self.hunk.core_lines(Side::New),
+        }
+    }
+
+    /// What the galley shows for this hunk at `place` in `text`: the words that came in, the words that went, and where
+    /// the buttons go. Offsets start at `shift`, for a file whose chapter starts further in.
+    pub fn passage(&self, text: &str, place: &Place, shift: isize) -> Passage {
+        let moved = |offset: usize| offset.saturating_add_signed(shift);
+        let new = &text[place.range.clone()];
+        let old = self.old_core();
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        for (range, gone) in word_changes(new, &old) {
+            let range = place.range.start + range.start..place.range.start + range.end;
+            let gone = shown_inline(&gone);
+            if !gone.is_empty() {
+                // A space of its own, or it runs into the word after it.
+                removed.push((moved(readable_place(text, range.start)), format!("{gone} ")));
+            }
+            let kept = text[range.clone()].trim_end().len();
+            if kept > 0 {
+                added.push(moved(range.start)..moved(range.start + kept));
+            }
+        }
+        let trimmed = new.trim_end_matches(['\n', '\r']);
+        let last_line = trimmed.rfind('\n').map_or(0, |at| at + 1);
+        let end = if trimmed.is_empty() {
+            readable_place(text, place.range.start)
+        } else {
+            place.range.start + last_line
+        };
+        Passage {
+            id: self.id,
+            added,
+            removed,
+            end: moved(end),
+        }
     }
 }
 
-/// The hunks that turn `base` into `theirs`, by whole lines.
-fn hunks_between(base: &Arc<str>, theirs: &Arc<str>) -> Vec<Tracked> {
+/// The word changes that turn `new` into `old`, as the range in `new` and what stood there. Changes a few words apart
+/// join, or a reworded sentence reads as confetti.
+fn word_changes(new: &str, old: &str) -> Vec<(Range<usize>, String)> {
+    let mut joined: Vec<(Range<usize>, String)> = Vec::new();
+    for edit in edits_between(new, old) {
+        match joined.last_mut() {
+            Some((range, text)) if new[range.end..edit.range.start].split_whitespace().count() < WORDS_APART => {
+                text.push_str(&new[range.end..edit.range.start]);
+                text.push_str(&edit.text);
+                range.end = edit.range.end;
+            }
+            _ => joined.push((edit.range.clone(), edit.text.clone())),
+        }
+    }
+    joined
+}
+
+/// Removed text as it can show inside one line.
+fn shown_inline(text: &str) -> String {
+    let paragraphs: Vec<String> = text
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|paragraph| !paragraph.is_empty())
+        .collect();
+    paragraphs.join(PARAGRAPH_MARK)
+}
+
+/// A place where something can show near `at`: a blank line has no text to stand in, so it moves on to the next line
+/// with text, or back to the end of the last one.
+fn readable_place(text: &str, at: usize) -> usize {
+    let line_start = text[..at].rfind('\n').map_or(0, |found| found + 1);
+    let line_end = text[at..].find('\n').map_or(text.len(), |found| at + found);
+    if !text[line_start..line_end].trim().is_empty() {
+        return at;
+    }
+    let rest = &text[at..];
+    match rest.find(|character: char| !character.is_whitespace()) {
+        Some(next) => at + next,
+        None => text[..at].trim_end().len(),
+    }
+}
+
+/// New lines cut into passages: each block with the blank lines after it, so a whole chapter is reviewed one passage after
+/// another. A comment shows nothing to review by, so it stays with the block after it.
+fn passages_of(text: &Text, range: Range<usize>) -> Vec<Range<usize>> {
+    let blocks = Blocks::parse(text.text);
+    let kinds = blocks.as_slice();
+    let mut passages = Vec::new();
+    let mut start = range.start;
+    for at in range.clone() {
+        let here = blocks.index_at(text.start_of(at));
+        let separates = kinds[here].kind == BlockKind::Blank
+            && here
+                .checked_sub(1)
+                .is_none_or(|before| kinds[before].kind != BlockKind::Comment);
+        let more = text.lines[..range.end]
+            .get(at + 1)
+            .is_some_and(|next| !next.trim().is_empty());
+        if separates && more {
+            passages.push(start..at + 1);
+            start = at + 1;
+        }
+    }
+    if start < range.end {
+        passages.push(start..range.end);
+    }
+    passages
+}
+
+/// The hunks that turn `base` into `theirs`, by whole lines. `step` is their change's place among the file's.
+fn hunks_between(step: usize, base: &Arc<str>, theirs: &Arc<str>) -> Vec<Tracked> {
     let (old_text, new_text) = (Text::new(base), Text::new(theirs));
-    line_changes(base, theirs)
-        .into_iter()
-        .map(|(old, new)| {
-            let before = old.start.saturating_sub(CONTEXT)..old.start;
-            let after = old.end..(old.end + CONTEXT).min(old_text.lines.len());
-            let line = |mark, text: &&str| PatchLine {
-                mark,
-                text: (*text).to_owned(),
-            };
-            let lines = (old_text.lines[before.clone()]
-                .iter()
-                .map(|text| line(Mark::Context, text)))
-            .chain(old_text.lines[old.clone()].iter().map(|text| line(Mark::Removed, text)))
-            .chain(new_text.lines[new.clone()].iter().map(|text| line(Mark::Added, text)))
-            .chain(old_text.lines[after].iter().map(|text| line(Mark::Context, text)))
-            .collect();
-            let hunk = Hunk {
+    let line = |mark, text: &&str| PatchLine {
+        mark,
+        text: (*text).to_owned(),
+    };
+    let on_disk = |old: Range<usize>, new: Range<usize>| OnDisk {
+        step,
+        base: base.clone(),
+        theirs: theirs.clone(),
+        old: old_text.start_of(old.start)..old_text.start_of(old.end),
+        new: new_text.start_of(new.start)..new_text.start_of(new.end),
+    };
+    let mut hunks = Vec::new();
+    for (old, new) in line_changes(base, theirs) {
+        if old.is_empty() {
+            // Text that only came in: its context is what stands around it now, the other passages included.
+            for piece in passages_of(&new_text, new.clone()) {
+                let before = piece.start.saturating_sub(CONTEXT)..piece.start;
+                let after = piece.end..(piece.end + CONTEXT).min(new_text.lines.len());
+                let lines = (new_text.lines[before.clone()]
+                    .iter()
+                    .map(|text| line(Mark::Context, text)))
+                .chain(new_text.lines[piece.clone()].iter().map(|text| line(Mark::Added, text)))
+                .chain(new_text.lines[after].iter().map(|text| line(Mark::Context, text)))
+                .collect();
+                hunks.push(Tracked {
+                    id: next_id(),
+                    near: piece.start,
+                    hunk: Hunk {
+                        old_start: old.start + 1,
+                        new_start: before.start + 1,
+                        lines,
+                    },
+                    on_disk: Some(on_disk(old.clone(), piece)),
+                });
+            }
+            continue;
+        }
+        let before = old.start.saturating_sub(CONTEXT)..old.start;
+        let after = old.end..(old.end + CONTEXT).min(old_text.lines.len());
+        let lines = (old_text.lines[before.clone()]
+            .iter()
+            .map(|text| line(Mark::Context, text)))
+        .chain(old_text.lines[old.clone()].iter().map(|text| line(Mark::Removed, text)))
+        .chain(new_text.lines[new.clone()].iter().map(|text| line(Mark::Added, text)))
+        .chain(old_text.lines[after].iter().map(|text| line(Mark::Context, text)))
+        .collect();
+        hunks.push(Tracked {
+            id: next_id(),
+            near: new.start,
+            hunk: Hunk {
                 old_start: before.start + 1,
                 new_start: new.start - before.len() + 1,
                 lines,
-            };
-            Tracked {
-                near: new.start,
-                hunk,
-                on_disk: Some(OnDisk {
-                    base: base.clone(),
-                    theirs: theirs.clone(),
-                    old: old_text.start_of(old.start)..old_text.start_of(old.end),
-                    new: new_text.start_of(new.start)..new_text.start_of(new.end),
-                }),
-            }
-        })
-        .collect()
+            },
+            on_disk: Some(on_disk(old, new)),
+        });
+    }
+    hunks
 }
 
 /// A change on disk from one text to another. Changes that follow each other in a turn count as one.
@@ -332,15 +534,84 @@ pub struct FileChanges {
     pub path: PathBuf,
     /// The chapter holding the file, once its change was seen on disk. It survives a rename.
     pub chapter: Option<ChapterId>,
+    /// The file did not exist before the turn, so taking back all of it removes it.
+    pub created: bool,
     steps: Vec<Step>,
     pub hunks: Vec<Tracked>,
+}
+
+impl FileChanges {
+    fn rebuild(&mut self) {
+        self.steps.retain(|step| step.base != step.theirs);
+        self.hunks = (self.steps.iter().enumerate())
+            .flat_map(|(at, step)| hunks_between(at, &step.base, &step.theirs))
+            .collect();
+    }
+
+    pub fn holds(&self, id: u64) -> bool {
+        self.hunks.iter().any(|tracked| tracked.id == id)
+    }
+
+    /// Makes a hunk part of what its change started from. Returns whether it was here.
+    pub fn accept(&mut self, id: u64) -> bool {
+        let Some(at) = self.hunks.iter().position(|tracked| tracked.id == id) else {
+            return false;
+        };
+        let Some(disk) = self.hunks[at].on_disk.clone() else {
+            self.hunks.remove(at);
+            return true;
+        };
+        let step = &mut self.steps[disk.step];
+        step.base = format!(
+            "{}{}{}",
+            &step.base[..disk.old.start],
+            &step.theirs[disk.new.clone()],
+            &step.base[disk.old.end..]
+        )
+        .into();
+        self.rebuild();
+        true
+    }
+
+    /// Accepts everything of this file: all that is left of its changes is in the text.
+    pub fn accept_all(&mut self) {
+        self.steps.clear();
+        self.hunks.clear();
+    }
+
+    /// What `mine` becomes with everything still under review taken back, newest first. A step the author did not touch
+    /// goes back whole, so the bytes from before it return exactly.
+    pub fn reject_all(&mut self, mine: &str) -> String {
+        let mut text = mine.to_owned();
+        for (step, change) in self.steps.iter().enumerate().rev() {
+            if text == *change.theirs {
+                text = change.base.to_string();
+                continue;
+            }
+            for tracked in self.hunks.iter_mut().rev() {
+                if tracked.on_disk.as_ref().is_some_and(|disk| disk.step == step)
+                    && let Some(reverted) = tracked.revert(&text)
+                {
+                    text = reverted;
+                }
+            }
+        }
+        if self.steps.is_empty() {
+            for tracked in self.hunks.iter_mut().rev() {
+                if let Some(reverted) = tracked.revert(&text) {
+                    text = reverted;
+                }
+            }
+        }
+        text
+    }
 }
 
 /// Everything a turn changed.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TurnChanges {
     pub files: Vec<FileChanges>,
-    /// Files a tool wrote that did not exist. They have no hunks to revert.
+    /// Files a tool wrote that did not exist.
     pub created: Vec<PathBuf>,
 }
 
@@ -357,10 +628,13 @@ impl TurnChanges {
     pub fn add(&mut self, path: PathBuf, hunks: Vec<Hunk>) {
         let tracked = hunks.into_iter().map(Tracked::new);
         match self.files.iter_mut().find(|file| file.path == path) {
+            // What was seen on disk tells more.
+            Some(file) if !file.steps.is_empty() => {}
             Some(file) => file.hunks.extend(tracked),
             None => self.files.push(FileChanges {
                 path,
                 chapter: None,
+                created: false,
                 steps: Vec::new(),
                 hunks: tracked.collect(),
             }),
@@ -380,6 +654,7 @@ impl TurnChanges {
             self.files.push(FileChanges {
                 path: path.clone(),
                 chapter,
+                created: false,
                 steps: Vec::new(),
                 hunks: Vec::new(),
             });
@@ -389,17 +664,21 @@ impl TurnChanges {
         file.path = path;
         file.chapter = chapter;
         match file.steps.last_mut() {
-            Some(last) if last.base == base && last.theirs == theirs => return false,
+            Some(last) if last.theirs == theirs => return false,
             Some(last) if last.theirs == base => last.theirs = theirs,
             _ => file.steps.push(Step { base, theirs }),
         }
-        file.steps.retain(|step| step.base != step.theirs);
-        file.hunks = file
-            .steps
-            .iter()
-            .flat_map(|step| hunks_between(&step.base, &step.theirs))
-            .collect();
+        file.rebuild();
         true
+    }
+
+    /// Takes in a file that did not exist before the turn: all of its text is the change.
+    pub fn observe_created(&mut self, path: PathBuf, chapter: Option<ChapterId>, text: Arc<str>) {
+        self.created.retain(|created| *created != path);
+        self.observe(path.clone(), chapter, "".into(), text);
+        if let Some(file) = self.files.iter_mut().find(|file| file.path == path) {
+            file.created = true;
+        }
     }
 }
 
@@ -425,7 +704,7 @@ mod tests {
 
     /// The one hunk between two texts.
     fn only_hunk(base: &str, theirs: &str) -> Tracked {
-        let mut hunks = hunks_between(&base.into(), &theirs.into());
+        let mut hunks = hunks_between(0, &base.into(), &theirs.into());
         assert_eq!(hunks.len(), 1);
         hunks.remove(0)
     }
@@ -531,7 +810,7 @@ mod tests {
     fn of_two_hunks_one_can_be_taken_back_and_the_other_stays() {
         let base = "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix\n";
         let theirs = "ONE\n\ntwo\n\nthree\n\nfour\n\nfive\n\nSIX\n";
-        let mut hunks = hunks_between(&base.into(), &theirs.into());
+        let mut hunks = hunks_between(0, &base.into(), &theirs.into());
         assert_eq!(hunks.len(), 2);
         let without_first = hunks[0].revert(theirs).expect("revert");
         assert_eq!(without_first, "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nSIX\n");
@@ -692,5 +971,135 @@ mod tests {
         assert_eq!(turn.files.len(), 1);
         assert_eq!(turn.files[0].path, PathBuf::from("new.md"));
         assert_eq!(turn.hunk_count(), 1);
+    }
+
+    #[test]
+    fn a_passage_shows_new_words_tinted_and_old_words_struck() {
+        let theirs = "# Notes\n\nHowdy world.\n\nA second line.\n";
+        let mut hunk = only_hunk(NOTES, theirs);
+        let Presence::Applied(place) = hunk.presence(theirs) else {
+            panic!("applied")
+        };
+        let passage = hunk.passage(theirs, &place, 0);
+        let at = theirs.find("Howdy").expect("there");
+        assert_eq!(passage.added, [at..at + "Howdy".len()]);
+        assert_eq!(passage.removed, [(at, "Hello ".to_owned())]);
+        assert_eq!(passage.end, at);
+    }
+
+    #[test]
+    fn changes_a_few_words_apart_read_as_one() {
+        let changes = word_changes(
+            "the lamps in silver lilies caught it",
+            "the soft radiance in the lilies of silver caught it",
+        );
+        assert_eq!(changes.len(), 1, "{changes:?}");
+    }
+
+    #[test]
+    fn a_removed_passage_stands_at_text_and_keeps_paragraphs_apart() {
+        let base = "One.\n\nTwo.\n\nThree.\n";
+        let theirs = "One.\n\nThree.\n";
+        let mut hunk = only_hunk(base, theirs);
+        let Presence::Applied(place) = hunk.presence(theirs) else {
+            panic!("applied")
+        };
+        let passage = hunk.passage(theirs, &place, 0);
+        assert!(passage.added.is_empty());
+        let (at, text) = &passage.removed[0];
+        assert!(
+            theirs[*at..].starts_with("Three") || theirs[..*at].ends_with("One."),
+            "at {at}"
+        );
+        assert_eq!(text, "Two. ");
+        assert_eq!(shown_inline("One\nmore.\n\nTwo.\n"), "One more. \u{b6} Two.");
+    }
+
+    #[test]
+    fn a_new_chapter_is_one_passage_after_another_and_goes_back_to_nothing() {
+        let text = "# New\n\nFirst paragraph.\n\n***\n\nSecond paragraph.\n\n***\n\nThird.\n";
+        let mut changes = TurnChanges::default();
+        changes.observe_created("/book/manuscript/new.md".into(), None, text.into());
+        let file = &mut changes.files[0];
+        assert!(file.created);
+        assert_eq!(file.hunks.len(), 6);
+        assert_eq!(file.reject_all(text), "");
+    }
+
+    #[test]
+    fn a_comment_stays_with_the_passage_after_it() {
+        let text = "<!--\nA note\n\nwith a gap.\n-->\n\n# New\n\nFirst.\n\nSecond.\n";
+        let mut changes = TurnChanges::default();
+        changes.observe_created("/new.md".into(), None, text.into());
+        let cores: Vec<String> = changes.files[0].hunks.iter().map(Tracked::new_core).collect();
+        assert_eq!(
+            cores,
+            [
+                "<!--\nA note\n\nwith a gap.\n-->\n\n# New\n\n",
+                "First.\n\n",
+                "Second.\n"
+            ]
+        );
+    }
+
+    #[test]
+    fn passages_of_a_new_chapter_reject_one_by_one_down_to_nothing() {
+        let text = "# New\n\nFirst.\n\n***\n\nSecond.\n\n***\n\nThird.\n";
+        let mut changes = TurnChanges::default();
+        changes.observe_created("/book/manuscript/new.md".into(), None, text.into());
+        let mut mine = text.to_owned();
+        let file = &mut changes.files[0];
+        assert_eq!(file.hunks.len(), 6);
+        for order in [2, 0, 4, 1, 3, 5] {
+            mine = file.hunks[order].revert(&mine).expect("rejects");
+        }
+        assert_eq!(mine, "");
+    }
+
+    #[test]
+    fn rejecting_everything_returns_the_exact_bytes() {
+        // No final line break, and a line ending the diff must not normalize.
+        let base = "One.\r\n\r\nTwo.\n\nThree";
+        let theirs = "One changed.\r\n\r\nTwo.\n\nNew passage.\n\nThree, again";
+        let mut changes = TurnChanges::default();
+        changes.observe("/a.md".into(), None, base.into(), theirs.into());
+        assert_eq!(changes.files[0].reject_all(theirs), base);
+    }
+
+    #[test]
+    fn rejecting_everything_keeps_what_the_author_typed() {
+        let base = "One.\n\nTwo.\n\nThree.\n";
+        let theirs = "One changed.\n\nTwo.\n\nThree changed.\n";
+        let mine = "One changed.\n\nTwo, typed by the author.\n\nThree changed.\n";
+        let mut changes = TurnChanges::default();
+        changes.observe("/a.md".into(), None, base.into(), theirs.into());
+        assert_eq!(
+            changes.files[0].reject_all(mine),
+            "One.\n\nTwo, typed by the author.\n\nThree.\n"
+        );
+    }
+
+    #[test]
+    fn an_accepted_passage_leaves_review_and_a_reject_all_leaves_it_in_the_text() {
+        let base = "One.\n\nTwo.\n\nThree.\n";
+        let theirs = "One changed.\n\nTwo.\n\nThree changed.\n";
+        let mut changes = TurnChanges::default();
+        changes.observe("/a.md".into(), None, base.into(), theirs.into());
+        let file = &mut changes.files[0];
+        assert_eq!(file.hunks.len(), 2);
+        let first = file.hunks[0].id;
+        assert!(file.accept(first));
+        assert_eq!(file.hunks.len(), 1);
+        assert_eq!(file.reject_all(theirs), "One changed.\n\nTwo.\n\nThree.\n");
+    }
+
+    #[test]
+    fn accepting_everything_empties_review_and_a_later_write_starts_anew() {
+        let mut changes = TurnChanges::default();
+        changes.observe("/a.md".into(), None, "One.\n".into(), "Two.\n".into());
+        changes.files[0].accept_all();
+        assert!(changes.files[0].hunks.is_empty());
+        assert!(changes.observe("/a.md".into(), None, "Two.\n".into(), "Three.\n".into()));
+        assert_eq!(changes.files[0].reject_all("Three.\n"), "Two.\n");
     }
 }

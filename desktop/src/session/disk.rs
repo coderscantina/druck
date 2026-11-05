@@ -26,6 +26,8 @@ pub(super) struct Synced {
     base: Arc<str>,
     hash: u64,
     earlier: VecDeque<Arc<str>>,
+    /// The text being replaced is not one a change may start from. See [`Session::disown_versions`].
+    disowned: bool,
     on_disk: bool,
 }
 
@@ -35,6 +37,7 @@ impl Synced {
             base: text.into(),
             hash: content_hash(text.as_bytes()),
             earlier: VecDeque::new(),
+            disowned: false,
             on_disk,
         }
     }
@@ -43,7 +46,9 @@ impl Synced {
         if text != self.base {
             let old = std::mem::replace(&mut self.base, text);
             self.hash = content_hash(self.base.as_bytes());
-            self.earlier.push_back(old);
+            if !std::mem::take(&mut self.disowned) {
+                self.earlier.push_back(old);
+            }
             if self.earlier.len() > EARLIER_VERSIONS {
                 self.earlier.pop_front();
             }
@@ -174,6 +179,15 @@ impl Session {
             None => {
                 self.synced.insert(path.to_owned(), Synced::new(&text, on_disk));
             }
+        }
+    }
+
+    /// Says that what a file has held so far was taken back on purpose, so no later change started from it: a merge
+    /// measured from such a version would bring back part of what was taken back. Takes effect with the next text recorded.
+    pub fn disown_versions(&mut self, path: &Path) {
+        if let Some(synced) = self.synced.get_mut(path) {
+            synced.earlier.clear();
+            synced.disowned = true;
         }
     }
 

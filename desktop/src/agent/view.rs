@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Div, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, Stateful, StyledText,
-    UnderlineStyle, Window, div, px, svg,
+    AnyElement, Context, Div, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, StyledText, UnderlineStyle,
+    Window, div, px, svg,
 };
 
 use super::approval::{Approval, Preview};
@@ -14,21 +14,28 @@ use super::context::ChipKind;
 use super::conversation::{Entry, Status, ToolCall, ToolState};
 use super::diff::{DiffLine, Mark};
 use super::markdown::{self, Block, Inline};
+use super::note_tool::TOOL as NOTE_TOOL;
 use super::strings::{self, Key};
-use super::{AgentView, HunkKey, MODELS, Standing};
+use super::{AgentView, MODELS, Standing};
 use crate::a11y::Control as _;
+use crate::editor::review::small_button;
 use crate::tokens::{self, Tokens};
+use crate::workspace::Mode;
 
 /// The tallest a diff in an approval grows before it scrolls.
 const DIFF_HEIGHT: gpui::Pixels = px(180.);
 
 impl Render for AgentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.enabled {
+            return div().into_any_element();
+        }
         self.ensure_checked(window, cx);
         let tokens = Tokens::get(cx).clone();
         div()
             .id("agent")
-            .flex_1()
+            .flex_grow(1.)
+            .flex_shrink(1.)
             .min_h_0()
             .flex()
             .flex_col()
@@ -36,6 +43,7 @@ impl Render for AgentView {
             .when(self.model_menu, |panel| panel.child(self.model_menu(&tokens, cx)))
             .child(self.body(&tokens, cx))
             .child(self.footer(&tokens, window, cx))
+            .into_any_element()
     }
 }
 
@@ -76,7 +84,13 @@ impl AgentView {
                             .when(!busy, |button| {
                                 button.on_click(cx.listener(|view, _, _, cx| view.new_conversation(cx)))
                             }),
-                    ),
+                    )
+                    .when(self.mode == Mode::Write, |row| {
+                        row.child(
+                            small_button("agent-close", crate::t!(Key::Close).to_owned(), tokens)
+                                .on_click(cx.listener(|view, _, window, cx| view.close_chat(window, cx))),
+                        )
+                    }),
             )
     }
 
@@ -141,7 +155,8 @@ impl AgentView {
         }
         div()
             .id("agent-conversation")
-            .flex_1()
+            .flex_grow(1.)
+            .flex_shrink(1.)
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
@@ -275,6 +290,11 @@ impl AgentView {
         };
         let open = self.expanded.contains(&index);
         let has_output = !tool.output.is_empty();
+        let name = if tool.name == NOTE_TOOL {
+            crate::t!(Key::ToolNote).to_owned()
+        } else {
+            tool.name.clone()
+        };
         div()
             .flex()
             .flex_col()
@@ -282,7 +302,7 @@ impl AgentView {
             .child(
                 div()
                     .id(("tool", index))
-                    .button(tokens, tool.name.clone())
+                    .button(tokens, name.clone())
                     .flex()
                     .items_center()
                     .gap(tokens::SPACE_1)
@@ -303,12 +323,7 @@ impl AgentView {
                             .flex_none()
                             .text_color(tokens.text_faint),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(tool.name.clone()),
-                    )
+                    .child(div().flex_none().font_weight(FontWeight::SEMIBOLD).child(name))
                     .child(
                         div()
                             .min_w_0()
@@ -331,16 +346,14 @@ impl AgentView {
             return div().into_any_element();
         };
         let mut files = Vec::new();
-        for (file_at, file) in changes.files.iter().enumerate() {
+        for file in &changes.files {
             let path = super::relative(&self.base, &file.path);
             let hunks: Vec<_> = file
                 .hunks
                 .iter()
-                .enumerate()
-                .map(|(hunk_at, tracked)| {
-                    let key: HunkKey = (turn, file_at, hunk_at);
-                    let standing = self.standing.get(&key).copied().unwrap_or(Standing::NotOpen);
-                    self.hunk_row(key, tracked, standing, tokens, cx)
+                .map(|tracked| {
+                    let standing = self.standing.get(&tracked.id).copied().unwrap_or(Standing::NotOpen);
+                    self.hunk_row(tracked, standing, file.chapter.is_some(), tokens, cx)
                 })
                 .collect();
             files.push(
@@ -385,9 +398,9 @@ impl AgentView {
 
     fn hunk_row(
         &self,
-        key: HunkKey,
         tracked: &super::changes::Tracked,
         standing: Standing,
+        can_show: bool,
         tokens: &Tokens,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -419,7 +432,8 @@ impl AgentView {
                     .child(div().min_w_0().flex_1().truncate().child(line.text.clone()))
             })
             .collect();
-        let id = key.0 * 10_000 + key.1 * 100 + key.2;
+        let id = tracked.id;
+        let key = id as usize;
         div()
             .flex()
             .flex_col()
@@ -438,16 +452,19 @@ impl AgentView {
                         hunk.removed(),
                         note.map(|note| format!("  \u{b7} {note}")).unwrap_or_default()
                     )))
-                    .when(standing != Standing::NotOpen && standing != Standing::Moved, |row| {
-                        row.child(
-                            small_button(("hunk-show", id), crate::t!(Key::Show).to_owned(), tokens)
-                                .on_click(cx.listener(move |view, _, window, cx| view.reveal(key, window, cx))),
-                        )
-                    })
+                    .when(
+                        can_show && standing != Standing::NotOpen && standing != Standing::Moved,
+                        |row| {
+                            row.child(
+                                small_button(("hunk-show", key), crate::t!(Key::Show).to_owned(), tokens)
+                                    .on_click(cx.listener(move |view, _, window, cx| view.reveal(id, window, cx))),
+                            )
+                        },
+                    )
                     .when(standing == Standing::Applied, |row| {
                         row.child(
-                            small_button(("hunk-revert", id), crate::t!(Key::Revert).to_owned(), tokens)
-                                .on_click(cx.listener(move |view, _, window, cx| view.revert(key, window, cx))),
+                            small_button(("hunk-revert", key), crate::t!(Key::Revert).to_owned(), tokens)
+                                .on_click(cx.listener(move |view, _, window, cx| view.reject(id, window, cx))),
                         )
                     }),
             )
@@ -505,6 +522,12 @@ impl AgentView {
                     .into_iter()
                     .map(|approval| self.approval_card(&approval, more, tokens, cx)),
             )
+            .when_some(self.replying.and_then(|id| self.notes.get(id)), |footer, note| {
+                footer.child(faint_owned(
+                    tokens,
+                    crate::t!(Key::ReplyingTo, title = note.title.clone()),
+                ))
+            })
             .when(usable && !chips.is_empty(), |footer| {
                 footer.child(div().flex().flex_wrap().gap(tokens::SPACE_1).children(chips))
             })
@@ -692,25 +715,6 @@ impl AgentView {
 }
 
 // Pieces
-
-fn small_button(id: impl Into<gpui::ElementId>, label: String, tokens: &Tokens) -> Stateful<Div> {
-    div()
-        .id(id)
-        .button(tokens, label.clone())
-        .flex_none()
-        .h(px(22.))
-        .px(tokens::SPACE_2)
-        .flex()
-        .items_center()
-        .rounded(tokens::RADIUS)
-        .border_1()
-        .border_color(tokens.divider)
-        .cursor_pointer()
-        .text_size(tokens::TEXT_SMALL)
-        .text_color(tokens.text_quiet)
-        .hover(|button| button.bg(tokens.raised).text_color(tokens.text))
-        .child(label)
-}
 
 fn quiet(tokens: &Tokens, text: &'static str) -> AnyElement {
     quiet_owned(tokens, text.to_owned())

@@ -31,6 +31,8 @@ pub struct GalleyStyle {
     pub code_background: Hsla,
     /// What the book cannot resolve.
     pub error: Hsla,
+    /// Behind words an agent took out.
+    pub removed: Hsla,
 }
 
 fn font_of(face: &Face) -> Font {
@@ -61,6 +63,7 @@ impl GalleyStyle {
             rule: tokens.divider.into(),
             code_background: tokens.raised.into(),
             error: tokens.error.into(),
+            removed: tokens.removed.into(),
         };
         style.set_colors(tokens);
         style
@@ -211,6 +214,7 @@ impl GalleyStyle {
             match look {
                 ChipLook::Mark | ChipLook::Label => self.link,
                 ChipLook::Error => self.error,
+                ChipLook::Removed => base.color,
             }
         } else if style.quiet {
             self.quiet
@@ -230,7 +234,7 @@ impl GalleyStyle {
                 color: Some(color),
                 wavy: false,
             }),
-            strikethrough: style.strike.then_some(StrikethroughStyle {
+            strikethrough: (style.strike || style.chip == Some(ChipLook::Removed)).then_some(StrikethroughStyle {
                 thickness: px(1.),
                 color: Some(color),
             }),
@@ -373,9 +377,10 @@ pub struct BlockLayout {
     pub whole: Option<Box<Whole>>,
     /// Shaped in the faded colour of a paragraph out of focus.
     pub dim: bool,
-    /// The room it was shaped with: a separator's gap and a first line's indent.
+    /// The room it was shaped with: a separator's gap, a first line's indent, and what stands below its text.
     pub gap: Pixels,
     pub indent: Pixels,
+    pub below: Pixels,
 }
 
 impl BlockLayout {
@@ -412,6 +417,8 @@ pub struct ShapeRequest<'a> {
     pub gap: Pixels,
     /// How far in the block's first line starts.
     pub indent: Pixels,
+    /// Room kept below the text, for what stands under it.
+    pub below: Pixels,
 }
 
 pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
@@ -430,6 +437,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         dim,
         gap,
         indent,
+        below,
     } = request;
     let base = if source {
         style.source_line_style(kind)
@@ -512,7 +520,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
     }
     BlockLayout {
         lines: shaped_lines,
-        height: y,
+        height: y + below,
         hidden,
         marked,
         width,
@@ -522,6 +530,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         dim,
         gap,
         indent,
+        below,
     }
 }
 

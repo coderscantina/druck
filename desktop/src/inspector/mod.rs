@@ -266,7 +266,11 @@ impl InspectorView {
 impl Render for InspectorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let top: Vec<_> = Tab::TOP.iter().map(|&tab| self.rail_button(tab, cx)).collect();
-        let bottom: Vec<_> = Tab::BOTTOM.iter().map(|&tab| self.rail_button(tab, cx)).collect();
+        let agent_on = crate::settings::get(cx).agent;
+        let bottom: Vec<_> = (Tab::BOTTOM.iter())
+            .filter(|&&tab| tab != Tab::Agent || agent_on)
+            .map(|&tab| self.rail_button(tab, cx))
+            .collect();
         let tokens = Tokens::get(cx);
         let panel = div()
             .id("inspector-panel")

@@ -43,7 +43,10 @@ pub struct Frame {
     pub(super) column: Column,
     pub(super) blocks: Vec<FrameBlock>,
     selection: Vec<Bounds<Pixels>>,
+    /// What an agent's changes brought in, tinted.
     marks: Vec<Bounds<Pixels>>,
+    /// The thin lines under the passages notes are about.
+    note_lines: Vec<Bounds<Pixels>>,
     /// Misspelled words, from the rectangles a selection of them would have.
     misspelled: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
@@ -60,6 +63,8 @@ pub struct Frame {
     images: Vec<AnyElement>,
     /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
     margin: Option<AnyElement>,
+    /// A passage's buttons and the agent's notes, drawn inside the same bounds for the same reason.
+    review: Vec<AnyElement>,
     source: bool,
     pub(super) ink: Hsla,
     pub(super) quiet: Hsla,
@@ -67,6 +72,7 @@ pub struct Frame {
     link: Hsla,
     error: Hsla,
     code_background: Hsla,
+    removed: Hsla,
     body_size: Pixels,
     body_font: gpui::Font,
 }
@@ -114,7 +120,7 @@ impl Element for Galley {
         window: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        let (mut frame, floats, margin) = self.view.update(cx, |view, cx| {
+        let (mut frame, floats, margin, rows, advice) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
             view.set_viewport(bounds);
             if view.autoscroll {
@@ -144,7 +150,9 @@ impl Element for Galley {
             let caret = frame.caret.or_else(|| view.caret_bounds(window));
             let floats = view.floats(&selection, caret, window, cx);
             let margin = view.margin_element();
-            (frame, floats, margin)
+            let rows = view.review_rows(cx);
+            let advice = view.advice_elements(cx);
+            (frame, floats, margin, rows, advice)
         });
         frame.images = self.prepaint_images(&frame, bounds, window, cx);
         frame.margin = margin.map(|(mut element, origin)| {
@@ -152,6 +160,22 @@ impl Element for Galley {
                 element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
             });
             element
+        });
+        // An agent's notes stand beside their passages, each below the one before it, over a chapter's own long notes.
+        let mut note_y = bounds.top();
+        let note_left = frame.column.note_left;
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for (mut element, origin) in rows {
+                element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
+                frame.review.push(element);
+            }
+            for (mut element, wanted) in advice {
+                let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
+                let y = wanted.max(note_y);
+                element.prepaint_at(point(note_left.unwrap_or_default(), y), window, cx);
+                note_y = y + height + tokens::SPACE_3;
+                frame.review.push(element);
+            }
         });
         frame.floats = floats
             .into_iter()
@@ -186,7 +210,7 @@ impl Element for Galley {
         let accent = colors.accent;
         let selection_color = Hsla::from(accent).opacity(0.25);
         let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
-        let mark_color = Hsla::from(colors.added).opacity(0.2);
+        let mark_color = Hsla::from(colors.added).opacity(tokens::REVIEW_TINT);
         let misspelled_color = Hsla::from(accent).opacity(0.6);
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -195,6 +219,9 @@ impl Element for Galley {
             }
             for rectangle in &frame.marks {
                 window.paint_quad(fill(*rectangle, mark_color));
+            }
+            for line in &frame.note_lines {
+                window.paint_quad(fill(*line, accent));
             }
             for rectangle in &frame.selection {
                 window.paint_quad(fill(*rectangle, selection_color));
@@ -214,6 +241,9 @@ impl Element for Galley {
             }
             if let Some(margin) = &mut frame.margin {
                 margin.paint(window, cx);
+            }
+            for element in &mut frame.review {
+                element.paint(window, cx);
             }
             paint_gutter(frame, window, cx);
             if let Some(bar) = frame.scrollbar {
@@ -273,9 +303,6 @@ impl Galley {
 }
 
 fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window) {
-    if frame.source {
-        return;
-    }
     let column = &frame.column;
     for line in &block.layout.lines {
         for (chip, look) in &line.chips {
@@ -283,6 +310,7 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
                 ChipLook::Mark => continue,
                 ChipLook::Label => frame.link.opacity(0.12),
                 ChipLook::Error => frame.error.opacity(0.14),
+                ChipLook::Removed => frame.removed.opacity(tokens::REVIEW_TINT),
             };
             let bounds = Bounds::new(
                 point(column.text_left + chip.origin.x, block.top + chip.origin.y),
@@ -290,6 +318,9 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
             );
             window.paint_quad(fill(bounds, color).corner_radii(px(3.)));
         }
+    }
+    if frame.source {
+        return;
     }
     let height = block.layout.height;
     match block.kind {
@@ -386,16 +417,24 @@ impl EditorView {
                 icon,
             });
         }
-        let selection = self.range_rectangles(self.selection.range(), &blocks);
-        let marks = self
-            .marks
-            .iter()
-            .flat_map(|mark| self.range_rectangles(mark.clone(), &blocks))
+        let selection = self.range_rectangles(self.selection.range(), &blocks, false);
+        let marks = (self.review.iter())
+            .flat_map(|passage| &passage.added)
+            .flat_map(|added| self.range_rectangles(added.clone(), &blocks, true))
+            .collect();
+        let note_lines = (self.advice_anchors().into_iter())
+            .flat_map(|anchor| self.range_rectangles(anchor, &blocks, true))
+            .map(|passage| {
+                Bounds::new(
+                    point(passage.left(), passage.bottom() - tokens::NOTE_RULE),
+                    size(passage.size.width, tokens::NOTE_RULE),
+                )
+            })
             .collect();
         let misspelled = self
             .spelling_ranges()
             .into_iter()
-            .flat_map(|word| self.range_rectangles(word, &blocks))
+            .flat_map(|word| self.range_rectangles(word, &blocks, false))
             .collect();
         let caret = if self.selection.is_empty() {
             self.caret_bounds(window)
@@ -408,6 +447,7 @@ impl EditorView {
             blocks,
             selection,
             marks,
+            note_lines,
             misspelled,
             caret,
             hitbox,
@@ -420,6 +460,7 @@ impl EditorView {
             floats: Vec::new(),
             images: Vec::new(),
             margin: None,
+            review: Vec::new(),
             source: self.source,
             ink: self.style.ink,
             quiet: self.style.quiet,
@@ -427,13 +468,20 @@ impl EditorView {
             link: self.style.link,
             error: self.style.error,
             code_background: self.style.code_background,
+            removed: self.style.removed,
             body_size: self.style.body_size,
             body_font: self.style.body.clone(),
         }
     }
 
-    /// The rectangles that cover `selection` in the visible blocks.
-    fn range_rectangles(&self, selection: std::ops::Range<usize>, blocks: &[FrameBlock]) -> Vec<Bounds<Pixels>> {
+    /// The rectangles that cover `selection` in the visible blocks. `past_chip` starts them after removed words standing
+    /// at the range's start.
+    fn range_rectangles(
+        &self,
+        selection: std::ops::Range<usize>,
+        blocks: &[FrameBlock],
+        past_chip: bool,
+    ) -> Vec<Bounds<Pixels>> {
         if selection.is_empty() {
             return Vec::new();
         }
@@ -460,12 +508,15 @@ impl EditorView {
                 if selection.end < line_start || selection.start > line_end {
                     continue;
                 }
-                let from = line.display.to_display(
-                    selection
-                        .start
-                        .saturating_sub(block_start)
-                        .max(line.display.source.start),
-                );
+                let start = selection
+                    .start
+                    .saturating_sub(block_start)
+                    .max(line.display.source.start);
+                let from = if past_chip {
+                    line.display.to_display_past_chip(start)
+                } else {
+                    line.display.to_display(start)
+                };
                 let to = line
                     .display
                     .to_display(selection.end.saturating_sub(block_start).min(line.display.source.end));

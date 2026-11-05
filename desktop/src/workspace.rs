@@ -118,6 +118,8 @@ pub struct Workspace {
     theme_setting: Option<String>,
     /// The style whose block to show once the pages catch up with the theme.
     jump: Option<String>,
+    /// Something in Write wants the author, who is elsewhere: a dot on the switch.
+    write_attention: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -204,6 +206,7 @@ impl Workspace {
             theme_setting: None,
             explicit: asked,
             jump: None,
+            write_attention: false,
             _subscriptions: subscriptions,
         };
         workspace.theme_setting = workspace.parts.editor.read(cx).session().theme_setting();
@@ -273,6 +276,14 @@ impl Workspace {
         match self.mode {
             Mode::Write => window.focus(&self.parts.editor.focus_handle(cx), cx),
             Mode::Publish => window.focus(&self.parts.preview.focus_handle(cx), cx),
+        }
+    }
+
+    /// Puts a dot on the Write switch, or takes it off.
+    pub fn set_write_attention(&mut self, wanted: bool, cx: &mut Context<Self>) {
+        if self.write_attention != wanted {
+            self.write_attention = wanted;
+            cx.notify();
         }
     }
 
@@ -691,6 +702,17 @@ impl Workspace {
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |workspace, _, window, cx| workspace.show(mode, window, cx)))
                     .child(label)
+                    .when(mode == Mode::Write && self.write_attention, |button| {
+                        button.relative().child(
+                            div()
+                                .absolute()
+                                .top(px(1.))
+                                .right(px(1.))
+                                .size(tokens::DOT_SIZE)
+                                .rounded_full()
+                                .bg(tokens.accent),
+                        )
+                    })
             })
             .collect();
         div().flex().items_center().gap(px(2.)).children(buttons)

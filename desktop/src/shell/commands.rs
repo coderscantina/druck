@@ -19,12 +19,21 @@ pub enum Scope {
     Anywhere,
     /// Needs the text on screen.
     Write,
+    /// Only while the agent is enabled in Settings.
+    Agent,
 }
 
 pub struct Command {
     pub label: Key,
     pub action: Box<dyn Action>,
     pub scope: Scope,
+}
+
+impl Command {
+    /// Whether the settings let this command exist at all. With the agent off, its commands leave no trace.
+    pub fn is_available(&self, cx: &App) -> bool {
+        self.scope != Scope::Agent || crate::settings::get(cx).agent
+    }
 }
 
 fn command(label: Key, scope: Scope, action: impl Action) -> Command {
@@ -37,7 +46,7 @@ fn command(label: Key, scope: Scope, action: impl Action) -> Command {
 
 /// Every command, roughly by how often it is wanted.
 pub fn all() -> Vec<Command> {
-    use Scope::{Anywhere, Write};
+    use Scope::{Agent, Anywhere, Write};
     vec![
         command(Key::ViewWrite, Anywhere, ShowWrite),
         command(Key::ViewPublish, Anywhere, ShowPublish),
@@ -84,7 +93,8 @@ pub fn all() -> Vec<Command> {
         command(Key::ShowFonts, Anywhere, ShowFonts),
         command(Key::ShowImages, Anywhere, ShowImages),
         command(Key::ShowDetails, Anywhere, ShowDetails),
-        command(Key::ShowAgent, Anywhere, ShowAgent),
+        command(Key::AskAgent, Agent, AskAgent),
+        command(Key::ShowAgent, Agent, ShowAgent),
         command(Key::ShowDiagnostics, Anywhere, ShowDiagnostics),
         command(Key::Undo, Write, Undo),
         command(Key::Redo, Write, Redo),

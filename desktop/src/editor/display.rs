@@ -31,6 +31,8 @@ pub enum ChipLook {
     Label,
     /// What the book cannot resolve.
     Error,
+    /// Words an agent took out, which stand for no source.
+    Removed,
 }
 
 /// A run of a block's source that shows as other text. `range` is relative to the block, on one line.
@@ -84,6 +86,14 @@ impl DisplayLine {
             }
         }
         self.text.len()
+    }
+
+    /// Like [`Self::to_display`], but past a chip that stands at `source` for no source, as an agent's removed words do.
+    pub fn to_display_past_chip(&self, source: usize) -> usize {
+        let at = self.to_display(source);
+        (self.segments.iter())
+            .find(|segment| segment.source == source && segment.source_len == 0 && segment.display == at)
+            .map_or(at, |segment| segment.display + segment.len)
     }
 
     /// The source offset of a displayed offset. Between a marker and text it is the end of the text before the marker,

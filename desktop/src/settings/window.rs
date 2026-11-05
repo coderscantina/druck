@@ -23,17 +23,19 @@ pub enum Category {
     Appearance,
     Writing,
     Language,
+    Agent,
     Keys,
 }
 
 impl Category {
-    const ALL: [Self; 4] = [Self::Appearance, Self::Writing, Self::Language, Self::Keys];
+    const ALL: [Self; 5] = [Self::Appearance, Self::Writing, Self::Language, Self::Agent, Self::Keys];
 
     fn label(self) -> Key {
         match self {
             Self::Appearance => Key::CategoryAppearance,
             Self::Writing => Key::CategoryWriting,
             Self::Language => Key::CategoryLanguage,
+            Self::Agent => Key::CategoryAgent,
             Self::Keys => Key::CategoryKeys,
         }
     }
@@ -43,6 +45,7 @@ impl Category {
         match name {
             "writing" => Self::Writing,
             "language" => Self::Language,
+            "agent" => Self::Agent,
             "keys" => Self::Keys,
             _ => Self::Appearance,
         }
@@ -120,6 +123,12 @@ const ROWS: &[Row] = &[
         label: Key::Spelling,
         hint: Key::SpellingHint,
         control: Control::Switch(|s| s.spelling, |s, on| s.spelling = on),
+    },
+    Row {
+        category: Category::Agent,
+        label: Key::Agent,
+        hint: Key::AgentHint,
+        control: Control::Switch(|s| s.agent, |s, on| s.agent = on),
     },
 ];
 
@@ -494,7 +503,7 @@ impl SettingsWindow {
         for category in categories {
             let mut rows: Vec<gpui::AnyElement> = Vec::new();
             if category == Category::Keys {
-                for command in commands::all() {
+                for command in commands::all().into_iter().filter(|command| command.is_available(cx)) {
                     let Some(keys) = commands::keys_of(command.action.as_ref(), cx) else {
                         continue;
                     };
