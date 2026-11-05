@@ -26,20 +26,23 @@ impl PreviewView {
         self.foot = foot;
     }
 
-    pub(super) fn status(&self) -> String {
+    /// Which pages show, and the numbers printed on them when those differ from their places in the file.
+    pub(super) fn status(&self) -> (String, Option<String>) {
         let Some(layout) = &self.layout else {
-            return if self.diagnostics.is_empty() {
+            let text = if self.diagnostics.is_empty() {
                 crate::t!(Key::NoPagesYet).to_owned()
             } else {
                 crate::t!(Key::NoPages).to_owned()
             };
+            return (text, None);
         };
         let pages = layout.laid.pages().len();
         if self.is_contact_sheet() {
-            return match pages {
+            let text = match pages {
                 1 => crate::t!(Key::OnePage).to_owned(),
                 pages => crate::t!(Key::PageCount, pages = pages),
             };
+            return (text, None);
         }
         let shown = self.sheets(self.current_zoom).and_then(|sheets| {
             let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
@@ -52,13 +55,11 @@ impl PreviewView {
         } else {
             crate::t!(Key::PageOf, page = shown.start + 1, pages = pages)
         };
-        match printed_labels(&layout.laid, shown) {
-            Some(labels) => format!("{range} ({labels})"),
-            None => range,
-        }
+        (range, printed_labels(&layout.laid, shown))
     }
 
-    /// The line itself. A narrow one drops the word "warnings", then the switch's label, and never cuts a number.
+    /// The line itself. A narrow one drops the printed page numbers, then the word "warnings", then the switch's label,
+    /// and never cuts a number.
     pub(super) fn status_line(
         &self,
         tokens: &Tokens,
@@ -73,8 +74,16 @@ impl PreviewView {
         });
         let warnings = self.problems.iter().filter(|problem| problem.warning).count();
         let count = self.problems.len() - warnings;
-        let status = self.status();
         let look_label = (count > 0).then(|| crate::t!(Key::ToLookAt, count = count));
+        // The printed numbers go first when the line is short, so the zoom is never cut.
+        let status = match self.status() {
+            (range, Some(labels)) => {
+                let full = format!("{range} ({labels})");
+                let fewest = [&full, look_label.as_deref().unwrap_or_default(), &warnings.to_string()];
+                if self.status_fits(&fewest, window) { full } else { range }
+            }
+            (range, None) => range,
+        };
         let to_look_at = look_label.clone().map(|label| {
             div()
                 .id("to-look-at")

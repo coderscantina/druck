@@ -243,7 +243,7 @@ impl SearchPanel {
 }
 
 impl Render for SearchPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.open {
             return div().into_any_element();
         }
@@ -300,6 +300,8 @@ impl Render for SearchPanel {
             .top(tokens::TITLEBAR_HEIGHT + tokens::SECTION_HEIGHT)
             .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
             .w(tokens::SEARCH_CARD_WIDTH)
+            // A short window shortens the list, so the card's foot stays in it.
+            .max_h(window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::SECTION_HEIGHT - tokens::SPACE_4)
             .flex()
             .flex_col()
             .bg(tokens.panel)
@@ -310,6 +312,7 @@ impl Render for SearchPanel {
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
+                    .flex_none()
                     .px(tokens::SPACE_3)
                     .h(tokens::SECTION_HEIGHT + tokens::SPACE_2)
                     .flex()
@@ -333,6 +336,7 @@ impl Render for SearchPanel {
             )
             .child(
                 div()
+                    .flex_none()
                     .px(tokens::SPACE_3)
                     .pb(tokens::SPACE_2)
                     .flex()
@@ -372,12 +376,17 @@ impl Render for SearchPanel {
             .when(!rows.is_empty(), |card| {
                 card.child(
                     div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
                         .relative()
                         .border_t_1()
                         .border_color(tokens.divider)
                         .child(
                             div()
                                 .id("search-results")
+                                .min_h_0()
                                 .max_h(tokens::SEARCH_RESULTS_HEIGHT)
                                 .overflow_y_scroll()
                                 .track_scroll(&self.scroll)
