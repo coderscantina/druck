@@ -85,7 +85,9 @@ impl EditorView {
                     block: block_index,
                 });
             }
-            if block.kind == BlockKind::Comment {
+            if block.kind == BlockKind::Comment
+                && !crate::persist::merge::is_marker(&self.session.active_buffer().text()[range.clone()])
+            {
                 markers.push(CommentMarker {
                     bounds: at(block.top, line_height),
                     block: index,

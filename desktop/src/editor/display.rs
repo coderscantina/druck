@@ -201,6 +201,12 @@ pub fn hidden_ranges(
             hidden.push(range);
         }
     }
+    // A marker line between two versions shows its words alone, until the caret comes to it.
+    if kind == BlockKind::Comment && caret.is_none() && crate::persist::merge::is_marker(text) {
+        let line = text.trim_end();
+        hidden.push(0.."<!-- ".len());
+        hidden.push(line.len() - " -->".len()..line.len());
+    }
     hidden.retain(|range| !range.is_empty());
     hidden.sort_by_key(|range| range.start);
     hidden
@@ -576,6 +582,13 @@ mod tests {
             "two {.lead}"
         );
         assert_eq!(show(BlockKind::Paragraph, "a {b} c\n", None)[0].text, "a {b} c");
+    }
+
+    #[test]
+    fn a_marker_between_two_versions_shows_its_words() {
+        let marker = "<!-- >>>>>>> from outside -->\n";
+        assert_eq!(show(BlockKind::Comment, marker, None)[0].text, ">>>>>>> from outside");
+        assert_eq!(show(BlockKind::Comment, marker, Some(3))[0].text, marker.trim_end());
     }
 
     #[test]

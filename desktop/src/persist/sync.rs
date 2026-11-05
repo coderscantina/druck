@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use super::atomic::{Outcome, content_hash};
 use super::merge::{Choice, Merged, edits_between, git_conflict, starting_point, three_way};
 use super::recovery::Copies;
+use super::strings::Key;
 use super::watch::Ready;
 use crate::session::disk::Outgoing;
 use crate::session::{ChapterId, Session};
@@ -154,6 +155,20 @@ pub enum Problem {
     Unreadable(String),
     /// The whole document's folder is gone.
     Gone,
+    /// The folder cannot be watched, so changes from other programs do not show.
+    Watch(String),
+    /// A recovery copy cannot be brought back. It stays where it is, for the next opening.
+    Restore(String),
+    /// Unsaved text cannot be kept in a recovery copy.
+    Copy(String),
+    /// A change from outside cannot be merged into the text, which stays as it was.
+    Merge(String),
+    /// The chapter list cannot be written after a chapter's file moved.
+    ChapterList(String),
+    /// A file's local history cannot be kept.
+    History(String),
+    /// A new project could not become a Git repo. It works without one, with local history.
+    Repo(String),
 }
 
 /// What is left to say about unsaved text after everything that can be written has been, for a document that is about to
@@ -227,6 +242,23 @@ impl FileSync {
         self.problems.iter().map(|(path, problem)| (path.as_path(), problem))
     }
 
+    /// Records a problem with a file that the view or another part of the app ran into.
+    pub fn report(&mut self, path: &Path, problem: Problem) {
+        self.problems.insert(path.to_owned(), problem);
+    }
+
+    /// Clears a file's problem of the kind `kind` makes, now that it is over.
+    pub fn clear(&mut self, path: &Path, kind: fn(String) -> Problem) {
+        let same = std::mem::discriminant(&kind(String::new()));
+        if self
+            .problems
+            .get(path)
+            .is_some_and(|problem| std::mem::discriminant(problem) == same)
+        {
+            self.problems.remove(path);
+        }
+    }
+
     pub fn copies(&self) -> Option<&Copies> {
         self.copies.as_ref()
     }
@@ -285,7 +317,7 @@ impl FileSync {
             return self.on_removed(session, path, known.base);
         };
         let Ok(theirs) = String::from_utf8(bytes) else {
-            let problem = format!("{} is not UTF-8 text.", path.display());
+            let problem = crate::t!(Key::NotUtf8, file = path.display());
             session.mark_unreadable(path, problem.clone());
             self.problems.insert(path.to_owned(), Problem::Unreadable(problem));
             return None;
@@ -352,9 +384,10 @@ impl FileSync {
         {
             // Edits from this diff are sorted and on character boundaries, so this would be a bug in the diff. The buffer
             // is unchanged and stays unsaved, and the file is left as it is.
-            eprintln!("cannot merge into {}: {error}", path.display());
+            self.report(path, Problem::Merge(error.to_string()));
             return;
         }
+        self.clear(path, Problem::Merge);
         session.set_synced(path, theirs.clone(), true);
         if text == &**theirs {
             session.mark_clean(path);
@@ -405,17 +438,21 @@ impl FileSync {
             return Ok(None);
         };
         let mine = session.file_text(path).unwrap_or_default();
-        let Some(theirs) = pending.theirs.clone() else {
-            return self.resolve_removal(session, path, choice, &mine);
+        let kept = match pending.theirs.clone() {
+            None => self.resolve_removal(session, path, choice, &mine)?,
+            Some(theirs) => {
+                let merged = pending.merged(&mine, &theirs);
+                let kept = match choice {
+                    Choice::Mine => self.keep(path, "theirs", &theirs)?,
+                    Choice::Theirs => self.keep(path, "mine", &mine)?,
+                    Choice::Both => None,
+                };
+                self.take_text(session, path, &mine, &merged.text(choice), &theirs);
+                kept
+            }
         };
-        let merged = pending.merged(&mine, &theirs);
-        let kept = match choice {
-            Choice::Mine => self.keep(path, "theirs", &theirs)?,
-            Choice::Theirs => self.keep(path, "mine", &mine)?,
-            Choice::Both => None,
-        };
-        let text = merged.text(choice);
-        self.take_text(session, path, &mine, &text, &theirs);
+        // Neither side's earlier versions are a starting point any more: the person settled what the file holds.
+        session.disown_versions(path);
         Ok(kept)
     }
 
@@ -495,10 +532,11 @@ impl FileSync {
             }
         }
         let unsaved = session.unsaved();
-        if let Some(copies) = &self.copies {
+        if let Some(copies) = self.copies.clone() {
             for file in &unsaved {
-                if let Err(error) = copies.store(&file.path, &file.base, &file.text) {
-                    eprintln!("cannot keep a copy of {}: {error}", file.path.display());
+                match copies.store(&file.path, &file.base, &file.text) {
+                    Ok(()) => self.clear(&file.path, Problem::Copy),
+                    Err(error) => self.report(&file.path, Problem::Copy(error.to_string())),
                 }
             }
         }
@@ -509,7 +547,7 @@ impl FileSync {
                 file: file.path.clone(),
                 reason: match self.problems.get(&file.path) {
                     Some(Problem::Save(reason) | Problem::Unreadable(reason)) => reason.clone(),
-                    _ => "the file is not as the app last saw it".to_owned(),
+                    _ => crate::t!(Key::NotAsSeen).to_owned(),
                 },
             },
         }
@@ -549,7 +587,7 @@ impl FileSync {
         let root = session.base_dir();
         let there = root.is_dir();
         if there {
-            self.problems.remove(&root);
+            self.clear(&root, |_| Problem::Gone);
         } else {
             self.problems.insert(root, Problem::Gone);
         }
@@ -627,8 +665,11 @@ impl FileSync {
             report.manifest = true;
             report.session_changed = true;
             report.files_changed = true;
-        } else if book_moved && let Err(problem) = session.sync_chapter_list() {
-            eprintln!("cannot update the chapter list: {problem}");
+        } else if book_moved && let Some(manifest) = &manifest {
+            match session.sync_chapter_list() {
+                Ok(()) => self.clear(manifest, Problem::ChapterList),
+                Err(problem) => self.report(manifest, Problem::ChapterList(problem)),
+            }
         }
         for (path, _) in gone {
             if let Some(change) = self.on_disk(session, &path, None) {

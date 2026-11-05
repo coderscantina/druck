@@ -20,8 +20,8 @@ crate::strings! {
         ),
         MergingNote => ("Finishes the merge.", "Schließt den Merge ab."),
         BothStand => (
-            "Both versions stand in {chapter}. Remove the marker comments to finish the merge.",
-            "In {chapter} stehen beide Fassungen. Entferne die Markerkommentare, um den Merge abzuschließen."
+            "Both versions stand in {chapter}.",
+            "In {chapter} stehen beide Fassungen."
         ),
         CannotRunGit => ("cannot run git: {error}", "git lässt sich nicht starten: {error}"),
         CannotTalkToGit => ("cannot talk to git: {error}", "keine Verbindung zu git: {error}"),

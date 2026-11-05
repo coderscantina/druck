@@ -25,11 +25,46 @@ const BOTH_MINE: &str = "<!-- <<<<<<< yours -->\n";
 const BOTH_BETWEEN: &str = "<!-- ======= -->\n";
 const BOTH_THEIRS: &str = "<!-- >>>>>>> from outside -->\n";
 
+const MARKERS: [&str; 3] = [BOTH_MINE, BOTH_BETWEEN, BOTH_THEIRS];
+
 /// Whether a text still has the marker comments of a [`Choice::Both`].
 pub fn has_markers(text: &str) -> bool {
-    [BOTH_MINE, BOTH_BETWEEN, BOTH_THEIRS]
-        .iter()
-        .any(|marker| text.contains(marker))
+    MARKERS.iter().any(|marker| text.contains(marker))
+}
+
+/// Whether a block or line is one of the marker comments of a [`Choice::Both`].
+pub fn is_marker(text: &str) -> bool {
+    MARKERS.iter().any(|marker| text.trim_end() == marker.trim_end())
+}
+
+/// The text with the versions [`Choice::Both`] left in it reduced to `choice`'s side, and the marker lines gone.
+pub fn keep_one(text: &str, choice: Choice) -> String {
+    #[derive(PartialEq)]
+    enum Part {
+        Outside,
+        Mine,
+        Theirs,
+    }
+    let mut part = Part::Outside;
+    let mut kept = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        match line.trim_end() {
+            marker if marker == BOTH_MINE.trim_end() => part = Part::Mine,
+            marker if marker == BOTH_BETWEEN.trim_end() => part = Part::Theirs,
+            marker if marker == BOTH_THEIRS.trim_end() => part = Part::Outside,
+            _ => {
+                let keep = match part {
+                    Part::Outside => true,
+                    Part::Mine => choice != Choice::Theirs,
+                    Part::Theirs => choice != Choice::Mine,
+                };
+                if keep {
+                    kept.push_str(line);
+                }
+            }
+        }
+    }
+    kept
 }
 
 /// A piece of the merge's result.
@@ -385,32 +420,27 @@ pub fn map_offset(offset: usize, edits: &[Edit]) -> usize {
     (offset as isize + delta) as usize
 }
 
-/// How much text separates two versions, in bytes changed.
-fn distance(old: &str, new: &str) -> usize {
-    edits_between(old, new)
-        .iter()
-        .map(|edit| edit.range.len() + edit.text.len())
-        .sum()
-}
-
-/// Which of the file's earlier versions a change from outside started from.
+/// Which version of the file a change from outside started from.
 ///
-/// A program may read a file, take its time, and write the whole of it back. Measured against the newest version, that
-/// write also takes back everything saved since it read. So the base of the merge is the version closest to what it
-/// wrote, and what was saved since then stays. A file exactly like an earlier version is another matter: nobody
-/// edited that, it was put back on purpose by something like `git checkout`, and it counts as a change to `current`.
+/// A program may read a file, take its time, and write all of it back. Its text then undoes every change saved since it
+/// read, and only then is that earlier version the starting point, so what was saved meanwhile stays. Any other text is
+/// a change to `current`, also one that takes back part of what was saved: that was done on purpose, as by deleting a
+/// passage, settling a conflict, or putting a file back with `git checkout`.
 pub fn starting_point<'a>(current: &'a str, earlier: &'a [impl AsRef<str>], theirs: &str) -> &'a str {
-    let mut best = (current, distance(current, theirs));
-    if best.1 == 0 || earlier.iter().any(|version| version.as_ref() == theirs) {
+    if earlier.iter().any(|version| version.as_ref() == theirs) {
         return current;
     }
-    for version in earlier.iter().rev() {
-        let measured = distance(version.as_ref(), theirs);
-        if measured < best.1 {
-            best = (version.as_ref(), measured);
-        }
-    }
-    best.0
+    (earlier.iter().rev())
+        .map(AsRef::as_ref)
+        .find(|version| undoes_since(version, current, theirs))
+        .unwrap_or(current)
+}
+
+/// Whether `theirs` undoes every change from `version` to `current`: going back to `version` from `theirs` would
+/// change nothing.
+fn undoes_since(version: &str, current: &str, theirs: &str) -> bool {
+    let merged = three_way(current, version, theirs);
+    merged.is_clean() && merged.text(Choice::Mine) == theirs
 }
 
 #[cfg(test)]
@@ -663,6 +693,25 @@ mod tests {
         let earlier = [old];
         assert_eq!(starting_point(saved, &earlier, old), saved);
         assert_eq!(clean(saved, saved, old), old);
+    }
+
+    #[test]
+    fn keeping_one_side_takes_the_markers_and_the_other_side_out() {
+        let merged = three_way("A.\nB.\nC.\n", "A.\nMine.\nC.\n", "A.\nTheirs.\nC.\n");
+        let both = merged.text(Choice::Both);
+        assert!(both.lines().filter(|line| is_marker(line)).count() == 3, "{both}");
+        assert_eq!(keep_one(&both, Choice::Mine), "A.\nMine.\nC.\n");
+        assert_eq!(keep_one(&both, Choice::Theirs), "A.\nTheirs.\nC.\n");
+    }
+
+    #[test]
+    fn a_deletion_of_saved_text_starts_from_the_newest_version() {
+        let old = "One.\n\nTwo.\n";
+        let saved = "One.\n\nTyped.\n\nTwo.\n\nThree.\n";
+        // Deletes what was typed, and keeps the paragraph saved after it, so it read the newest version.
+        let theirs = "One.\n\nTwo.\n\nThree.\n";
+        assert_eq!(starting_point(saved, &[old], theirs), saved);
+        assert_eq!(clean(saved, saved, theirs), theirs);
     }
 
     #[test]

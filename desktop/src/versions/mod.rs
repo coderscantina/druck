@@ -48,10 +48,11 @@ use self::timeline::Timeline;
 pub use self::ui::compared;
 use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
-use crate::persist::merge::has_markers;
+use crate::persist::merge::{Choice, edits_between, has_markers, keep_one};
 use crate::persist::recovery::data_dir;
 use crate::persist::{Closing, FileChange, PersistView};
 use crate::session::{ChapterId, Kind, Session};
+use crate::source::EditKind;
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Mode, Parts, Slots};
 
@@ -163,17 +164,17 @@ pub fn use_rail_tab(show: impl Fn(&mut Window, &mut App) + 'static, cx: &mut App
     cx.set_global(RailTab(Box::new(show)));
 }
 
-/// The project just made, to warn about once it opens.
-struct NewProject(PathBuf);
+/// The project just made, to warn about once it opens, and why it could not become a repo.
+#[derive(Clone)]
+struct NewProject(PathBuf, Option<String>);
 
 impl Global for NewProject {}
 
-/// Makes a new project's folder a repo. Nothing is committed. A folder that cannot be one still works, with local history.
+/// Makes a new project's folder a repo. Nothing is committed. A folder that cannot be one still works, with local
+/// history, and the window's foot says so once it opens.
 pub fn start_repo(folder: &Path, cx: &mut App) {
-    if let Err(problem) = Repo::init(folder) {
-        eprintln!("cannot make {} a repo: {problem:?}", folder.display());
-    }
-    cx.set_global(NewProject(folder.to_owned()));
+    let problem = Repo::init(folder).err().map(|problem| describe(&problem));
+    cx.set_global(NewProject(folder.to_owned(), problem));
 }
 
 /// What to say at the window's foot when the book in this folder opens.
@@ -293,8 +294,8 @@ pub struct Versions {
     fetched: bool,
     /// A merge stopped on conflicts, and the card opens when the last one is settled.
     awaiting_merge: bool,
-    /// The chapter that still holds both versions of a merge's conflict, which holds the card back.
-    both_stand_in: Option<String>,
+    /// The file that still holds both versions of a merge's conflict, which holds the card back, and its chapter's name.
+    both_stand_in: Option<(PathBuf, String)>,
     /// The card opens once the repo has been read again, for the merge's message.
     card_after_reading: bool,
     /// Changes coming in now are the repo's own moves, which were labelled before they began.
@@ -387,10 +388,17 @@ impl Versions {
 
     /// A project just made in a folder a sync service copies says so once. The card and the panel keep saying it.
     fn warn_about_cloud(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let new = cx.try_global::<NewProject>().map(|project| project.0.clone());
-        let Some(book) = self.book(cx).filter(|book| new.as_ref() == Some(book)) else {
+        let Some(NewProject(new, problem)) = cx.try_global::<NewProject>().cloned() else {
             return;
         };
+        let Some(book) = self.book(cx).filter(|book| *book == new) else {
+            return;
+        };
+        if problem.is_some() {
+            self.persist.update(cx, |persist, cx| {
+                persist.report(&book, crate::persist::sync::Problem::Repo, problem, cx)
+            });
+        }
         if let Some(service) = repo::cloud_service(&book) {
             self.show_note(crate::t!(Key::CloudWarning, service = service), window, cx);
         }
@@ -716,15 +724,38 @@ impl Versions {
         self.refresh(cx);
     }
 
-    /// The name of a chapter that still has "See both"'s marker comments.
-    fn chapter_with_markers(&self, cx: &App) -> Option<String> {
+    /// A file that still has "See both"'s marker comments, and its chapter's name.
+    fn chapter_with_markers(&self, cx: &App) -> Option<(PathBuf, String)> {
         let session = self.session(cx);
         let path = (session.files().into_iter())
             .find(|path| session.file_text(path).is_some_and(|text| has_markers(&text)))?;
-        Some(session.chapter_of_file(&path).map_or_else(
+        let name = session.chapter_of_file(&path).map_or_else(
             || path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
             |chapter| session.title_of(chapter),
-        ))
+        );
+        Some((path, name))
+    }
+
+    /// Settles the versions "See both" left in a file by one side, as one undo step, which takes the markers out too.
+    fn keep_one_side(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((path, _)) = self.both_stand_in.clone() else {
+            return;
+        };
+        let result = self.parts.editor.update(cx, |editor, cx| {
+            editor.update_session(
+                |session| {
+                    let text = session.file_text(&path).unwrap_or_default();
+                    let edits = edits_between(&text, &keep_one(&text, choice));
+                    session.apply_to_file(&path, &edits, EditKind::Discrete)
+                },
+                window,
+                cx,
+            )
+        });
+        if let Err(error) = result {
+            self.error = Some(error.to_string());
+        }
+        self.conflicts_settled(cx);
     }
 
     fn abort_merge(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -999,22 +1030,32 @@ impl Versions {
 impl Render for Versions {
     /// A passing note at the window's foot, in the saving state's form.
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tokens = Tokens::get(cx);
+        let tokens = Tokens::get(cx).clone();
+        let both = self.both_stand_in.is_some();
         let (text, color): (SharedString, _) = match (&self.both_stand_in, &self.note) {
-            (Some(chapter), _) => (crate::t!(Key::BothStand, chapter = chapter).into(), tokens.accent),
+            (Some((_, chapter)), _) => (crate::t!(Key::BothStand, chapter = chapter).into(), tokens.accent),
             (None, Some(note)) => (note.clone(), tokens.text_quiet),
             (None, None) => return div().into_any_element(),
+        };
+        let side = |id, choice| {
+            crate::persist::foot_button(&tokens, id, choice)
+                .on_click(cx.listener(move |view, _, window, cx| view.keep_one_side(choice, window, cx)))
         };
         div()
             .h_full()
             .min_w_0()
             .flex()
             .items_center()
+            .gap(tokens::SPACE_2)
             .px(tokens::SPACE_3)
             .bg(tokens.canvas)
             .text_size(tokens::TEXT_SMALL)
             .text_color(color)
             .child(div().min_w_0().truncate().child(text))
+            .when(both, |line| {
+                line.child(side("both-keep-mine", Choice::Mine))
+                    .child(side("both-take-theirs", Choice::Theirs))
+            })
             .into_any_element()
     }
 }

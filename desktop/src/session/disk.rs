@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use druck::input::MANIFEST;
 
@@ -17,15 +17,18 @@ use crate::persist::merge::{edits_between, map_offset};
 use crate::source::buffer::EditError;
 use crate::source::{Blocks, Buffer, Edit, EditKind, Selection};
 
-/// How many earlier versions of a file to keep, to recognize a write that started from one of them. A few minutes of
-/// autosaves at most, so a program that reads, thinks, and writes back does not take back what was typed meanwhile.
+/// How long an earlier version of a file is kept, to recognize a write that started from it: a program that reads,
+/// thinks, and writes back within a few minutes does not take back what was saved meanwhile.
+const EARLIER_FOR: Duration = Duration::from_secs(5 * 60);
+/// At most this many, so a burst of saves holds few copies of a long chapter.
 const EARLIER_VERSIONS: usize = 32;
 
 /// The last text a file and the session agreed on.
 pub(super) struct Synced {
     base: Arc<str>,
     hash: u64,
-    earlier: VecDeque<Arc<str>>,
+    /// Earlier versions with when they were replaced, oldest first.
+    earlier: VecDeque<(Instant, Arc<str>)>,
     /// The text being replaced is not one a change may start from. See [`Session::disown_versions`].
     disowned: bool,
     on_disk: bool,
@@ -46,10 +49,13 @@ impl Synced {
         if text != self.base {
             let old = std::mem::replace(&mut self.base, text);
             self.hash = content_hash(self.base.as_bytes());
+            let now = Instant::now();
             if !std::mem::take(&mut self.disowned) {
-                self.earlier.push_back(old);
+                self.earlier.push_back((now, old));
             }
-            if self.earlier.len() > EARLIER_VERSIONS {
+            while self.earlier.len() > EARLIER_VERSIONS
+                || (self.earlier.front()).is_some_and(|(at, _)| now.duration_since(*at) > EARLIER_FOR)
+            {
                 self.earlier.pop_front();
             }
         }
@@ -62,7 +68,7 @@ impl Synced {
 pub struct FileBase {
     pub base: Arc<str>,
     pub hash: u64,
-    /// Older versions of the file, oldest first.
+    /// Versions of the file from the last few minutes, oldest first.
     pub earlier: Vec<Arc<str>>,
     pub on_disk: bool,
 }
@@ -167,7 +173,10 @@ impl Session {
         Some(FileBase {
             base: synced.base.clone(),
             hash: synced.hash,
-            earlier: synced.earlier.iter().cloned().collect(),
+            earlier: (synced.earlier.iter())
+                .filter(|(at, _)| at.elapsed() <= EARLIER_FOR)
+                .map(|(_, text)| text.clone())
+                .collect(),
             on_disk: synced.on_disk,
         })
     }
@@ -182,8 +191,8 @@ impl Session {
         }
     }
 
-    /// Says that what a file has held so far was taken back on purpose, so no later change started from it: a merge
-    /// measured from such a version would bring back part of what was taken back. Takes effect with the next text recorded.
+    /// Says that what a file has held so far was taken back or settled on purpose, so no later change started from it: a
+    /// merge measured from such a version would bring back part of it. Takes effect with the next text recorded.
     pub fn disown_versions(&mut self, path: &Path) {
         if let Some(synced) = self.synced.get_mut(path) {
             synced.earlier.clear();

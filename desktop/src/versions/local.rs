@@ -3,30 +3,37 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
-use gpui::{App, Context, Window};
+use gpui::{App, Context, WeakEntity, Window};
 
 use super::history::{History, now_ms};
 use super::pacing::Due;
 use super::strings::Key;
 use super::{Current, REFRESH_PAUSE, Versions};
 use crate::persist::FileChange;
-use crate::persist::sync::ChangeKind;
+use crate::persist::sync::{ChangeKind, Problem};
 use crate::session::{ChapterId, Kind, Session};
 
 /// Records what every file of the document holds now in its local history, with a label: before an agent's turn, and
 /// before anything else that may change the text. A file that then does not change adds no mark to its timeline. The
 /// work happens off the main thread.
 pub fn label_history(session: &Session, label: &str, cx: &App) {
-    let Some(store) = cx.try_global::<Current>().and_then(|current| current.store.clone()) else {
+    let Some(current) = cx.try_global::<Current>() else {
         return;
     };
-    let files = files_with_text(session);
-    let label = label.to_owned();
-    cx.background_spawn(async move { keep_labelled(&store, &files, &label) })
-        .detach();
+    let Some(store) = current.store.clone() else {
+        return;
+    };
+    store_off_thread(
+        store,
+        files_with_text(session),
+        Some(label.to_owned()),
+        current.view.clone(),
+        cx,
+    );
 }
 
 fn files_with_text(session: &Session) -> Vec<(PathBuf, String)> {
@@ -35,13 +42,36 @@ fn files_with_text(session: &Session) -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-fn keep_labelled(store: &History, files: &[(PathBuf, String)], label: &str) {
-    let now = now_ms();
-    for (path, text) in files {
-        if let Err(error) = store.snapshot(path, text, Some(label), now) {
-            eprintln!("cannot keep local history of {}: {error}", path.display());
-        }
-    }
+/// Keeps what `files` hold in local history, off the main thread, and says at the window's foot when a file's history
+/// cannot be kept, until it can again.
+fn store_off_thread(
+    store: Arc<History>,
+    files: Vec<(PathBuf, String)>,
+    label: Option<String>,
+    view: WeakEntity<Versions>,
+    cx: &App,
+) {
+    let kept = cx.background_spawn(async move {
+        let now = now_ms();
+        (files.into_iter())
+            .map(|(path, text)| {
+                let result = store.snapshot(&path, &text, label.as_deref(), now);
+                (path, result.err().map(|error| error.to_string()))
+            })
+            .collect::<Vec<_>>()
+    });
+    cx.spawn(async move |cx| {
+        let kept = kept.await;
+        view.update(cx, |view, cx| {
+            view.persist.update(cx, |persist, cx| {
+                for (path, error) in kept {
+                    persist.report(&path, Problem::History, error, cx);
+                }
+            });
+        })
+        .ok();
+    })
+    .detach();
 }
 
 impl Versions {
@@ -82,13 +112,8 @@ impl Versions {
         if self.pacing.edited(path, now) {
             // Before the first edit this run, keep what the file held, or the timeline would start after it.
             if let (Some(store), Some(known)) = (self.store.clone(), session.file_base(path)) {
-                let path = path.to_owned();
-                cx.background_spawn(async move {
-                    if let Err(error) = store.snapshot(&path, &known.base, None, now_ms()) {
-                        eprintln!("cannot keep local history of {}: {error}", path.display());
-                    }
-                })
-                .detach();
+                let files = vec![(path.to_owned(), known.base.to_string())];
+                store_off_thread(store, files, None, cx.entity().downgrade(), cx);
             }
         }
         self.start_pacing(window, cx);
@@ -139,15 +164,7 @@ impl Versions {
         let files: Vec<(PathBuf, String)> = (paths.iter())
             .filter_map(|path| session.file_text(path).map(|text| (path.clone(), text)))
             .collect();
-        cx.background_spawn(async move {
-            let now = now_ms();
-            for (path, text) in files {
-                if let Err(error) = store.snapshot(&path, &text, None, now) {
-                    eprintln!("cannot keep local history of {}: {error}", path.display());
-                }
-            }
-        })
-        .detach();
+        store_off_thread(store, files, None, cx.entity().downgrade(), cx);
     }
 
     /// The app or the document is about to go: what waits for a pause is stored now.

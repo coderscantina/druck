@@ -376,7 +376,7 @@ impl PersistView {
         }) {
             Ok(watcher) => Some(watcher),
             Err(error) => {
-                eprintln!("cannot watch {}: {error}", root.display());
+                self.sync.report(&root, Problem::Watch(error.to_string()));
                 None
             }
         };
@@ -423,7 +423,7 @@ impl PersistView {
                             continue;
                         }
                         if let Err(problem) = session.restore_text(&copy.path, &copy.base, &copy.text) {
-                            eprintln!("cannot restore {}: {problem}", copy.path.display());
+                            sync.report(&copy.path, Problem::Restore(problem));
                             continue;
                         }
                         names.push(file_name(&copy.path));
@@ -646,13 +646,27 @@ impl PersistView {
             return;
         }
         let lock = self.write_lock.clone();
-        cx.background_spawn(async move {
+        let stored = cx.background_spawn(async move {
             let _writing = lock.lock();
-            for file in unsaved {
-                if let Err(error) = copies.store(&file.path, &file.base, &file.text) {
-                    eprintln!("cannot keep a copy of {}: {error}", file.path.display());
+            (unsaved.into_iter())
+                .map(|file| {
+                    let result = copies.store(&file.path, &file.base, &file.text);
+                    (file.path, result.map_err(|error| error.to_string()))
+                })
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |view, cx| {
+            let stored = stored.await;
+            view.update(cx, |view, cx| {
+                for (path, result) in stored {
+                    match result {
+                        Ok(()) => view.sync.clear(&path, Problem::Copy),
+                        Err(error) => view.sync.report(&path, Problem::Copy(error)),
+                    }
                 }
-            }
+                cx.notify();
+            })
+            .ok();
         })
         .detach();
     }
@@ -794,6 +808,16 @@ impl PersistView {
         self.show_note(text, window, cx);
     }
 
+    /// Says at the foot that something about `path` went wrong outside saving, or, with `None`, that a problem of
+    /// `kind` is over.
+    pub fn report(&mut self, path: &Path, kind: fn(String) -> Problem, error: Option<String>, cx: &mut Context<Self>) {
+        match error {
+            Some(error) => self.sync.report(path, kind(error)),
+            None => self.sync.clear(path, kind),
+        }
+        cx.notify();
+    }
+
     /// Settles the first conflict, as a key or button of the prompt does. For scripted runs.
     #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn settle_first(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
@@ -833,29 +857,32 @@ impl PersistView {
         cx.notify();
     }
 
-    fn button(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        choice: Choice,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let tokens = Tokens::get(cx);
-        div()
-            .id(id)
-            .button(tokens, label)
-            .flex_none()
-            .px(tokens::SPACE_2)
-            .rounded(tokens::RADIUS)
-            .cursor_pointer()
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(tokens.text)
-            .bg(tokens.raised)
-            .hover(|button| button.bg(tokens.divider))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+    fn button(&self, id: &'static str, choice: Choice, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        foot_button(Tokens::get(cx), id, choice)
             .on_click(cx.listener(move |view, _, window, cx| view.resolve_first(choice, window, cx)))
-            .child(label)
     }
+}
+
+/// A small raised button at the window's foot that settles both versions by `choice`.
+pub fn foot_button(tokens: &Tokens, id: &'static str, choice: Choice) -> gpui::Stateful<gpui::Div> {
+    let label = crate::t!(match choice {
+        Choice::Mine => Key::KeepMine,
+        Choice::Theirs => Key::TakeTheirs,
+        Choice::Both => Key::SeeBoth,
+    });
+    div()
+        .id(id)
+        .button(tokens, label)
+        .flex_none()
+        .px(tokens::SPACE_2)
+        .rounded(tokens::RADIUS)
+        .cursor_pointer()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(tokens.text)
+        .bg(tokens.raised)
+        .hover(|button| button.bg(tokens.divider))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(label)
 }
 
 impl Render for PersistView {
@@ -914,11 +941,9 @@ impl Render for PersistView {
                 .text_color(tokens.accent)
                 .children(theirs)
                 .child(div().min_w_0().truncate().child(says))
-                .child(self.button("keep-mine", crate::t!(Key::KeepMine), Choice::Mine, cx))
-                .child(self.button("take-theirs", crate::t!(Key::TakeTheirs), Choice::Theirs, cx))
-                .when(!removal, |root| {
-                    root.child(self.button("see-both", crate::t!(Key::SeeBoth), Choice::Both, cx))
-                })
+                .child(self.button("keep-mine", Choice::Mine, cx))
+                .child(self.button("take-theirs", Choice::Theirs, cx))
+                .when(!removal, |root| root.child(self.button("see-both", Choice::Both, cx)))
                 .into_any_element();
         }
         if let Some((path, problem)) = self.sync.problems().next() {
@@ -931,6 +956,13 @@ impl Render for PersistView {
                     crate::t!(Key::KeptInMemory)
                 ),
                 Problem::Unreadable(reason) => format!("{}: {reason}", crate::t!(Key::Unreadable)),
+                Problem::Watch(error) => crate::t!(Key::CannotWatch, error = error),
+                Problem::Restore(error) => crate::t!(Key::CannotRestore, file = file_name(path), error = error),
+                Problem::Copy(error) => crate::t!(Key::CannotKeepCopy, file = file_name(path), error = error),
+                Problem::Merge(error) => crate::t!(Key::CannotMerge, file = file_name(path), error = error),
+                Problem::ChapterList(error) => crate::t!(Key::CannotUpdateChapters, error = error),
+                Problem::History(error) => crate::t!(Key::CannotKeepHistory, file = file_name(path), error = error),
+                Problem::Repo(error) => crate::t!(Key::CannotMakeRepo, error = error),
             };
             return root
                 .flex_1()

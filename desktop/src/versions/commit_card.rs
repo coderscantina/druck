@@ -248,7 +248,7 @@ impl CommitCard {
         parts.push(Self::field(&self.message).into_any_element());
         if overview.merging.is_some() {
             parts.push(ui::quiet_line(tokens, crate::t!(Key::MergingNote)).into_any_element());
-            if let Some(chapter) = &view.read(cx).both_stand_in {
+            if let Some((_, chapter)) = &view.read(cx).both_stand_in {
                 parts.push(ui::accent_line(tokens, crate::t!(Key::BothStand, chapter = chapter)).into_any_element());
             }
         }

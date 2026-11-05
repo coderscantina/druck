@@ -1656,12 +1656,15 @@ impl EditorView {
         (!self.source && (self.selection.is_empty() || self.drag.is_some())).then_some(self.reveal_at)
     }
 
-    /// Whether a comment block takes no room here: it is closed, not opened by its marker, and has no caret in it.
+    /// Whether a comment block takes no room here: it is closed, not opened by its marker, has no caret in it, and is not
+    /// one of the marker lines between two versions, which stand in the flow while they are there.
     fn comment_is_hidden(&self, index: usize) -> bool {
         let block = &self.blocks.as_slice()[index];
+        let text = &self.session.active_buffer().text()[block.range.clone()];
         block.kind == BlockKind::Comment
             && !self.slots[index].expanded
-            && notes::is_closed(&self.session.active_buffer().text()[block.range.clone()])
+            && notes::is_closed(text)
+            && !crate::persist::merge::is_marker(text)
             && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
     }
 

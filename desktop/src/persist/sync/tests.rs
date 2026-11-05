@@ -333,6 +333,40 @@ fn a_write_that_started_from_an_older_read_does_not_take_back_what_was_saved() {
 }
 
 #[test]
+fn deleting_text_saved_earlier_in_the_session_stays_deleted() {
+    let mut fixture = Fixture::new();
+    let passage = " A long passage typed and saved early in the session, then deleted by a tool.";
+    fixture.type_in(ONE, "First line.", &format!("First line.{passage}"));
+    fixture.save();
+    fixture.type_in(ONE, "Second line.", "Second line!");
+    fixture.save();
+    let theirs = fixture.text(ONE).replace(passage, "");
+
+    let change = fixture.outside(ONE, &theirs).unwrap();
+    assert_eq!(change.kind, ChangeKind::Reloaded);
+    assert_eq!(fixture.text(ONE), theirs);
+}
+
+#[test]
+fn removing_both_markers_from_outside_is_taken_as_it_is() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    fixture.outside(ONE, "# One\n\nTheirs.\n\nSecond line.\n");
+    let path = fixture.one();
+    fixture.sync.resolve(&mut fixture.session, &path, Choice::Both).unwrap();
+    fixture.save();
+    let unmarked: String = (fixture.disk(ONE).lines())
+        .filter(|line| !line.starts_with("<!-- "))
+        .map(|line| format!("{line}\n"))
+        .collect();
+
+    let change = fixture.outside(ONE, &unmarked).unwrap();
+    assert_eq!(change.kind, ChangeKind::Reloaded);
+    assert_eq!(fixture.text(ONE), unmarked);
+    assert!(fixture.sync.conflicts().next().is_none());
+}
+
+#[test]
 fn git_putting_an_older_version_back_is_taken_as_it_is() {
     let mut fixture = Fixture::new();
     let committed = fixture.text(ONE);
