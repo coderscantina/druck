@@ -115,9 +115,12 @@ crate::strings! {
         SessionMode => ("Use mode {mode} this session", "Modus {mode} in dieser Sitzung nutzen"),
         SessionRule => ("Always allow {rule} this session", "{rule} in dieser Sitzung immer erlauben"),
         SessionOther => ("Always allow this this session", "Das in dieser Sitzung immer erlauben"),
-        ChangesOneOne => ("1 change in 1 file", "1 Änderung in 1 Datei"),
-        ChangesManyOne => ("{hunks} changes in 1 file", "{hunks} Änderungen in 1 Datei"),
-        ChangesManyMany => ("{hunks} changes in {files} files", "{hunks} Änderungen in {files} Dateien"),
+        ChangesOneOne => ("This turn: 1 change in 1 file", "In dieser Runde: 1 Änderung in 1 Datei"),
+        ChangesManyOne => ("This turn: {hunks} changes in 1 file", "In dieser Runde: {hunks} Änderungen in 1 Datei"),
+        ChangesManyMany => (
+            "This turn: {hunks} changes in {files} files",
+            "In dieser Runde: {hunks} Änderungen in {files} Dateien"
+        ),
         CreatedFile => ("Created {path}", "{path} angelegt"),
         DeletedFile => ("{path} was deleted", "{path} gelöscht"),
         HunkLine => ("line {line}", "Zeile {line}"),

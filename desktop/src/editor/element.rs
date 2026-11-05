@@ -14,6 +14,7 @@ use super::display::ChipLook;
 use super::float::prepaint_float;
 use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
 use super::layout::{BlockLayout, Column};
+use super::margin::{Wanted, flow};
 use super::{EditorView, Scrollbar};
 use crate::source::BlockKind;
 use crate::tokens::{self, Tokens};
@@ -155,25 +156,26 @@ impl Element for Galley {
             (frame, floats, margin, rows, advice)
         });
         frame.images = self.prepaint_images(&frame, bounds, window, cx);
-        frame.margin = margin.map(|(mut element, origin)| {
-            window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
-            });
-            element
-        });
-        // An agent's notes stand beside their passages, each below the one before it, over a chapter's own long notes.
-        let mut note_y = bounds.top();
-        let note_left = frame.column.note_left;
+        let note_left = frame.column.note_left.unwrap_or_default();
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for (mut element, origin) in rows {
                 element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
                 frame.review.push(element);
             }
-            for (mut element, wanted) in advice {
+            let mut measured = |(mut element, y): (AnyElement, Pixels)| {
                 let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
-                let y = wanted.max(note_y);
-                element.prepaint_at(point(note_left.unwrap_or_default(), y), window, cx);
-                note_y = y + height + tokens::SPACE_3;
+                (element, Wanted { y, height })
+            };
+            let chapter = margin.map(&mut measured);
+            let advice: Vec<_> = advice.into_iter().map(&mut measured).collect();
+            let wanted: Vec<Wanted> = advice.iter().map(|(_, wanted)| *wanted).collect();
+            let placed = flow(chapter.as_ref().map(|(_, wanted)| *wanted), &wanted, bounds.top());
+            frame.margin = chapter.map(|(mut element, _)| {
+                element.prepaint_at(point(note_left, placed.chapter), window, cx);
+                element
+            });
+            for ((mut element, _), y) in advice.into_iter().zip(placed.notes) {
+                element.prepaint_at(point(note_left, y), window, cx);
                 frame.review.push(element);
             }
         });
@@ -212,6 +214,7 @@ impl Element for Galley {
         let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
         let mark_color = Hsla::from(colors.added).opacity(tokens::REVIEW_TINT);
         let misspelled_color = Hsla::from(accent).opacity(0.6);
+        let note_line_color = colors.text_faint;
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for block in &frame.blocks {
@@ -221,7 +224,7 @@ impl Element for Galley {
                 window.paint_quad(fill(*rectangle, mark_color));
             }
             for line in &frame.note_lines {
-                window.paint_quad(fill(*line, accent));
+                window.paint_quad(fill(*line, note_line_color));
             }
             for rectangle in &frame.selection {
                 window.paint_quad(fill(*rectangle, selection_color));

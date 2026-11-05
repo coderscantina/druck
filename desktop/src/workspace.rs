@@ -21,9 +21,11 @@ use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
-use crate::preview::directives::{self, edit_between};
 use crate::preview::proof::BlockAt;
-use crate::preview::slip::{self, Directive, ProofSlip, SlipEvent};
+#[cfg(any(debug_assertions, feature = "measure"))]
+use crate::preview::slip::Directive;
+use crate::preview::slip::{ProofSlip, SlipEvent};
+use crate::preview::slip_control;
 use crate::preview::{Ahead, BookType, PageClicked, PreviewView, ProblemsWanted, Typeset};
 use crate::session::{Group, Session};
 use crate::settings;
@@ -31,7 +33,6 @@ use crate::shell::text::Key;
 use crate::sidebar::dialogs::{DialogEvent, SectionDialog};
 use crate::sidebar::ticks::TicksView;
 use crate::sidebar::{SidebarData, SidebarEvent, SidebarView};
-use crate::source::EditKind;
 use crate::theme_file::blocks::Target;
 use crate::tokens::{self, Tokens};
 
@@ -174,9 +175,10 @@ impl Workspace {
                 workspace.show_fonts(cx);
                 workspace.jump_to_style(window, cx);
                 workspace.ready_pages(window, cx);
-                workspace.sync_slip(cx);
+                slip_control::sync(&workspace.parts, cx);
                 if let Some(words) = workspace.slip_words.take() {
                     workspace.open_slip_on(&words, window, cx);
+                    #[cfg(any(debug_assertions, feature = "measure"))]
                     if crate::gate::var("DRUCK_SLIP_BREAK").is_some() {
                         workspace.toggle_page_break_for_gate(window, cx);
                     }
@@ -247,7 +249,7 @@ impl Workspace {
             workspace.focus_main(window, cx);
         }
         cx.emit(ModeChanged(mode));
-        // For screenshots: `DRUCK_CHAPTER=4` opens that chapter of the book, and `DRUCK_SELECT=word` selects a word in it.
+        // For screenshots: `DRUCK_CHAPTER=4` opens that chapter of the book.
         if let Some(chapter) = crate::gate::var("DRUCK_CHAPTER").and_then(|chapter| chapter.parse::<usize>().ok()) {
             let id = workspace.parts.editor.read(cx).session().book().get(chapter).copied();
             if let Some(id) = id {
@@ -257,6 +259,8 @@ impl Workspace {
                     .update(cx, |editor, cx| editor.show_chapter(id, window, cx));
             }
         }
+        // `DRUCK_SELECT=word` selects a word in it.
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some(word) = crate::gate::var("DRUCK_SELECT") {
             workspace.parts.editor.update(cx, |editor, cx| {
                 if let Some(at) = editor.text().find(&word) {
@@ -287,7 +291,7 @@ impl Workspace {
         if mode == Mode::Publish {
             self.request_if_changed(cx);
         } else {
-            self.close_slip(cx);
+            slip_control::close(&self.parts, cx);
         }
         self.focus_main(window, cx);
         if changed {
@@ -368,7 +372,7 @@ impl Workspace {
 
     /// After a pause in typing: titles first, then pages. Every edit starts the pause again.
     fn text_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.keep_slip(cx);
+        slip_control::keep(&self.parts, cx);
         let pause = match self.mode {
             Mode::Write => LONG_PAUSE,
             Mode::Publish => REFRESH_PAUSE,
@@ -387,7 +391,7 @@ impl Workspace {
     }
 
     fn session_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.keep_slip(cx);
+        slip_control::keep(&self.parts, cx);
         self.sync_panels(window, cx);
         self.sync_theme(cx);
         self.request_if_changed(cx);
@@ -524,9 +528,7 @@ impl Workspace {
         }
     }
 
-    /// Opens the proof slip on the block a click landed on, or closes it on a click on nothing. Pages behind the text have
-    /// other offsets, so a click on them does nothing until they catch up. The text goes to the same place, so Write opens
-    /// there.
+    /// Opens the proof slip on the block a click landed on, or closes it on a click on nothing.
     fn page_clicked(
         &mut self,
         _: &Entity<PreviewView>,
@@ -534,45 +536,26 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(block) = block else {
-            self.close_slip(cx);
-            self.focus_main(window, cx);
-            return;
-        };
-        let editor = self.parts.editor.clone();
-        if !self.parts.preview.read(cx).shows(editor.read(cx).revision()) {
-            return;
+        match block {
+            Some(block) => slip_control::open(&self.parts, block, self.book_type.as_ref(), window, cx),
+            None => {
+                slip_control::close(&self.parts, cx);
+                self.focus_main(window, cx);
+            }
         }
-        let session = editor.read(cx).session();
-        let Some(opening) = slip::opening(session, block) else {
-            return;
-        };
-        let Some(chapter) = session.chapter(opening.chapter) else {
-            return;
-        };
-        let text = chapter.text();
-        let written = text[opening.range.clone()].to_owned();
-        let state = directives::read(text, &opening.range);
-        let (id, at) = (opening.chapter, opening.range.start);
-        let stand_in = tokens::stand_in_type();
-        let book_type = self.book_type.as_ref().unwrap_or(&stand_in);
-        let face = book_type.face_of(opening.style.as_deref().unwrap_or("body")).clone();
-        self.slip(cx).update(cx, |slip, cx| {
-            slip.open(opening, &written, state, &face, window, cx);
-        });
-        editor.update(cx, |editor, cx| editor.show_place(id, at, window, cx));
-        self.sync_slip(cx);
     }
 
     /// Closes the slip as Escape does. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn close_slip_for_gate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_slip(cx);
+        slip_control::close(&self.parts, cx);
         self.focus_main(window, cx);
     }
 
     /// Presses the slip's page break button. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn toggle_page_break_for_gate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.slip_toggled(Directive::PageBreak, window, cx);
+        slip_control::toggled(&self.parts, Directive::PageBreak, window, cx);
     }
 
     /// Opens the slip on the first paragraph with these words, as a click on them would. For scripted runs.
@@ -587,123 +570,17 @@ impl Workspace {
         self.page_clicked(&preview, &PageClicked(block), window, cx);
     }
 
-    fn slip(&self, cx: &gpui::App) -> Entity<ProofSlip> {
-        self.parts.preview.read(cx).slip().clone()
-    }
-
-    fn close_slip(&mut self, cx: &mut Context<Self>) {
-        self.slip(cx).update(cx, |slip, cx| slip.close(cx));
-        self.parts.preview.update(cx, |preview, cx| preview.set_slip(None, cx));
-    }
-
-    /// Shows the slip at its paragraph on the pages, once they are set from the text it is in.
-    fn sync_slip(&mut self, cx: &mut Context<Self>) {
-        let Some(opened) = self.slip(cx).read(cx).opened().cloned() else {
-            return;
-        };
-        let editor = self.parts.editor.read(cx);
-        if !self.parts.preview.read(cx).shows(editor.revision()) {
-            return;
-        }
-        let Some((file, start)) = editor.session().file_position(opened.chapter, opened.range.start) else {
-            return;
-        };
-        let source = (file, start..start + opened.range.len());
-        self.parts
-            .preview
-            .update(cx, |preview, cx| preview.set_slip(Some(source), cx));
-    }
-
-    /// Keeps the slip on its paragraph when something else changed the chapter, or closes it if the paragraph is gone.
-    fn keep_slip(&mut self, cx: &mut Context<Self>) {
-        let slip = self.slip(cx);
-        let Some(opened) = slip.read(cx).opened().cloned() else {
-            return;
-        };
-        if slip.read(cx).input().read(cx).is_composing() {
-            return;
-        }
-        let held = slip.read(cx).text(cx).to_owned();
-        let session = self.parts.editor.read(cx).session();
-        let found = session.chapter(opened.chapter).and_then(|chapter| {
-            let text = chapter.text();
-            let range = slip::relocated(text, &held, &opened.range)?;
-            Some((directives::read(text, &range), range))
-        });
-        match found {
-            Some((_, range)) if range == opened.range => {}
-            Some((state, range)) => slip.update(cx, |slip, cx| slip.moved_to(range, state, cx)),
-            None => self.close_slip(cx),
-        }
-    }
-
     fn slip_event(&mut self, _: &Entity<ProofSlip>, event: &SlipEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
-            SlipEvent::Edited => self.slip_edited(window, cx),
-            SlipEvent::Toggle(directive) => self.slip_toggled(*directive, window, cx),
+            SlipEvent::Edited => slip_control::edited(&self.parts, window, cx),
+            SlipEvent::Toggle(directive) => slip_control::toggled(&self.parts, *directive, window, cx),
             SlipEvent::ShowStyle(style) => self.parts.inspector.update(cx, |inspector, cx| {
                 inspector.open_style(style, window, cx);
             }),
             SlipEvent::Closed => {
-                self.close_slip(cx);
+                slip_control::close(&self.parts, cx);
                 self.focus_main(window, cx);
             }
-        }
-    }
-
-    /// Carries what changed in the slip over to the chapter, which is the truth.
-    fn slip_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let slip = self.slip(cx);
-        let Some(opened) = slip.read(cx).opened().cloned() else {
-            return;
-        };
-        let new = slip.read(cx).text(cx).to_owned();
-        let editor = self.parts.editor.clone();
-        let Some(chapter) = editor.read(cx).session().chapter(opened.chapter) else {
-            return;
-        };
-        let Some(old) = chapter.text().get(opened.range.clone()).map(str::to_owned) else {
-            return;
-        };
-        let Some(edit) = edit_between(opened.range.start, &old, &new) else {
-            return;
-        };
-        let kind = if new.len() < old.len() {
-            EditKind::Deleting
-        } else {
-            EditKind::Typing
-        };
-        let range = opened.range.start..opened.range.start + new.len();
-        let made = editor.update(cx, |editor, cx| {
-            editor.edit_outside(opened.chapter, vec![edit], kind, window, cx)
-        });
-        if made.is_ok() {
-            let text = editor.read(cx).session().buffer(opened.chapter).text();
-            let state = directives::read(text, &range);
-            slip.update(cx, |slip, cx| slip.moved_to(range, state, cx));
-        }
-    }
-
-    /// Adds or takes away a directive around the slip's paragraph.
-    fn slip_toggled(&mut self, directive: Directive, window: &mut Window, cx: &mut Context<Self>) {
-        let slip = self.slip(cx);
-        let Some(opened) = slip.read(cx).opened().cloned() else {
-            return;
-        };
-        let editor = self.parts.editor.clone();
-        let text = editor.read(cx).session().buffer(opened.chapter).text();
-        let change = match directive {
-            Directive::PageBreak => directives::toggle_page_break(text, &opened.range),
-            Directive::Keep => directives::toggle_keep(text, &opened.range),
-        };
-        let range = change.range.clone();
-        let made = editor.update(cx, |editor, cx| {
-            editor.edit_outside(opened.chapter, change.edits, EditKind::Discrete, window, cx)
-        });
-        if made.is_ok() {
-            let text = editor.read(cx).session().buffer(opened.chapter).text();
-            let state = directives::read(text, &range);
-            slip.update(cx, |slip, cx| slip.moved_to(range, state, cx));
         }
     }
 

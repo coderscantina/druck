@@ -85,6 +85,7 @@ impl AgentView {
             }
             "send" if self.selection_card.is_some() => self.send_selection(window, cx),
             "send" => self.send(window, cx),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             "select" => self.editor.update(cx, |editor, cx| {
                 if let Some(at) = editor.text().find(rest) {
                     editor.select_for_screenshot(at..at + rest.len(), window, cx);

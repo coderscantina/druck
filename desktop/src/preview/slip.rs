@@ -1,6 +1,6 @@
 //! The proof slip: a card at a paragraph on the pages, with its written text in the theme's font, the directives that
 //! exist, and at its foot a link to the paragraph's style. It holds a copy of the text only while it is on screen. The
-//! chapter is the truth: [`SlipEvent::Edited`] asks the workspace to carry each change over.
+//! chapter is the truth: [`SlipEvent::Edited`] asks [`super::slip_control`] to carry each change over.
 
 use std::ops::Range;
 
@@ -18,6 +18,7 @@ use super::strings::Key;
 use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Committed, Edited, TextInput};
 use crate::session::{ChapterId, Session};
+use crate::source::buffer::Splice;
 use crate::theme_file::blocks::styles_of;
 use crate::tokens::{self, Tokens};
 
@@ -44,6 +45,10 @@ pub struct Opening {
     pub chapter: ChapterId,
     /// The paragraph in the chapter's text.
     pub range: Range<usize>,
+    /// The text the chapter held at `range` when the slip last matched it. The field can run ahead while it composes.
+    pub synced: String,
+    /// The chapter's revision then.
+    pub revision: u64,
     /// Where the caret starts in it.
     pub caret: usize,
     /// The style's key, its own custom style if it has one.
@@ -57,6 +62,7 @@ pub struct Opening {
 pub fn opening(session: &Session, clicked: &BlockAt) -> Option<Opening> {
     let (chapter, start) = session.locate(&clicked.file, clicked.range.start)?;
     let text = session.chapter(chapter)?.text();
+    let revision = session.buffer(chapter).revision();
     let end = text.floor_char_boundary((start + clicked.range.len()).min(text.len()));
     let written = text[start..end].trim_end();
     let range = start..start + written.len();
@@ -80,6 +86,8 @@ pub fn opening(session: &Session, clicked: &BlockAt) -> Option<Opening> {
             &directive_name,
         ),
         range,
+        synced: written.to_owned(),
+        revision,
     })
 }
 
@@ -113,16 +121,24 @@ fn takes_directives(
         })
 }
 
-/// Where a slip's text stands in a chapter whose text changed: at `range` if it is still there, else at the nearest place
-/// that holds it. `None` when it is gone.
-pub fn relocated(text: &str, held: &str, range: &Range<usize>) -> Option<Range<usize>> {
-    if text.get(range.clone()) == Some(held) {
-        return Some(range.clone());
+/// Where a slip's text stands in a chapter whose text changed: `range` moved by the change, if `splice` says what that was
+/// and the text is there, else the nearest place that holds it. A search alone could take the wrong one of two paragraphs
+/// that read the same. `None` when it is gone.
+pub fn relocated(text: &str, held: &str, range: &Range<usize>, splice: Option<Splice>) -> Option<Range<usize>> {
+    let expected = match splice {
+        Some(splice) if range.start >= splice.old_end => {
+            let moved = |offset: usize| offset + splice.new_end - splice.old_end;
+            moved(range.start)..moved(range.end)
+        }
+        _ => range.clone(),
+    };
+    if text.get(expected.clone()) == Some(held) {
+        return Some(expected);
     }
     let nearest = text
         .match_indices(held)
         .map(|(at, _)| at)
-        .min_by_key(|at| at.abs_diff(range.start))?;
+        .min_by_key(|at| at.abs_diff(expected.start))?;
     Some(nearest..nearest + held.len())
 }
 
@@ -181,22 +197,14 @@ impl ProofSlip {
         }
     }
 
-    /// Opens on a paragraph, whose written text is `text`.
-    pub fn open(
-        &mut self,
-        opening: Opening,
-        text: &str,
-        state: State,
-        face: &Face,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Opens on a paragraph.
+    pub fn open(&mut self, opening: Opening, state: State, face: &Face, window: &mut Window, cx: &mut Context<Self>) {
         self.state = opening.takes_directives.then_some(state);
-        let caret = opening.caret;
+        let (caret, text) = (opening.caret, opening.synced.clone());
         self.opened = Some(opening);
         self.input.update(cx, |input, cx| {
             input.set_book_type(Some(type_of(face)), cx);
-            input.set_value(text.to_owned(), true, cx);
+            input.set_value(text, true, cx);
             input.set_caret(caret, cx);
         });
         self.scroll.set_offset(point(px(0.), px(0.)));
@@ -219,10 +227,12 @@ impl ProofSlip {
         self.input.read(cx).text()
     }
 
-    /// The paragraph moved in its chapter, by the slip's own change or another's.
-    pub fn moved_to(&mut self, range: Range<usize>, state: State, cx: &mut Context<Self>) {
+    /// The slip matches the chapter again: its paragraph holds `synced` at `range`, at `revision`.
+    pub fn synced(&mut self, range: Range<usize>, synced: String, revision: u64, state: State, cx: &mut Context<Self>) {
         if let Some(opened) = &mut self.opened {
             opened.range = range;
+            opened.synced = synced;
+            opened.revision = revision;
             if opened.takes_directives {
                 self.state = Some(state);
             }
@@ -391,12 +401,40 @@ mod tests {
         let held = "A paragraph.";
         let first = "One.\n\nA paragraph.\n";
         let range = 6..18;
-        assert_eq!(relocated(first, held, &range), Some(6..18));
+        assert_eq!(relocated(first, held, &range, None), Some(6..18));
         let moved = "Something new.\n\nOne.\n\nA paragraph.\n";
-        assert_eq!(relocated(moved, held, &range), Some(22..34));
-        assert_eq!(relocated("One.\n\nChanged.\n", held, &range), None);
+        assert_eq!(relocated(moved, held, &range, None), Some(22..34));
+        assert_eq!(relocated("One.\n\nChanged.\n", held, &range, None), None);
         let twice = "A paragraph.\n\nOne.\n\nx\n\nA paragraph.\n";
-        assert_eq!(relocated(twice, held, &(20..32)), Some(23..35), "the nearer of two");
+        assert_eq!(relocated(twice, held, &(20..32), None), Some(23..35), "the nearer of two");
+    }
+
+    #[test]
+    fn a_change_moves_the_slip_by_its_size_and_not_to_a_paragraph_that_reads_the_same() {
+        let held = "Yes.";
+        // The second of two, which is on 6..10. Six bytes in front of it put the first at the same offset.
+        let text = "Added.Yes.\n\nYes.\n";
+        let before = Splice {
+            start: 0,
+            old_end: 0,
+            new_end: 6,
+        };
+        assert_eq!(relocated(text, held, &(6..10), Some(before)), Some(12..16));
+        // A change after it leaves it alone, even when the same words stand as far along as the change is long.
+        let after = Splice {
+            start: 4,
+            old_end: 4,
+            new_end: 10,
+        };
+        let text = "Yes.\n\nYes.Added.\n";
+        assert_eq!(relocated(text, held, &(0..4), Some(after)), Some(0..4));
+        // A change over the paragraph falls back on the search.
+        let over = Splice {
+            start: 0,
+            old_end: 8,
+            new_end: 1,
+        };
+        assert_eq!(relocated("x\n\nYes.\n", held, &(2..6), Some(over)), Some(3..7));
     }
 
     fn parent(kind: BlockKind) -> Parent {

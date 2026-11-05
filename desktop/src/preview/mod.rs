@@ -4,7 +4,7 @@
 //! The workspace calls [`PreviewView::request`] with the session's joined text and hears [`Typeset`] when pages change.
 //! In Write they are not on screen, and [`PreviewView::ready_ahead`] keeps what Publish would show ready to paint.
 //!
-//! A click on a line asks the workspace to open the [`slip::ProofSlip`], which this view shows at its paragraph. Problems
+//! A click on a line opens the [`slip::ProofSlip`] through the workspace and [`slip_control`], which this view shows at its paragraph. Problems
 //! come in through [`PreviewView::set_problems`], and only these and the slip's paragraph are ever marked on a page.
 
 mod bench;
@@ -16,6 +16,7 @@ pub mod proof;
 mod raster;
 mod sheets;
 pub mod slip;
+pub mod slip_control;
 mod strings;
 
 use std::collections::HashSet;
@@ -62,6 +63,9 @@ const SPECIMEN_FILE: &str = "specimen.md";
 const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 /// Zoom levels below fit, which show a contact sheet. Small enough that it reads as one, whatever the window.
 const CONTACT_ZOOMS: [f32; 4] = [0.14, 0.2, 0.3, 0.45];
+/// Fit follows the view below every fixed level, so a narrow window shows a whole spread. This only keeps a sliver of a
+/// view from asking for sheets of no size.
+const SMALLEST_FIT: f32 = 0.02;
 /// Sharper than this costs too much memory per page; higher zoom enlarges these pixels.
 const MAX_RESOLUTION: f32 = 4.0;
 /// Rasterized pages kept in memory. Painted ones also have a copy in the GPU atlas.
@@ -529,6 +533,18 @@ impl PreviewView {
         top >= self.scroll.1 && top <= self.scroll.1 + self.view.1
     }
 
+    /// Whether the slip is open and no part of its paragraph is in the view any more. The author scrolled away from it: a
+    /// change of the text brings the view back with it through [`Self::set_slip`] first.
+    fn slip_left_the_view(&self, sheets: &Sheets, cx: &App) -> bool {
+        self.slip.read(cx).opened().is_some()
+            && !self.slip_marks.is_empty()
+            && !self.slip_marks.iter().any(|mark| {
+                let top = sheets.top(mark.page) + mark.rect.y.0 as f32 * self.current_zoom;
+                let bottom = top + mark.rect.height.0 as f32 * self.current_zoom;
+                bottom > self.scroll.1 && top < self.scroll.1 + self.view.1
+            })
+    }
+
     /// The written place of the first text on a page.
     pub fn first_place(&self, page: usize) -> Option<(PathBuf, usize)> {
         proof::first_place(&self.layout.as_ref()?.laid, page)
@@ -721,7 +737,7 @@ impl PreviewView {
         let gutter = f32::from(tokens::SPREAD_GUTTER);
         ((width - margins - gutter) / (2.0 * widest))
             .min((height - margins) / tallest)
-            .clamp(CONTACT_ZOOMS[0], ZOOMS[ZOOMS.len() - 1])
+            .clamp(SMALLEST_FIT, ZOOMS[ZOOMS.len() - 1])
     }
 
     /// A frame on screen: frees what the atlas no longer needs, and places the sheets.
@@ -826,6 +842,11 @@ impl PreviewView {
                 image: found.or_else(|| self.cache.stale(page)),
                 exact: exact_here,
             });
+        }
+        if self.slip_left_the_view(&sheets, cx) {
+            // A click on nothing, which closes the slip. Not during this frame, which is still placing it.
+            let this = cx.entity();
+            cx.defer(move |cx| this.update(cx, |_, cx| cx.emit(PageClicked(None))));
         }
         let all_exact = exact == visible.len();
         if all_exact && self.published > self.ready.0 && self.published == self.scheduler.latest() {
@@ -954,7 +975,7 @@ impl PreviewView {
         let room = f32::from(tokens::SPACE_2);
         let x = left.clamp(room, (self.view.0 - width - room).max(room));
         let y = bottom + (tokens::MARK_PADDING + tokens::MARK_PADDING) * zoom;
-        Some(point(px(self.origin.0 + x), px(self.origin.1 + y)))
+        Some(point(px(self.origin.0 + x), px(self.origin.1 + y).max(tokens::TITLEBAR_HEIGHT)))
     }
 
     /// The status line's zoom: smaller, the value, larger, and fit.
@@ -1184,6 +1205,12 @@ mod tests {
         assert_eq!(step(Zoom::Fit, 1.53, 1), Some(Zoom::Fixed(2.0)));
         assert_eq!(step(Zoom::Fixed(2.0), 2.0, -1), Some(Zoom::Fit));
         assert_eq!(step(Zoom::Fixed(3.0), 3.0, 1), None);
+    }
+
+    #[test]
+    fn fit_goes_below_every_fixed_level() {
+        assert_eq!(next_zoom(Zoom::Fit, 0.1, 0.1, -1), None);
+        assert_eq!(next_zoom(Zoom::Fit, 0.1, 0.1, 1), Some(Zoom::Fixed(0.5)));
     }
 
     #[test]

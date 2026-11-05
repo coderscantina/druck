@@ -800,14 +800,15 @@ impl EditorView {
             .children(rows)
     }
 
-    /// The chapter's notes for this frame, beside the chapter's first text while that is on screen.
-    pub(super) fn margin_element(&self) -> Option<(AnyElement, Point<Pixels>)> {
-        let left = self.column.note_left?;
+    /// The chapter's notes for this frame, with the height they want to stand at: beside the chapter's first text while
+    /// that is on screen.
+    pub(super) fn margin_element(&self) -> Option<(AnyElement, Pixels)> {
+        self.column.note_left?;
         let margin = self.margin.clone()?;
         let region = notes::leading_region(self.text(), &self.blocks)?;
         let first = self.blocks.index_at(region.start);
         let (_, top) = self.visible.iter().find(|(index, _)| *index >= first)?;
-        Some((margin.into_any_element(), point(left, *top)))
+        Some((margin.into_any_element(), *top))
     }
 
     // The frame's floats

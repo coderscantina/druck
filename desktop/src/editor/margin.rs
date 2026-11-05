@@ -1,6 +1,7 @@
 //! The chapter's notes in the right margin: each comment that opens the chapter, with a thin accent line at its left and
 //! a field that edits its text where it stands in the buffer, so undo and the bytes around it are the editor's. They show
-//! only when there are any. An agent's notes stand in the same margin, see [`super::review`].
+//! only when there are any. An agent's notes stand in the same margin, see [`super::review`], and [`flow`] places them
+//! all, so none is painted over another.
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -26,6 +27,54 @@ use crate::tokens::{self, Tokens};
 
 const FIELD_CONTEXT: &str = "NoteField";
 const LINE_HEIGHT: Pixels = tokens::NOTE_LINE_HEIGHT;
+
+/// Where something in the margin wants to stand, and how tall it is.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Wanted {
+    pub y: Pixels,
+    pub height: Pixels,
+}
+
+/// Where everything in the margin stands.
+#[derive(Debug, PartialEq)]
+pub(super) struct Flow {
+    pub chapter: Pixels,
+    pub notes: Vec<Pixels>,
+}
+
+/// Lays the margin out as one flow, down from `top`, the view's top. An agent's notes, in order, each belong beside a
+/// passage, so they stand as near it as the note above them allows. The chapter's note belongs to no passage: it stands at
+/// its place only if that leaves room before the next agent's note, and otherwise moves below them.
+pub(super) fn flow(chapter: Option<Wanted>, notes: &[Wanted], top: Pixels) -> Flow {
+    let gap = tokens::SPACE_3;
+    let mut pending = chapter;
+    let mut placed_chapter = chapter.map_or(top, |chapter| chapter.y);
+    let mut placed = Vec::with_capacity(notes.len());
+    let mut next = top;
+    for note in notes {
+        if let Some(chapter) = pending {
+            // With nothing above it, it scrolls away with the text it stands beside.
+            let y = if placed.is_empty() { chapter.y } else { chapter.y.max(next) };
+            if y + chapter.height + gap <= note.y {
+                placed_chapter = y;
+                next = next.max(y + chapter.height + gap);
+                pending = None;
+            }
+        }
+        let y = note.y.max(next);
+        placed.push(y);
+        next = y + note.height + gap;
+    }
+    if let Some(chapter) = pending
+        && !placed.is_empty()
+    {
+        placed_chapter = chapter.y.max(next);
+    }
+    Flow {
+        chapter: placed_chapter,
+        notes: placed,
+    }
+}
 
 pub struct MarginNotes {
     editor: Entity<EditorView>,
@@ -595,4 +644,48 @@ fn from_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
         text.len()
     };
     offset(range.start)..offset(range.end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wanted(y: f32, height: f32) -> Wanted {
+        Wanted {
+            y: px(y),
+            height: px(height),
+        }
+    }
+
+    #[test]
+    fn an_agents_notes_push_the_chapters_note_down() {
+        // A note whose text is gone at the top, and one beside a passage, over a chapter's note that runs long.
+        let placed = flow(Some(wanted(40., 900.)), &[wanted(40., 60.), wanted(450., 120.)], px(28.));
+        assert_eq!(placed.notes, [px(40.), px(450.)]);
+        assert_eq!(placed.chapter, px(450. + 120.) + tokens::SPACE_3);
+    }
+
+    #[test]
+    fn a_chapters_note_stays_at_its_place_when_there_is_room() {
+        let placed = flow(Some(wanted(40., 100.)), &[wanted(450., 120.)], px(28.));
+        assert_eq!(placed.chapter, px(40.));
+        assert_eq!(placed.notes, [px(450.)]);
+    }
+
+    #[test]
+    fn nothing_in_the_flow_overlaps() {
+        let notes = [wanted(30., 80.), wanted(50., 80.), wanted(60., 80.)];
+        let placed = flow(Some(wanted(40., 300.)), &notes, px(28.));
+        let mut all: Vec<(Pixels, Pixels)> = placed.notes.iter().zip(&notes).map(|(y, note)| (*y, note.height)).collect();
+        all.push((placed.chapter, px(300.)));
+        all.sort_by_key(|(y, _)| *y);
+        for pair in all.windows(2) {
+            assert!(pair[0].0 + pair[0].1 <= pair[1].0, "{pair:?}");
+        }
+    }
+
+    #[test]
+    fn a_chapters_note_alone_scrolls_with_its_text() {
+        assert_eq!(flow(Some(wanted(-300., 100.)), &[], px(28.)).chapter, px(-300.));
+    }
 }

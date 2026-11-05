@@ -708,6 +708,7 @@ impl EditorView {
     }
 
     /// Selects `range` as a person would, with the toolbar showing. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn select_for_screenshot(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
         let selection = Selection {
             anchor: range.start,

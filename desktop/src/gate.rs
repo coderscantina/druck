@@ -486,6 +486,7 @@ impl Gate {
         self.window
             .update(cx, |_, window, cx| {
                 workspace.update(cx, |workspace, cx| {
+                    #[cfg(any(debug_assertions, feature = "measure"))]
                     workspace.close_slip_for_gate(window, cx);
                 });
             })
@@ -526,6 +527,7 @@ impl Gate {
             let workspace = gate.workspace.clone();
             gate.window
                 .update(cx, |_, window, cx| {
+                    #[cfg(any(debug_assertions, feature = "measure"))]
                     workspace.update(cx, |workspace, cx| workspace.toggle_page_break_for_gate(window, cx));
                 })
                 .ok();

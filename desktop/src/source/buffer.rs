@@ -135,6 +135,8 @@ pub struct Buffer {
     undo: Vec<Group>,
     redo: Vec<Group>,
     revision: u64,
+    /// What the change to this revision touched.
+    last_splice: Option<Splice>,
     /// The last undo stopped at a change from outside, so the next one takes it back.
     undo_outside_armed: bool,
 }
@@ -146,6 +148,7 @@ impl Buffer {
             undo: Vec::new(),
             redo: Vec::new(),
             revision: 0,
+            last_splice: None,
             undo_outside_armed: false,
         }
     }
@@ -164,9 +167,13 @@ impl Buffer {
     }
 
     /// Changes with every edit, undo, and redo. Consumers compare it to see whether their copy is stale.
-    #[allow(dead_code, reason = "for the preview's refresh in the integration wave")]
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// What the change to the current revision touched, for a consumer one revision behind.
+    pub fn last_splice(&self) -> Option<Splice> {
+        self.last_splice
     }
 
     /// Applies `edits` as one atomic change, in increasing non-overlapping order, or nothing at all. `before` and
@@ -187,6 +194,7 @@ impl Buffer {
         };
         self.redo.clear();
         self.revision += 1;
+        self.last_splice = Some(splice);
         self.undo_outside_armed = false;
         match self.undo.last_mut() {
             Some(group) if group.after == before && kind.joins(group.kind, now - group.last_edit) => {
@@ -217,6 +225,7 @@ impl Buffer {
         };
         self.redo.clear();
         self.revision += 1;
+        self.last_splice = Some(splice);
         self.undo_outside_armed = false;
         match self.undo.last_mut() {
             Some(group) => {
@@ -275,6 +284,7 @@ impl Buffer {
             });
         }
         self.revision += 1;
+        self.last_splice = total;
         total.unwrap_or(Splice {
             start: 0,
             old_end: 0,

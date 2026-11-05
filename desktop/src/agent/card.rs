@@ -16,9 +16,8 @@ pub fn mount(agent: &Entity<AgentView>, slots: &mut Slots, _: &mut Window, cx: &
     let chat = cx.new(|cx| ChatCard::new(agent.clone(), cx));
     slots.overlays.push(chat.into());
     let foot = cx.new(|cx| ReviewFoot::new(agent.clone(), cx));
-    // Beside the saving state, before the word count pushes to the right.
-    let at = slots.footer.len().min(1);
-    slots.footer.insert(at, foot.into());
+    // Before the saving state, whose line takes the room that is left, so a note coming and going moves nothing.
+    slots.footer.insert(0, foot.into());
 }
 
 /// The small card at the bottom right, over the text and without a backdrop.
