@@ -125,6 +125,21 @@ pub struct BookType {
 }
 
 impl BookType {
+    /// The face of a theme style, or the body's for a style Write does not set apart.
+    pub fn face_of(&self, style: &str) -> &Face {
+        match style {
+            "quote" => &self.quote,
+            "list" => &self.list,
+            "footnote" => &self.footnote,
+            "code-block" => &self.code,
+            _ => style
+                .strip_prefix("heading-")
+                .and_then(|level| level.parse::<usize>().ok())
+                .and_then(|level| self.headings.get(level.checked_sub(1)?))
+                .unwrap_or(&self.body),
+        }
+    }
+
     fn of(config: &Config, laid: &druck::output::Layout) -> Self {
         let mut files: Vec<Bytes> = Vec::new();
         let mut face = |style: &Style| {

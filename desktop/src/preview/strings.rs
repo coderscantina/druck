@@ -1,12 +1,20 @@
-//! The strings of the preview's status strip, in English and German.
+//! The strings of Publish's pages: the status line and the proof slip, in English and German.
 
 crate::strings! {
     pub enum Key {
         NoPagesYet => ("No pages yet", "Noch keine Seiten"),
         NoPages => ("No pages", "Keine Seiten"),
-        PageOf => (
-            "Page {page} of {pages} \u{00b7} {percent}%",
-            "Seite {page} von {pages} \u{00b7} {percent}\u{a0}%"
-        ),
+        PageOf => ("Page {page} of {pages}", "Seite {page} von {pages}"),
+        PagesOf => ("Pages {first}\u{2013}{last} of {pages}", "Seiten {first}\u{2013}{last} von {pages}"),
+        PageCount => ("{pages} pages", "{pages} Seiten"),
+        ToLookAt => ("{count} to look at", "{count} zu prüfen"),
+        ZoomOut => ("Zoom out", "Verkleinern"),
+        ZoomIn => ("Zoom in", "Vergrößern"),
+        ZoomFit => ("Fit", "Einpassen"),
+        SlipLabel => ("Proof slip", "Korrekturzettel"),
+        SlipText => ("Paragraph text", "Absatztext"),
+        SlipPageBreak => ("Page break before", "Seitenumbruch davor"),
+        SlipKeep => ("Keep together", "Zusammenhalten"),
+        SlipEscape => ("Esc closes", "Esc schließt"),
     }
 }
