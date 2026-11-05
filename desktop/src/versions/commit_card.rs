@@ -308,7 +308,16 @@ impl CommitCard {
         }
         let unreviewed = unreviewed_changes(cx);
         if unreviewed > 0 {
-            parts.push(ui::accent_line(tokens, crate::t!(Key::Unreviewed, count = unreviewed)).into_any_element());
+            parts.push(
+                ui::accent_line(
+                    tokens,
+                    match unreviewed {
+                        1 => crate::t!(Key::OneUnreviewed).to_owned(),
+                        count => crate::t!(Key::Unreviewed, count = count),
+                    },
+                )
+                .into_any_element(),
+            );
         }
         let (installed, working) = (view.read(cx).git_installed(), view.read(cx).is_working());
         if overview.signs && !installed {

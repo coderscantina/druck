@@ -8,10 +8,12 @@ crate::strings! {
         OpenProof => ("Proof", "Korrektur"),
         PageOf => ("Page {page} of {pages}", "Seite {page} von {pages}"),
         PagesOf => ("Pages {first}\u{2013}{last} of {pages}", "Seiten {first}\u{2013}{last} von {pages}"),
+        OnePage => ("1 page", "1 Seite"),
         PageCount => ("{pages} pages", "{pages} Seiten"),
         ToLookAt => ("{count} to look at", "{count} zu prüfen"),
+        OneWarning => ("1 warning", "1 Warnung"),
         Warnings => ("{count} warnings", "{count} Warnungen"),
-        WarningMarks => ("Marks", "Marken"),
+        WarningMarks => ("Marks", "Markierungen"),
         ZoomOut => ("Zoom out", "Verkleinern"),
         ZoomIn => ("Zoom in", "Vergrößern"),
         ZoomFit => ("Fit", "Einpassen"),
@@ -28,8 +30,8 @@ crate::strings! {
         SlipShowStyle => ("Edit this style", "Stil bearbeiten"),
         SlipStyleWaits => (
             "Choose where the theme is changed, and the style follows.",
-            "Wähle, wo das Thema geändert wird, dann folgt der Stil."
+            "Wähle, wo das Theme geändert wird, dann folgt der Stil."
         ),
-        SlipNoTheme => ("A style needs a theme file to live in.", "Ein Stil braucht eine Themendatei."),
+        SlipNoTheme => ("A style needs a theme file to live in.", "Ein Stil braucht eine Theme-Datei."),
     }
 }

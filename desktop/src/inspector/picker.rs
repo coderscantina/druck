@@ -291,7 +291,7 @@ impl ThemePicker {
             }
         }
         if let Some(common) = &common {
-            rows.push(label(Key::CommonThemes).into_any_element());
+            rows.push(label(Key::SharedThemes).into_any_element());
             for entry in library::list(None, Some(common)) {
                 // A project theme of the same name wins, so the document means that one.
                 let shadowed = project_entries.iter().any(|project| project.name == entry.name);
@@ -299,7 +299,7 @@ impl ThemePicker {
             }
             rows.push(match &self.naming {
                 Some((_, input)) => div().p(tokens::SPACE_2).child(input.clone()).into_any_element(),
-                None => widgets::quiet_link(tokens, "theme-new", format!("+ {}", crate::t!(Key::NewCommonTheme)))
+                None => widgets::quiet_link(tokens, "theme-new", format!("+ {}", crate::t!(Key::NewSharedTheme)))
                     .m(tokens::SPACE_2)
                     .on_click(cx.listener(|picker, _, window, cx| {
                         picker.start_naming(Naming::Create, String::new(), window, cx);

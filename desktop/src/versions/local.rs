@@ -95,7 +95,11 @@ impl Versions {
                     let text = crate::t!(Key::HistoryFollowed, from = from.display().to_string());
                     view.show_note(text, window, cx);
                 } else if left > 0 {
-                    view.show_note(crate::t!(Key::HistoryLeft, count = left), window, cx);
+                    let text = match left {
+                        1 => crate::t!(Key::OneHistoryLeft).to_owned(),
+                        left => crate::t!(Key::HistoryLeft, count = left),
+                    };
+                    view.show_note(text, window, cx);
                 }
                 view.changed(cx);
             })

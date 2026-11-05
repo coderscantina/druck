@@ -4,22 +4,22 @@ crate::strings! {
     pub enum Key {
         NotAThemeName => (
             "\"{name}\" is not a theme name: use letters, digits, hyphens, and underscores",
-            "\"{name}\" ist kein Themenname: erlaubt sind Buchstaben, Ziffern, Binde- und Unterstriche"
+            "\"{name}\" ist kein Theme-Name: erlaubt sind Buchstaben, Ziffern, Binde- und Unterstriche"
         ),
-        ThemeExists => ("a theme named \"{name}\" already exists", "ein Thema namens \"{name}\" gibt es schon"),
-        NoCommonTheme => ("no common theme named \"{name}\"", "kein gemeinsames Thema namens \"{name}\""),
+        ThemeExists => ("a theme named \"{name}\" already exists", "ein Theme namens \"{name}\" gibt es schon"),
+        NoSharedTheme => ("no shared theme named \"{name}\"", "kein gemeinsames Theme namens \"{name}\""),
         ProjectHasTheme => (
             "the project already has a theme named \"{name}\"",
-            "das Projekt hat schon ein Thema namens \"{name}\""
+            "das Projekt hat schon ein Theme namens \"{name}\""
         ),
-        NoProject => ("there is no project to copy the theme into", "es gibt kein Projekt, in das sich das Thema kopieren lässt"),
+        NoProject => ("there is no project to copy the theme into", "es gibt kein Projekt, in das sich das Theme kopieren lässt"),
         CannotCreate => ("cannot create {path}: {error}", "{path} lässt sich nicht anlegen: {error}"),
         CannotWrite => ("cannot write {path}: {error}", "{path} lässt sich nicht schreiben: {error}"),
         CannotRename => ("cannot rename {path}: {error}", "{path} lässt sich nicht umbenennen: {error}"),
         CannotCopy => ("cannot copy {path}: {error}", "{path} lässt sich nicht kopieren: {error}"),
         CannotDelete => ("cannot delete {path}: {error}", "{path} lässt sich nicht löschen: {error}"),
         CannotRead => ("cannot read {path}: {error}", "{path} lässt sich nicht lesen: {error}"),
-        CannotTake => ("the theme cannot take this change", "das Thema lässt diese Änderung nicht zu"),
+        CannotTake => ("the theme cannot take this change", "das Theme lässt diese Änderung nicht zu"),
         NotAFont => (
             "{path} is not an OpenType or TrueType font",
             "{path} ist keine OpenType- oder TrueType-Schrift"

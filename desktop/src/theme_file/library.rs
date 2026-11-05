@@ -127,7 +127,7 @@ pub fn rename(common: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
     let source = common_path(common, from);
     let target = common_path(common, to);
     if !source.is_file() {
-        return Err(crate::t!(Key::NoCommonTheme, name = from));
+        return Err(crate::t!(Key::NoSharedTheme, name = from));
     }
     if target.exists() {
         return Err(crate::t!(Key::ThemeExists, name = to));
@@ -142,7 +142,7 @@ pub fn duplicate(common: &Path, from: &str, to: &str) -> Result<PathBuf, String>
     let source = common_path(common, from);
     let target = common_path(common, to);
     if !source.is_file() {
-        return Err(crate::t!(Key::NoCommonTheme, name = from));
+        return Err(crate::t!(Key::NoSharedTheme, name = from));
     }
     if target.exists() {
         return Err(crate::t!(Key::ThemeExists, name = to));
@@ -166,7 +166,7 @@ pub fn free_copy_name(common: &Path, name: &str) -> String {
 pub fn delete(common: &Path, name: &str) -> Result<(), String> {
     let path = common_path(common, name);
     if !path.is_file() {
-        return Err(crate::t!(Key::NoCommonTheme, name = name));
+        return Err(crate::t!(Key::NoSharedTheme, name = name));
     }
     fs::remove_file(&path).map_err(|e| crate::t!(Key::CannotDelete, path = path.display(), error = e))
 }

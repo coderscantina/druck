@@ -213,7 +213,7 @@ crate::strings! {
         Decimal => (".", ","),
 
         // JSON view
-        JsonOwn => ("What this theme sets itself", "Was dieses Thema selbst setzt"),
+        JsonOwn => ("What this theme sets itself", "Was dieses Theme selbst setzt"),
         JsonValid => ("Valid. Changes apply as you type.", "Gültig. Änderungen gelten sofort."),
         JsonInvalid => ("Not applied: {value}", "Nicht übernommen: {value}"),
 
@@ -304,11 +304,11 @@ crate::strings! {
         // Picker
         Theme => ("Theme", "Theme"),
         ProjectThemes => ("PROJECT", "PROJEKT"),
-        CommonThemes => ("COMMON", "GEMEINSAM"),
-        NewCommonTheme => ("New common theme", "Neues gemeinsames Theme"),
+        SharedThemes => ("Shared", "Gemeinsam"),
+        NewSharedTheme => ("New shared theme", "Neues gemeinsames Theme"),
         Duplicate => ("Duplicate", "Duplizieren"),
         DefaultTheme => ("Built-in default", "Eingebaute Vorgabe"),
-        DeleteTheme => ("Delete the common theme \"{value}\"?", "Das gemeinsame Theme „{value}“ löschen?"),
+        DeleteTheme => ("Delete the shared theme \"{value}\"?", "Das gemeinsame Theme „{value}“ löschen?"),
         DeleteThemeDetail => (
             "Documents that name it fall back to errors until they name another theme. This cannot be undone.",
             "Dokumente, die es nennen, melden Fehler, bis sie ein anderes Theme nennen. Das lässt sich nicht rückgängig machen."
@@ -319,7 +319,7 @@ crate::strings! {
         // Fork
         ForkTitle => ("Change a shared theme", "Gemeinsames Theme ändern"),
         ForkBody => (
-            "\"{value}\" is a common theme. Other documents may use it too.",
+            "\"{value}\" is a shared theme. Other documents may use it too.",
             "„{value}“ ist ein gemeinsames Theme. Auch andere Dokumente können es nutzen."
         ),
         ForkCopy => ("Copy it into this project (recommended)", "In dieses Projekt kopieren (empfohlen)"),

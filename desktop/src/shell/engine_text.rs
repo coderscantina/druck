@@ -97,12 +97,20 @@ fn decimal(lines: f64) -> String {
     }
 }
 
-/// A diagnostic's message in the language now set: its code's words, or the engine's own with no code.
+/// A diagnostic's message in the language now set: its code's words, or the engine's own with no code. It stands on
+/// its own in a list or a line, so it starts with a capital, where the engine's start lower case.
 pub fn message(diagnostic: &Diagnostic) -> String {
-    let Some(code) = &diagnostic.code else {
-        return diagnostic.message.clone();
-    };
-    match code {
+    let words = (diagnostic.code.as_ref())
+        .and_then(coded)
+        .unwrap_or_else(|| diagnostic.message.clone());
+    let mut chars = words.chars();
+    chars
+        .next()
+        .map_or(words.clone(), |first| first.to_uppercase().chain(chars).collect())
+}
+
+fn coded(code: &Code) -> Option<String> {
+    Some(match code {
         Code::PageShort { page, lines } => crate::t!(Key::PageShort, page = page_of(page), lines = decimal(*lines)),
         Code::PageUneven { page, lines } => crate::t!(Key::PageUneven, page = page_of(page), lines = decimal(*lines)),
         Code::ChapterEndShort { page, lines, wanted } => {
@@ -138,8 +146,8 @@ pub fn message(diagnostic: &Diagnostic) -> String {
         Code::UnknownStyle { name, known } => {
             crate::t!(Key::UnknownStyleOf, name = name, known = known.join(", "))
         }
-        _ => diagnostic.message.clone(),
-    }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -163,11 +171,11 @@ mod tests {
         set_language(Language::German);
         assert_eq!(message(&short), "Seite 12 endet 1,4 Zeilen über dem Seitenfuß");
         set_language(Language::English);
-        assert_eq!(message(&short), "page 12 ends 1.4 lines short of the bottom");
+        assert_eq!(message(&short), "Page 12 ends 1.4 lines short of the bottom");
     }
 
     #[test]
-    fn a_message_with_no_code_keeps_the_engines_words() {
-        assert_eq!(message(&Diagnostic::error("the engine's words")), "the engine's words");
+    fn a_message_with_no_code_keeps_the_engines_words_with_a_capital() {
+        assert_eq!(message(&Diagnostic::error("the engine's words")), "The engine's words");
     }
 }

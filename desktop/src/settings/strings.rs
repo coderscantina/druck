@@ -15,7 +15,7 @@ crate::strings! {
         OneObject => ("the file should hold one object", "die Datei sollte ein Objekt enthalten"),
         WantedSwitch => ("true or false", "true oder false"),
         WantedAppearance => ("\"system\", \"dark\", or \"light\"", "\"system\", \"dark\" oder \"light\""),
-        WantedAccent => ("a colour such as \"#2f8fb8\"", "eine Farbe wie \"#2f8fb8\""),
+        WantedAccent => ("a color such as \"#2f8fb8\"", "eine Farbe wie \"#2f8fb8\""),
         WantedLanguage => ("\"system\", \"english\", or \"german\"", "\"system\", \"english\" oder \"german\""),
         WantedLineLength => (
             "\"book\" or a number of characters from 20 to 240",
@@ -33,12 +33,12 @@ crate::strings! {
         AppearanceSystem => ("System", "System"),
         AppearanceLight => ("Light", "Hell"),
         AppearanceDark => ("Dark", "Dunkel"),
-        Accent => ("Accent colour", "Akzentfarbe"),
+        Accent => ("Accent color", "Akzentfarbe"),
         AccentHint => (
             "Caret, selection, marks, and the action that moves on.",
             "Cursor, Auswahl, Markierungen und die Aktion, die weiterführt."
         ),
-        AccentBad => ("Use a colour such as #2f8fb8.", "Eine Farbe wie #2f8fb8 verwenden."),
+        AccentBad => ("Use a color such as #2f8fb8.", "Eine Farbe wie #2f8fb8 verwenden."),
 
         LineLength => ("Line length", "Zeilenlänge"),
         LineLengthHint => ("The book's measure, or your own.", "Die Satzbreite des Buchs oder deine eigene."),

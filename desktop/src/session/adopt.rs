@@ -39,10 +39,10 @@ impl Offer {
             Some(file) => crate::t!(
                 Key::MakeProjectHintMoves,
                 manifest = MANIFEST,
-                count = count,
+                chapters = chapters(count),
                 file = file
             ),
-            None => crate::t!(Key::MakeProjectHint, manifest = MANIFEST, count = count),
+            None => crate::t!(Key::MakeProjectHint, manifest = MANIFEST, chapters = chapters(count)),
         };
         if self.missing.is_empty() {
             does
@@ -56,9 +56,22 @@ impl Offer {
     pub fn done(&self) -> String {
         let count = self.chapters.len();
         match &self.moves_front_matter_of {
-            Some(file) => crate::t!(Key::MadeProjectMoved, manifest = MANIFEST, count = count, file = file),
-            None => crate::t!(Key::MadeProject, manifest = MANIFEST, count = count),
+            Some(file) => crate::t!(
+                Key::MadeProjectMoved,
+                manifest = MANIFEST,
+                chapters = chapters(count),
+                file = file
+            ),
+            None => crate::t!(Key::MadeProject, manifest = MANIFEST, chapters = chapters(count)),
         }
+    }
+}
+
+/// "1 chapter" or "3 chapters".
+fn chapters(count: usize) -> String {
+    match count {
+        1 => crate::t!(Key::OneChapter).to_owned(),
+        count => crate::t!(Key::Chapters, count = count),
     }
 }
 

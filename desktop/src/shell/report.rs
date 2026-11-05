@@ -329,7 +329,7 @@ mod tests {
         theme.location = Some(Location { line: 4, column: 2 });
         let report = build(&session, &[theme], &[], &HashMap::new(), "Project", &|_| None);
         assert_eq!(report.sections[0].chapter, None);
-        assert_eq!(report.sections[0].entries[0].message, "theme.json:4: unknown property");
+        assert_eq!(report.sections[0].entries[0].message, "theme.json:4: Unknown property");
         assert!(report.marks().is_empty());
         fs::remove_dir_all(dir).ok();
     }

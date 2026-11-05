@@ -98,21 +98,23 @@ crate::strings! {
         CannotReadYaml => ("cannot read this YAML line: {line}", "diese YAML-Zeile lässt sich nicht lesen: {line}"),
         MakeProject => ("Make this a project", "Daraus ein Projekt machen"),
         MakeProjectHint => (
-            "Writes {manifest} with {count} chapters in name order. Your files stay where they are.",
-            "Schreibt {manifest} mit {count} Kapiteln nach Namen. Deine Dateien bleiben, wo sie sind."
+            "Writes {manifest} with {chapters} in name order. Your files stay where they are.",
+            "Schreibt {manifest} mit {chapters} nach Namen. Deine Dateien bleiben, wo sie sind."
         ),
         MakeProjectHintMoves => (
-            "Writes {manifest} with {count} chapters in name order, and moves the front matter of {file} into it.",
-            "Schreibt {manifest} mit {count} Kapiteln nach Namen und übernimmt die Front Matter aus {file}."
+            "Writes {manifest} with {chapters} in name order, and moves the front matter of {file} into it.",
+            "Schreibt {manifest} mit {chapters} nach Namen und übernimmt die Front Matter aus {file}."
         ),
         MakeProjectMissing => (
             "It names {paths}, which cannot be found, so there are no pages until the file is there.",
             "Sie nennt {paths}, nicht auffindbar, also gibt es keine Seiten, bis die Datei da ist."
         ),
-        MadeProject => ("Wrote {manifest} with {count} chapters.", "{manifest} mit {count} Kapiteln geschrieben."),
+        MadeProject => ("Wrote {manifest} with {chapters}.", "{manifest} mit {chapters} geschrieben."),
+        OneChapter => ("1 chapter", "1 Kapitel"),
+        Chapters => ("{count} chapters", "{count} Kapiteln"),
         MadeProjectMoved => (
-            "Wrote {manifest} with {count} chapters, and moved the front matter of {file} into it.",
-            "{manifest} mit {count} Kapiteln geschrieben und die Front Matter aus {file} übernommen."
+            "Wrote {manifest} with {chapters}, and moved the front matter of {file} into it.",
+            "{manifest} mit {chapters} geschrieben und die Front Matter aus {file} übernommen."
         ),
         NoManifestInFolder => ("{folder} has no {manifest} yet.", "{folder} hat noch keine {manifest}."),
         ManifestExists => ("{path} already has a {manifest}.", "{path} hat schon eine {manifest}."),

@@ -10,6 +10,10 @@ crate::strings! {
         NothingChanged => ("Nothing changed since the last commit.", "Seit dem letzten Commit hat sich nichts geändert."),
         Working => ("Working…", "Läuft…"),
         Reading => ("Reading the repo…", "Repo wird gelesen…"),
+        OneUnreviewed => (
+            "1 agent change not reviewed will be part of this commit.",
+            "1 nicht geprüfte Agent-Änderung kommt in diesen Commit."
+        ),
         Unreviewed => (
             "{count} agent changes not reviewed will be part of this commit.",
             "{count} nicht geprüfte Agent-Änderungen kommen in diesen Commit."
@@ -127,6 +131,10 @@ crate::strings! {
         HistoryFollowed => (
             "Local history followed this book from {from}.",
             "Der lokale Verlauf ist diesem Buch aus {from} gefolgt."
+        ),
+        OneHistoryLeft => (
+            "1 file here has no local history, but a file with its name does elsewhere. ⌘Y shows it.",
+            "1 Datei hier hat keinen lokalen Verlauf, eine gleichnamige anderswo schon. ⌘Y zeigt sie."
         ),
         HistoryLeft => (
             "{count} files here have no local history, but files with their names do elsewhere. ⌘Y shows them.",
