@@ -151,7 +151,11 @@ pub fn mount(
     let shown = slot.downgrade();
     slots.right.push(crate::workspace::RightPanel {
         view: slot.into(),
-        width: std::rc::Rc::new(move |cx| shown.upgrade().map_or(gpui::px(0.), |slot| slot.read(cx).width(cx))),
+        width: std::rc::Rc::new(move |cx| {
+            shown
+                .upgrade()
+                .map_or(gpui::px(0.), |slot| slot.read(cx).width_in_write(cx))
+        }),
     });
     panel
 }

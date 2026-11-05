@@ -87,11 +87,11 @@ pub struct Slots {
     pub right: Vec<RightPanel>,
 }
 
-/// A panel at the right, and how wide it is now, so the text knows its room before anything is laid out.
+/// A panel at the right, and how wide it is in Write, so the text knows its room before anything is laid out.
 #[derive(Clone)]
 pub struct RightPanel {
     pub view: AnyView,
-    /// Zero while the panel is closed.
+    /// Zero while the panel is closed. Called while the workspace renders, so it must not read the workspace.
     pub width: Rc<dyn Fn(&App) -> Pixels>,
 }
 

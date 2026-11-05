@@ -71,7 +71,8 @@ pub struct ChapterNotes {
 
 impl ChapterNotes {
     pub fn new(editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle().tab_stop(true);
+        // Not a stop of its own: it drew no ring, so Control+Tab from the text seemed to do nothing. A click unfolds it.
+        let focus = cx.focus_handle();
         let subscriptions = vec![
             cx.subscribe(&editor, |notes, _, _: &TextChanged, cx| notes.sync(cx)),
             cx.subscribe(&editor, |notes, _, _: &SessionChanged, cx| notes.sync(cx)),

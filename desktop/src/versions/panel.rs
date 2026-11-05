@@ -492,9 +492,9 @@ impl Slot {
         self.panel.read(cx).is_open() && !in_rail
     }
 
-    /// How much of the window's width the panel takes now.
-    pub fn width(&self, cx: &gpui::App) -> gpui::Pixels {
-        if self.shown(cx) {
+    /// How much of Write's width the panel takes. It reads no mode, since the workspace asks while it renders.
+    pub fn width_in_write(&self, cx: &gpui::App) -> gpui::Pixels {
+        if self.panel.read(cx).is_open() {
             tokens::INSPECTOR_WIDTH
         } else {
             gpui::px(0.)
