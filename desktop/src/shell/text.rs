@@ -159,6 +159,9 @@ crate::strings! {
         StageWriting => ("Writing the file\u{2026}", "Datei wird geschrieben\u{2026}"),
         ExportCancelled => ("Cancelled.", "Abgebrochen."),
         ExportSave => ("Save to druck.yaml", "In druck.yaml sichern"),
+        NoExportNamed => ("no export named \"{name}\" in {manifest}", "kein Export namens „{name}“ in {manifest}"),
+        CannotCreateFolder => ("cannot create {folder}: {error}", "{folder} lässt sich nicht anlegen: {error}"),
+        CannotWriteFile => ("cannot write {file}: {error}", "{file} lässt sich nicht schreiben: {error}"),
         ExportUnreviewed => ("Agent changes not reviewed yet: {count}", "Noch nicht geprüfte Agent-Änderungen: {count}"),
         ExportFailedSee => (
             "The export failed. The reasons are in Proof.",

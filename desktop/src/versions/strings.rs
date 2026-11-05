@@ -27,6 +27,13 @@ crate::strings! {
             "Both versions stand in {chapter}.",
             "In {chapter} stehen beide Fassungen."
         ),
+        GitFailed => ("git failed", "git ist fehlgeschlagen"),
+        NoWorktree => ("the repo has no worktree", "das Repo hat keinen Arbeitsordner"),
+        NoCommitYet => ("the repo has no commit yet", "das Repo hat noch keinen Commit"),
+        UnknownIndexEntry => (
+            "the index holds an entry of an unknown kind",
+            "der Index enthält einen Eintrag unbekannter Art"
+        ),
         CannotRunGit => ("cannot run git: {error}", "git lässt sich nicht starten: {error}"),
         CannotTalkToGit => ("cannot talk to git: {error}", "keine Verbindung zu git: {error}"),
         CannotWaitForGit => ("cannot wait for git: {error}", "git antwortet nicht: {error}"),

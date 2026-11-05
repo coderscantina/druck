@@ -191,7 +191,7 @@ impl Output {
         text.lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
-            .unwrap_or("git failed")
+            .unwrap_or(crate::t!(Key::GitFailed))
             .trim_start_matches("error: ")
             .trim_start_matches("fatal: ")
             .to_owned()

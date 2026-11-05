@@ -467,7 +467,7 @@ impl AgentView {
             return Ok(());
         }
         let Some(cli) = &self.cli else {
-            return Err(strings::cannot_start("not found"));
+            return Err(strings::cannot_start(crate::t!(strings::Key::CliNotFound)));
         };
         let config = SessionConfig {
             program: cli.program.clone(),

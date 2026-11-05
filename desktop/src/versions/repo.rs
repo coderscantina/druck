@@ -17,6 +17,7 @@ use gix::refs::FullName;
 use gix::refs::transaction::{Change as RefChange, LogChange, PreviousValue, RefEdit, RefLog};
 
 use super::git_cli::Git;
+use super::strings::Key;
 use super::{history, words};
 use crate::persist::atomic;
 use crate::session::templates::{GITIGNORE, GITIGNORE_TEXT};
@@ -190,7 +191,7 @@ impl Repo {
     fn from_repo(repo: gix::Repository, book: &Path) -> Result<Self> {
         let workdir = repo
             .workdir()
-            .ok_or_else(|| Problem::Other("the repo has no worktree".to_owned()))?;
+            .ok_or_else(|| Problem::Other(crate::t!(Key::NoWorktree).to_owned()))?;
         let (workdir, canonical) = (fs::canonicalize(workdir)?, fs::canonicalize(book)?);
         let inside = canonical.strip_prefix(&workdir)?.to_string_lossy().into_owned();
         let scope = if inside.is_empty() {
@@ -633,7 +634,7 @@ impl Repo {
         let full = branch_ref(name)?;
         let head = self
             .head_id()
-            .ok_or_else(|| Problem::Other("the repo has no commit yet".to_owned()))?;
+            .ok_or_else(|| Problem::Other(crate::t!(Key::NoCommitYet).to_owned()))?;
         if self.repo.try_find_reference(full.as_ref())?.is_some() {
             return Err(Problem::BranchExists(name.to_owned()));
         }
@@ -793,7 +794,7 @@ fn branch_ref(name: &str) -> Result<FullName> {
 }
 
 fn entry_kind(mode: Mode) -> Result<EntryKind> {
-    let unknown = || Problem::Other("the index holds an entry of an unknown kind".to_owned());
+    let unknown = || Problem::Other(crate::t!(Key::UnknownIndexEntry).to_owned());
     Ok(mode.to_tree_entry_mode().ok_or_else(unknown)?.kind())
 }
 

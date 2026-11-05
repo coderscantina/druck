@@ -10,6 +10,7 @@ use druck::input::{DocumentText, Input, MANIFEST, Overrides, Project, ThemeDirs,
 use druck::resource::{FileResolver, Origin, clock_date, source_date};
 use druck::{EpubOptions, Failure, LayoutOptions, PdfOptions, Renderer};
 
+use super::text::Key;
 use crate::session::{Joined, Kind, LiveResolver};
 
 /// What an export makes.
@@ -104,7 +105,7 @@ pub fn run(request: Request, cancel: &Cancel, stage: &dyn Fn(Stage)) -> Result<W
             if let Some(name) = name
                 && !project.exports().any(|(known, _)| known == name)
             {
-                return Err(failed(format!("no export named \"{name}\" in {MANIFEST}")));
+                return Err(failed(crate::t!(Key::NoExportNamed, name = name, manifest = MANIFEST)));
             }
             let (text, settings) = project.export(name)?;
             let extension = if request.target == Target::Epub { "epub" } else { "pdf" };
@@ -157,15 +158,17 @@ pub fn run(request: Request, cancel: &Cancel, stage: &dyn Fn(Stage)) -> Result<W
 /// Writes the file whole or not at all: a partial PDF never replaces the one before it.
 fn write(output: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(folder) = output.parent() {
-        fs::create_dir_all(folder).map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
+        fs::create_dir_all(folder)
+            .map_err(|error| crate::t!(Key::CannotCreateFolder, folder = folder.display(), error = error))?;
     }
     let mut temporary = output.as_os_str().to_owned();
     temporary.push(".part");
     let temporary = PathBuf::from(temporary);
-    fs::write(&temporary, bytes).map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    let cannot_write = |error: std::io::Error| crate::t!(Key::CannotWriteFile, file = output.display(), error = error);
+    fs::write(&temporary, bytes).map_err(cannot_write)?;
     fs::rename(&temporary, output).map_err(|error| {
         fs::remove_file(&temporary).ok();
-        format!("cannot write {}: {error}", output.display())
+        cannot_write(error)
     })
 }
 

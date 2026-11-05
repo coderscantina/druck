@@ -134,6 +134,7 @@ crate::strings! {
             "Diese Änderung lässt sich nicht zurücknehmen, ohne deinen späteren Text zu berühren, deshalb bleibt sie."
         ),
         CannotStart => ("Claude Code did not start: {error}", "Claude Code ließ sich nicht starten: {error}"),
+        CliNotFound => ("it is not installed or not on the path", "es ist nicht installiert oder nicht im Pfad"),
         CannotSend => ("The prompt did not reach Claude Code: {error}", "Der Prompt hat Claude Code nicht erreicht: {error}"),
         Exited => ("Claude Code stopped unexpectedly.{detail}", "Claude Code wurde unerwartet beendet.{detail}"),
     }
