@@ -189,14 +189,17 @@ pub fn hidden_ranges(
             hidden.push(line.start..line.start + spaces);
         }
     }
-    // A label or style at the end of a heading or paragraph, which the pickers show.
+    // A label or style at the end of a heading or paragraph, which the pickers show. It shows once the caret is inside
+    // it, so a caret right after the words before it, as at the end of a title, leaves it hidden.
     if matches!(kind, BlockKind::Heading { .. } | BlockKind::Paragraph)
         && let Some(line) = lines.iter().rev().find(|line| !line.is_empty())
-        && !line_holds(&lines, caret, line.start)
         && let Some(group) = super::rich::styles::closing_group(&text[line.clone()])
     {
         let before = text[line.start..line.start + group.start].trim_end_matches(' ').len();
-        hidden.push(line.start + before..line.start + group.end);
+        let range = line.start + before..line.start + group.end;
+        if !caret.is_some_and(|caret| range.start < caret && caret <= range.end) {
+            hidden.push(range);
+        }
     }
     hidden.retain(|range| !range.is_empty());
     hidden.sort_by_key(|range| range.start);
@@ -561,13 +564,15 @@ mod tests {
     }
 
     #[test]
-    fn a_closing_label_or_style_hides_until_the_caret_is_on_its_line() {
+    fn a_closing_label_or_style_hides_until_the_caret_is_inside_it() {
         assert_eq!(show(HEADING, "# Title {#sec:a}\n", None)[0].text, "Title");
-        assert_eq!(show(HEADING, "# Title {#sec:a}\n", Some(3))[0].text, "# Title {#sec:a}");
+        assert_eq!(show(HEADING, "# Title {#sec:a}\n", Some(7))[0].text, "# Title");
+        assert_eq!(show(HEADING, "# Title {#sec:a}\n", Some(9))[0].text, "# Title {#sec:a}");
         let lines = show(BlockKind::Paragraph, "One\ntwo {.lead}\n", None);
         assert_eq!((lines[0].text.as_str(), lines[1].text.as_str()), ("One", "two"));
+        assert_eq!(show(BlockKind::Paragraph, "One\ntwo {.lead}\n", Some(5))[1].text, "two");
         assert_eq!(
-            show(BlockKind::Paragraph, "One\ntwo {.lead}\n", Some(5))[1].text,
+            show(BlockKind::Paragraph, "One\ntwo {.lead}\n", Some(15))[1].text,
             "two {.lead}"
         );
         assert_eq!(show(BlockKind::Paragraph, "a {b} c\n", None)[0].text, "a {b} c");

@@ -11,6 +11,7 @@ use druck::resource::normalize;
 use super::details::Field;
 use super::*;
 use crate::preview::job::Typesetter;
+use crate::shell::strings::Language;
 use crate::source::buffer::Selection as Caret;
 
 /// A folder that removes itself.
@@ -584,10 +585,13 @@ fn a_section_written_out_has_no_placeholder_the_document_lacks() {
 
 #[test]
 fn every_starter_opens_renders_and_keeps_its_manifest_readable() {
-    for starter in STARTERS {
-        let folder = Folder::new(&format!("starter-{}", starter.slug));
+    for (starter, language) in STARTERS
+        .iter()
+        .flat_map(|starter| [Language::English, Language::German].map(|language| (starter, language)))
+    {
+        let folder = Folder::new(&format!("starter-{}-{language:?}", starter.slug));
         let dir = folder.0.join("My Project");
-        starter.create(&dir).expect("creates");
+        starter.create(&dir, language).expect("creates");
         let session = Session::open(&dir).expect("opens");
         assert_eq!(session.details().title, "My Project");
         assert!(session.problem().is_none(), "{}", starter.slug);
@@ -604,8 +608,26 @@ fn every_starter_opens_renders_and_keeps_its_manifest_readable() {
                 .iter()
                 .all(|warning| !warning.message.contains("unknown"))
         );
-        assert!(starter.create(&dir).is_err(), "a starter does not write over a project");
+        assert!(
+            starter.create(&dir, language).is_err(),
+            "a starter does not write over a project"
+        );
     }
+}
+
+#[test]
+fn a_new_book_starts_after_the_title_of_its_first_chapter() {
+    let folder = Folder::new("starter-caret");
+    let dir = folder.0.join("book");
+    STARTERS[0].create(&dir, Language::English).expect("creates");
+    let mut session = Session::open(&dir).expect("opens");
+    session.start_after_first_title();
+    let text = session.active_buffer().text();
+    assert!(text.starts_with("# The first chapter\n"));
+    assert_eq!(
+        session.active_chapter().view.selection,
+        Caret::caret("# The first chapter".len())
+    );
 }
 
 #[test]
@@ -615,7 +637,7 @@ fn every_template_renders_in_every_starters_theme() {
             // A starter that places its own contents, bibliography, or index would have two of them.
             let folder = Folder::new(&format!("mix-{}-{}", starter.slug, template.slug));
             let dir = folder.0.join("project");
-            starter.create(&dir).expect("creates");
+            starter.create(&dir, Language::English).expect("creates");
             let mut session = Session::open(&dir).expect("opens");
             let has_own = session.joined().text.contains(template.text.trim());
             if has_own {
@@ -784,7 +806,7 @@ fn every_starter_leaves_its_exports_out_of_git() {
     for starter in STARTERS {
         let dir = std::env::temp_dir().join(format!("druck-starter-ignore-{}-{}", starter.slug, std::process::id()));
         fs::remove_dir_all(&dir).ok();
-        starter.create(&dir).expect("made");
+        starter.create(&dir, Language::English).expect("made");
         assert_eq!(fs::read_to_string(dir.join(".gitignore")).expect("written"), "build/\n");
         fs::remove_dir_all(&dir).ok();
     }

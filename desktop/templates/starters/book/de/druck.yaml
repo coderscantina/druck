@@ -1,0 +1,21 @@
+title: Unbenanntes Buch
+author: Dein Name
+lang: de
+theme: novel
+meta:
+  publisher: Dein Verlag
+chapters:
+  - manuscript/00-vorspann.md
+  - manuscript/01-erstes-kapitel.md
+  - manuscript/02-zweites-kapitel.md
+exports:
+  entwurf:
+    draft: true
+    output: build/entwurf.pdf
+  druck:
+    bleed: 3mm
+    crop-marks: true
+    final: true
+    output: build/druck.pdf
+  ebook:
+    output: build/buch.epub

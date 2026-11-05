@@ -1,5 +1,8 @@
 {
   "version": 1,
+  "document": {
+    "numbered-headings": false
+  },
   "tokens": {
     "colors": {
       "accent": "#7a2a2a",

@@ -49,16 +49,19 @@ crate::strings! {
             "Chapters, a title page, and print and ebook exports",
             "Kapitel, Titelseite und Exporte für Druck und E-Book"
         ),
+        BookFolder => ("Untitled book", "Unbenanntes Buch"),
         PaperName => ("Paper", "Paper"),
         PaperDescription => (
             "Numbered headings, an abstract, and references",
             "Nummerierte Überschriften, Abstract und Literatur"
         ),
+        PaperFolder => ("Untitled paper", "Unbenanntes Paper"),
         ArticleName => ("Article", "Artikel"),
         ArticleDescription => (
             "One file, a title, and PDF and ebook exports",
             "Eine Datei, ein Titel und Exporte für PDF und E-Book"
         ),
+        ArticleFolder => ("Untitled article", "Unbenannter Artikel"),
 
         CannotFindWorkingDir => ("cannot find the working directory: {error}", "Der Arbeitsordner ist nicht zu finden: {error}"),
         NoSuchFile => ("cannot open {path}: no such file or folder", "{path} lässt sich nicht öffnen: Datei oder Ordner gibt es nicht"),

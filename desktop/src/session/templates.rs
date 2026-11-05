@@ -7,6 +7,7 @@ use std::path::Path;
 use super::outline;
 use super::strings::Key;
 use super::yaml;
+use crate::shell::strings::Language;
 
 macro_rules! text {
     ($name:literal) => {
@@ -143,8 +144,10 @@ pub struct Starter {
     pub slug: &'static str,
     pub name: Key,
     pub description: Key,
-    /// Paths in the new folder, with their contents.
-    pub files: &'static [(&'static str, &'static [u8])],
+    /// The new folder's suggested name, which becomes the title.
+    pub folder: Key,
+    /// Paths in the new folder, with their contents, in English and in German.
+    files: [&'static [(&'static str, &'static [u8])]; 2],
 }
 
 macro_rules! file {
@@ -152,6 +155,16 @@ macro_rules! file {
         (
             $path,
             include_bytes!(concat!("../../templates/starters/", $starter, "/", $path)) as &[u8],
+        )
+    };
+}
+
+/// A file of the German starter, from its `de` folder.
+macro_rules! german {
+    ($starter:literal, $path:literal) => {
+        (
+            $path,
+            include_bytes!(concat!("../../templates/starters/", $starter, "/de/", $path)) as &[u8],
         )
     };
 }
@@ -165,50 +178,80 @@ pub const STARTERS: &[Starter] = &[
         slug: "book",
         name: Key::BookName,
         description: Key::BookDescription,
-        files: &[
-            file!("book", "druck.yaml"),
-            file!("book", "manuscript/00-front.md"),
-            file!("book", "manuscript/01-first-chapter.md"),
-            file!("book", "manuscript/02-second-chapter.md"),
-            file!("book", "themes/novel/theme.json"),
-            file!("book", "themes/novel/ornament.svg"),
+        folder: Key::BookFolder,
+        files: [
+            &[
+                file!("book", "druck.yaml"),
+                file!("book", "manuscript/00-front.md"),
+                file!("book", "manuscript/01-first-chapter.md"),
+                file!("book", "manuscript/02-second-chapter.md"),
+                file!("book", "themes/novel/theme.json"),
+                file!("book", "themes/novel/ornament.svg"),
+            ],
+            &[
+                german!("book", "druck.yaml"),
+                german!("book", "manuscript/00-vorspann.md"),
+                german!("book", "manuscript/01-erstes-kapitel.md"),
+                german!("book", "manuscript/02-zweites-kapitel.md"),
+                file!("book", "themes/novel/theme.json"),
+                file!("book", "themes/novel/ornament.svg"),
+            ],
         ],
     },
     Starter {
         slug: "paper",
         name: Key::PaperName,
         description: Key::PaperDescription,
-        files: &[
-            file!("paper", "druck.yaml"),
-            file!("paper", "references.bib"),
-            file!("paper", "manuscript/01-introduction.md"),
-            file!("paper", "manuscript/02-findings.md"),
-            file!("paper", "themes/paper/theme.json"),
-            file!("paper", "themes/paper/logo.svg"),
+        folder: Key::PaperFolder,
+        files: [
+            &[
+                file!("paper", "druck.yaml"),
+                file!("paper", "references.bib"),
+                file!("paper", "manuscript/01-introduction.md"),
+                file!("paper", "manuscript/02-findings.md"),
+                file!("paper", "themes/paper/theme.json"),
+                file!("paper", "themes/paper/logo.svg"),
+            ],
+            &[
+                german!("paper", "druck.yaml"),
+                file!("paper", "references.bib"),
+                german!("paper", "manuscript/01-einleitung.md"),
+                german!("paper", "manuscript/02-ergebnisse.md"),
+                file!("paper", "themes/paper/theme.json"),
+                file!("paper", "themes/paper/logo.svg"),
+            ],
         ],
     },
     Starter {
         slug: "article",
         name: Key::ArticleName,
         description: Key::ArticleDescription,
-        files: &[
-            file!("article", "druck.yaml"),
-            file!("article", "manuscript/01-article.md"),
-            file!("article", "themes/article/theme.json"),
+        folder: Key::ArticleFolder,
+        files: [
+            &[
+                file!("article", "druck.yaml"),
+                file!("article", "manuscript/01-article.md"),
+                file!("article", "themes/article/theme.json"),
+            ],
+            &[
+                german!("article", "druck.yaml"),
+                german!("article", "manuscript/01-artikel.md"),
+                file!("article", "themes/article/theme.json"),
+            ],
         ],
     },
 ];
 
 impl Starter {
-    /// Creates the project in `dir`, a folder that does not exist or is empty, titled after the folder.
-    pub fn create(&self, dir: &Path) -> Result<(), String> {
+    /// Creates the project in `dir`, a folder that does not exist or is empty, titled after the folder, in `language`.
+    pub fn create(&self, dir: &Path, language: Language) -> Result<(), String> {
         let describe = |error: std::io::Error| crate::t!(Key::CannotCreate, path = dir.display(), error = error);
         if dir.read_dir().is_ok_and(|mut files| files.next().is_some()) {
             return Err(crate::t!(Key::AlreadyHoldsFiles, path = dir.display()));
         }
         fs::create_dir_all(dir).map_err(describe)?;
         fs::write(dir.join(GITIGNORE), GITIGNORE_TEXT).map_err(describe)?;
-        for (path, bytes) in self.files {
+        for (path, bytes) in self.files[usize::from(language == Language::German)] {
             let target = dir.join(path);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(describe)?;

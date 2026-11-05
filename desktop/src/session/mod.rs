@@ -793,6 +793,19 @@ impl Session {
         self.active = id;
     }
 
+    /// Makes the book's first chapter with a heading the active one, with the caret after its title, as a new project
+    /// opens.
+    pub fn start_after_first_title(&mut self) {
+        let first = self
+            .book
+            .iter()
+            .find_map(|&id| Some((id, self.known(id).outline.heading.clone()?)));
+        if let Some((id, heading)) = first {
+            self.set_active(id);
+            self.known_mut(id).view.selection = Selection::caret(heading.end);
+        }
+    }
+
     /// Reads a note's or research file if that is still to do, so its text can be edited without opening it.
     pub fn load(&mut self, id: ChapterId) {
         if self.known(id).read == Read::Later {

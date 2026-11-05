@@ -167,6 +167,15 @@ pub fn open(
 }
 
 /// What to do once the document is saved.
+/// Where a document opens.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Opening {
+    /// Where its chapters' places say, the start of the first chapter for a document just opened.
+    AsSaved,
+    /// A new project: after the title of its first chapter with one, so the author can start writing.
+    AfterFirstTitle,
+}
+
 type After = Box<dyn FnOnce(&mut Shell, &mut Window, &mut Context<Shell>)>;
 
 /// The window's root: the launch screen, or the workspace of the one open document.
@@ -260,20 +269,24 @@ impl Shell {
 
     fn ask_for_new_project(&mut self, starter: &'static Starter, window: &mut Window, cx: &mut Context<Self>) {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        let chosen = cx.prompt_for_new_path(&home, Some(starter.slug));
+        let documents = home.join("Documents");
+        let start = if documents.is_dir() { documents } else { home };
+        let chosen = cx.prompt_for_new_path(&start, Some(crate::t!(starter.folder)));
         cx.spawn_in(window, async move |shell, cx| {
             let Ok(Ok(Some(path))) = chosen.await else {
                 return;
             };
             shell
-                .update_in(cx, |shell, window, cx| match starter.create(&path) {
-                    Ok(()) => {
-                        crate::versions::start_repo(&path, cx);
-                        shell.open_path(&path, window, cx);
+                .update_in(cx, |shell, window, cx| {
+                    match starter.create(&path, crate::shell::strings::language()) {
+                        Ok(()) => {
+                            crate::versions::start_repo(&path, cx);
+                            shell.open_at(&path, Opening::AfterFirstTitle, window, cx);
+                        }
+                        Err(problem) => shell
+                            .launch
+                            .update(cx, |launch, cx| launch.set_error(Some(problem), None, cx)),
                     }
-                    Err(problem) => shell
-                        .launch
-                        .update(cx, |launch, cx| launch.set_error(Some(problem), None, cx)),
                 })
                 .ok();
         })
@@ -293,13 +306,17 @@ impl Shell {
 
     /// Opens a document in this window. Text not yet on disk is written first, and a person is asked only if that fails.
     fn open_path(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_at(path, Opening::AsSaved, window, cx);
+    }
+
+    fn open_at(&mut self, path: &Path, opening: Opening, window: &mut Window, cx: &mut Context<Self>) {
         let path = path.to_owned();
         self.after_saving(
             Key::CannotSaveBeforeOpening,
             window,
             cx,
             Box::new(move |shell, window, cx| {
-                shell.replace_document(&path, window, cx);
+                shell.replace_document(&path, opening, window, cx);
             }),
         );
     }
@@ -402,9 +419,12 @@ impl Shell {
         }
     }
 
-    fn replace_document(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    fn replace_document(&mut self, path: &Path, opening: Opening, window: &mut Window, cx: &mut Context<Self>) {
         match Session::open(path) {
-            Ok(session) => {
+            Ok(mut session) => {
+                if opening == Opening::AfterFirstTitle {
+                    session.start_after_first_title();
+                }
                 self.launch.update(cx, |launch, cx| launch.set_error(None, None, cx));
                 self.show_session(session, None, window, cx);
             }

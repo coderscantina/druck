@@ -1,5 +1,5 @@
 # The first chapter
 
-Each file in `manuscript/` is one chapter, and `druck.yaml` lists them in reading order. Write here, and the pages follow when you pause.
+Write here. Each file in `manuscript/` is a chapter, in the order `druck.yaml` lists them.
 
-Drag a chapter in the sidebar to move it. The new section button at the bottom of the sidebar adds another one.
+Publish, at the top of the window, shows the pages, and Write brings you back. Cmd+\ shows the chapters at the left, where a drag puts them in another order and the plus at the foot adds one.

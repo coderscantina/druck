@@ -1,0 +1,17 @@
+title: Unbenanntes Paper
+subtitle: Worum es in diesem Paper geht
+author: Dein Name
+date: Entwurf
+abstract: |
+  Ein Absatz über die Frage, die Methode und das Ergebnis. Die Titelseite zeigt ihn.
+lang: de
+theme: paper
+title-page: true
+toc: true
+bibliography: references.bib
+chapters:
+  - manuscript/01-einleitung.md
+  - manuscript/02-ergebnisse.md
+exports:
+  paper:
+    output: build/paper.pdf

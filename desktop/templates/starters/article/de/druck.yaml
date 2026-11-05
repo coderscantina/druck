@@ -1,0 +1,12 @@
+title: Unbenannter Artikel
+subtitle: Worum es in diesem Artikel geht
+author: Dein Name
+lang: de
+theme: article
+chapters:
+  - manuscript/01-artikel.md
+exports:
+  artikel:
+    output: build/artikel.pdf
+  ebook:
+    output: build/artikel.epub
