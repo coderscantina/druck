@@ -448,6 +448,7 @@ fn a_rename_keeps_the_chapter_and_its_undo_and_the_manifest_follows() {
     let ready = Ready {
         paths: vec![fixture.one(), new.clone()],
         everything: false,
+        resource: false,
     };
     let report = fixture.sync.process(&mut fixture.session, &ready);
     assert!(report.files_changed);
@@ -473,6 +474,7 @@ fn a_changed_manifest_changes_the_book() {
     let ready = Ready {
         paths: vec![fixture.path("druck.yaml")],
         everything: false,
+        resource: false,
     };
     let report = fixture.sync.process(&mut fixture.session, &ready);
     assert!(report.manifest);
@@ -500,6 +502,7 @@ fn a_new_file_appears_and_a_folder_that_went_keeps_all_the_text() {
         &Ready {
             paths: vec![new.clone()],
             everything: false,
+            resource: false,
         },
     );
     assert!(report.files_changed);
@@ -513,6 +516,7 @@ fn a_new_file_appears_and_a_folder_that_went_keeps_all_the_text() {
         &Ready {
             paths: Vec::new(),
             everything: true,
+            resource: false,
         },
     );
     assert!(fixture.sync.root_is_gone(&fixture.session));

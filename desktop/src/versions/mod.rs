@@ -8,13 +8,13 @@
 //! `Cmd+Shift+S` opens the [commit card](commit_card), `Cmd+Y` the [timeline](timeline), and `Ctrl+Shift+G` the
 //! [Git panel](panel). All three show what [`Versions`] knows, and ask it to do things.
 //!
-//! For other slices: [`label_history`] before something that may change the text, and [`set_unreviewed_changes`] for what
-//! the commit card warns about.
+//! For other slices: [`label_history`] before something that may change the text.
 
 mod commit_card;
 mod dates;
 mod git_cli;
 mod history;
+mod local;
 mod pacing;
 mod panel;
 mod repo;
@@ -37,16 +37,19 @@ use gpui::{
 
 use self::commit_card::{CardField, CommitCard};
 use self::git_cli::{Git, Merged, Refused};
-use self::history::{History, Orphan, now_ms};
-use self::pacing::{Due, Pacing};
+use self::history::{History, Orphan};
+pub use self::local::label_history;
+use self::pacing::Pacing;
 pub use self::panel::GitPanel;
 use self::panel::Slot;
 use self::repo::{Conflict, Overview, Problem, Repo};
 use self::strings::Key;
 use self::timeline::Timeline;
+pub use self::ui::compared;
 use crate::editor::{SessionChanged, TextChanged};
+use crate::inspector::{Tab, TabShown};
+use crate::persist::merge::has_markers;
 use crate::persist::recovery::data_dir;
-use crate::persist::sync::ChangeKind;
 use crate::persist::{Closing, FileChange, PersistView};
 use crate::session::{ChapterId, Kind, Session};
 use crate::tokens::{self, Tokens};
@@ -57,6 +60,7 @@ actions!(versions, [ShowCommitCard, ShowTimeline, ShowGitPanel]);
 /// How long after typing stops the open panel reads the repo again.
 const REFRESH_PAUSE: Duration = Duration::from_millis(1500);
 /// The time a scripted step gets before the next.
+#[cfg(any(debug_assertions, feature = "measure"))]
 const SCRIPT_STEP: Duration = Duration::from_secs(3);
 /// How often the open panel looks whether another tool moved the repo.
 const PANEL_LOOK: Duration = Duration::from_secs(5);
@@ -74,11 +78,6 @@ struct Current {
 }
 
 impl Global for Current {}
-
-/// What the commit card warns about, from whoever knows.
-struct Unreviewed(Box<dyn Fn(&App) -> usize>);
-
-impl Global for Unreviewed {}
 
 /// What shows the Git rail tab.
 type ShowRailTab = dyn Fn(&mut Window, &mut App);
@@ -120,9 +119,6 @@ where
 }
 
 /// Mounts the three views and starts local history. One line in `app::mount`.
-///
-/// `DRUCK_VERSIONS=card`, `timeline`, `panel`, or `menu` opens one, for screenshots. `DRUCK_VERSIONS_RUN` runs steps from
-/// outside, see [`Versions::run_scripted`], as automated mouse events do not reach the window.
 pub fn mount(
     parts: &Parts,
     persist: &Entity<PersistView>,
@@ -150,58 +146,15 @@ pub fn mount(
     slots.overlays.push(timeline.into());
     let slot = cx.new(|_| Slot::new(panel.clone(), view.downgrade()));
     slots.right.push(slot.into());
-    if let Some(shown) = crate::gate::var("DRUCK_VERSIONS") {
-        let view = view.clone();
-        window.defer(cx, move |window, cx| {
-            view.update(cx, |view, cx| match shown.as_str() {
-                "card" => view.toggle_card(window, cx),
-                "timeline" => view.toggle_timeline(window, cx),
-                "panel" => view.toggle_panel(window, cx),
-                "menu" => {
-                    view.toggle_panel(window, cx);
-                    view.panel.update(cx, |panel, cx| panel.show_branches(cx));
-                }
-                _ => {}
-            });
-        });
-    }
-    if let Some(steps) = crate::gate::var("DRUCK_VERSIONS_RUN") {
-        let view = view.downgrade();
-        cx.spawn_in(window, async move |_, cx| {
-            for step in steps.split(';').filter(|step| !step.is_empty()) {
-                cx.background_executor().timer(SCRIPT_STEP).await;
-                view.update_in(cx, |view, window, cx| view.run_scripted(step, window, cx))
-                    .ok();
-            }
-        })
-        .detach();
-    }
     panel
 }
 
-/// Records what every file of the document holds now in its local history, with a label: before an agent's turn, and
-/// before anything else that may change the text. A file that then does not change adds no mark to its timeline. The
-/// work happens off the main thread.
-pub fn label_history(session: &Session, label: &str, cx: &App) {
-    let Some(store) = cx.try_global::<Current>().and_then(|current| current.store.clone()) else {
-        return;
-    };
-    let files = files_with_text(session);
-    let label = label.to_owned();
-    cx.background_spawn(async move { keep_labelled(&store, &files, &label) })
-        .detach();
-}
-
-/// Says how many agent changes are not reviewed yet, which the commit card names in the accent color.
-pub fn set_unreviewed_changes(count: impl Fn(&App) -> usize + 'static, cx: &mut App) {
-    cx.set_global(Unreviewed(Box::new(count)));
-}
-
 fn unreviewed_changes(cx: &App) -> usize {
+    #[cfg(any(debug_assertions, feature = "measure"))]
     if let Some(count) = crate::gate::var("DRUCK_UNREVIEWED").and_then(|count| count.parse().ok()) {
         return count;
     }
-    cx.try_global::<Unreviewed>().map_or(0, |count| (count.0)(cx))
+    crate::agent::unreviewed_changes(cx).iter().map(|file| file.count).sum()
 }
 
 /// Says how to show the Git panel's rail tab, once it holds the panel: `Ctrl+Shift+G` then shows it in Publish, and the
@@ -223,23 +176,59 @@ pub fn start_repo(folder: &Path, cx: &mut App) {
     cx.set_global(NewProject(folder.to_owned()));
 }
 
+/// What to say at the window's foot when the book in this folder opens.
+struct AtOpening(PathBuf, String);
+
+impl Global for AtOpening {}
+
+/// Says `text` at the window's foot once the book in `folder` opens.
+pub fn say_at_opening(folder: &Path, text: String, cx: &mut App) {
+    cx.set_global(AtOpening(folder.to_owned(), text));
+}
+
 /// A commit's hash as Git shortens it.
 fn short_hash(hash: &str) -> &str {
     hash.get(..7).unwrap_or(hash)
 }
 
-fn files_with_text(session: &Session) -> Vec<(PathBuf, String)> {
-    (session.files().into_iter())
-        .filter_map(|path| session.file_text(&path).map(|text| (path, text)))
-        .collect()
-}
-
-fn keep_labelled(store: &History, files: &[(PathBuf, String)], label: &str) {
-    let now = now_ms();
-    for (path, text) in files {
-        if let Err(error) = store.snapshot(path, text, Some(label), now) {
-            eprintln!("cannot keep local history of {}: {error}", path.display());
-        }
+/// `DRUCK_VERSIONS=card`, `timeline`, `panel`, or `menu` opens one, for screenshots, `DRUCK_NO_GIT` runs as with no Git
+/// installed, `DRUCK_COMMIT_MESSAGE` fills the card's field, and `DRUCK_VERSIONS_RUN` runs steps from outside, see
+/// [`Versions::run_scripted`], as automated mouse events do not reach the window.
+#[cfg(any(debug_assertions, feature = "measure"))]
+pub fn apply_gate(window: &mut Window, cx: &mut App) {
+    let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) else {
+        return;
+    };
+    if crate::gate::var("DRUCK_NO_GIT").is_some() {
+        view.update(cx, |view, _| view.git = None);
+    }
+    if let Some(message) = crate::gate::var("DRUCK_COMMIT_MESSAGE") {
+        let card = view.read(cx).card.clone();
+        card.update(cx, |card, cx| card.preset_message(message, cx));
+    }
+    if let Some(shown) = crate::gate::var("DRUCK_VERSIONS") {
+        view.update(cx, |view, cx| match shown.as_str() {
+            "card" => view.toggle_card(window, cx),
+            "timeline" => view.toggle_timeline(window, cx),
+            "panel" => view.toggle_panel(window, cx),
+            "menu" => {
+                view.toggle_panel(window, cx);
+                view.panel.update(cx, |panel, cx| panel.show_branches(cx));
+            }
+            _ => {}
+        });
+    }
+    if let Some(steps) = crate::gate::var("DRUCK_VERSIONS_RUN") {
+        let view = view.downgrade();
+        window
+            .spawn(cx, async move |cx| {
+                for step in steps.split(';').filter(|step| !step.is_empty()) {
+                    cx.background_executor().timer(SCRIPT_STEP).await;
+                    view.update_in(cx, |view, window, cx| view.run_scripted(step, window, cx))
+                        .ok();
+                }
+            })
+            .detach();
     }
 }
 
@@ -264,7 +253,8 @@ enum MergeFrom {
 
 enum MergeEnd {
     Done,
-    Conflicts(Vec<Conflict>),
+    /// And what was merged, which is what changed the same words.
+    Conflicts(Vec<Conflict>, String),
     /// One file cannot be shown on the conflict line, so the merge was undone.
     Outside(String),
 }
@@ -297,8 +287,14 @@ pub struct Versions {
     panel_watch: Task<()>,
     reading: Task<()>,
     last_fetch: Option<Instant>,
+    /// A view asked for a fetch before the repo had been read, and it runs once it has.
+    fetch_wanted: bool,
+    /// A fetch came back this run, so what the repo says about its remote is worth showing.
+    fetched: bool,
     /// A merge stopped on conflicts, and the card opens when the last one is settled.
     awaiting_merge: bool,
+    /// The chapter that still holds both versions of a merge's conflict, which holds the card back.
+    both_stand_in: Option<String>,
     /// The card opens once the repo has been read again, for the merge's message.
     card_after_reading: bool,
     /// Changes coming in now are the repo's own moves, which were labelled before they began.
@@ -315,11 +311,7 @@ impl Versions {
         cx: &mut Context<Self>,
     ) -> Self {
         let store = data_dir().map(|data| Arc::new(History::new(&data)));
-        let git = if crate::gate::var("DRUCK_NO_GIT").is_some() {
-            None
-        } else {
-            Git::find().map(Arc::new)
-        };
+        let git = Git::find().map(Arc::new);
         let view = cx.entity().downgrade();
         let card = cx.new(|cx| CommitCard::new(view.clone(), window, cx));
         let book = match parts.editor.read(cx).session().kind() {
@@ -339,6 +331,12 @@ impl Versions {
                 view.outside_change(change, cx)
             }),
             cx.observe(&persist, |view, _, cx| view.conflicts_settled(cx)),
+            cx.subscribe(&parts.inspector, |view, _, TabShown(tab), cx| {
+                if *tab == Tab::Git {
+                    view.refresh(cx);
+                    view.fetch_now_and_then(cx);
+                }
+            }),
             cx.on_app_quit(|view, cx| {
                 view.keep_waiting(cx);
                 async {}
@@ -371,7 +369,10 @@ impl Versions {
             panel_watch: Task::ready(()),
             reading: Task::ready(()),
             last_fetch: None,
+            fetch_wanted: false,
+            fetched: false,
             awaiting_merge: false,
+            both_stand_in: None,
             card_after_reading: false,
             quiet: false,
             _subscriptions: subscriptions,
@@ -379,6 +380,7 @@ impl Versions {
         view.paths = view.chapter_paths(cx);
         view.look_after_history(window, cx);
         view.warn_about_cloud(window, cx);
+        view.say_what_opening_did(window, cx);
         view.refresh(cx);
         view
     }
@@ -391,6 +393,15 @@ impl Versions {
         };
         if let Some(service) = repo::cloud_service(&book) {
             self.show_note(crate::t!(Key::CloudWarning, service = service), window, cx);
+        }
+    }
+
+    fn say_what_opening_did(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(AtOpening(folder, text)) = cx.try_global::<AtOpening>() else {
+            return;
+        };
+        if self.book(cx).as_ref() == Some(folder) {
+            self.show_note(text.clone(), window, cx);
         }
     }
 
@@ -409,190 +420,6 @@ impl Versions {
     /// The views observe this one, so a view that called in here is free again by the time it hears.
     fn changed(&mut self, cx: &mut Context<Self>) {
         cx.notify();
-    }
-
-    // Local history
-
-    /// At opening: finds history that moved with the book, says so, and thins what is old.
-    fn look_after_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(store) = self.store.clone() else {
-            return;
-        };
-        let files = self.session(cx).files();
-        let work = cx.background_spawn(async move {
-            let followed = store.follow(&files);
-            store.thin_daily(now_ms());
-            followed
-        });
-        cx.spawn_in(window, async move |view, cx| {
-            let followed = work.await;
-            view.update_in(cx, |view, window, cx| {
-                let left = followed.unplaced.len();
-                view.unplaced = followed.unplaced.into_iter().collect();
-                if let Some((from, _)) = followed.moved.first() {
-                    let text = crate::t!(Key::HistoryFollowed, from = from.display().to_string());
-                    view.show_note(text, window, cx);
-                } else if left > 0 {
-                    view.show_note(crate::t!(Key::HistoryLeft, count = left), window, cx);
-                }
-                view.changed(cx);
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    /// A key was typed. Costs a lookup of the file in a small map.
-    fn edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let session = self.parts.editor.read(cx).session();
-        let path = session.active_chapter().path();
-        let now = Instant::now();
-        if self.pacing.edited(path, now) {
-            // Before the first edit this run, keep what the file held, or the timeline would start after it.
-            if let (Some(store), Some(known)) = (self.store.clone(), session.file_base(path)) {
-                let path = path.to_owned();
-                cx.background_spawn(async move {
-                    if let Err(error) = store.snapshot(&path, &known.base, None, now_ms()) {
-                        eprintln!("cannot keep local history of {}: {error}", path.display());
-                    }
-                })
-                .detach();
-            }
-        }
-        self.start_pacing(window, cx);
-        if self.panel.read(cx).is_open() {
-            self.refresh_pause = cx.spawn(async move |view, cx| {
-                cx.background_executor().timer(REFRESH_PAUSE).await;
-                view.update(cx, |view, cx| view.refresh(cx)).ok();
-            });
-        }
-    }
-
-    fn start_pacing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pacing_running {
-            return;
-        }
-        self.pacing_running = true;
-        cx.spawn_in(window, async move |view, cx| {
-            loop {
-                let wait = view.update(cx, |view, cx| match view.pacing.next(Instant::now()) {
-                    Due::Idle => {
-                        view.pacing_running = false;
-                        None
-                    }
-                    Due::Wait(wait) => Some(wait),
-                    Due::Take(paths) => {
-                        view.keep(&paths, cx);
-                        Some(Duration::ZERO)
-                    }
-                });
-                match wait {
-                    Ok(Some(wait)) => cx.background_executor().timer(wait).await,
-                    _ => return,
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Stores what these files hold now, off the main thread.
-    fn keep(&self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        let Some(store) = self.store.clone() else {
-            return;
-        };
-        let session = self.session(cx);
-        let files: Vec<(PathBuf, String)> = (paths.iter())
-            .filter_map(|path| session.file_text(path).map(|text| (path.clone(), text)))
-            .collect();
-        cx.background_spawn(async move {
-            let now = now_ms();
-            for (path, text) in files {
-                if let Err(error) = store.snapshot(&path, &text, None, now) {
-                    eprintln!("cannot keep local history of {}: {error}", path.display());
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// The app or the document is about to go: what waits for a pause is stored now.
-    fn keep_waiting(&mut self, cx: &App) {
-        let Some(store) = self.store.clone() else {
-            return;
-        };
-        let session = self.session(cx);
-        let now = now_ms();
-        for path in self.pacing.drain() {
-            if let Some(text) = session.file_text(&path) {
-                store.snapshot(&path, &text, None, now).ok();
-            }
-        }
-    }
-
-    /// Labels the current state of every file with text.
-    fn label_all(&self, label: &str, cx: &mut Context<Self>) {
-        label_history(self.session(cx), label, cx);
-    }
-
-    /// A chapter's file changed name: its log goes along.
-    fn session_changed(&mut self, cx: &mut Context<Self>) {
-        let now = self.chapter_paths(cx);
-        if let Some(store) = self.store.clone() {
-            let renamed: Vec<(PathBuf, PathBuf)> = (now.iter())
-                .filter_map(|(id, path)| {
-                    let before = self.paths.get(id)?;
-                    (before != path).then(|| (before.clone(), path.clone()))
-                })
-                .collect();
-            if !renamed.is_empty() {
-                cx.background_spawn(async move {
-                    for (from, to) in renamed {
-                        store.moved(&from, &to).ok();
-                    }
-                })
-                .detach();
-            }
-        }
-        self.paths = now;
-        self.timeline.update(cx, |timeline, cx| timeline.follow_active(cx));
-    }
-
-    fn chapter_paths(&self, cx: &App) -> HashMap<ChapterId, PathBuf> {
-        let session = self.session(cx);
-        if matches!(session.kind(), Kind::Single { .. }) {
-            return HashMap::new();
-        }
-        (session.files().into_iter())
-            .filter_map(|path| Some((session.chapter_of_file(&path)?, path)))
-            .collect()
-    }
-
-    /// A change from outside: what the file held before it goes into local history, with a label, and so does the result.
-    fn outside_change(&mut self, change: &FileChange, cx: &mut Context<Self>) {
-        self.refresh(cx);
-        if self.quiet
-            || !matches!(
-                change.kind,
-                ChangeKind::Reloaded | ChangeKind::Merged | ChangeKind::Conflict
-            )
-        {
-            return;
-        }
-        let Some(store) = self.store.clone() else {
-            return;
-        };
-        let (path, base) = (change.path.clone(), change.base.clone());
-        let after = self.session(cx).file_text(&path);
-        let label = crate::t!(Key::BeforeOutside);
-        self.pacing.taken(&path, Instant::now());
-        cx.background_spawn(async move {
-            let now = now_ms();
-            store.snapshot(&path, &base, Some(label), now).ok();
-            if let Some(after) = after {
-                store.snapshot(&path, &after, None, now + 1).ok();
-            }
-        })
-        .detach();
     }
 
     // The repo
@@ -622,6 +449,9 @@ impl Versions {
                         with_view(cx, Versions::prepare_open_card);
                     }
                 }
+                if std::mem::take(&mut view.fetch_wanted) {
+                    view.fetch_now_and_then(cx);
+                }
                 if view.card_after_reading {
                     view.card_after_reading = false;
                     with_view(cx, Versions::show_card);
@@ -634,6 +464,10 @@ impl Versions {
     /// A fetch now and then while the panel or the timeline is open, for Behind to mean something. Quiet about failing:
     /// the author may be offline, and a push or pull says why.
     fn fetch_now_and_then(&mut self, cx: &mut Context<Self>) {
+        if self.state == RepoState::Reading {
+            self.fetch_wanted = true;
+            return;
+        }
         let has_remote = matches!(&self.state, RepoState::Ready(overview) if overview.remote.is_some());
         let (Some(git), Some(book), true) = (self.git.clone(), self.book(cx), has_remote) else {
             return;
@@ -644,11 +478,25 @@ impl Versions {
         self.last_fetch = Some(Instant::now());
         let work = cx.background_spawn(async move { git.fetch(&book) });
         cx.spawn(async move |view, cx| {
-            if work.await.is_ok() {
-                view.update(cx, |view, cx| view.refresh(cx)).ok();
-            }
+            let fetched = work.await;
+            view.update(cx, |view, cx| {
+                view.fetched = true;
+                if fetched.is_ok() {
+                    view.refresh(cx);
+                }
+                view.changed(cx);
+            })
+            .ok();
         })
         .detach();
+    }
+
+    /// Where the branch stands against its upstream, once that means something: until the first fetch returns, a remote's
+    /// state is only as new as the last run's. With no Git to fetch with, it stays what the repo knows.
+    fn sync_shown(&self, overview: &Overview) -> Option<String> {
+        use repo::Sync;
+        let waiting = self.git.is_some() && !self.fetched && !matches!(overview.sync, Sync::NoRemote | Sync::NotPushed);
+        (!waiting).then(|| sync_words(overview.sync))
     }
 
     /// Writes what is unsaved, then does `then`. A conflict or a failed save stops it, and says why.
@@ -723,7 +571,7 @@ impl Versions {
             let git = view.git.clone();
             let new_upstream = view.new_upstream();
             let job = move || {
-                let mut repo = open_repo(&book)?;
+                let mut repo = open_repo(&book).map_err(|problem| describe(&problem))?;
                 let hash = repo
                     .commit(&message, git.as_deref())
                     .map_err(|problem| describe(&problem))?;
@@ -741,6 +589,7 @@ impl Versions {
                 Ok((hash, problem)) => {
                     view.error = problem;
                     view.awaiting_merge = false;
+                    view.both_stand_in = None;
                     view.show_note(crate::t!(Key::Committed, hash = short_hash(&hash)), window, cx);
                     view.card
                         .update(cx, |card, cx| card.committed(view.error.is_none(), window, cx));
@@ -812,14 +661,25 @@ impl Versions {
         });
     }
 
+    /// `git` is done moving the files. What it changed comes in as the repo's own move, which was labelled before it began.
+    fn release_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.quiet = true;
+        self.persist.update(cx, |persist, cx| {
+            persist.hold_outside_changes(false);
+            persist.scan_now(window, cx);
+        });
+        self.quiet = false;
+    }
+
     fn merge_finished(&mut self, result: Result<MergeEnd, String>, window: &mut Window, cx: &mut Context<Self>) {
         self.quiet = true;
         match result {
             Ok(MergeEnd::Done) => {}
             Ok(MergeEnd::Outside(file)) => self.error = Some(crate::t!(Key::MergeOutside, file = file)),
-            Ok(MergeEnd::Conflicts(conflicts)) => {
+            Ok(MergeEnd::Conflicts(conflicts, target)) => {
                 let persist = self.persist.clone();
                 self.awaiting_merge = true;
+                persist.update(cx, |persist, _| persist.merging_from(target));
                 for conflict in conflicts {
                     let base = conflict.base.unwrap_or_default();
                     let theirs = conflict.theirs.unwrap_or_default();
@@ -833,22 +693,38 @@ impl Versions {
             }
             Err(reason) => self.error = Some(reason),
         }
-        self.persist.update(cx, |persist, cx| {
-            persist.hold_outside_changes(false);
-            persist.scan_now(window, cx);
-        });
-        self.quiet = false;
+        self.release_files(window, cx);
         self.conflicts_settled(cx);
     }
 
-    /// The last conflict of a merge was settled: the author commits it.
+    /// The last conflict of a merge was settled: the author commits it. "See both" leaves both versions in the text between
+    /// marker comments, which is not settled until those are gone, so the foot says so and the card waits.
     fn conflicts_settled(&mut self, cx: &mut Context<Self>) {
         if !self.awaiting_merge || self.working || self.persist.read(cx).has_conflicts() {
+            return;
+        }
+        let marked = self.chapter_with_markers(cx);
+        if marked != self.both_stand_in {
+            self.both_stand_in = marked;
+            cx.notify();
+        }
+        if self.both_stand_in.is_some() {
             return;
         }
         self.awaiting_merge = false;
         self.card_after_reading = true;
         self.refresh(cx);
+    }
+
+    /// The name of a chapter that still has "See both"'s marker comments.
+    fn chapter_with_markers(&self, cx: &App) -> Option<String> {
+        let session = self.session(cx);
+        let path = (session.files().into_iter())
+            .find(|path| session.file_text(path).is_some_and(|text| has_markers(&text)))?;
+        Some(session.chapter_of_file(&path).map_or_else(
+            || path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            |chapter| session.title_of(chapter),
+        ))
     }
 
     fn abort_merge(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -860,16 +736,12 @@ impl Versions {
         }
         self.error = None;
         self.awaiting_merge = false;
+        self.both_stand_in = None;
         self.persist.update(cx, |persist, _| persist.hold_outside_changes(true));
         let job = move || git.abort_merge(&book);
         let done: Done<()> = Box::new(|view, result, window, cx| {
             view.error = result.err();
-            view.quiet = true;
-            view.persist.update(cx, |persist, cx| {
-                persist.hold_outside_changes(false);
-                persist.scan_now(window, cx);
-            });
-            view.quiet = false;
+            view.release_files(window, cx);
         });
         self.work(job, done, window, cx);
     }
@@ -888,18 +760,19 @@ impl Versions {
             let job = move || git.switch(&book, &branch).map_err(|refused| describe_refused(&refused));
             let done: Done<()> = Box::new(|view, result, window, cx| {
                 view.error = result.err();
-                view.quiet = true;
-                view.persist.update(cx, |persist, cx| {
-                    persist.hold_outside_changes(false);
-                    persist.scan_now(window, cx);
-                });
-                view.quiet = false;
+                view.release_files(window, cx);
             });
             view.work(job, done, window, cx);
         });
     }
 
-    fn create_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Runs a change to the repo off the main thread, unless one is running. What goes wrong shows until the next action.
+    fn change_repo(
+        &mut self,
+        job: impl FnOnce(&Path) -> Result<(), Problem> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(book) = self.book(cx) else {
             return;
         };
@@ -907,66 +780,32 @@ impl Versions {
             return;
         }
         self.error = None;
-        let job = move || {
-            open_repo(&book)?
-                .create_branch(&name)
-                .map_err(|problem| describe(&problem))
-        };
+        let job = move || job(&book).map_err(|problem| describe(&problem));
         let done: Done<()> = Box::new(|view, result, _, _| view.error = result.err());
         self.work(job, done, window, cx);
     }
 
+    fn create_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.change_repo(move |book| open_repo(book)?.create_branch(&name), window, cx);
+    }
+
     fn delete_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(book) = self.book(cx) else {
-            return;
-        };
-        if self.working {
-            return;
-        }
-        self.error = None;
-        let job = move || {
-            open_repo(&book)?
-                .delete_branch(&name)
-                .map_err(|problem| describe(&problem))
-        };
-        let done: Done<()> = Box::new(|view, result, _, _| view.error = result.err());
-        self.work(job, done, window, cx);
+        self.change_repo(move |book| open_repo(book)?.delete_branch(&name), window, cx);
     }
 
     /// Makes the book a repo, when the author said so.
     fn make_repo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(book) = self.book(cx) else {
-            return;
-        };
-        if self.working {
-            return;
-        }
-        self.error = None;
-        let job = move || Repo::init(&book).map(|_| ()).map_err(|problem| describe(&problem));
-        let done: Done<()> = Box::new(|view, result, _, _| view.error = result.err());
-        self.work(job, done, window, cx);
+        self.change_repo(move |book| Repo::init(book).map(|_| ()), window, cx);
     }
 
     fn set_identity(&mut self, name: String, email: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(book) = self.book(cx) else {
-            return;
-        };
-        if self.working {
-            return;
-        }
-        self.error = None;
-        let job = move || {
-            open_repo(&book)?
-                .set_identity(&name, &email)
-                .map_err(|problem| describe(&problem))
-        };
-        let done: Done<()> = Box::new(|view, result, _, _| view.error = result.err());
-        self.work(job, done, window, cx);
+        self.change_repo(move |book| open_repo(book)?.set_identity(&name, &email), window, cx);
     }
 
     /// One step of `DRUCK_VERSIONS_RUN`, separated by semicolons: `commit:message`, `create:branch`, `switch:branch`,
     /// `merge:branch`, `delete:branch`, `abort`, `push`, `pull`, `repo`, `keep:mine`, `keep:theirs`, or `keep:both`. These call
     /// what the buttons call.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     fn run_scripted(&mut self, step: &str, window: &mut Window, cx: &mut Context<Self>) {
         let (name, value) = step.split_once(':').unwrap_or((step, ""));
         let value = value.to_owned();
@@ -1066,7 +905,6 @@ impl Versions {
     fn toggle_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.mode(cx) == Mode::Publish && self.has_rail_tab(cx) {
             cx.update_global::<RailTab, _>(|tab, cx| (tab.0)(window, cx));
-            self.refresh(cx);
             return;
         }
         let opening = !self.panel.read(cx).is_open();
@@ -1161,33 +999,32 @@ impl Versions {
 impl Render for Versions {
     /// A passing note at the window's foot, in the saving state's form.
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(note) = &self.note else {
-            return div().into_any_element();
-        };
         let tokens = Tokens::get(cx);
+        let (text, color): (SharedString, _) = match (&self.both_stand_in, &self.note) {
+            (Some(chapter), _) => (crate::t!(Key::BothStand, chapter = chapter).into(), tokens.accent),
+            (None, Some(note)) => (note.clone(), tokens.text_quiet),
+            (None, None) => return div().into_any_element(),
+        };
         div()
             .h_full()
             .min_w_0()
             .flex()
             .items_center()
             .px(tokens::SPACE_3)
+            .bg(tokens.canvas)
             .text_size(tokens::TEXT_SMALL)
-            .text_color(tokens.text_quiet)
-            .child(div().min_w_0().truncate().child(note.clone()))
+            .text_color(color)
+            .child(div().min_w_0().truncate().child(text))
             .into_any_element()
     }
 }
 
-fn open_repo(book: &Path) -> Result<Repo, String> {
-    match Repo::open(book) {
-        Ok(Some(repo)) => Ok(repo),
-        Ok(None) => Err(describe(&Problem::Other("this book is not a Git repo".to_owned()))),
-        Err(problem) => Err(describe(&problem)),
-    }
+fn open_repo(book: &Path) -> Result<Repo, Problem> {
+    Repo::open(book)?.ok_or_else(|| Problem::Other(crate::t!(Key::NotARepo).to_owned()))
 }
 
 fn merge_job(git: &Git, book: &Path, from: MergeFrom, takeable: &HashSet<PathBuf>) -> Result<MergeEnd, String> {
-    let repo = open_repo(book)?;
+    let repo = open_repo(book).map_err(|problem| describe(&problem))?;
     let target = match from {
         MergeFrom::Branch(name) => name,
         MergeFrom::Upstream => {
@@ -1199,7 +1036,8 @@ fn merge_job(git: &Git, book: &Path, from: MergeFrom, takeable: &HashSet<PathBuf
     match git.merge(book, repo.git_dir(), &target) {
         Ok(Merged::Done) => Ok(MergeEnd::Done),
         Ok(Merged::Conflicts) => {
-            let conflicts = open_repo(book)?.conflicts().map_err(|problem| describe(&problem))?;
+            let conflicts =
+                (open_repo(book).and_then(|repo| repo.conflicts())).map_err(|problem| describe(&problem))?;
             let stuck = conflicts.iter().find(|conflict| {
                 !(conflict.in_book
                     && conflict.ours_exists
@@ -1211,7 +1049,7 @@ fn merge_job(git: &Git, book: &Path, from: MergeFrom, takeable: &HashSet<PathBuf
                 git.abort_merge(book)?;
                 return Ok(MergeEnd::Outside(name));
             }
-            Ok(MergeEnd::Conflicts(conflicts))
+            Ok(MergeEnd::Conflicts(conflicts, target))
         }
         Err(refused) => Err(describe_refused(&refused)),
     }

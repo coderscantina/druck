@@ -88,6 +88,13 @@ pub struct Branch {
     pub merged: bool,
 }
 
+/// Whether a file's words mean anything to an author: Markdown has words, and a manifest or a bibliography has only changes.
+fn counts_words(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
+}
+
 /// Where the current branch stands against its upstream, as of the last fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Sync {
@@ -254,6 +261,8 @@ impl Repo {
                 .and_then(|tree| self.text_in(tree, &rela))
                 .unwrap_or_default();
             let words = match &on_disk {
+                Some(bytes) if std::str::from_utf8(bytes).is_err() => None,
+                _ if !counts_words(&path) => Some((0, 0)),
                 Some(bytes) => std::str::from_utf8(bytes).ok().map(|new| words::counts(&old, new)),
                 None => Some(words::counts(&old, "")),
             };

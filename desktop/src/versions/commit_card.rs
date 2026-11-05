@@ -3,7 +3,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, KeyBinding, Subscription, WeakEntity, Window, actions, div, relative,
+    App, Context, Entity, FocusHandle, Focusable, Hsla, KeyBinding, ScrollHandle, Subscription, WeakEntity, Window,
+    actions, div, linear_color_stop, linear_gradient, relative,
 };
 
 use super::repo::{self, Overview};
@@ -38,6 +39,7 @@ pub struct CommitCard {
     email: Entity<TextInput>,
     /// This is the first commit asked for in a folder with no repo, and the question stands.
     first_asking: bool,
+    changes_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -80,6 +82,7 @@ impl CommitCard {
             name,
             email,
             first_asking: false,
+            changes_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -88,14 +91,17 @@ impl CommitCard {
         self.open
     }
 
+    /// Puts words in the message field. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn preset_message(&mut self, message: String, cx: &mut Context<Self>) {
+        self.message.update(cx, |input, cx| input.set_value(message, true, cx));
+    }
+
     /// Opens the card, remembering what had the keys.
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.before = window.focused(cx);
         self.open = true;
         self.first_asking = false;
-        if let Some(preset) = crate::gate::var("DRUCK_COMMIT_MESSAGE") {
-            self.message.update(cx, |input, cx| input.set_value(preset, true, cx));
-        }
         cx.notify();
     }
 
@@ -242,6 +248,9 @@ impl CommitCard {
         parts.push(Self::field(&self.message).into_any_element());
         if overview.merging.is_some() {
             parts.push(ui::quiet_line(tokens, crate::t!(Key::MergingNote)).into_any_element());
+            if let Some(chapter) = &view.read(cx).both_stand_in {
+                parts.push(ui::accent_line(tokens, crate::t!(Key::BothStand, chapter = chapter)).into_any_element());
+            }
         }
         if overview.changes.is_empty() && overview.merging.is_none() {
             parts.push(
@@ -256,16 +265,44 @@ impl CommitCard {
                 ui::change_row(tokens, title, change_words(change, view.in_conflict(&change.path, cx)))
                     .into_any_element()
             });
+            let more_below = {
+                let (offset, most) = (self.changes_scroll.offset().y, self.changes_scroll.max_offset().y);
+                overview.changes.len() > tokens::COMMIT_CARD_MAX_ROWS && -offset < most.max(tokens::HAIRLINE)
+            };
             parts.push(
                 div()
-                    .id("card-changes")
                     .flex_none()
-                    .pt(tokens::SPACE_2)
-                    .max_h(tokens::VERSIONS_ROW_HEIGHT * tokens::COMMIT_CARD_MAX_ROWS as f32)
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .children(rows.collect::<Vec<_>>())
+                    .mt(tokens::SPACE_2)
+                    .relative()
+                    .child(
+                        div()
+                            .id("card-changes")
+                            .max_h(tokens::VERSIONS_ROW_HEIGHT * tokens::COMMIT_CARD_MAX_ROWS as f32)
+                            .overflow_y_scroll()
+                            .track_scroll(&self.changes_scroll)
+                            .flex()
+                            .flex_col()
+                            .children(rows.collect::<Vec<_>>()),
+                    )
+                    .when(more_below, |list| {
+                        let (clear, solid) = (
+                            Hsla::from(tokens.panel).opacity(tokens::CLEAR),
+                            Hsla::from(tokens.panel),
+                        );
+                        list.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(tokens::VERSIONS_ROW_HEIGHT)
+                                .bg(linear_gradient(
+                                    tokens::FADE_DOWN,
+                                    linear_color_stop(clear, 0.),
+                                    linear_color_stop(solid, 1.),
+                                )),
+                        )
+                    })
                     .into_any_element(),
             );
         }

@@ -1,8 +1,12 @@
 //! The small pieces the versions views share, built from the tokens.
 
 use gpui::prelude::*;
-use gpui::{ElementId, FontWeight, SharedString, Stateful, div};
+use gpui::{
+    ElementId, Font, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, Stateful, StrikethroughStyle,
+    StyledText, UnderlineStyle, div,
+};
 
+use super::shown::{self, Run, Tint};
 use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
@@ -21,6 +25,48 @@ pub fn section_label(tokens: &Tokens, label: impl Into<SharedString>) -> gpui::D
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(tokens.text_quiet)
         .child(label.into())
+}
+
+/// How a stretch of shown text differs: the timeline's tints, with the removed words struck through.
+pub fn run_highlight(run: &Run, marked: bool, tokens: &Tokens) -> HighlightStyle {
+    let tint = run.tint.map(|tint| match tint {
+        Tint::Removed => Hsla::from(tokens.removed),
+        Tint::Added => Hsla::from(tokens.added),
+    });
+    HighlightStyle {
+        background_color: tint.map(|tint| tint.opacity(tokens::DIFF_TINT)),
+        strikethrough: (run.tint == Some(Tint::Removed)).then_some(StrikethroughStyle {
+            thickness: tokens::HAIRLINE,
+            color: None,
+        }),
+        underline: marked.then(|| UnderlineStyle {
+            thickness: tokens::HAIRLINE,
+            color: Some(tokens.accent.into()),
+            wavy: false,
+        }),
+        font_weight: run.bold.then_some(FontWeight::BOLD),
+        font_style: run.italic.then_some(FontStyle::Italic),
+        ..Default::default()
+    }
+}
+
+/// What the other side wrote against the author's words, in the book's type with the timeline's tints: the author's words
+/// that go are struck through, and the other side's are tinted as added.
+pub fn compared(mine: &str, theirs: &str, font: &Font, tokens: &Tokens) -> Vec<gpui::AnyElement> {
+    (shown::build(mine, theirs).blocks.iter())
+        .map(|block| {
+            let highlights: Vec<_> = (block.runs.iter())
+                .filter(|run| run.tint.is_some() || run.bold || run.italic)
+                .map(|run| (run.range.clone(), run_highlight(run, false, tokens)))
+                .collect();
+            div()
+                .font(font.clone())
+                .text_size(tokens::SLIP_TEXT)
+                .text_color(tokens.text)
+                .child(StyledText::new(SharedString::from(block.text.clone())).with_highlights(highlights))
+                .into_any_element()
+        })
+        .collect()
 }
 
 /// A quiet group label in a panel.

@@ -11,16 +11,16 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, DefiniteLength, Entity, FocusHandle, FontStyle, FontWeight, HighlightStyle, Hsla,
-    InteractiveText, KeyBinding, MouseButton, Pixels, ScrollHandle, SharedString, StrikethroughStyle, StyledText,
-    Subscription, Task, UnderlineStyle, WeakEntity, Window, actions, canvas, div, fill, point, px, size,
+    App, Bounds, Context, DefiniteLength, Entity, FocusHandle, FontWeight, InteractiveText, KeyBinding, MouseButton,
+    Pixels, ScrollHandle, SharedString, StyledText, Subscription, Task, WeakEntity, Window, actions, canvas, div, fill,
+    point, px, size,
 };
 
 use super::history::{History, now_ms};
 use super::repo::Repo;
-use super::shown::{self, Shown, ShownBlock, Tint};
+use super::shown::{self, Shown, ShownBlock};
 use super::strings::Key;
-use super::{RepoState, Versions, dates, sync_words, ui};
+use super::{RepoState, Versions, dates, ui};
 use crate::editor::EditorView;
 use crate::persist::merge::edits_between;
 use crate::preview::Typeset;
@@ -260,9 +260,13 @@ impl Timeline {
                         .rposition(|mark| Some(mark.blob()) != current_blob.as_deref()))
                     .unwrap_or(marks.len());
                     timeline.marks = marks;
-                    timeline.at = crate::gate::var("DRUCK_TIMELINE_AT")
-                        .and_then(|back| back.parse::<usize>().ok())
-                        .map_or(start, |back| timeline.marks.len().saturating_sub(back));
+                    timeline.at = start;
+                    #[cfg(any(debug_assertions, feature = "measure"))]
+                    if let Some(back) =
+                        crate::gate::var("DRUCK_TIMELINE_AT").and_then(|back| back.parse::<usize>().ok())
+                    {
+                        timeline.at = timeline.marks.len().saturating_sub(back);
+                    }
                     timeline.show_position(cx);
                 })
                 .ok();
@@ -482,27 +486,9 @@ impl Timeline {
             .filter(|run| run.tint.is_some() || run.bold || run.italic)
             .map(|run| {
                 let selected = run.passage == Some(self.selected);
-                let tint = run.tint.map(|tint| match tint {
-                    Tint::Removed => Hsla::from(tokens.removed),
-                    Tint::Added => Hsla::from(tokens.added),
-                });
                 (
                     run.range.start + shift..run.range.end + shift,
-                    HighlightStyle {
-                        background_color: tint.map(|tint| tint.opacity(tokens::DIFF_TINT)),
-                        strikethrough: (run.tint == Some(Tint::Removed)).then_some(StrikethroughStyle {
-                            thickness: tokens::HAIRLINE,
-                            color: None,
-                        }),
-                        underline: selected.then(|| UnderlineStyle {
-                            thickness: tokens::HAIRLINE,
-                            color: Some(tokens.accent.into()),
-                            wavy: false,
-                        }),
-                        font_weight: run.bold.then_some(FontWeight::BOLD),
-                        font_style: run.italic.then_some(FontStyle::Italic),
-                        ..Default::default()
-                    },
+                    ui::run_highlight(run, selected, tokens),
                 )
             })
             .collect();
@@ -617,7 +603,13 @@ impl Render for Timeline {
         let tokens = Tokens::get(cx).clone();
         let view = self.view.upgrade();
         let (branch, sync) = match view.as_ref().map(|view| view.read(cx).state()) {
-            Some(RepoState::Ready(overview)) => (overview.branch.clone(), sync_words(overview.sync)),
+            Some(RepoState::Ready(overview)) => (
+                overview.branch.clone(),
+                self.view
+                    .upgrade()
+                    .and_then(|view| view.read(cx).sync_shown(overview))
+                    .unwrap_or_default(),
+            ),
             _ => (String::new(), String::new()),
         };
         let unplaced = view.as_ref().and_then(|view| {

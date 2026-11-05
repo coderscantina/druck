@@ -24,7 +24,9 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(debug_assertions, feature = "measure"))]
+use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{
@@ -325,6 +327,8 @@ pub struct EditorView {
     review: Vec<review::Passage>,
     /// An agent's notes beside the active chapter.
     advice: Vec<review::Advice>,
+    /// The passage a conflict on the line at the foot is about.
+    conflict_mark: Option<Range<usize>>,
     /// The card that floats under the selection while it has the keys.
     selection_prompt: Option<AnyView>,
     /// The column up and down keep to, kept across lines that are too short for it.
@@ -333,7 +337,11 @@ pub struct EditorView {
     reveal_at: usize,
     drag: Option<Drag>,
     scroll: Anchor,
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    gutter_pinned: bool,
     autoscroll: bool,
+    /// How far down the pane the caret's line is to stand at the next autoscroll, when something asks it to stay.
+    caret_stays_at: Option<Pixels>,
     column: Column,
     /// Blocks in the current frame, with the window y of each one's top.
     visible: Vec<(usize, Pixels)>,
@@ -385,17 +393,20 @@ pub struct EditorView {
     /// Misspelled words. See [`spelling`].
     spelling: spelling::Spelling,
     /// The newest revision and body style painted, and when each first was.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     painted_revision: (u64, Instant),
+    #[cfg(any(debug_assertions, feature = "measure"))]
     painted_style: (u64, Instant),
+    #[cfg(any(debug_assertions, feature = "measure"))]
     style_generation: u64,
 }
 
-const CARET_MARGIN: Pixels = px(24.);
+const CARET_MARGIN: Pixels = tokens::TEXT_MARGIN_RIGHT;
 const BLINK: Duration = Duration::from_millis(530);
 /// How often a drag scrolls while the pointer stands outside the galley, and how fast for each pixel it is out.
 const DRAG_SCROLL_TICK: Duration = Duration::from_millis(16);
 const DRAG_SCROLL_SPEED: f32 = 0.35;
-const DRAG_SCROLL_MAX: Pixels = px(60.);
+const DRAG_SCROLL_MAX: Pixels = tokens::DRAG_SCROLL_MAX;
 /// A chapter's first view: its top, with its margin above it.
 const START_OF_CHAPTER: Anchor = Anchor {
     block: 0,
@@ -460,12 +471,14 @@ impl EditorView {
             marked: None,
             review: Vec::new(),
             advice: Vec::new(),
+            conflict_mark: None,
             selection_prompt: None,
             goal_x: None,
             reveal_at: caret,
             drag: None,
             scroll: START_OF_CHAPTER,
             autoscroll: false,
+            caret_stays_at: None,
             column: Column::default(),
             visible: Vec::new(),
             hovered: None,
@@ -493,11 +506,16 @@ impl EditorView {
             note_room: px(0.),
             open_comments: HashSet::new(),
             comment_focus: HashMap::new(),
-            gutter_shown: crate::gate::var("DRUCK_GUTTER").is_some(),
+            gutter_shown: false,
+            #[cfg(any(debug_assertions, feature = "measure"))]
+            gutter_pinned: false,
             caret_by_keys: false,
             spelling: spelling::Spelling::new(cx, &spelling_folder),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             painted_revision: (0, Instant::now()),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             painted_style: (0, Instant::now()),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             style_generation: 0,
         };
         view.rich.atoms = rich::atoms(view.session.active_buffer().text(), &view.blocks);
@@ -698,6 +716,27 @@ impl EditorView {
         self.set_selection(Selection::caret(offset), false, window, cx);
     }
 
+    /// Shows the gutter's icons whatever the pointer does, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn pin_gutter(&mut self, cx: &mut Context<Self>) {
+        self.gutter_pinned = true;
+        self.gutter_shown = true;
+        cx.notify();
+    }
+
+    /// Marks the passage of the open chapter a conflict is about, or nothing.
+    pub fn set_conflict_mark(&mut self, mark: Option<Range<usize>>, cx: &mut Context<Self>) {
+        if self.conflict_mark != mark {
+            self.conflict_mark = mark;
+            cx.notify();
+        }
+    }
+
+    /// The theme's body font, for text elsewhere in the book's type.
+    pub fn body_font(&self) -> gpui::Font {
+        self.style.body.clone()
+    }
+
     /// Selects `range` of the active chapter and brings it into view, for the find bar.
     pub fn select(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.session.active_buffer().text();
@@ -729,7 +768,10 @@ impl EditorView {
     /// Sets the text's type from the theme. Every block is shaped again as it comes into view.
     pub fn set_type(&mut self, book_type: BookType, cx: &mut Context<Self>) {
         self.style.set_type(book_type);
-        self.style_generation += 1;
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        {
+            self.style_generation += 1;
+        }
         self.forget_shapes();
         self.autoscroll = true;
         cx.notify();
@@ -794,6 +836,8 @@ impl EditorView {
     /// Shows the active chapter's plain Markdown, or its galley again. Buffer, caret, and undo stay the same.
     pub fn toggle_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let active = self.session.active();
+        // The two views differ in height everywhere, so the caret's line keeps its place on screen.
+        self.caret_stays_at = (self.caret_bounds(window)).map(|caret| caret.top() - self.column.viewport.top());
         self.source = !self.source;
         if self.source {
             self.source_chapters.insert(active);
@@ -881,21 +925,25 @@ impl EditorView {
         self.restore(restored, window, cx);
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn style_generation(&self) -> u64 {
         self.style_generation
     }
 
     /// When `revision` or a newer one was first painted, if it has been.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn revision_painted_at(&self, revision: u64) -> Option<Instant> {
         (self.painted_revision.0 >= revision).then_some(self.painted_revision.1)
     }
 
     /// When body style `generation` or a newer one was first painted, if it has been.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn style_painted_at(&self, generation: u64) -> Option<Instant> {
         (self.painted_style.0 >= generation).then_some(self.painted_style.1)
     }
 
     /// Called at the end of each paint.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     fn note_painted(&mut self) {
         let now = Instant::now();
         if self.painted_revision.0 != self.session.revision() {
@@ -1262,7 +1310,7 @@ impl EditorView {
     /// Scrolls a page and returns the place at the caret's old height on screen.
     fn page_target(&mut self, down: bool, goal: Option<Pixels>, window: &Window) -> (usize, bool, Pixels) {
         let height = self.column.viewport.size.height;
-        let distance = (height - px(48.)).max(px(48.));
+        let distance = (height - tokens::PAGE_KEY_OVERLAP).max(tokens::PAGE_KEY_OVERLAP);
         let caret = self.caret_bounds(window);
         let here = caret.map_or(self.column.viewport.origin, |caret| caret.origin);
         let goal = goal.unwrap_or(here.x);
@@ -1336,8 +1384,9 @@ impl EditorView {
             self.hovered = hovered;
             cx.notify();
         }
-        let in_margin =
-            crate::gate::var("DRUCK_GUTTER").is_some() || (inside && event.position.x < self.column.text_left);
+        let in_margin = inside && event.position.x < self.column.text_left;
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        let in_margin = in_margin || self.gutter_pinned;
         if in_margin != self.gutter_shown {
             self.gutter_shown = in_margin;
             cx.notify();
@@ -1407,7 +1456,11 @@ impl EditorView {
         let viewport = self.column.viewport;
         let above = viewport.top() - self.pointer.y;
         let below = self.pointer.y - viewport.bottom();
-        let step = |distance: Pixels| (distance * DRAG_SCROLL_SPEED).max(px(1.)).min(DRAG_SCROLL_MAX);
+        let step = |distance: Pixels| {
+            (distance * DRAG_SCROLL_SPEED)
+                .max(tokens::HAIRLINE)
+                .min(DRAG_SCROLL_MAX)
+        };
         if above > px(0.) {
             Some(px(0.) - step(above))
         } else if below > px(0.) {
@@ -1551,8 +1604,8 @@ impl EditorView {
         .map(|(top, thumb_height)| Scrollbar {
             track,
             thumb: Bounds::new(
-                point(track.left() + px(2.), track.top() + px(top)),
-                size(tokens::SCROLLBAR_WIDTH - px(4.), px(thumb_height)),
+                point(track.left() + tokens::SCROLLBAR_INSET, track.top() + px(top)),
+                size(tokens::SCROLLBAR_WIDTH - tokens::SCROLLBAR_INSET * 2., px(thumb_height)),
             ),
         });
     }
@@ -1918,6 +1971,15 @@ impl EditorView {
         let caret_bottom = caret_top + line.line_height;
         let height = self.column.viewport.size.height;
 
+        if let Some(at) = self.caret_stays_at.take() {
+            self.scroll = Anchor {
+                block: here.block,
+                offset: caret_top - at,
+            };
+            self.shape_back_from(here.block, at, window);
+            self.normalize_scroll();
+            return;
+        }
         if self.writing.typewriter && self.caret_by_keys {
             let at = height * tokens::TYPEWRITER_AT;
             self.scroll = Anchor {
@@ -2347,9 +2409,9 @@ impl EntityInputHandler for EditorView {
         let start = self.offset_bounds(range.start, false, window)?;
         let end = self.offset_bounds(range.end, false, window).unwrap_or(start);
         let width = if end.origin.y == start.origin.y {
-            (end.origin.x - start.origin.x).max(px(1.))
+            (end.origin.x - start.origin.x).max(tokens::HAIRLINE)
         } else {
-            px(1.)
+            tokens::HAIRLINE
         };
         Some(Bounds::new(start.origin, size(width, start.size.height)))
     }

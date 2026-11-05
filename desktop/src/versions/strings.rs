@@ -19,11 +19,20 @@ crate::strings! {
             "Deine Einstellungen verlangen signierte Commits, dazu braucht es Git. Dieser bleibt unsigniert."
         ),
         MergingNote => ("Finishes the merge.", "Schließt den Merge ab."),
+        BothStand => (
+            "Both versions stand in {chapter}. Remove the marker comments to finish the merge.",
+            "In {chapter} stehen beide Fassungen. Entferne die Markerkommentare, um den Merge abzuschließen."
+        ),
+        CannotRunGit => ("cannot run git: {error}", "git lässt sich nicht starten: {error}"),
+        CannotTalkToGit => ("cannot talk to git: {error}", "keine Verbindung zu git: {error}"),
+        CannotWaitForGit => ("cannot wait for git: {error}", "git antwortet nicht: {error}"),
+        GitTooLong => ("git {command} took too long and was stopped", "git {command} dauerte zu lange und wurde angehalten"),
+        NotARepo => ("this book is not a Git repo", "dieses Buch ist kein Git-Repo"),
         OneWordAdded => ("+1 word", "+1 Wort"),
         OneWordRemoved => ("−1 word", "−1 Wort"),
         WordsAdded => ("+{added} words", "+{added} Wörter"),
         WordsRemoved => ("−{removed} words", "−{removed} Wörter"),
-        WordsBoth => ("+{added}, −{removed}", "+{added}, −{removed}"),
+        WordsBoth => ("+{added}, −{removed} words", "+{added}, −{removed} Wörter"),
         WordsSame => ("changed", "geändert"),
         Binary => ("not text", "kein Text"),
         Deleted => ("deleted", "gelöscht"),

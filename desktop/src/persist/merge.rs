@@ -3,6 +3,9 @@
 //! The merge works on lines. Where both sides changed the same lines it tries again on words, so two edits in one
 //! paragraph merge if they do not touch the same words. Edits on adjacent lines do not overlap. What overlaps stays
 //! as a [`Chunk::Conflict`] of whole lines, for the person to decide.
+//!
+//! [`git_conflict`] is the same merge by Git's rule, for a file Git reported as conflicting: lines only, and lines next to
+//! each other do overlap, so a place Git would not merge is never merged here by words.
 
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -20,6 +23,13 @@ const DIFF_TIME: Duration = Duration::from_millis(100);
 const BOTH_MINE: &str = "<!-- <<<<<<< yours -->\n";
 const BOTH_BETWEEN: &str = "<!-- ======= -->\n";
 const BOTH_THEIRS: &str = "<!-- >>>>>>> from outside -->\n";
+
+/// Whether a text still has the marker comments of a [`Choice::Both`].
+pub fn has_markers(text: &str) -> bool {
+    [BOTH_MINE, BOTH_BETWEEN, BOTH_THEIRS]
+        .iter()
+        .any(|marker| text.contains(marker))
+}
 
 /// A piece of the merge's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +56,14 @@ pub struct Merged {
 impl Merged {
     pub fn is_clean(&self) -> bool {
         !self.chunks.iter().any(|chunk| matches!(chunk, Chunk::Conflict { .. }))
+    }
+
+    /// The first place both sides changed, as each side wrote it.
+    pub fn first_conflict(&self) -> Option<(&str, &str)> {
+        self.chunks.iter().find_map(|chunk| match chunk {
+            Chunk::Conflict { mine, theirs } => Some((mine.as_str(), theirs.as_str())),
+            Chunk::Clean(_) => None,
+        })
     }
 
     /// The text, with every conflict settled by `choice`.
@@ -91,8 +109,39 @@ fn push_line(text: &mut String, line: &str) {
 /// Merges what `mine` and `theirs` changed in `base`.
 pub fn three_way(base: &str, mine: &str, theirs: &str) -> Merged {
     let mut merged = Merged::default();
-    merge_tokens(&lines(base), &lines(mine), &lines(theirs), true, &mut merged);
+    let rules = Rules {
+        by_words: true,
+        touching_overlaps: false,
+    };
+    merge_tokens(&lines(base), &lines(mine), &lines(theirs), rules, &mut merged);
     merged
+}
+
+/// Merges a file Git stopped on. Every place Git reported stays a conflict. Should this merge find none, where its diff and
+/// Git's differ, the whole file is the conflict, since Git said there is one.
+pub fn git_conflict(base: &str, mine: &str, theirs: &str) -> Merged {
+    let mut merged = Merged::default();
+    let rules = Rules {
+        by_words: false,
+        touching_overlaps: true,
+    };
+    merge_tokens(&lines(base), &lines(mine), &lines(theirs), rules, &mut merged);
+    if merged.is_clean() {
+        merged.chunks = vec![Chunk::Conflict {
+            mine: mine.to_owned(),
+            theirs: theirs.to_owned(),
+        }];
+    }
+    merged
+}
+
+/// What counts as an overlap in a merge.
+#[derive(Clone, Copy)]
+struct Rules {
+    /// Lines both sides changed get a second try, word by word.
+    by_words: bool,
+    /// Changes with nothing unchanged between them meet.
+    touching_overlaps: bool,
 }
 
 fn lines(text: &str) -> Vec<&str> {
@@ -156,7 +205,10 @@ fn hunks(old: &[&str], new: &[&str]) -> Vec<Hunk> {
 
 /// Whether a hunk's change meets the region of base tokens `start..end` others already claim. An insertion at the very
 /// edge of a change does not, except two insertions at one place, which are one place both sides wrote.
-fn meets(hunk: &Hunk, start: usize, end: usize) -> bool {
+fn meets(hunk: &Hunk, start: usize, end: usize, rules: Rules) -> bool {
+    if rules.touching_overlaps {
+        return hunk.base.start <= end && start <= hunk.base.end;
+    }
     if start == end && hunk.base.is_empty() {
         return hunk.base.start == start;
     }
@@ -169,7 +221,7 @@ fn meets(hunk: &Hunk, start: usize, end: usize) -> bool {
     hunk.base.start < end && start < hunk.base.end
 }
 
-fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], refine: bool, merged: &mut Merged) {
+fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, merged: &mut Merged) {
     let mine_hunks = hunks(base, mine);
     let their_hunks = hunks(base, theirs);
     let (mut next_mine, mut next_theirs) = (0, 0);
@@ -194,10 +246,13 @@ fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], refine: bool, mer
         }
         // Everything either side changed that meets this change, growing until nothing more does.
         loop {
-            let grown = if let Some(hunk) = mine_hunks.get(next_mine).filter(|hunk| meets(hunk, start, end)) {
+            let grown = if let Some(hunk) = mine_hunks.get(next_mine).filter(|hunk| meets(hunk, start, end, rules)) {
                 next_mine += 1;
                 hunk.base.end
-            } else if let Some(hunk) = their_hunks.get(next_theirs).filter(|hunk| meets(hunk, start, end)) {
+            } else if let Some(hunk) = their_hunks
+                .get(next_theirs)
+                .filter(|hunk| meets(hunk, start, end, rules))
+            {
                 next_theirs += 1;
                 hunk.base.end
             } else {
@@ -212,7 +267,7 @@ fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], refine: bool, mer
             (Some(part), None) | (None, Some(part)) => merged.clean(part),
             (Some(mine_part), Some(theirs_part)) if mine_part == theirs_part => merged.clean(mine_part),
             (Some(mine_part), Some(theirs_part)) => {
-                settle(&base[start..end], mine_part, theirs_part, refine, merged);
+                settle(&base[start..end], mine_part, theirs_part, rules, merged);
             }
             (None, None) => {}
         }
@@ -230,11 +285,15 @@ fn side<'a, 'b>(tokens: &'a [&'b str], hunks: &[Hunk], start: usize, end: usize)
 }
 
 /// Both sides changed these tokens differently. Tries the same merge on words, and otherwise keeps both as a conflict.
-fn settle(base: &[&str], mine: &[&str], theirs: &[&str], refine: bool, merged: &mut Merged) {
+fn settle(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, merged: &mut Merged) {
     let (base, mine, theirs) = (base.concat(), mine.concat(), theirs.concat());
-    if refine {
+    if rules.by_words {
+        let inner_rules = Rules {
+            by_words: false,
+            ..rules
+        };
         let mut inner = Merged::default();
-        merge_tokens(&words(&base), &words(&mine), &words(&theirs), false, &mut inner);
+        merge_tokens(&words(&base), &words(&mine), &words(&theirs), inner_rules, &mut inner);
         if inner.is_clean() {
             for chunk in inner.chunks {
                 if let Chunk::Clean(text) = chunk {
@@ -395,6 +454,37 @@ mod tests {
         assert!(!merged.is_clean());
         assert_eq!(merged.text(Choice::Mine), "Before.\nThe slow fox.\nAfter.\n");
         assert_eq!(merged.text(Choice::Theirs), "Before.\nThe sly fox.\nAfter.\n");
+    }
+
+    /// What a Git merge once did to the real book's sentence. Outside changes still merge this way, see the decision.
+    #[test]
+    fn git_s_conflict_is_never_merged_by_words() {
+        let (base, mine, theirs) = ("Da war nichts.\n", "Da war nur Leere.\n", "Da war gar nichts.\n");
+        assert!(three_way(base, mine, theirs).is_clean());
+        let merged = git_conflict(base, mine, theirs);
+        assert_eq!(merged.first_conflict(), Some((mine, theirs)));
+        assert_eq!(merged.text(Choice::Theirs), theirs);
+    }
+
+    #[test]
+    fn a_git_conflict_keeps_what_merges_by_lines_and_lines_that_touch_overlap() {
+        let base = "a\nb\nc\nd\ne\nf\n";
+        let merged = git_conflict(base, "a\nB\nc\nd\ne\nf\n", "a\nb\nC\nd\ne\nF\n");
+        assert!(!merged.is_clean());
+        assert_eq!(merged.text(Choice::Mine), "a\nB\nc\nd\ne\nF\n");
+    }
+
+    #[test]
+    fn a_git_conflict_the_lines_do_not_show_is_the_whole_file() {
+        let merged = git_conflict("a\n", "b\n", "b\n");
+        assert_eq!(merged.first_conflict(), Some(("b\n", "b\n")));
+    }
+
+    #[test]
+    fn marker_comments_are_found() {
+        let merged = three_way("x\nold\ny\n", "x\nmine\ny\n", "x\ntheirs\ny\n");
+        assert!(has_markers(&merged.text(Choice::Both)));
+        assert!(!has_markers(&merged.text(Choice::Mine)));
     }
 
     #[test]

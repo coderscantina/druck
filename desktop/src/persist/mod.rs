@@ -28,7 +28,7 @@ use self::atomic::Outcome;
 use self::merge::Choice;
 use self::recovery::{Copies, data_dir};
 use self::strings::Key;
-use self::sync::{ChangeKind, FileSync, Next, Pacer, Problem};
+use self::sync::{ChangeKind, ConflictPassage, FileSync, Next, Pacer, Problem};
 pub use self::sync::{Closing, FileChange};
 use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::a11y::Control as _;
@@ -149,11 +149,20 @@ pub struct PersistView {
     recovered: HashMap<PathBuf, u64>,
     /// A Git command is moving the files, and what they hold now is not for taking in yet.
     holding_outside: bool,
+    /// What a merge stopped on is being merged in, which the conflict line names.
+    merging: Option<String>,
+    /// The first place the first conflict is about, as the conflict line shows it.
+    passage: Option<ConflictPassage>,
     _incoming: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<FileChange> for PersistView {}
+
+/// A file that is no text of the book changed, which a layout that failed may have lacked.
+pub struct ResourceChanged;
+
+impl EventEmitter<ResourceChanged> for PersistView {}
 
 impl PersistView {
     fn new(
@@ -196,9 +205,15 @@ impl PersistView {
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |view, _, _: &TextChanged, window, cx| {
                 view.edited(window, cx);
+                if view.passage.is_some() {
+                    view.sync_passage(cx);
+                }
             }),
             cx.subscribe_in(&editor, window, |view, _, _: &SessionChanged, window, cx| {
                 view.update_watched_files(cx);
+                if view.has_conflicts() || view.passage.is_some() {
+                    view.sync_passage(cx);
+                }
                 if view.editor.read(cx).session().is_dirty() {
                     view.edited(window, cx);
                 }
@@ -232,6 +247,8 @@ impl PersistView {
             gone_task: None,
             recovered: HashMap::new(),
             holding_outside: false,
+            merging: None,
+            passage: None,
             _incoming: incoming,
             _subscriptions: subscriptions,
         };
@@ -259,6 +276,7 @@ impl PersistView {
             Ready {
                 paths: Vec::new(),
                 everything: true,
+                resource: false,
             },
             window,
             cx,
@@ -281,9 +299,14 @@ impl PersistView {
         self.sync.conflicts().any(|conflict| conflict == path)
     }
 
-    /// Takes in one file of a Git merge that overlapped. The file gets their text, and the buffer, which holds ours, merges
-    /// against the merge's base: cleanly word by word, or as a conflict on the line at the window's foot, exactly as if
-    /// another program had written the file.
+    /// Says which branch a merge's conflicts come from, for the line to name.
+    pub fn merging_from(&mut self, branch: String) {
+        self.merging = Some(branch);
+    }
+
+    /// Takes in one file of a Git merge that overlapped. The file gets their text, the buffer keeps ours, and the conflict
+    /// goes to the line at the window's foot. Git reported it, so it does not merge by words. The view goes to the passage,
+    /// since the author asked for this merge and is looking at it.
     pub fn take_merge(
         &mut self,
         path: &Path,
@@ -296,10 +319,7 @@ impl PersistView {
         let sync = &mut self.sync;
         let change = self.editor.update(cx, |editor, cx| {
             editor.update_session(
-                |session| {
-                    session.restart_sync(path, base);
-                    sync.on_disk(session, path, Some(theirs.as_bytes().to_vec()))
-                },
+                |session| sync.take_git_conflict(session, path, base, theirs),
                 window,
                 cx,
             )
@@ -307,11 +327,43 @@ impl PersistView {
         if let Some(change) = change {
             self.tell(change, window, cx);
         }
-        if self.session(cx).is_dirty() {
-            self.edited(window, cx);
-        }
+        self.sync_passage(cx);
+        self.go_to_passage(window, cx);
         cx.notify();
         Ok(())
+    }
+
+    /// Looks again at what the first conflict is about, and marks it in the text if its chapter is open.
+    fn sync_passage(&mut self, cx: &mut Context<Self>) {
+        if !self.has_conflicts() {
+            self.merging = None;
+        }
+        let session = self.session(cx);
+        let passage = (self.sync.conflicts().next()).and_then(|path| {
+            let passage = self.sync.conflict_passage(session, path)?;
+            let (chapter, at) = session.place_in_file(path, passage.range.start)?;
+            let mark = (chapter == session.active()).then(|| at..at + passage.range.len());
+            Some((passage, mark))
+        });
+        let (passage, mark) = passage.unzip();
+        if self.passage != passage {
+            self.passage = passage;
+            cx.notify();
+        }
+        let mark = mark.flatten();
+        self.editor.update(cx, |editor, cx| editor.set_conflict_mark(mark, cx));
+    }
+
+    /// Opens the chapter of a merge's first conflict at its passage.
+    fn go_to_passage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let session = self.session(cx);
+        let place = (self.sync.conflicts().next())
+            .zip(self.passage.as_ref())
+            .and_then(|(path, passage)| session.place_in_file(path, passage.range.start));
+        if let Some((chapter, at)) = place {
+            self.editor
+                .update(cx, |editor, cx| editor.show_place(chapter, at, window, cx));
+        }
     }
 
     fn start_watching(&mut self, cx: &mut Context<Self>) {
@@ -344,8 +396,9 @@ impl PersistView {
         self.theme = open_theme(self.inspector.read(cx).model(), cx);
         let mut files = self.session(cx).files();
         files.extend(self.theme.clone());
+        let resources = self.session(cx).named_files();
         if let Some(watcher) = &mut self.watcher {
-            watcher.set_files(&files);
+            watcher.set_files(&files, &resources);
         }
     }
 
@@ -622,6 +675,9 @@ impl PersistView {
         }
         let ready = self.waiting.take(now, plain);
         let wait = self.waiting.wait(now, plain);
+        if ready.resource {
+            cx.emit(ResourceChanged);
+        }
         if !ready.paths.is_empty() || ready.everything {
             self.process(ready, window, cx);
         }
@@ -696,6 +752,7 @@ impl PersistView {
             ChangeKind::Conflict | ChangeKind::Unchanged => {}
         }
         cx.emit(change);
+        self.sync_passage(cx);
     }
 
     fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -737,7 +794,8 @@ impl PersistView {
         self.show_note(text, window, cx);
     }
 
-    /// Settles the first conflict, as a key or button of the prompt does.
+    /// Settles the first conflict, as a key or button of the prompt does. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn settle_first(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
         self.resolve_first(choice, window, cx);
     }
@@ -768,6 +826,11 @@ impl PersistView {
         }
         self.edited(window, cx);
         self.update_watched_files(cx);
+        self.sync_passage(cx);
+        if self.merging.is_some() {
+            self.go_to_passage(window, cx);
+        }
+        cx.notify();
     }
 
     fn button(
@@ -813,15 +876,44 @@ impl Render for PersistView {
                 .chapter_of_file(path)
                 .map_or_else(|| file_name(path), |chapter| session.title_of(chapter));
             let removal = self.sync.conflict_is_removal(path);
-            let says = if removal {
-                crate::t!(Key::Deleted)
-            } else {
-                crate::t!(Key::Overlap)
+            let says = match (&self.merging, removal) {
+                (_, true) => format!("{name} {}", crate::t!(Key::Deleted)),
+                (Some(branch), false) => crate::t!(Key::OverlapBranch, name = name, branch = branch),
+                (None, false) => format!("{name} {}", crate::t!(Key::Overlap)),
             };
+            let theirs = self.passage.as_ref().map(|passage| {
+                let font = self.editor.read(cx).body_font();
+                div()
+                    .id("conflict-theirs")
+                    .absolute()
+                    .bottom_full()
+                    .left(tokens::SPACE_3)
+                    .w(tokens::CONFLICT_CARD_WIDTH)
+                    .max_h(tokens::SLIP_TEXT_MAX_HEIGHT)
+                    .overflow_y_scroll()
+                    .p(tokens::SPACE_3)
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::SPACE_1)
+                    .bg(tokens.panel)
+                    .border_1()
+                    .border_color(tokens.divider)
+                    .rounded(tokens::RADIUS)
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .children(crate::versions::compared(
+                        &passage.mine,
+                        &passage.theirs,
+                        &font,
+                        &tokens,
+                    ))
+            });
             return root
+                .relative()
                 .flex_1()
                 .text_color(tokens.accent)
-                .child(div().min_w_0().truncate().child(format!("{name} {says}")))
+                .children(theirs)
+                .child(div().min_w_0().truncate().child(says))
                 .child(self.button("keep-mine", crate::t!(Key::KeepMine), Choice::Mine, cx))
                 .child(self.button("take-theirs", crate::t!(Key::TakeTheirs), Choice::Theirs, cx))
                 .when(!removal, |root| {

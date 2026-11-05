@@ -511,3 +511,122 @@ fn a_new_repo_leaves_exports_out_and_keeps_an_ignore_file_it_finds() {
     assert_eq!(fs::read_to_string(fresh.join(".gitignore")).expect("kept"), "mine/\n");
     fs::remove_dir_all(&fresh).ok();
 }
+
+/// What once happened in the real book: Git reports "both modified", and the app must not settle that by merging words
+/// into a sentence neither side wrote.
+#[test]
+fn a_hunk_git_calls_conflicting_goes_to_a_person_and_never_merges_by_words() {
+    use crate::persist::merge::Choice;
+    use crate::persist::sync::{ChangeKind, FileSync};
+    use crate::session::Session;
+
+    let fixture = fixture("word-merge");
+    let dir = fixture.root.join("book");
+    let _ = repo_at(&dir);
+    let chapter = dir.join("manuscript/one.md");
+    let manifest = "title: T\nchapters:\n  - manuscript/one.md\n";
+    fs::write(dir.join("druck.yaml"), manifest).unwrap();
+    let write = |sentence: &str| fs::write(&chapter, format!("# One\n\nDa war {sentence}.\n\nDas Ende.\n")).unwrap();
+    let commit = |message: &str| {
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", message]);
+    };
+    write("nichts");
+    commit("Base");
+    git(&dir, &["checkout", "-q", "-b", "probe"]);
+    write("gar nichts");
+    commit("Theirs");
+    git(&dir, &["checkout", "-q", "main"]);
+    write("nur Leere");
+    commit("Ours");
+
+    let mut session = Session::open(&dir).unwrap();
+    let cli = Git::find().expect("these tests need git");
+    let repo = Repo::open(&dir).unwrap().unwrap();
+    assert!(matches!(
+        cli.merge(&dir, repo.git_dir(), "probe"),
+        Ok(Merged::Conflicts)
+    ));
+    assert!(git(&dir, &["status", "--porcelain"]).contains("UU manuscript/one.md"));
+    let conflict = repo.conflicts().unwrap().remove(0);
+    let (base, theirs) = (conflict.base.unwrap(), conflict.theirs.unwrap());
+    fs::write(&chapter, &theirs).unwrap();
+
+    let mut sync = FileSync::new(None);
+    let change = sync.take_git_conflict(&mut session, &chapter, &base, &theirs).unwrap();
+    assert_eq!(change.kind, ChangeKind::Conflict);
+    assert_eq!(sync.conflicts().collect::<Vec<_>>(), [chapter.as_path()]);
+    let mine = "# One\n\nDa war nur Leere.\n\nDas Ende.\n";
+    assert_eq!(session.file_text(&chapter).as_deref(), Some(mine));
+
+    // A later look at the same file, as after any change in the folder, leaves it to the person.
+    assert!(
+        sync.on_disk(&mut session, &chapter, Some(theirs.clone().into_bytes()))
+            .is_none()
+    );
+    assert!(!sync.can_settle_a_conflict(&session));
+    let passage = sync.conflict_passage(&session, &chapter).unwrap();
+    assert_eq!(passage.mine, "Da war nur Leere.\n");
+    assert_eq!(passage.theirs, "Da war gar nichts.\n");
+
+    sync.resolve(&mut session, &chapter, Choice::Theirs).unwrap();
+    assert_eq!(session.file_text(&chapter).as_deref(), Some(theirs.as_str()));
+    assert_eq!(sync.conflicts().count(), 0);
+}
+
+/// Git calls lines next to each other a conflict too, and what it merged elsewhere in the file stays merged.
+#[test]
+fn a_git_conflict_on_adjacent_lines_stays_one_and_the_clean_part_comes_along() {
+    use crate::persist::merge::{Choice, git_conflict};
+
+    let fixture = fixture("adjacent");
+    let dir = fixture.root.join("book");
+    let _ = repo_at(&dir);
+    let chapter = dir.join("manuscript/one.md");
+    let text = |two: &str, three: &str, eight: &str| {
+        format!("eins\n{two}\n{three}\nvier\nfünf\nsechs\nsieben\n{eight}\nneun\n")
+    };
+    let commit = |message: &str| {
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", message]);
+    };
+    fs::write(&chapter, text("zwei", "drei", "acht")).unwrap();
+    commit("Base");
+    git(&dir, &["checkout", "-q", "-b", "probe"]);
+    fs::write(&chapter, text("zwei", "DREI", "ACHT")).unwrap();
+    commit("Theirs");
+    git(&dir, &["checkout", "-q", "main"]);
+    fs::write(&chapter, text("ZWEI", "drei", "acht")).unwrap();
+    commit("Ours");
+    let cli = Git::find().expect("these tests need git");
+    let repo = Repo::open(&dir).unwrap().unwrap();
+    assert!(matches!(
+        cli.merge(&dir, repo.git_dir(), "probe"),
+        Ok(Merged::Conflicts)
+    ));
+    let merged = git_conflict(
+        &text("zwei", "drei", "acht"),
+        &text("ZWEI", "drei", "acht"),
+        &text("zwei", "DREI", "ACHT"),
+    );
+    assert!(!merged.is_clean());
+    assert_eq!(merged.text(Choice::Mine), text("ZWEI", "drei", "ACHT"));
+}
+
+#[test]
+fn only_markdown_counts_words() {
+    let fixture = fixture("words");
+    let dir = fixture.root.join("book");
+    let mut repo = repo_at(&dir);
+    fs::write(dir.join("manuscript/one.md"), "# One\n\nFirst words here and more.\n").unwrap();
+    fs::write(
+        dir.join("literatur.bib"),
+        "@misc{a, title={Viele Worte in einer Liste}}\n",
+    )
+    .unwrap();
+    let changes = repo.changes().unwrap();
+    let words = |name: &str| (changes.iter().find(|change| change.name == name)).and_then(|change| change.words);
+    assert_eq!(words("manuscript/one.md"), Some((2, 0)));
+    assert_eq!(words("literatur.bib"), Some((0, 0)));
+    repo.commit("Both", None).unwrap();
+}

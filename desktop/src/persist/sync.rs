@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::atomic::{Outcome, content_hash};
-use super::merge::{Choice, edits_between, starting_point, three_way};
+use super::merge::{Choice, Merged, edits_between, git_conflict, starting_point, three_way};
 use super::recovery::Copies;
 use super::watch::Ready;
 use crate::session::disk::Outgoing;
@@ -121,6 +121,27 @@ struct Pending {
     base: Arc<str>,
     /// `None`: the file was deleted.
     theirs: Option<Arc<str>>,
+    /// Git reported this as a conflict, so nothing here merges by words and only a person settles it.
+    from_git: bool,
+}
+
+impl Pending {
+    fn merged(&self, mine: &str, theirs: &str) -> Merged {
+        if self.from_git {
+            git_conflict(&self.base, mine, theirs)
+        } else {
+            three_way(&self.base, mine, theirs)
+        }
+    }
+}
+
+/// The first place a conflict is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictPassage {
+    /// Where the author's side stands in the file's text.
+    pub range: std::ops::Range<usize>,
+    pub mine: String,
+    pub theirs: String,
 }
 
 /// A problem to show, by the file it is about.
@@ -179,6 +200,23 @@ impl FileSync {
         self.pending.keys().map(PathBuf::as_path)
     }
 
+    /// The first place a file's conflict is about, as the text has it now and as the other side wrote it. A deleted file has
+    /// none.
+    pub fn conflict_passage(&self, session: &Session, path: &Path) -> Option<ConflictPassage> {
+        let pending = self.pending.get(path)?;
+        let theirs = pending.theirs.as_deref()?;
+        let text = session.file_text(path)?;
+        let merged = pending.merged(&text, theirs);
+        let (mine, theirs) = merged.first_conflict()?;
+        // Whole lines of this very text, unless the first side's lines hold nothing.
+        let start = (!mine.is_empty()).then(|| text.find(mine)).flatten().unwrap_or(0);
+        Some(ConflictPassage {
+            range: start..start + mine.len(),
+            mine: mine.to_owned(),
+            theirs: theirs.to_owned(),
+        })
+    }
+
     /// Whether a file with a conflict was deleted, rather than changed.
     pub fn conflict_is_removal(&self, path: &Path) -> bool {
         self.pending.get(path).is_some_and(|pending| pending.theirs.is_none())
@@ -201,6 +239,38 @@ impl FileSync {
             None => known.on_disk,
             Some(bytes) => !known.on_disk || content_hash(bytes) != known.hash || self.pending.contains_key(path),
         }
+    }
+
+    /// Takes in one file Git stopped on, which the disk has `theirs` of now: it starts over from the merge's `base` and goes
+    /// to a person. Git said both sides overlap, so nothing tries to merge it by words.
+    pub fn take_git_conflict(
+        &mut self,
+        session: &mut Session,
+        path: &Path,
+        base: &str,
+        theirs: &str,
+    ) -> Option<FileChange> {
+        let chapter = session.chapter_of_file(path);
+        session.file_base(path)?;
+        session.restart_sync(path, base);
+        let (base, theirs): (Arc<str>, Arc<str>) = (base.into(), theirs.into());
+        let change = FileChange {
+            path: path.to_owned(),
+            chapter,
+            kind: ChangeKind::Conflict,
+            base: base.clone(),
+            theirs: Some(theirs.clone()),
+        };
+        self.pending.insert(
+            path.to_owned(),
+            Pending {
+                base,
+                theirs: Some(theirs),
+                from_git: true,
+            },
+        );
+        session.hold_file(path, true);
+        Some(change)
     }
 
     /// Takes in what a file holds now. `disk` is `None` for a missing file.
@@ -242,6 +312,11 @@ impl FileSync {
             self.release(session, path);
             return Some(change);
         }
+        let held_from_git = (self.pending.get(path))
+            .is_some_and(|pending| pending.from_git && pending.theirs.as_deref() == Some(&*theirs));
+        if held_from_git {
+            return None;
+        }
         let base: Arc<str> = starting_point(&known.base, &known.earlier, &theirs).into();
         let merged = three_way(&base, &mine, &theirs);
         if !merged.is_clean() {
@@ -251,6 +326,7 @@ impl FileSync {
                 Pending {
                     base,
                     theirs: Some(theirs),
+                    from_git: false,
                 },
             );
             session.hold_file(path, true);
@@ -305,7 +381,14 @@ impl FileSync {
             theirs: None,
         };
         if dirty {
-            self.pending.insert(path.to_owned(), Pending { base, theirs: None });
+            self.pending.insert(
+                path.to_owned(),
+                Pending {
+                    base,
+                    theirs: None,
+                    from_git: false,
+                },
+            );
             session.hold_file(path, true);
         } else {
             session.file_removed(path);
@@ -324,7 +407,7 @@ impl FileSync {
         let Some(theirs) = pending.theirs.clone() else {
             return self.resolve_removal(session, path, choice, &mine);
         };
-        let merged = three_way(&pending.base, &mine, &theirs);
+        let merged = pending.merged(&mine, &theirs);
         let kept = match choice {
             Choice::Mine => self.keep(path, "theirs", &theirs)?,
             Choice::Theirs => self.keep(path, "mine", &mine)?,
@@ -437,7 +520,11 @@ impl FileSync {
             let (Some(theirs), Some(mine)) = (&pending.theirs, session.file_text(path)) else {
                 return false;
             };
-            three_way(&pending.base, &mine, theirs).is_clean()
+            if pending.from_git {
+                mine == **theirs
+            } else {
+                pending.merged(&mine, theirs).is_clean()
+            }
         })
     }
 

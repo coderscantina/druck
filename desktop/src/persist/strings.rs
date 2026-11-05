@@ -16,6 +16,10 @@ crate::strings! {
             "changed outside where you are writing. Nothing is lost, whichever you choose:",
             "wurde von außen dort geändert, wo du schreibst. Nichts geht verloren:"
         ),
+        OverlapBranch => (
+            "In {name}, {branch} changed the same place as you. Nothing is lost, whichever you choose:",
+            "In {name} hat {branch} dieselbe Stelle geändert wie du. Nichts geht verloren:"
+        ),
         Deleted => (
             "was deleted outside, but has text not saved yet. Nothing is lost, whichever you choose:",
             "wurde von außen gelöscht, hat aber ungesicherten Text. Nichts geht verloren:"

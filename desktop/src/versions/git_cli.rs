@@ -8,6 +8,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::strings::Key;
+
 /// Where `git` may be when an app started from the Finder has only the system's search path.
 const FOLDERS: [&str; 2] = ["/opt/homebrew/bin", "/usr/local/bin"];
 /// Local work is quick. Past this something waits for a person it cannot reach.
@@ -71,11 +73,11 @@ impl Git {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| format!("cannot run git: {error}"))?;
+            .map_err(|error| crate::t!(Key::CannotRunGit, error = error))?;
         if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
             stdin
                 .write_all(input.as_bytes())
-                .map_err(|error| format!("cannot talk to git: {error}"))?;
+                .map_err(|error| crate::t!(Key::CannotTalkToGit, error = error))?;
         }
         // On their own threads, as a child with a full pipe would never exit.
         let reader = |pipe: Option<Box<dyn std::io::Read + Send>>| {
@@ -96,10 +98,10 @@ impl Git {
                 Ok(None) if started.elapsed() > limit => {
                     child.kill().ok();
                     child.wait().ok();
-                    return Err(format!("git {} took too long and was stopped", args[0]));
+                    return Err(crate::t!(Key::GitTooLong, command = args[0]));
                 }
                 Ok(None) => thread::sleep(POLL),
-                Err(error) => return Err(format!("cannot wait for git: {error}")),
+                Err(error) => return Err(crate::t!(Key::CannotWaitForGit, error = error)),
             }
         };
         Ok(Output {

@@ -6,7 +6,7 @@ use gpui::{Context, Entity, Focusable as _, ScrollHandle, Subscription, WeakEnti
 
 use super::repo::{Branch, Overview};
 use super::strings::Key;
-use super::{RepoState, Versions, change_words, dates, repo, sync_words, ui};
+use super::{RepoState, Versions, change_words, dates, repo, ui};
 use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
@@ -79,6 +79,7 @@ impl GitPanel {
     }
 
     /// Opens the branch list, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn show_branches(&mut self, cx: &mut Context<Self>) {
         self.branches_open = true;
         cx.notify();
@@ -128,6 +129,7 @@ impl GitPanel {
         } else {
             overview.branch.clone()
         };
+        let sync = self.view.upgrade().and_then(|view| view.read(cx).sync_shown(overview));
         div()
             .id("git-branch")
             .button(tokens, crate::t!(Key::BranchGroup))
@@ -150,13 +152,13 @@ impl GitPanel {
                 cx.notify();
             }))
             .child(div().flex_1().min_w_0().truncate().child(name))
-            .child(
+            .children(sync.map(|sync| {
                 div()
                     .flex_none()
                     .text_size(tokens::TEXT_SMALL)
                     .text_color(tokens.text_quiet)
-                    .child(sync_words(overview.sync)),
-            )
+                    .child(sync)
+            }))
     }
 
     fn branch_row(
@@ -459,6 +461,9 @@ impl Render for Slot {
         }
         let tokens = Tokens::get(cx);
         div()
+            .tab_group()
+            .tab_index(tokens::TAB_RIGHT)
+            .tab_stop(false)
             .flex_none()
             .w(tokens::INSPECTOR_WIDTH)
             .h_full()

@@ -48,6 +48,8 @@ pub struct Frame {
     marks: Vec<Bounds<Pixels>>,
     /// The thin lines under the passages notes are about.
     note_lines: Vec<Bounds<Pixels>>,
+    /// The line under the passage a conflict is about.
+    conflict_lines: Vec<Bounds<Pixels>>,
     /// Misspelled words, from the rectangles a selection of them would have.
     misspelled: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
@@ -218,10 +220,14 @@ impl Element for Galley {
 
         let colors = Tokens::get(cx);
         let accent = colors.accent;
-        let selection_color = Hsla::from(accent).opacity(0.25);
-        let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
+        let selection_color = Hsla::from(accent).opacity(tokens::SELECTION_TINT);
+        let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong {
+            tokens::THUMB_STRONG
+        } else {
+            tokens::THUMB_FAINT
+        });
         let mark_color = Hsla::from(colors.added).opacity(tokens::REVIEW_TINT);
-        let misspelled_color = Hsla::from(accent).opacity(0.6);
+        let misspelled_color = Hsla::from(accent).opacity(tokens::MISSPELLED_TINT);
         let note_line_color = colors.text_faint;
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -234,6 +240,9 @@ impl Element for Galley {
             for line in &frame.note_lines {
                 window.paint_quad(fill(*line, note_line_color));
             }
+            for line in &frame.conflict_lines {
+                window.paint_quad(fill(*line, accent));
+            }
             for rectangle in &frame.selection {
                 window.paint_quad(fill(*rectangle, selection_color));
             }
@@ -243,7 +252,7 @@ impl Element for Galley {
             for word in &frame.misspelled {
                 let line = Bounds::new(
                     point(word.left(), word.bottom() - word.size.height * MISSPELLED_RISE),
-                    size(word.size.width, px(1.)),
+                    size(word.size.width, tokens::HAIRLINE),
                 );
                 window.paint_quad(fill(line, misspelled_color));
             }
@@ -258,7 +267,7 @@ impl Element for Galley {
             }
             paint_gutter(frame, window, cx);
             if let Some(bar) = frame.scrollbar {
-                window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(px(3.)));
+                window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(tokens::BOX_RADIUS));
             }
             if focused
                 && caret_on
@@ -285,6 +294,7 @@ impl Element for Galley {
         }
         self.view.update(cx, |view, _| {
             view.trace.painted();
+            #[cfg(any(debug_assertions, feature = "measure"))]
             view.note_painted();
         });
     }
@@ -319,15 +329,15 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
         for (chip, look) in &line.chips {
             let color = match look {
                 ChipLook::Mark => continue,
-                ChipLook::Label => frame.link.opacity(0.12),
-                ChipLook::Error => frame.error.opacity(0.14),
+                ChipLook::Label => frame.link.opacity(tokens::CHIP_TINT),
+                ChipLook::Error => frame.error.opacity(tokens::CHIP_ERROR_TINT),
                 ChipLook::Removed => frame.removed.opacity(tokens::REVIEW_TINT),
             };
             let bounds = Bounds::new(
                 point(column.text_left + chip.origin.x, block.top + chip.origin.y),
                 chip.size,
             );
-            window.paint_quad(fill(bounds, color).corner_radii(px(3.)));
+            window.paint_quad(fill(bounds, color).corner_radii(tokens::BOX_RADIUS));
         }
     }
     if frame.source {
@@ -337,13 +347,16 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
     match block.kind {
         BlockKind::Code => {
             let bounds = Bounds::new(
-                point(column.text_left - px(6.), block.top),
-                size(column.text_width + px(12.), height),
+                point(column.text_left - tokens::CODE_OUTDENT, block.top),
+                size(column.text_width + tokens::CODE_OUTDENT * 2., height),
             );
             window.paint_quad(fill(bounds, frame.code_background));
         }
         BlockKind::Quote => {
-            let bounds = Bounds::new(point(column.text_left + px(2.), block.top), size(px(2.), height));
+            let bounds = Bounds::new(
+                point(column.text_left + tokens::QUOTE_RULE_X, block.top),
+                size(tokens::QUOTE_RULE_WIDTH, height),
+            );
             window.paint_quad(fill(bounds, frame.rule));
         }
         _ => {}
@@ -433,14 +446,19 @@ impl EditorView {
             .flat_map(|passage| &passage.added)
             .flat_map(|added| self.range_rectangles(added.clone(), &blocks, true))
             .collect();
+        let rule_under = |passage: Bounds<Pixels>| {
+            Bounds::new(
+                point(passage.left(), passage.bottom() - tokens::NOTE_RULE),
+                size(passage.size.width, tokens::NOTE_RULE),
+            )
+        };
         let note_lines = (self.advice_anchors().into_iter())
             .flat_map(|anchor| self.range_rectangles(anchor, &blocks, true))
-            .map(|passage| {
-                Bounds::new(
-                    point(passage.left(), passage.bottom() - tokens::NOTE_RULE),
-                    size(passage.size.width, tokens::NOTE_RULE),
-                )
-            })
+            .map(rule_under)
+            .collect();
+        let conflict_lines = (self.conflict_mark.clone().into_iter())
+            .flat_map(|mark| self.range_rectangles(mark, &blocks, true))
+            .map(rule_under)
             .collect();
         let misspelled = self
             .spelling_ranges()
@@ -459,6 +477,7 @@ impl EditorView {
             selection,
             marks,
             note_lines,
+            conflict_lines,
             misspelled,
             caret,
             hitbox,
