@@ -4,7 +4,7 @@
 use gpui::Focusable;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, Subscription, Window, div, point, px, relative, svg,
+    AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, Subscription, Window, div, point, relative, svg,
 };
 
 use super::{CONTEXT, NextField, PreviousField, RichFloat, card, field_label, small_button};
@@ -727,7 +727,7 @@ impl EditorView {
                             .on_click(cx.listener(|this, _, window, cx| this.commit_rich_float(window, cx))),
                     ),
             );
-        let max_height = self.column.viewport.size.height - px(16.);
+        let max_height = self.column.viewport.size.height - tokens::SPACE_4;
         let element = card(&tokens)
             .id("grid-float")
             .key_context(CONTEXT)
@@ -777,7 +777,7 @@ impl EditorView {
             .into_any_element();
         let x = self.column.text_left - tokens::SPACE_2;
         let viewport = self.column.viewport;
-        let y = top.max(viewport.top()).min(viewport.bottom() - px(120.));
+        let y = top.max(viewport.top()).min(viewport.bottom() - tokens::GRID_MIN_ROOM);
         Some((element, point(x, y)))
     }
 

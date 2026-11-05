@@ -629,7 +629,7 @@ impl EditorView {
         let wanted = match &self.float {
             Float::Rich(RichFloat::Note(note)) => size(note::WIDTH, note.height(cx)),
             Float::Rich(RichFloat::Picker(_)) => size(picker::WIDTH, tokens::PICKER_CARD_HEIGHT),
-            _ => size(tokens::LINK_POPUP_WIDTH, px(90.)),
+            _ => size(tokens::LINK_POPUP_WIDTH, tokens::LINK_POPUP_HEIGHT),
         };
         let float = std::mem::take(&mut self.float);
         let built = match &float {

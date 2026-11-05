@@ -55,6 +55,8 @@ crate::strings! {
         FieldDate => ("Date", "Datum"),
         FieldLanguage => ("Language", "Sprache"),
         NoCover => ("No cover", "Kein Cover"),
+        FieldBibliography => ("Bibliography", "Literatur"),
+        NoBibliography => ("No bibliography", "Keine Literatur"),
         Choose => ("Choose\u{2026}", "Auswählen\u{2026}"),
         Remove => ("Remove", "Entfernen"),
         Isbn => ("ISBN", "ISBN"),

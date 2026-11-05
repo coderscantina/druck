@@ -780,9 +780,9 @@ impl EntityInputHandler for TextInput {
         let (start, height) = Self::position(shaped, range.start);
         let (end, _) = Self::position(shaped, range.end);
         let width = if end.y == start.y {
-            (end.x - start.x).max(px(1.))
+            (end.x - start.x).max(tokens::HAIRLINE)
         } else {
-            px(1.)
+            tokens::HAIRLINE
         };
         Some(Bounds::new(start, size(width, height)))
     }
@@ -848,7 +848,7 @@ impl Element for InputElement {
                     gpui::AvailableSpace::Definite(width) => Some(width),
                     _ => None,
                 })
-                .unwrap_or(px(200.));
+                .unwrap_or(tokens::INPUT_MEASURE_DEFAULT);
             let shaped = input.update(cx, |input, cx| input.shape(width, window, cx));
             let height = shaped.lines.last().map_or(shaped.line_height, |line| {
                 line.top + shaped.line_height * line.rows.len() as f32
@@ -902,7 +902,7 @@ impl Element for InputElement {
                 for rectangle in selection_rectangles(&shaped, selection.range(), bounds.size.width) {
                     window.paint_quad(fill(
                         Bounds::new(point(rectangle.origin.x - scroll_x, rectangle.origin.y), rectangle.size),
-                        accent.opacity(0.25),
+                        accent.opacity(tokens::SELECTION_TINT),
                     ));
                 }
             }
@@ -915,7 +915,7 @@ impl Element for InputElement {
             if focused && selection.is_empty() {
                 let (position, height) = TextInput::position(&shaped, selection.head);
                 window.paint_quad(fill(
-                    Bounds::new(point(position.x - scroll_x, position.y), size(px(1.), height)),
+                    Bounds::new(point(position.x - scroll_x, position.y), size(tokens::HAIRLINE, height)),
                     accent,
                 ));
             }
@@ -925,8 +925,8 @@ impl Element for InputElement {
             let caret = TextInput::position(&shaped, input.selection.head).0.x - shaped.origin.x;
             let before = input.scroll_x;
             if !multiline {
-                if caret - input.scroll_x > bounds.size.width - px(4.) {
-                    input.scroll_x = caret - bounds.size.width + px(4.);
+                if caret - input.scroll_x > bounds.size.width - tokens::INPUT_CARET_ROOM {
+                    input.scroll_x = caret - bounds.size.width + tokens::INPUT_CARET_ROOM;
                 } else if caret < input.scroll_x {
                     input.scroll_x = caret;
                 }
@@ -978,7 +978,7 @@ impl TextInput {
         };
         let (font, size) = self.book_type.clone().unwrap_or_else(|| {
             let size = if self.multiline {
-                tokens::TEXT_SMALL + px(1.)
+                tokens::TEXT_SMALL + tokens::HAIRLINE
             } else {
                 tokens::TEXT_BODY
             };
@@ -1034,7 +1034,7 @@ fn runs(length: usize, marked: Option<Range<usize>>, color: Hsla, font: &gpui::F
         color,
         background_color: None,
         underline: underline.then_some(UnderlineStyle {
-            thickness: px(1.),
+            thickness: tokens::HAIRLINE,
             color: Some(color),
             wavy: false,
         }),
@@ -1086,7 +1086,8 @@ fn selection_rectangles(shaped: &Shaped, range: Range<usize>, width: Pixels) -> 
             }
             let left = layout.x_for_index(start - line.range.start) - layout.x_for_index(row.start);
             let right = if continues {
-                (width.max(layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start)) + px(4.))
+                (width.max(layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start))
+                    + tokens::INPUT_CARET_ROOM)
                     .max(left)
             } else {
                 layout.x_for_index(end - line.range.start) - layout.x_for_index(row.start)

@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(any(debug_assertions, feature = "measure"))]
 use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
@@ -62,6 +63,7 @@ impl<T> Scheduler<T> {
         (number, job, cancel)
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn is_running(&self) -> bool {
         self.running.is_some()
     }
@@ -91,6 +93,7 @@ pub struct Layout {
     pub book_type: BookType,
     /// The font families the styles use, for the Fonts tab.
     pub fonts: Vec<FontUse>,
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub timing: Timing,
 }
 
@@ -192,6 +195,7 @@ impl BookType {
 }
 
 /// Where a layout's time went.
+#[cfg(any(debug_assertions, feature = "measure"))]
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
     pub configure: Duration,
@@ -270,11 +274,14 @@ impl Typesetter {
     }
 
     fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
+        #[cfg(any(debug_assertions, feature = "measure"))]
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;
         let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
+        #[cfg(any(debug_assertions, feature = "measure"))]
         let configured_at = Instant::now();
         let laid = configured.layout(&LayoutOptions { source_map: true })?;
+        #[cfg(any(debug_assertions, feature = "measure"))]
         let typeset = Instant::now();
         let config = resolved_config::of(&configured);
         let warnings = unlisted
@@ -284,6 +291,7 @@ impl Typesetter {
             .cloned()
             .collect();
         let painter = same_fonts(&mut self.painter, &laid);
+        #[cfg(any(debug_assertions, feature = "measure"))]
         let fingerprints_from = Instant::now();
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
@@ -293,6 +301,7 @@ impl Typesetter {
             painter,
             fingerprints,
             warnings,
+            #[cfg(any(debug_assertions, feature = "measure"))]
             timing: Timing {
                 configure: configured_at - start,
                 typeset: typeset - configured_at,

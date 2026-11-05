@@ -200,6 +200,7 @@ fn body_of_page(laid: &Layout, page: usize) -> Option<Rect> {
 }
 
 /// The block of the first text on the pages that holds `words`. For scripted runs, which have no pointer.
+#[cfg(any(debug_assertions, feature = "measure"))]
 pub fn block_with_text(laid: &Layout, words: &str) -> Option<BlockAt> {
     laid.pages().iter().enumerate().find_map(|(page, sheet)| {
         sheet.items.iter().find_map(|item| match item {
@@ -212,6 +213,7 @@ pub fn block_with_text(laid: &Layout, words: &str) -> Option<BlockAt> {
 }
 
 /// A paragraph at about the middle of a page, or of the next page that has one. For scripted runs.
+#[cfg(any(debug_assertions, feature = "measure"))]
 pub fn paragraph_on_page(laid: &Layout, page: usize) -> Option<(usize, BlockAt)> {
     let pages = laid.pages();
     let first = page.checked_rem(pages.len())?;

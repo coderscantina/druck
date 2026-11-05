@@ -273,7 +273,7 @@ impl EditorView {
         let clipped = rows > COMMENT_LINES && !open;
         let fade = gpui::linear_gradient(
             180.,
-            gpui::linear_color_stop(gpui::Hsla::from(tokens.canvas).opacity(0.), 0.),
+            gpui::linear_color_stop(gpui::Hsla::from(tokens.canvas).opacity(tokens::CLEAR), 0.),
             gpui::linear_color_stop(tokens.canvas, 1.),
         );
         let toggled = shown.clone();
@@ -624,7 +624,7 @@ impl Render for NoteField {
             move |bounds: Bounds<Pixels>, _, window, cx| {
                 window.handle_input(&focus, ElementInputHandler::new(bounds, this.clone()), cx);
                 for rectangle in selection.into_iter().flatten() {
-                    window.paint_quad(fill(rectangle, accent.opacity(0.25)));
+                    window.paint_quad(fill(rectangle, accent.opacity(tokens::SELECTION_TINT)));
                 }
                 let mut y = bounds.top();
                 for line in lines.iter() {
@@ -640,7 +640,7 @@ impl Render for NoteField {
                     y += line.size(LINE_HEIGHT).height;
                 }
                 if let Some(caret) = caret {
-                    window.paint_quad(fill(Bounds::new(caret, size(px(1.), LINE_HEIGHT)), accent));
+                    window.paint_quad(fill(Bounds::new(caret, size(tokens::HAIRLINE, LINE_HEIGHT)), accent));
                 }
             },
         )
@@ -757,7 +757,7 @@ impl NoteField {
                         let x1 = layout.x_for_index(b) - row_x;
                         rectangles.push(Bounds::new(
                             point(origin.x + x0, y + LINE_HEIGHT * row as f32),
-                            size((x1 - x0).max(px(4.)), LINE_HEIGHT),
+                            size((x1 - x0).max(tokens::NOTE_SELECTION_MIN), LINE_HEIGHT),
                         ));
                     }
                     row_start = row_end;
@@ -846,7 +846,10 @@ impl EntityInputHandler for NoteField {
     ) -> Option<Bounds<Pixels>> {
         let text = self.shown(cx);
         let range = from_utf16(&text, &range_utf16);
-        Some(Bounds::new(self.position_of(range.start), size(px(1.), LINE_HEIGHT)))
+        Some(Bounds::new(
+            self.position_of(range.start),
+            size(tokens::HAIRLINE, LINE_HEIGHT),
+        ))
     }
 
     fn character_index_for_point(

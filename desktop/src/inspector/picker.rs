@@ -52,8 +52,7 @@ impl ThemePicker {
             editor,
             preview,
             model,
-            // `DRUCK_PICKER=1` opens the menu, for screenshots.
-            open: crate::gate::var("DRUCK_PICKER").is_some(),
+            open: false,
             expanded: None,
             naming: None,
             error: None,

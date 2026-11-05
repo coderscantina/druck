@@ -400,7 +400,7 @@ fn sheet(sheet: &Sheet, aspect: f64, tokens: &Tokens) -> Div {
         .bg(tokens.sheet)
         .border_1()
         .border_color(tokens.divider)
-        .child(place(sheet.prose).bg(tokens.text_faint).opacity(0.45))
+        .child(place(sheet.prose).bg(tokens.text_faint).opacity(chrome::SKETCH_OPACITY))
         .when_some(sheet.gap, |page, gap| page.child(place(gap).bg(tokens.sheet)))
         .child(place(sheet.frame).border_1().border_color(tokens.divider))
 }

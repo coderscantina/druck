@@ -207,7 +207,7 @@ impl StyleIndex {
             }),
             cx.observe(&model, |_, _, cx| cx.notify()),
         ];
-        let mut index = Self {
+        Self {
             model,
             search,
             open: None,
@@ -219,20 +219,21 @@ impl StyleIndex {
             heads,
             source,
             _subscriptions: subscriptions,
-        };
-        // `DRUCK_SECTION` opens a section for screenshots, by its name in the theme or `body` and `headings`.
-        if let Some(name) = crate::gate::var("DRUCK_SECTION") {
-            let found = SECTIONS.iter().find(|section| match section.panel {
-                Panel::Body => name == "body",
-                Panel::Headings => name == "headings",
-                Panel::Source => name == "source",
-                _ => section.key == Some(name.as_str()),
-            });
-            if let Some(found) = found {
-                index.open_section(*found, window, cx);
-            }
         }
-        index
+    }
+
+    /// Opens a section by its name in the theme, or `body`, `headings`, or `source`. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn open_section_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let found = SECTIONS.iter().find(|section| match section.panel {
+            Panel::Body => name == "body",
+            Panel::Headings => name == "headings",
+            Panel::Source => name == "source",
+            _ => section.key == Some(name),
+        });
+        if let Some(found) = found {
+            self.open_section(*found, window, cx);
+        }
     }
 
     /// Opens the section a style belongs to, at that style.

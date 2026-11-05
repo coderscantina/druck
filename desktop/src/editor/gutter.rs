@@ -133,7 +133,7 @@ impl EditorView {
         if let Some(marker) = self
             .markers
             .iter()
-            .find(|marker| marker.bounds.dilate(px(3.)).contains(&position))
+            .find(|marker| marker.bounds.dilate(tokens::MARKER_HIT).contains(&position))
         {
             let expanded = &mut self.slots[marker.block].expanded;
             *expanded = !*expanded;
@@ -247,7 +247,7 @@ impl EditorView {
                 Some(top + self.block_height(last))
             })?;
         Some(Bounds::new(
-            point(self.column.text_left, y - px(1.)),
+            point(self.column.text_left, y - tokens::HAIRLINE),
             size(self.column.text_width, tokens::KEY_BAR),
         ))
     }
@@ -275,7 +275,7 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
         let color: Hsla = if block.hovered {
             frame.ink
         } else {
-            frame.quiet.opacity(0.55)
+            frame.quiet.opacity(tokens::GUTTER_REST)
         };
         window
             .paint_svg(bounds, icon.into(), None, TransformationMatrix::unit(), color, cx)

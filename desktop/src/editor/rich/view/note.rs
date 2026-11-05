@@ -40,7 +40,7 @@ impl NoteFloat {
     /// About how tall the card comes out, to place it.
     pub fn height(&self, cx: &gpui::App) -> gpui::Pixels {
         let lines = self.input.read(cx).text().lines().count().max(1) as f32;
-        gpui::px(100.) + gpui::px(22.) * lines
+        tokens::NOTE_CARD_BASE + tokens::NOTE_CARD_LINE * lines
     }
 
     pub fn anchor(&self) -> usize {

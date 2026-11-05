@@ -342,7 +342,9 @@ impl Render for SearchPanel {
                             .child(div().flex_1().min_w_0().child(self.replacement.clone()))
                             .child(
                                 ui::button(&tokens, "replace-all", crate::t!(Key::ReplaceAll))
-                                    .when(!replacing || hits == 0, |button| button.opacity(0.4).cursor_default())
+                                    .when(!replacing || hits == 0, |button| {
+                                        button.opacity(tokens::DISABLED_OPACITY).cursor_default()
+                                    })
                                     .when(replacing && hits > 0, |button| {
                                         button.on_click(cx.listener(|_, _, _, cx| cx.emit(SearchEvent::ReplaceAll)))
                                     }),

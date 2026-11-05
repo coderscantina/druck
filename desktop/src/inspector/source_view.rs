@@ -192,7 +192,7 @@ impl SourceView {
             })
             .when_some(reference, |column, text| {
                 column
-                    .child(widgets::section(tokens, crate::t!(Key::DefaultWord).to_uppercase()))
+                    .child(widgets::section(tokens, crate::t!(Key::DefaultWord).to_uppercase()).px_0())
                     .child(
                         div()
                             .font_family(chrome::FONT_MONO)

@@ -17,16 +17,25 @@
 //!
 //! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
 //! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
+//!
+//! This whole module, and every hook that reads a variable, is left out of a build without `debug_assertions` or the
+//! `measure` feature. [`apply`] runs once after the workspace has mounted, and sets what the variables ask for from
+//! outside the views.
+//!
+//! For captures, no window needs to be frontmost or key. `DRUCK_GATE=2` floats on the last display without focus, and these
+//! need no keystrokes at all: `DRUCK_MODE`, `DRUCK_TAB`, `DRUCK_CHAPTER`, `DRUCK_SELECT`, `DRUCK_SECTION`, `DRUCK_SLIP`,
+//! `DRUCK_VERSIONS`, `DRUCK_VERSIONS_RUN`, and the scripted actions of `DRUCK_AGENT_SCRIPT`. Keys sent by
+//! `CGEventPostToPid` reach the process without it being frontmost, and never reach another window.
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use gpui::{AnyWindowHandle, App, AsyncApp, Entity, EntityInputHandler};
+use gpui::{AnyWindowHandle, App, AsyncApp, Context, Entity, EntityInputHandler, Window};
 
 use crate::editor::EditorView;
-use crate::inspector::InspectorView;
-use crate::preview::{PreviewView, memory};
-use crate::workspace::{Mode, Workspace};
+use crate::inspector::{InspectorView, Tab};
+use crate::preview::{PreviewView, Typeset, memory};
+use crate::workspace::{Mode, Parts, Workspace};
 
 /// Bursts of typing at about 130 words a minute, with pauses that let a refresh start.
 const BURSTS: usize = 60;
@@ -53,13 +62,127 @@ struct Gate {
     letters: Cell<usize>,
 }
 
-/// A variable that changes what the app does, for screenshots and measurements. A debug build or a build with the
-/// `measure` feature reads them. Any other build, so any app that ships, has no hidden behaviour.
+/// A variable that changes what the app does, for screenshots and measurements.
 pub fn var(name: &str) -> Option<String> {
-    if cfg!(any(debug_assertions, feature = "measure")) {
-        std::env::var(name).ok()
-    } else {
-        None
+    std::env::var(name).ok()
+}
+
+/// Whether this run is a measurement, whose window floats without focus and which keeps no settings.
+pub fn measuring() -> bool {
+    var("DRUCK_GATE").is_some()
+}
+
+/// What a run asks for with no document open.
+pub fn at_launch(cx: &mut App) {
+    // `DRUCK_SETTINGS` opens the settings window on a category.
+    if let Some(category) = var("DRUCK_SETTINGS") {
+        crate::settings::window::open(Some(&category), cx);
+    }
+}
+
+/// What a run asks for once a document's workspace has mounted, for screenshots and measurements.
+pub fn apply(parts: &Parts, workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Workspace>) {
+    let parts = parts.clone();
+    let handle = window.window_handle();
+    window.defer(cx, move |window, cx| {
+        apply_to_panes(&parts, window, cx);
+        apply_to_workspace(&parts, &workspace, window, cx);
+        crate::palette::apply_gate(window, cx);
+        crate::versions::apply_gate(window, cx);
+        workspace.update(cx, |_, cx| crate::agent::apply_gate(window, cx));
+        start(
+            workspace.clone(),
+            parts.editor.clone(),
+            parts.preview.clone(),
+            parts.inspector.clone(),
+            handle,
+            cx,
+        );
+    });
+}
+
+fn apply_to_panes(parts: &Parts, window: &mut Window, cx: &mut App) {
+    if var("DRUCK_TICKS").is_some() {
+        parts.ticks.update(cx, |ticks, cx| ticks.pin_open(cx));
+    }
+    if var("DRUCK_GUTTER").is_some() {
+        parts.editor.update(cx, |editor, cx| editor.pin_gutter(cx));
+    }
+    parts.inspector.update(cx, |inspector, cx| {
+        if let Some(tab) = var("DRUCK_TAB").and_then(|name| Tab::named(&name)) {
+            inspector.show(tab, cx);
+        }
+        if var("DRUCK_PICKER").is_some() {
+            inspector.choose_theme(cx);
+        }
+        if let Some(name) = var("DRUCK_SECTION") {
+            inspector.open_section_named(&name, window, cx);
+        }
+        if let Some(family) = var("DRUCK_FONT") {
+            inspector.select_font(family, cx);
+        }
+    });
+    if var("DRUCK_PROBE_EDIT").is_some() {
+        let model = parts.inspector.read(cx).model().clone();
+        let change = crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into());
+        model.update(cx, |model, cx| {
+            model.change(change, cx).ok();
+        });
+    }
+    if var("DRUCK_SPECIMEN").is_some() {
+        parts.preview.update(cx, |preview, cx| preview.set_specimen(true, cx));
+    }
+}
+
+fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut Window, cx: &mut App) {
+    let mode = match var("DRUCK_MODE").as_deref() {
+        Some("write") => Some(Mode::Write),
+        Some("publish") => Some(Mode::Publish),
+        _ => None,
+    };
+    if let Some(mode) = mode {
+        workspace.update(cx, |workspace, cx| workspace.show(mode, window, cx));
+    }
+    if let Some(chapter) = var("DRUCK_CHAPTER").and_then(|chapter| chapter.parse::<usize>().ok()) {
+        let id = parts.editor.read(cx).session().book().get(chapter).copied();
+        if let Some(id) = id {
+            parts
+                .editor
+                .update(cx, |editor, cx| editor.show_chapter(id, window, cx));
+        }
+    }
+    // After the first frame, which shapes the chapter: a selection before it scrolls to no place and the toolbar has no
+    // bounds to stand at.
+    if let Some(word) = var("DRUCK_SELECT") {
+        let editor = parts.editor.clone();
+        window.on_next_frame(move |window, cx| {
+            editor.update(cx, |editor, cx| {
+                if let Some(at) = editor.text().find(&word) {
+                    editor.select_for_screenshot(at..at + word.len(), window, cx);
+                }
+            });
+        });
+    }
+    // `DRUCK_SLIP` opens a slip on a paragraph with these words once there are pages.
+    if let Some(words) = var("DRUCK_SLIP") {
+        let mut words = Some(words);
+        window
+            .subscribe(&parts.preview, cx, {
+                let (workspace, parts) = (workspace.clone(), parts.clone());
+                move |_, _: &Typeset, window, cx| {
+                    let Some(words) = words.take() else {
+                        return;
+                    };
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.open_slip_on(&words, window, cx);
+                        if var("DRUCK_SLIP_BREAK").is_some() {
+                            workspace.toggle_page_break_for_gate(window, cx);
+                        }
+                    });
+                    crate::preview::slip_control::try_from_gate(&parts, window, cx);
+                }
+            })
+            .detach();
     }
 }
 
@@ -397,7 +520,6 @@ impl Gate {
             if found.is_none() {
                 eprintln!("gate: edit {edit} (page {page}) is on no page: {word}");
             }
-            #[cfg(any(debug_assertions, feature = "measure"))]
             self.close_slip(cx);
             self.sleep(Duration::from_millis(40), cx).await;
         }
@@ -405,7 +527,6 @@ impl Gate {
         report("slip edit, last key to ready pages", to_pages);
         eprintln!("gate: slips that did not open: {lost_opens}");
         self.compare(&expected, "after the edits", cx);
-        #[cfg(any(debug_assertions, feature = "measure"))]
         self.moving_paragraph(cx).await;
         self.compare(&expected, "after the page break came away", cx);
         // Autosave runs after a pause.
@@ -484,12 +605,10 @@ impl Gate {
         eprintln!(
             "gate: zooming out made a contact sheet: {contact}; a click on it went back to a spread: {spread_again}"
         );
-        #[cfg(any(debug_assertions, feature = "measure"))]
         self.close_slip(cx);
         self.sleep(Duration::from_millis(100), cx).await;
     }
 
-    #[cfg(any(debug_assertions, feature = "measure"))]
     fn close_slip(&self, cx: &mut AsyncApp) {
         let workspace = self.workspace.clone();
         self.window
@@ -524,7 +643,6 @@ impl Gate {
     }
 
     /// A page break before a paragraph moves it to another page: the slip goes with it. Taking it away restores the bytes.
-    #[cfg(any(debug_assertions, feature = "measure"))]
     async fn moving_paragraph(&self, cx: &mut AsyncApp) {
         let Some(_) = self.open_slip(40, cx).await else {
             eprintln!("gate: no paragraph to move");
@@ -561,7 +679,6 @@ impl Gate {
         toggle(self, cx);
         self.sleep(Duration::from_millis(250), cx).await;
         self.settle(cx).await;
-        #[cfg(any(debug_assertions, feature = "measure"))]
         self.close_slip(cx);
     }
 

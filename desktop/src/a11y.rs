@@ -6,7 +6,7 @@
 use gpui::prelude::*;
 use gpui::{BoxShadow, Div, Role, SharedString, Stateful, Toggled, point, px};
 
-use crate::tokens::Tokens;
+use crate::tokens::{self, Tokens};
 
 pub trait Control: Sized {
     /// In the tab order, with a role and a label for assistive technology.
@@ -27,7 +27,7 @@ impl Control for Stateful<Div> {
             color: tokens.accent.into(),
             offset: point(px(0.), px(0.)),
             blur_radius: px(0.),
-            spread_radius: px(2.),
+            spread_radius: tokens::FOCUS_RING,
             inset: true,
         };
         self.role(role)

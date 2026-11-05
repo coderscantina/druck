@@ -230,12 +230,12 @@ impl GalleyStyle {
             color,
             background_color: style.code.then_some(self.code_background),
             underline: (style.marked || style.link || style.underline).then_some(UnderlineStyle {
-                thickness: px(1.),
+                thickness: tokens::HAIRLINE,
                 color: Some(color),
                 wavy: false,
             }),
             strikethrough: (style.strike || style.chip == Some(ChipLook::Removed)).then_some(StrikethroughStyle {
-                thickness: px(1.),
+                thickness: tokens::HAIRLINE,
                 color: Some(color),
             }),
         }
@@ -263,8 +263,8 @@ impl GalleyStyle {
 }
 
 /// Where the text stands in the pane: centred at its measure, keeping room for the gutter on its left. Margin notes stand
-/// at its right, and the text moves left for them only if the window is too narrow to hold both, then narrows, and with no
-/// room at all they do not show.
+/// at its right, and the text moves left for them only if the window is too narrow to hold both. The text keeps its measure
+/// before the notes keep their place: below measure plus margin they do not show, and the gutter's marker stands for them.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Column {
     pub viewport: Bounds<Pixels>,
@@ -279,7 +279,7 @@ impl Column {
         let left = viewport.left() + tokens::GUTTER_WIDTH;
         let right = viewport.right() - tokens::TEXT_MARGIN_RIGHT;
         let note_room = tokens::NOTE_GAP + tokens::NOTE_WIDTH;
-        let notes_fit = notes && right - left - note_room >= tokens::TEXT_MIN_WIDTH;
+        let notes_fit = notes && right - left - note_room >= measure.max(tokens::TEXT_MIN_WIDTH);
         let room = right - left - if notes_fit { note_room } else { px(0.) };
         let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH);
         let centred = viewport.left() + (viewport.size.width - text_width) * 0.5;
@@ -387,7 +387,7 @@ impl BlockLayout {
     /// The height of the block's first line that shows, for what stands beside it in the gutter.
     pub fn first_line_height(&self) -> Pixels {
         if self.whole.is_some() {
-            return px(20.);
+            return tokens::SOURCE_LINE_FALLBACK;
         }
         self.lines
             .iter()
@@ -456,7 +456,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             BlockKind::List => unit * display.nesting as f32 + if display.bullet.is_some() { hang } else { px(0.) },
             _ => quote_indent,
         };
-        let wrap = (width - x).max(px(40.));
+        let wrap = (width - x).max(tokens::WRAP_MIN);
         let mut runs: Vec<TextRun> = display
             .runs
             .iter()
@@ -598,7 +598,7 @@ fn indent_rows(shaped: &mut WrappedLine, breaks: &[usize], indent: Pixels) {
 }
 
 /// How far a chip's box stands off its text, and how much of the line it leaves free above and below.
-const CHIP_PAD: Pixels = px(2.);
+const CHIP_PAD: Pixels = tokens::HAIR_GAP;
 const CHIP_INSET: f32 = 0.08;
 
 /// The boxes behind a line's chips. A chip that wraps has one per row.
@@ -757,15 +757,16 @@ mod tests {
     }
 
     #[test]
-    fn a_narrow_window_moves_the_text_for_its_notes_then_narrows_it_then_drops_them() {
+    fn a_narrow_window_moves_the_text_for_its_notes_then_drops_them_before_narrowing_it() {
         let moved = Column::place(viewport(860.), px(460.), true);
         assert!(moved.text_left < px(200.));
         assert_eq!(moved.text_width, px(460.));
-        let narrowed = Column::place(viewport(600.), px(460.), true);
-        assert_eq!(narrowed.text_left, tokens::GUTTER_WIDTH);
-        assert!(narrowed.text_width < px(460.));
-        assert!(narrowed.note_left.is_some());
-        let dropped = Column::place(viewport(400.), px(460.), true);
+        assert!(moved.note_left.is_some());
+        let dropped = Column::place(viewport(620.), px(460.), true);
         assert_eq!(dropped.note_left, None);
+        assert_eq!(dropped.text_width, px(460.));
+        let narrowed = Column::place(viewport(400.), px(460.), true);
+        assert_eq!(narrowed.note_left, None);
+        assert!(narrowed.text_width < px(460.));
     }
 }

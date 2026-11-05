@@ -730,7 +730,7 @@ impl EditorView {
         let rows = count.min(tokens::MENU_MAX_ROWS) as f32;
         size(
             tokens::MENU_WIDTH,
-            tokens::MENU_ROW_HEIGHT * rows + tokens::SPACE_1 * 2. + px(2.),
+            tokens::MENU_ROW_HEIGHT * rows + tokens::SPACE_1 * 2. + tokens::CARD_BORDERS,
         )
     }
 
@@ -879,7 +879,7 @@ impl EditorView {
                 };
                 let wanted = size(
                     tokens::LINK_POPUP_WIDTH,
-                    tokens::FIELD_HEIGHT + tokens::SPACE_2 + px(2.),
+                    tokens::FIELD_HEIGHT + tokens::SPACE_2 + tokens::CARD_BORDERS,
                 );
                 let origin = placed(target, wanted, area);
                 vec![(self.link_popup(link, cx).into_any_element(), origin)]

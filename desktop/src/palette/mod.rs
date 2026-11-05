@@ -54,22 +54,29 @@ fn open(kind: Kind, cx: &mut App) {
     });
 }
 
-/// Mounts the palette as a layer over the window. `DRUCK_PALETTE=chapters` or `commands` opens it, for screenshots.
+/// Mounts the palette as a layer over the window.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let workspace = cx.entity().downgrade();
     let palette = cx.new(|cx| Palette::new(parts.clone(), workspace, window, cx));
     cx.set_global(Current(palette.downgrade(), window.window_handle()));
-    slots.overlays.push(palette.clone().into());
-    if let Some(name) = crate::gate::var("DRUCK_PALETTE") {
-        let kind = if name == "commands" {
-            Kind::Commands
-        } else {
-            Kind::Chapters
-        };
-        window.defer(cx, move |window, cx| {
-            palette.update(cx, |palette, cx| palette.open(kind, window, cx));
-        });
-    }
+    slots.overlays.push(palette.into());
+}
+
+/// `DRUCK_PALETTE=chapters` or `commands` opens it, for screenshots.
+#[cfg(any(debug_assertions, feature = "measure"))]
+pub fn apply_gate(window: &mut Window, cx: &mut App) {
+    let Some(name) = crate::gate::var("DRUCK_PALETTE") else {
+        return;
+    };
+    let Some(palette) = cx.try_global::<Current>().and_then(|current| current.0.upgrade()) else {
+        return;
+    };
+    let kind = if name == "commands" {
+        Kind::Commands
+    } else {
+        Kind::Chapters
+    };
+    palette.update(cx, |palette, cx| palette.open(kind, window, cx));
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -22,6 +22,9 @@ pub struct TicksView {
     open: bool,
     opening: Task<()>,
     scroll: ScrollHandle,
+    /// Stays open whatever the pointer does, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pinned: bool,
 }
 
 impl TicksView {
@@ -29,11 +32,28 @@ impl TicksView {
         Self {
             data: SidebarData::default(),
             marks: HashMap::new(),
-            // `DRUCK_TICKS=1` opens the card, for screenshots.
-            open: crate::gate::var("DRUCK_TICKS").is_some(),
+            open: false,
+            #[cfg(any(debug_assertions, feature = "measure"))]
+            pinned: false,
             opening: Task::ready(()),
             scroll: ScrollHandle::new(),
         }
+    }
+
+    fn close(&mut self) {
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        if self.pinned {
+            return;
+        }
+        self.open = false;
+    }
+
+    /// Opens the card and keeps it open, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn pin_open(&mut self, cx: &mut Context<Self>) {
+        self.open = true;
+        self.pinned = true;
+        cx.notify();
     }
 
     pub fn set_data(&mut self, data: SidebarData, cx: &mut Context<Self>) {
@@ -51,9 +71,7 @@ impl TicksView {
     fn hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
         if !hovered {
             self.opening = Task::ready(());
-            if crate::gate::var("DRUCK_TICKS").is_none() {
-                self.open = false;
-            }
+            self.close();
             cx.notify();
             return;
         }
@@ -119,9 +137,7 @@ impl TicksView {
                     .when(selected, |row| row.bg(tokens.raised))
                     .hover(|row| row.bg(tokens.raised))
                     .on_click(cx.listener(move |ticks, _, _, cx| {
-                        if crate::gate::var("DRUCK_TICKS").is_none() {
-                            ticks.open = false;
-                        }
+                        ticks.close();
                         cx.emit(SidebarEvent::Select(id));
                     }))
                     .child(row_lead(tokens, chapter, false, selected))

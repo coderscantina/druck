@@ -129,7 +129,7 @@ impl GridShape {
         let rule = |y: Pixels, strong: bool, window: &mut Window| {
             let bounds = Bounds::new(
                 point(origin.x, origin.y + y),
-                size(self.width, if strong { px(1.) } else { px(0.5) }),
+                size(self.width, if strong { tokens::HAIRLINE } else { tokens::TABLE_RULE }),
             );
             window.paint_quad(fill(bounds, frame.rule));
         };
@@ -149,7 +149,9 @@ impl FigureShape {
         let box_origin = point(origin.x + self.x, origin.y);
         if let Some(problem) = &self.problem {
             let bounds = Bounds::new(box_origin, self.image);
-            window.paint_quad(fill(bounds, frame.rule.opacity(0.25)).corner_radii(px(4.)));
+            window.paint_quad(
+                fill(bounds, frame.rule.opacity(tokens::FIGURE_LOADING_TINT)).corner_radii(tokens::CHIP_RADIUS),
+            );
             paint_lines(
                 problem,
                 box_origin.x + tokens::CELL_X,
@@ -270,7 +272,7 @@ impl EditorView {
                     .iter()
                     .copied()
                     .fold(px(0.), |a, b| a + b);
-                let room = (covered - tokens::CELL_X * 2.).max(px(16.));
+                let room = (covered - tokens::CELL_X * 2.).max(tokens::CELL_MIN_WIDTH);
                 let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, dim, window);
                 let align = grid.aligns.get(column).copied().unwrap_or_default();
                 if matches!(align, Align::Center | Align::Right) {
@@ -301,7 +303,7 @@ impl EditorView {
             top,
             rows,
             width,
-            height: y + px(1.),
+            height: y + tokens::HAIRLINE,
         }
     }
 
@@ -322,14 +324,14 @@ impl EditorView {
                     .min(f32::from(width) * MAX_ASPECT / natural_height);
                 (size(px(natural_width * scale), px(natural_height * scale)), None)
             }
-            Ok(_) => (size(width, px(48.)), Some(written.clone())),
+            Ok(_) => (size(width, tokens::FIGURE_MISSING_HEIGHT), Some(written.clone())),
             Err(why) => {
                 let message = if why.is_empty() {
                     crate::t!(Key::ImageMissing, path = written)
                 } else {
                     format!("{written}: {why}")
                 };
-                (size(width, px(48.)), Some(message))
+                (size(width, tokens::FIGURE_MISSING_HEIGHT), Some(message))
             }
         };
         let problem = problem.map(|message| {

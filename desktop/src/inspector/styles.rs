@@ -128,6 +128,7 @@ impl StylesPanel {
     }
 
     /// Sets the body size as if typed into its field. For measurements.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn set_body_size(&mut self, text: &str, cx: &mut Context<Self>) {
         self.selected = Some(Selected::Builtin("body"));
         self.commit(style_property::SIZE, text, cx);

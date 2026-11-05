@@ -261,10 +261,10 @@ impl EditorView {
         let x = self.column.text_left + (self.column.text_width - tokens::FIGURE_CARD_WIDTH) * 0.5;
         // Below the image, or over it when that would leave the galley.
         let room = px(area.bottom) - (top + height);
-        let y = if room >= px(280.) {
+        let y = if room >= tokens::FIGURE_CARD_ROOM {
             top + height + tokens::FLOAT_GAP
         } else {
-            (px(area.bottom) - px(290.)).max(px(area.top))
+            (px(area.bottom) - tokens::FIGURE_CARD_ROOM - tokens::SETTINGS_ROW_PADDING).max(px(area.top))
         };
         Some((element, point(x, y)))
     }

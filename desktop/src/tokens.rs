@@ -44,6 +44,8 @@ pub const LAUNCH_WIDTH: Pixels = px(440.);
 pub const TEXT_TITLE: Pixels = px(20.);
 pub const FIELD_HEIGHT: Pixels = px(30.);
 pub const RADIUS: Pixels = px(6.);
+/// The card that shows the other side of a conflict, over the conflict line.
+pub const CONFLICT_CARD_WIDTH: Pixels = px(420.);
 /// The floating toolbar and its buttons.
 pub const TOOLBAR_HEIGHT: Pixels = px(36.);
 pub const TOOLBAR_BUTTON: Pixels = px(28.);
@@ -148,9 +150,13 @@ pub const WARNING_MARK: u32 = 0x8a8a8a;
 pub const SLIP_WIDTH: Pixels = px(380.);
 pub const SLIP_TEXT: Pixels = px(14.);
 pub const SLIP_TEXT_MAX_HEIGHT: Pixels = px(260.);
+/// The least room the slip needs under its paragraph. With less, and more above, it stands above.
+pub const SLIP_ROOM_BELOW: Pixels = px(240.);
 /// The slip's text while its list of styles is open, so the card stays small.
 pub const SLIP_TEXT_SHORT_HEIGHT: Pixels = px(60.);
 pub const SLIP_STYLES_MAX_HEIGHT: Pixels = px(168.);
+/// What stands in place of the pages when a document has none.
+pub const EMPTY_STATE_WIDTH: Pixels = px(440.);
 /// The status line's zoom buttons.
 pub const ZOOM_BUTTON: Pixels = px(20.);
 /// The commit card and the rows and buttons the versions views share.
@@ -158,6 +164,8 @@ pub const COMMIT_CARD_WIDTH: Pixels = px(420.);
 pub const COMMIT_CARD_MAX_ROWS: usize = 12;
 pub const VERSIONS_ROW_HEIGHT: Pixels = px(24.);
 pub const VERSIONS_BUTTON_HEIGHT: Pixels = px(22.);
+/// The angle of a fade that darkens toward the foot of a list.
+pub const FADE_DOWN: f32 = 180.;
 /// The timeline's strip: commits as tall marks, local history as small ticks, and the position.
 pub const STRIP_HEIGHT: Pixels = px(50.);
 pub const STRIP_COMMIT_WIDTH: Pixels = px(2.);
@@ -191,7 +199,6 @@ pub const PROGRESS_HEIGHT: Pixels = px(3.);
 pub const PROGRESS_RADIUS: Pixels = px(1.5);
 /// The proof list.
 pub const PROOF_HEADING_HEIGHT: Pixels = px(28.);
-pub const PROOF_ENTRY_HEIGHT: Pixels = px(62.);
 pub const PROOF_DOT_TOP: Pixels = px(5.);
 /// The project search card, and the line number beside a hit.
 pub const SEARCH_CARD_WIDTH: Pixels = px(440.);
@@ -230,6 +237,74 @@ pub const CAPTION_GAP: Pixels = px(6.);
 pub const GRID_FIELD_MIN: Pixels = px(160.);
 pub const GRID_LABEL_WIDTH: Pixels = px(120.);
 pub const GRID_ROW_Y: Pixels = px(6.);
+
+/// The keyboard's focus ring.
+pub const FOCUS_RING: Pixels = px(2.);
+/// What a text field's caret keeps from its right edge, and the width a field reckons with before it has been drawn.
+pub const INPUT_CARET_ROOM: Pixels = px(4.);
+pub const INPUT_MEASURE_DEFAULT: Pixels = px(200.);
+/// How close to the end a conversation counts as read to the end, so it follows what comes in.
+pub const FOLLOW_ROOM: Pixels = px(32.);
+/// How far a line of a mouse wheel scrolls.
+pub const SCROLL_LINE: Pixels = px(20.);
+/// How far a code block's background stands out from the text, and a quotation's rule.
+pub const CODE_OUTDENT: Pixels = px(6.);
+pub const QUOTE_RULE_X: Pixels = px(2.);
+pub const QUOTE_RULE_WIDTH: Pixels = px(2.);
+/// The narrowest a selected stretch in a note draws, to stay visible.
+pub const NOTE_SELECTION_MIN: Pixels = px(4.);
+/// A source line's width before anything is known, and the least a wrapped line is given.
+pub const SOURCE_LINE_FALLBACK: Pixels = px(20.);
+pub const WRAP_MIN: Pixels = px(40.);
+/// The borders on both sides of a card, for a card's outer size.
+pub const CARD_BORDERS: Pixels = px(2.);
+/// How far around a comment marker a click still lands on it.
+pub const MARKER_HIT: Pixels = px(3.);
+/// How much of the view Page Up and Page Down keep.
+pub const PAGE_KEY_OVERLAP: Pixels = px(48.);
+/// The fastest a drag past the pane's edge scrolls in one tick, and how far the thumb stands in from its track.
+pub const DRAG_SCROLL_MAX: Pixels = px(60.);
+pub const SCROLLBAR_INSET: Pixels = px(2.);
+/// The thin rule between a table's rows, a cell's least width, and a missing figure's box.
+pub const TABLE_RULE: Pixels = px(0.5);
+pub const CELL_MIN_WIDTH: Pixels = px(16.);
+pub const FIGURE_MISSING_HEIGHT: Pixels = px(48.);
+/// What the editing grid keeps free above the window's foot, and what a figure's card needs under it.
+pub const GRID_MIN_ROOM: Pixels = px(120.);
+pub const FIGURE_CARD_ROOM: Pixels = px(280.);
+pub const LINK_POPUP_HEIGHT: Pixels = px(90.);
+/// A footnote's card: its height without text, and per line.
+pub const NOTE_CARD_BASE: Pixels = px(100.);
+pub const NOTE_CARD_LINE: Pixels = px(22.);
+/// How strongly the accent tints a selection, and a prompt's.
+pub const SELECTION_TINT: f32 = 0.25;
+pub const PROMPT_SELECTION_TINT: f32 = 0.3;
+/// A misspelled word's line.
+pub const MISSPELLED_TINT: f32 = 0.6;
+/// A chip's tint, and that of a chip the book cannot resolve.
+pub const CHIP_TINT: f32 = 0.12;
+pub const CHIP_ERROR_TINT: f32 = 0.14;
+/// The scrollbar's thumb, at rest and under the pointer.
+pub const THUMB_FAINT: f32 = 0.4;
+pub const THUMB_STRONG: f32 = 0.8;
+/// The gutter's other icons, a figure still loading, and the prose in a page's small drawing.
+pub const GUTTER_REST: f32 = 0.55;
+pub const FIGURE_LOADING_TINT: f32 = 0.25;
+pub const SKETCH_OPACITY: f32 = 0.45;
+/// A word's tint and a row's in an approval's diff.
+pub const DIFF_WORD_TINT: f32 = 0.35;
+pub const DIFF_ROW_TINT: f32 = 0.14;
+/// The start of a fade.
+pub const CLEAR: f32 = 0.;
+
+/// The window's regions, in the order Tab walks them.
+pub const TAB_TITLEBAR: isize = 0;
+pub const TAB_PANEL: isize = 1;
+pub const TAB_RAIL: isize = 2;
+pub const TAB_CENTRE: isize = 3;
+pub const TAB_RIGHT: isize = 4;
+/// A control that cannot be used right now.
+pub const DISABLED_OPACITY: f32 = 0.4;
 
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
@@ -290,6 +365,8 @@ impl From<WindowAppearance> for Scheme {
 pub struct Tokens {
     /// The window's surface, where the text stands in Write and the pages in Publish.
     pub canvas: Rgba,
+    /// The surface behind Publish's pages, darker than a white page in the light appearance.
+    pub pages_canvas: Rgba,
     /// Binder, rail, and cards.
     pub panel: Rgba,
     /// A raised block in a panel, such as the document identity or the active rail tab.
@@ -324,6 +401,7 @@ impl Tokens {
         match scheme {
             Scheme::Dark => Self {
                 canvas: rgb(0x161616),
+                pages_canvas: rgb(0x161616),
                 panel: rgb(0x1c1c1c),
                 raised: rgb(0x2a2a2a),
                 field: rgb(0x232323),
@@ -342,6 +420,7 @@ impl Tokens {
             },
             Scheme::Light => Self {
                 canvas: rgb(0xfbfbfb),
+                pages_canvas: rgb(0xd6d6d6),
                 panel: rgb(0xf3f3f3),
                 raised: rgb(0xe6e6e6),
                 field: rgb(0xffffff),

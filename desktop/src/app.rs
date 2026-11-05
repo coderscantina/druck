@@ -54,6 +54,10 @@ const SCREEN_MARGIN: f32 = 80.;
 /// Mounts what later slices own into the workspace's slots and tabs. One line per view.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let persist = crate::persist::mount(parts, slots, window, cx);
+    cx.subscribe(&persist, |workspace, _, _: &crate::persist::ResourceChanged, cx| {
+        workspace.retry_failed_layout(cx);
+    })
+    .detach();
     shell::mount(parts, slots, window, cx);
     crate::palette::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
@@ -65,10 +69,6 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     });
     crate::versions::use_rail_tab(
         move |_, cx| inspector.update(cx, |inspector, cx| inspector.show(crate::inspector::Tab::Git, cx)),
-        cx,
-    );
-    crate::versions::set_unreviewed_changes(
-        |cx| crate::agent::unreviewed_changes(cx).iter().map(|file| file.count).sum(),
         cx,
     );
     crate::editor::mount(parts, window, cx);
@@ -114,7 +114,7 @@ pub fn open(
         px(fit(wanted_width, display.map(|display| display.width))),
         px(fit(wanted_height, display.map(|display| display.height))),
     );
-    let measuring = crate::gate::var("DRUCK_GATE").is_some();
+    let measuring = crate::gate::measuring();
     // Macs stop painting a covered window. A measurement run floats on the last display without taking focus.
     let display_id = measuring
         .then(|| cx.displays().last().map(|display| display.id()))
@@ -163,10 +163,7 @@ pub fn open(
     if !measuring {
         cx.activate(true);
     }
-    // `DRUCK_SETTINGS` opens the settings window on a category, for screenshots.
-    if let Some(category) = crate::gate::var("DRUCK_SETTINGS") {
-        crate::settings::window::open(Some(&category), cx);
-    }
+    crate::gate::at_launch(cx);
 }
 
 /// What to do once the document is saved.
@@ -234,7 +231,7 @@ impl Shell {
     }
 
     fn show_session(&mut self, session: Session, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
-        window.set_window_title(&session.location().display().to_string());
+        window.set_window_title(&session.window_title());
         shell::document_opened(session.location(), cx);
         self.workspace = Some(cx.new(|cx| Workspace::new(session, theme, window, cx)));
         cx.notify();
@@ -286,10 +283,11 @@ impl Shell {
     /// Makes a folder of Markdown a project, and opens it. It is the author's folder, so it stays out of Git until they ask.
     fn make_project(&mut self, dir: &Path, offer: &Offer, window: &mut Window, cx: &mut Context<Self>) {
         match crate::session::adopt::make_project(dir, offer) {
-            Ok(()) => self.open_path(dir, window, cx),
-            Err(problem) => self
-                .launch
-                .update(cx, |launch, cx| launch.set_error(Some(problem), Some(dir), cx)),
+            Ok(()) => {
+                crate::versions::say_at_opening(dir, offer.done(), cx);
+                self.open_path(dir, window, cx);
+            }
+            Err(problem) => self.launch.update(cx, |launch, cx| launch.offer_failed(problem, cx)),
         }
     }
 
@@ -414,9 +412,9 @@ impl Shell {
                 eprintln!("{problem}");
                 self.workspace = None;
                 window.set_window_title("Druck");
-                LaunchView::take_focus(&self.launch, window, cx);
                 self.launch
                     .update(cx, |launch, cx| launch.set_error(Some(problem), Some(path), cx));
+                LaunchView::take_focus(&self.launch, window, cx);
                 cx.notify();
             }
         }

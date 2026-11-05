@@ -61,6 +61,9 @@ pub struct FontsPanel {
     families: Vec<Family>,
     /// The family open in the detail view.
     selected: Option<String>,
+    /// The family to open once there are families, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub wanted: Option<String>,
     adding: Option<Adding>,
     error: Option<String>,
 }
@@ -72,6 +75,8 @@ impl FontsPanel {
             model,
             families: Vec::new(),
             selected: None,
+            #[cfg(any(debug_assertions, feature = "measure"))]
+            wanted: None,
             adding: None,
             error: None,
         }
@@ -80,10 +85,10 @@ impl FontsPanel {
     /// The families of the latest layout.
     pub fn set_fonts(&mut self, fonts: Vec<FontUse>, cx: &mut Context<Self>) {
         self.families = fonts.into_iter().map(Family::of).collect();
-        // `DRUCK_FONT` opens a family for screenshots.
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if self.selected.is_none() {
-            self.selected = crate::gate::var("DRUCK_FONT")
-                .filter(|name| self.families.iter().any(|family| &family.font.family == name));
+            self.selected =
+                (self.wanted.take()).filter(|name| self.families.iter().any(|family| &family.font.family == name));
         }
         if let Some(selected) = &self.selected
             && !self.families.iter().any(|family| &family.font.family == selected)

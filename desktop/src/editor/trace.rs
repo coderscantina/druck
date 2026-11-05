@@ -1,7 +1,10 @@
-//! Input-to-paint timing, on when `DRUCK_TRACE` is set in a debug build or a build with the `measure` feature. Prints one line to stderr for each input that reached a frame.
+//! Input-to-paint timing, on when `DRUCK_TRACE` is set in a debug build or a build with the `measure` feature. Prints one line to stderr for each input that reached a frame. A shipped build has only the empty [`Trace`] at the end.
 
-use std::time::{Duration, Instant};
+#[cfg(any(debug_assertions, feature = "measure"))]
+use std::time::Duration;
+use std::time::Instant;
 
+#[cfg(any(debug_assertions, feature = "measure"))]
 #[derive(Default)]
 pub struct Trace {
     enabled: bool,
@@ -12,6 +15,7 @@ pub struct Trace {
     prepaint: Duration,
 }
 
+#[cfg(any(debug_assertions, feature = "measure"))]
 impl Trace {
     pub fn from_env() -> Self {
         Self {
@@ -60,4 +64,26 @@ impl Trace {
         );
         self.edit = Duration::ZERO;
     }
+}
+
+#[cfg(not(any(debug_assertions, feature = "measure")))]
+pub struct Trace;
+
+#[cfg(not(any(debug_assertions, feature = "measure")))]
+impl Trace {
+    pub fn from_env() -> Self {
+        Self
+    }
+
+    pub fn input(&mut self) -> Instant {
+        Instant::now()
+    }
+
+    pub fn handled(&mut self, _: Instant) {}
+
+    pub fn prepaint_started(&mut self) {}
+
+    pub fn paint_started(&mut self) {}
+
+    pub fn painted(&mut self) {}
 }

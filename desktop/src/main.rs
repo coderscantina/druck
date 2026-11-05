@@ -5,7 +5,25 @@ mod agent;
 mod app;
 mod assets;
 mod editor;
+#[cfg(any(debug_assertions, feature = "measure"))]
 mod gate;
+/// A shipped build has no hidden behaviour: these are all that is left of [`gate`].
+#[cfg(not(any(debug_assertions, feature = "measure")))]
+mod gate {
+    pub const fn measuring() -> bool {
+        false
+    }
+
+    pub fn at_launch(_: &mut gpui::App) {}
+
+    pub fn apply(
+        _: &crate::workspace::Parts,
+        _: gpui::Entity<crate::workspace::Workspace>,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<crate::workspace::Workspace>,
+    ) {
+    }
+}
 mod inspector;
 mod launch;
 mod open_urls;

@@ -130,6 +130,7 @@ impl EditorView {
     }
 
     /// The passages shown now, for scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn review(&self) -> &[Passage] {
         &self.review
     }
