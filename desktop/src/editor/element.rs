@@ -125,7 +125,7 @@ impl Element for Galley {
     ) -> Frame {
         let (mut frame, floats, margin, rows, advice) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
-            view.set_viewport(bounds);
+            view.set_viewport(bounds, cx);
             if view.autoscroll {
                 view.autoscroll = false;
                 view.scroll_to_caret(window);

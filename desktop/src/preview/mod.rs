@@ -32,9 +32,9 @@ use druck::output::Item;
 use druck::output::{ChapterId, SourcePos};
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding,
-    MouseDownEvent, Pixels, RenderImage, Role, ScrollEvent, SharedString, Window, actions, anchored, canvas, deferred,
-    div, fill, point, px, size,
+    Anchor, AnyView, AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding,
+    MouseDownEvent, Pixels, RenderImage, Role, ScrollEvent, SharedString, Toggled, Window, actions, anchored, canvas,
+    deferred, div, fill, point, px, size,
 };
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
@@ -215,6 +215,8 @@ pub struct PreviewView {
     proof_open: bool,
     /// The problem being looked at.
     current_problem: Option<usize>,
+    /// The window's foot line, which stands in the status line here.
+    foot: Vec<AnyView>,
 }
 
 /// Where the pages would paint if they were on screen.
@@ -283,6 +285,7 @@ impl PreviewView {
             marks: Marks::default(),
             proof_open: false,
             current_problem: None,
+            foot: Vec::new(),
         };
         #[cfg(any(debug_assertions, feature = "measure"))]
         let mut view = view;
@@ -762,9 +765,54 @@ impl PreviewView {
         }
     }
 
+    /// Page Down or Up. At fit it moves one row of sheets, so a spread lands whole in the middle. Larger, it moves most
+    /// of a screen.
+    fn page_screen(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let view = self.view.1;
+        let row = (self.zoom == Zoom::Fit)
+            .then(|| self.sheets(self.current_zoom))
+            .flatten()
+            .and_then(|sheets| {
+                let here = sheets.row_pages(sheets.page_at_middle(self.scroll.1, view)?);
+                let next = if forward {
+                    (here.end < sheets.len()).then_some(here.end)
+                } else {
+                    here.start.checked_sub(1)
+                };
+                Some(next.map_or(self.scroll.1, |page| sheets.scroll_to_centre(page, view)))
+            });
+        self.scroll.1 = row.unwrap_or(self.scroll.1 + if forward { view } else { -view } * 0.9);
+        cx.notify();
+    }
+
+    /// Whether the status line holds `parts` in full beside the zoom.
+    fn status_fits(&self, parts: &[&str], window: &Window) -> bool {
+        let width = |text: &str| f32::from(crate::shell::ui::small_text_width(text, window));
+        let words: f32 = parts
+            .iter()
+            .filter(|part| !part.is_empty())
+            .map(|part| width(part))
+            .sum();
+        let percent = format!("{}%", (self.current_zoom * 100.0).round());
+        let zoom = width(&percent)
+            + width(crate::t!(Key::ZoomFit))
+            + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 6. + tokens::HAIR_GAP * 3.)
+            + f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
+        let gaps = f32::from(tokens::SPACE_3) * (parts.len() + 3) as f32;
+        words + zoom + gaps <= self.view.0
+    }
+
+    /// The window's foot line, to show in the status line.
+    pub fn set_foot(&mut self, foot: Vec<AnyView>) {
+        self.foot = foot;
+    }
+
     fn arrangement(&self, zoom: f32) -> Arrangement {
         if zoom < self.fit * 0.999 {
-            Arrangement::Contact { view: self.view.0 }
+            Arrangement::Contact {
+                view: self.view.0,
+                gutter: f32::from(tokens::SPREAD_GUTTER),
+            }
         } else {
             Arrangement::Spreads {
                 gutter: f32::from(tokens::SPREAD_GUTTER),
@@ -980,7 +1028,10 @@ impl PreviewView {
         };
         let pages = layout.laid.pages().len();
         if self.is_contact_sheet() {
-            return crate::t!(Key::PageCount, pages = pages);
+            return match pages {
+                1 => crate::t!(Key::OnePage).to_owned(),
+                pages => crate::t!(Key::PageCount, pages = pages),
+            };
         }
         let shown = self.sheets(self.current_zoom).and_then(|sheets| {
             let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
@@ -1218,7 +1269,7 @@ impl Focusable for PreviewView {
 }
 
 impl Render for PreviewView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let this = cx.entity();
         let painted = this.clone();
@@ -1286,8 +1337,9 @@ impl Render for PreviewView {
         let empty = self.empty_state(&tokens, cx);
         let warnings = self.problems.iter().filter(|problem| problem.warning).count();
         let count = self.problems.len() - warnings;
-        let to_look_at = (count > 0).then(|| {
-            let label = crate::t!(Key::ToLookAt, count = count);
+        let status = self.status();
+        let look_label = (count > 0).then(|| crate::t!(Key::ToLookAt, count = count));
+        let to_look_at = look_label.clone().map(|label| {
             div()
                 .id("to-look-at")
                 .control(&tokens, Role::Link, SharedString::from(label.clone()))
@@ -1298,9 +1350,24 @@ impl Render for PreviewView {
                 .child(label)
         });
         let warning_count = (warnings > 0).then(|| {
-            let label = crate::t!(Key::Warnings, count = warnings);
+            let label = match warnings {
+                1 => crate::t!(Key::OneWarning).to_owned(),
+                warnings => crate::t!(Key::Warnings, count = warnings),
+            };
             let marks_on = crate::settings::get(cx).warning_marks;
             let toggle = crate::t!(Key::WarningMarks);
+            // A narrow line drops the word before it cuts the number.
+            let parts = [
+                status.as_str(),
+                look_label.as_deref().unwrap_or_default(),
+                &label,
+                toggle,
+            ];
+            let shown = if self.status_fits(&parts, window) {
+                label.clone()
+            } else {
+                warnings.to_string()
+            };
             div()
                 .min_w_0()
                 .flex()
@@ -1314,25 +1381,26 @@ impl Render for PreviewView {
                         .truncate()
                         .cursor_pointer()
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
-                        .child(label),
+                        .child(shown),
                 )
                 .child(
                     div()
                         .id("warning-marks")
-                        .toggle(&tokens, toggle, marks_on)
+                        .control(&tokens, Role::Switch, toggle)
+                        .aria_toggled(if marks_on { Toggled::True } else { Toggled::False })
                         .flex_none()
                         .h(tokens::ZOOM_BUTTON)
                         .px(tokens::SPACE_1)
                         .flex()
                         .items_center()
+                        .gap(tokens::SPACE_1)
                         .rounded(tokens::RADIUS)
                         .cursor_pointer()
-                        .when(marks_on, |button| button.bg(tokens.raised).text_color(tokens.text))
-                        .hover(|button| button.bg(tokens.raised))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(|_, _, cx| {
                             crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
                         })
+                        .child(crate::shell::ui::switch_track(&tokens, marks_on))
                         .child(toggle),
                 )
         });
@@ -1345,15 +1413,24 @@ impl Render for PreviewView {
             .gap(tokens::SPACE_3)
             .border_t_1()
             .border_color(tokens.divider)
-            .bg(tokens.panel)
+            .bg(tokens.canvas)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_quiet)
-            .child(div().flex_none().child(self.status()))
+            .child(div().flex_none().child(status))
             .children(to_look_at)
             .children(warning_count)
-            .child(div().flex_1().when_some(problem, |slot, problem| {
-                slot.min_w_0().truncate().text_color(tokens.accent).child(problem)
-            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .when_some(problem, |slot, problem| {
+                        slot.child(div().min_w_0().truncate().text_color(tokens.accent).child(problem))
+                    })
+                    .children(self.foot.clone()),
+            )
             .child(self.zoom_controls(&tokens, cx));
         let slip = self.slip.read(cx).opened().and(self.slip_place()).map(|place| {
             deferred(
@@ -1383,14 +1460,8 @@ impl Render for PreviewView {
                 }),
             )
             .on_scroll(cx.listener(Self::on_scroll))
-            .on_action(cx.listener(|view, _: &NextScreen, _, cx| {
-                view.scroll.1 += view.view.1 * 0.9;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|view, _: &PreviousScreen, _, cx| {
-                view.scroll.1 -= view.view.1 * 0.9;
-                cx.notify();
-            }))
+            .on_action(cx.listener(|view, _: &NextScreen, _, cx| view.page_screen(true, cx)))
+            .on_action(cx.listener(|view, _: &PreviousScreen, _, cx| view.page_screen(false, cx)))
             .on_action(cx.listener(|_, _: &CloseSlip, _, cx| cx.emit(PageClicked(None))))
             .child(
                 div()

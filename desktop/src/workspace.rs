@@ -214,6 +214,8 @@ impl Workspace {
         let mut slots = Slots::default();
         crate::app::mount(&parts, &mut slots, window, cx);
         slots.overlays.push(dialog.clone().into());
+        let foot = slots.footer.clone();
+        parts.preview.update(cx, |preview, _| preview.set_foot(foot));
         let mut workspace = Self {
             mode: Mode::Write,
             parts,
@@ -840,19 +842,18 @@ impl Render for Workspace {
         let accessible = window.is_a11y_active();
         let switch = self.mode_switch(&tokens, cx);
         let export = (self.mode == Mode::Publish).then(|| self.export_button(&tokens));
-        let foot = div()
-            .absolute()
-            .left_0()
-            .right_0()
-            .bottom(if self.mode == Mode::Publish {
-                tokens::SECTION_HEIGHT
-            } else {
-                px(0.)
-            })
-            .h(tokens::FOOTER_HEIGHT)
-            .flex()
-            .items_center()
-            .children(self.slots.footer.clone());
+        // In Publish the same line stands in the status line, see `PreviewView::set_foot`.
+        let foot = (self.mode == Mode::Write).then(|| {
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(tokens::FOOTER_HEIGHT)
+                .flex()
+                .items_center()
+                .children(self.slots.footer.clone())
+        });
         let binder_on = settings::get(cx).binder;
         let centre = div()
             .tab_group()
@@ -905,7 +906,7 @@ impl Render for Workspace {
                     .flex()
                     .bg(tokens.canvas)
                     .children(binder)
-                    .child(centre.child(foot))
+                    .child(centre.children(foot))
                     .children(self.slots.right.clone())
                     .children(rail),
             )

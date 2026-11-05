@@ -4,10 +4,10 @@
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, Task, TextRun, Window, div, font};
+use gpui::{Context, Entity, Subscription, Task, Window, div};
 
 use super::text::Key;
-use crate::editor::EditorView;
+use crate::editor::{EditorView, RoomChanged};
 use crate::tokens::{self, Tokens};
 
 /// How long after the last key the count comes back.
@@ -26,11 +26,15 @@ pub struct Footer {
     typing_pause: Task<()>,
     zoom: Option<u32>,
     zoom_pause: Task<()>,
+    _room: Subscription,
 }
 
 impl Footer {
-    pub fn new(editor: Entity<EditorView>) -> Self {
+    pub fn new(editor: Entity<EditorView>, cx: &mut Context<Self>) -> Self {
+        // Whether the count fits is known only once the text is laid out, after this has drawn.
+        let room = cx.subscribe(&editor, |_, _, _: &RoomChanged, cx| cx.notify());
         Self {
+            _room: room,
             editor,
             chapter: None,
             book: None,
@@ -88,17 +92,8 @@ impl Footer {
 }
 
 /// Whether the count stands clear of the text, which it would otherwise be drawn over in a narrow window.
-fn fits(count: &str, room: gpui::Pixels, window: &Window, tokens: &Tokens) -> bool {
-    let run = TextRun {
-        len: count.len(),
-        font: font(tokens::FONT_UI),
-        color: tokens.text_faint.into(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
-    let shaped = (window.text_system()).shape_line(count.to_owned().into(), tokens::TEXT_SMALL, &[run], None);
-    shaped.width + tokens::SPACE_3 * 2. <= room
+fn fits(count: &str, room: gpui::Pixels, window: &Window) -> bool {
+    super::ui::small_text_width(count, window) + tokens::SPACE_3 * 2. <= room
 }
 
 /// A number with thousands separated by a thin space.
@@ -126,10 +121,7 @@ impl Render for Footer {
         };
         let text = match self.zoom {
             Some(zoom) => format!("{zoom}\u{202f}%"),
-            None if self.shown
-                && !self.typing
-                && fits(&count, self.editor.read(cx).room_beside_text(), window, tokens) =>
-            {
+            None if self.shown && !self.typing && fits(&count, self.editor.read(cx).room_beside_text(), window) => {
                 count
             }
             None => String::new(),

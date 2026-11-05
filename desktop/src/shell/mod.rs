@@ -416,7 +416,7 @@ impl Hub {
         let export = cx.new(|cx| ExportPanel::new(window, cx));
         let search = cx.new(|cx| SearchPanel::new(window, cx));
         let find = cx.new(|cx| FindBar::new(window, cx));
-        let footer = cx.new(|_| Footer::new(parts.editor.clone()));
+        let footer = cx.new(|cx| Footer::new(parts.editor.clone(), cx));
         parts.inspector.update(cx, |inspector, _| {
             inspector.mount(Tab::Proof, diagnostics.clone().into());
             inspector.mount(Tab::Export, export.clone().into());

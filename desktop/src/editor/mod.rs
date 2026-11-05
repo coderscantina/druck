@@ -299,6 +299,12 @@ pub struct SessionChanged;
 
 impl EventEmitter<SessionChanged> for EditorView {}
 
+/// The room beside the text changed, after a resize, a panel, or the margin coming or going. It is known only once the
+/// text has been laid out, a frame after whatever stands beside it was drawn.
+pub struct RoomChanged;
+
+impl EventEmitter<RoomChanged> for EditorView {}
+
 /// A person asked for the text to be on disk now.
 pub struct SaveRequested;
 
@@ -1911,7 +1917,7 @@ impl EditorView {
         }
     }
 
-    fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
+    fn set_viewport(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         let notes = !self.advice.is_empty() || (!self.source && self.has_later_comment());
         let column = Column::place(bounds, self.measure(), notes);
         if column.text_width != self.column.text_width {
@@ -1919,7 +1925,11 @@ impl EditorView {
                 slot.estimate.set(None);
             }
         }
+        let room = self.room_beside_text();
         self.column = column;
+        if self.room_beside_text() != room {
+            cx.emit(RoomChanged);
+        }
     }
 
     /// Finds and shapes the blocks on screen, moving the scroll position back if it ran past the end. With typewriter

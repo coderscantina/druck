@@ -1,7 +1,7 @@
 //! Small pieces the shell's panels share, built from the tokens.
 
 use gpui::prelude::*;
-use gpui::{ElementId, FontWeight, SharedString, Stateful, div};
+use gpui::{ElementId, FontWeight, Pixels, SharedString, Stateful, TextRun, Window, div, font};
 
 use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
@@ -129,4 +129,43 @@ pub fn dot(tokens: &Tokens, kind: super::report::Kind) -> gpui::Div {
         Kind::Warning => dot.bg(tokens.text_quiet),
         Kind::Todo => dot.border_1().border_color(tokens.text_faint),
     }
+}
+
+/// How wide `text` is at the small size in the app's font, for a line that drops words it has no room for.
+pub fn small_text_width(text: &str, window: &Window) -> Pixels {
+    let run = TextRun {
+        len: text.len(),
+        font: font(tokens::FONT_UI),
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    (window.text_system())
+        .shape_line(text.to_owned().into(), tokens::TEXT_SMALL, &[run], None)
+        .width
+}
+
+/// A small squared switch, drawn only: on is the raised grey with a light knob at the right, off an outline with a faint
+/// knob at the left. The control around it takes the click and the keys.
+pub fn switch_track(tokens: &Tokens, on: bool) -> gpui::Div {
+    let inset = (tokens::SWITCH_HEIGHT - tokens::SWITCH_KNOB) / 2.;
+    div()
+        .flex_none()
+        .relative()
+        .w(tokens::SWITCH_WIDTH)
+        .h(tokens::SWITCH_HEIGHT)
+        .rounded(tokens::SWITCH_RADIUS)
+        .when(on, |switch| switch.bg(tokens.switch_on))
+        .when(!on, |switch| switch.border_1().border_color(tokens.divider))
+        .child(
+            div()
+                .absolute()
+                .top(inset)
+                .when(on, |knob| knob.right(inset))
+                .when(!on, |knob| knob.left(inset))
+                .size(tokens::SWITCH_KNOB)
+                .rounded(tokens::SWITCH_KNOB_RADIUS)
+                .bg(if on { tokens.switch_knob } else { tokens.text_faint }),
+        )
 }

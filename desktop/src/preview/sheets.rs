@@ -1,6 +1,7 @@
 //! Where page sheets sit: in spreads, or wrapped into a contact sheet. Lengths are logical pixels; page sizes are points.
 //!
-//! The first page is a recto and stands alone at the right of the gutter. After it, pages pair up as a printed book's do.
+//! The first page is a recto and stands alone at the right of the gutter. After it, pages pair up as a printed book's do,
+//! in spreads and on a contact sheet alike.
 
 use std::ops::Range;
 
@@ -9,8 +10,8 @@ use std::ops::Range;
 pub enum Arrangement {
     /// Facing pages about a centre gutter, `gutter` pixels wide.
     Spreads { gutter: f32 },
-    /// Every page, wrapped to fill a view this wide.
-    Contact { view: f32 },
+    /// Every page in facing pairs, `gutter` pixels apart, wrapped to fill a view `view` pixels wide.
+    Contact { view: f32, gutter: f32 },
 }
 
 /// One row of sheets.
@@ -36,7 +37,7 @@ impl Sheets {
         let sizes: Vec<(f32, f32)> = pages.map(|(width, height)| (width * zoom, height * zoom)).collect();
         match arrangement {
             Arrangement::Spreads { gutter } => Self::spreads(sizes, zoom, gap, gutter),
-            Arrangement::Contact { view } => Self::contact(sizes, zoom, gap, view),
+            Arrangement::Contact { view, gutter } => Self::contact(sizes, zoom, gap, gutter, view),
         }
     }
 
@@ -68,21 +69,34 @@ impl Sheets {
         sheets
     }
 
-    fn contact(sizes: Vec<(f32, f32)>, zoom: f32, gap: f32, view: f32) -> Self {
+    /// Pairs stand `gap` apart, and their two pages `gutter` apart. A row holds as many pairs as fit in `view`. The first
+    /// page has the right of the first pair to itself.
+    fn contact(sizes: Vec<(f32, f32)>, zoom: f32, gap: f32, gutter: f32, view: f32) -> Self {
         let widest = sizes.iter().map(|size| size.0).fold(0.0, f32::max);
-        let columns = (((view - gap) / (widest + gap)).floor() as usize).max(1);
+        let pair = 2.0 * widest + gutter;
+        let pairs = (((view - gap) / (pair + gap)).floor() as usize).max(1);
         let mut sheets = Self::empty(sizes, zoom);
+        let count = sheets.sizes.len();
+        // Places count from the empty verso before the first page, so page `n` is at place `n + 1`.
+        let per_row = 2 * pairs;
         let mut y = gap;
-        let mut start = 0;
-        while start < sheets.sizes.len() {
-            let end = (start + columns).min(sheets.sizes.len());
+        let mut first_place = 0;
+        while count > 0 && first_place <= count {
+            let (start, end) = (first_place.max(1) - 1, (first_place + per_row - 1).min(count));
             for page in start..end {
-                sheets.lefts[page] = gap + (page - start) as f32 * (widest + gap);
+                let place = page + 1 - first_place;
+                let pair_left = gap + (place / 2) as f32 * (pair + gap);
+                let width = sheets.sizes[page].0;
+                sheets.lefts[page] = if place % 2 == 0 {
+                    pair_left + widest - width
+                } else {
+                    pair_left + widest + gutter
+                };
             }
             y = sheets.push_row(start..end, y) + gap;
-            start = end;
+            first_place += per_row;
         }
-        sheets.width = gap + columns as f32 * (widest + gap);
+        sheets.width = gap + pairs as f32 * (pair + gap);
         sheets.height = y;
         sheets
     }
@@ -233,19 +247,33 @@ mod tests {
     }
 
     #[test]
-    fn a_contact_sheet_wraps_every_page_to_the_view() {
+    fn a_contact_sheet_wraps_facing_pairs_to_the_view() {
         let sheets = Sheets::new(
             std::iter::repeat_n((100.0, 200.0), 7),
             0.5,
             10.0,
-            Arrangement::Contact { view: 200.0 },
+            Arrangement::Contact {
+                view: 250.0,
+                gutter: 2.0,
+            },
         );
-        // 50 wide with gaps of 10: three fit in 200.
+        // A pair is 50 + 2 + 50 wide with gaps of 10: two fit in 250, so a row holds four places.
         assert_eq!(sheets.row_pages(0), 0..3);
-        assert_eq!(sheets.row_pages(6), 6..7);
+        assert_eq!(sheets.row_pages(3), 3..7);
         assert_eq!(sheets.top(3), 120.0);
-        // The three columns with their gaps take 190 of the 200, so 5 is left on each side.
-        assert_eq!(sheets.left(1, 200.0, 0.0), 5.0 + 10.0 + 60.0);
+        assert_eq!(sheets.width(), 234.0);
+        // 8 is left on each side. The first page stands on the right of the first pair, alone.
+        assert_eq!(sheets.left(0, 250.0, 0.0), 8.0 + 10.0 + 52.0);
+        // Pages 1 and 2 face each other across the gutter, and page 3 opens the next row's first pair.
+        assert_eq!(sheets.left(1, 250.0, 0.0), 8.0 + 10.0 + 112.0);
+        assert_eq!(sheets.left(2, 250.0, 0.0), 8.0 + 10.0 + 112.0 + 52.0);
+        assert_eq!(sheets.left(3, 250.0, 0.0), 8.0 + 10.0);
+        assert_eq!(
+            sheets
+                .point_at((8.0 + 10.0 + 112.0 + 52.0 + 1.0, 11.0), 250.0, (0.0, 0.0))
+                .map(|hit| hit.0),
+            Some(2)
+        );
     }
 
     #[test]
@@ -294,7 +322,10 @@ mod tests {
             std::iter::repeat_n((100.0, 200.0), 21),
             0.5,
             10.0,
-            Arrangement::Contact { view: 200.0 },
+            Arrangement::Contact {
+                view: 200.0,
+                gutter: 2.0,
+            },
         );
         let scroll = contact.scroll_to_centre(page, 200.0);
         assert!(contact.visible(scroll, 200.0).contains(&page));

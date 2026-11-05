@@ -316,30 +316,15 @@ impl SettingsWindow {
         tokens: &Tokens,
         cx: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
-        let inset = (tokens::SWITCH_HEIGHT - tokens::SWITCH_KNOB) / 2.;
         div()
             .id(id)
             .control(tokens, gpui::Role::Switch, label)
             .aria_toggled(if on { gpui::Toggled::True } else { gpui::Toggled::False })
             .flex_none()
-            .relative()
-            .w(tokens::SWITCH_WIDTH)
-            .h(tokens::SWITCH_HEIGHT)
             .rounded(tokens::SWITCH_RADIUS)
             .cursor_pointer()
-            .when(on, |switch| switch.bg(tokens.switch_on))
-            .when(!on, |switch| switch.border_1().border_color(tokens.divider))
             .on_click(cx.listener(move |_, _, _, cx| change(cx, |settings| set(settings, !on))))
-            .child(
-                div()
-                    .absolute()
-                    .top(inset)
-                    .when(on, |knob| knob.right(inset))
-                    .when(!on, |knob| knob.left(inset))
-                    .size(tokens::SWITCH_KNOB)
-                    .rounded(tokens::SWITCH_KNOB_RADIUS)
-                    .bg(if on { tokens.switch_knob } else { tokens.text_faint }),
-            )
+            .child(crate::shell::ui::switch_track(tokens, on))
     }
 
     fn accent_control(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
