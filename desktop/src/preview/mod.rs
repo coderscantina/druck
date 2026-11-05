@@ -1042,21 +1042,21 @@ impl PreviewView {
             Some(sheets.row_pages(page))
         });
         let shown = shown.unwrap_or(self.page..self.page + 1);
-        let number = |page: usize| page_label(&layout.laid, page);
-        if shown.len() > 1 {
-            crate::t!(
-                Key::PagesOf,
-                first = number(shown.start),
-                last = number(shown.end - 1),
-                pages = pages
-            )
+        let shown = shown.start.min(pages - 1)..shown.end.min(pages);
+        let range = if shown.len() > 1 {
+            crate::t!(Key::PagesOf, first = shown.start + 1, last = shown.end, pages = pages)
         } else {
-            crate::t!(Key::PageOf, page = number(shown.start.min(pages - 1)), pages = pages)
+            crate::t!(Key::PageOf, page = shown.start + 1, pages = pages)
+        };
+        match printed_labels(&layout.laid, shown) {
+            Some(labels) => format!("{range} ({labels})"),
+            None => range,
         }
     }
 
     /// The window rectangles of what is marked on a sheet, with how strong the tint is and whether it is a warning. A
-    /// warning shows during a proof pass, and only the one being looked at has a tint.
+    /// warning shows during a proof pass, and only the one being looked at has a tint. On a page of the one being looked
+    /// at, only its marks draw.
     fn marks_on(&self, sheet: &Placed, warnings_shown: bool) -> Vec<(Bounds<Pixels>, f32, bool)> {
         if self.is_contact_sheet() {
             return Vec::new();
@@ -1074,6 +1074,10 @@ impl PreviewView {
                 size(px(width * zoom), px(height * zoom)),
             )
         };
+        // The problem being looked at stands alone on its pages, so a page's tint and a paragraph's outline never nest.
+        let looked_at = (self.current_problem)
+            .and_then(|at| self.marks.of_problem.get(at))
+            .is_some_and(|marks| marks.iter().any(|mark| mark.page == sheet.page));
         let problems = self.marks.of_problem.iter().enumerate().flat_map(|(at, marks)| {
             let warning = self.problems.get(at).is_some_and(|problem| problem.warning);
             let current = Some(at) == self.current_problem;
@@ -1082,7 +1086,7 @@ impl PreviewView {
                 (false, true) => 0.,
                 (false, false) => tokens::MARK_TINT,
             };
-            let shown = !warning || warnings_shown;
+            let shown = (!warning || warnings_shown) && (current || !looked_at);
             marks
                 .iter()
                 .filter(move |_| shown)
@@ -1245,11 +1249,24 @@ fn in_words(problem: &Diagnostic) -> String {
     }
 }
 
-/// A page as the book numbers it, which is what warnings say, or its place from the front where it has no number.
-fn page_label(laid: &druck::output::Layout, page: usize) -> String {
-    match laid.page_numbers().get(page).copied().flatten() {
-        Some(number) => number.format.format(number.value),
-        None => (page + 1).to_string(),
+/// The number printed on a page, if it has one.
+fn printed_label(laid: &druck::output::Layout, page: usize) -> Option<String> {
+    let number = laid.page_numbers().get(page).copied().flatten()?;
+    Some(number.format.format(number.value))
+}
+
+/// The numbers printed on the pages in view, as `iii–iv`, when they say something the pages' places in the file do not.
+fn printed_labels(laid: &druck::output::Layout, pages: std::ops::Range<usize>) -> Option<String> {
+    let labels: Vec<(usize, String)> = pages
+        .filter_map(|page| Some((page, printed_label(laid, page)?)))
+        .collect();
+    if labels.iter().all(|(page, label)| *label == (page + 1).to_string()) {
+        return None;
+    }
+    match labels.as_slice() {
+        [(_, only)] => Some(only.clone()),
+        [(_, first), .., (_, last)] => Some(format!("{first}\u{2013}{last}")),
+        [] => None,
     }
 }
 
