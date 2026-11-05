@@ -36,7 +36,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 14: Desktop spike. Stays unchecked until the owner has run the IME test in the resume note.
 - [x] 15: Engine amendment.
 - [x] Phase 2: the public crate API, steps 1 to 5, outside the milestone plan. Complete on macOS; Linux and Windows wait for the first CI run. Nothing is published ([record](PHASE_2_API.md), [evidence](ACCEPTANCE.md#phase-2-contract)).
-- [ ] 16: Desktop public beta. All eight slices are built and integrated on `t3/finish-desktop-beta-gate`, which nothing has merged. It stays unchecked: what is left needs a person, see [the criteria](#milestone-16-criteria).
+- [ ] 16: Desktop public beta. Superseded by [the writing-first direction](DECISIONS.md#2026-11-05-writing-first-direction). All eight slices are built and on `main`, and they are the base of milestone 18. See [the criteria](#milestone-16-criteria) for where it stood.
   - [x] Slice 2: Persistence.
   - [x] Slice 3: Editor commands.
   - [x] Slice 4: Theme core.
@@ -44,6 +44,12 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
   - [x] Slice 6: Agent panel.
   - [x] Slice 7: Rich blocks.
   - [ ] Slice 8: Beta gate, met with the gaps below.
+- [ ] 18: Writing surface. Next.
+- [ ] 19: Publish view.
+- [ ] 20: Writing partner.
+- [ ] 21: Versions.
+- [ ] 22: Writer beta, the new gate for a first public release.
+- [ ] 23: Desktop 1.0, replacing 17.
 
 ### Milestone 16 criteria
 
@@ -68,6 +74,8 @@ Defects left, none blocking: chips and code spans can run a galley row a little 
 
 ## Owner's checklist
 
+Written for milestone 16. Items 1 and 3 to 6 and 10 to 14 still apply through milestone 22. Item 2 no longer blocks a release, item 7's print lines are going, and item 8 moves to milestone 20.
+
 Everything only a person can do or decide, most important first. Run the app with `cargo run --release -p druck-desktop -- --open <project folder>`, on a copy of a real book, or from `python3 scripts/package-desktop.py`.
 
 1. [ ] **Input methods.** The IME test in the resume note, in the galley, a chapter note, a theme field, the agent's prompt box, a footnote popover, and a table cell. Milestone 14 waits for this, and a beta cannot ship without it.
@@ -87,9 +95,9 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
-The desktop beta is finished on `t3/finish-desktop-beta-gate`, on top of `t3/rich-block-editors` and `t3/desktop-beta-gate`. Nothing is merged, pushed, tagged, or signed with an identity. This branch adds print-composer lines, the spell checker, the accessibility and keyboard pass, the Insert menu, and a fix for footnote text lost to outside changes, which the soak found. See [the criteria](#milestone-16-criteria) and [decisions](DECISIONS.md#2026-11-04-desktop-beta-finishing-the-gate).
+The product changed direction on 2026-11-05: writing first, with Publish as a separate step. See [the decision](DECISIONS.md#2026-11-05-writing-first-direction), [the desktop briefing](DESKTOP_BRIEFING.md), [the design document](DESIGN.md), and [the mockups](mockups/). The desktop beta's code is on `main` at `f725d10`, which has not been pushed. The direction's documents are on branch `writing-first-direction`, uncommitted, in the worktree `.claude/worktrees/writing-first`. The main checkout's `typesetting-rules` has separate uncommitted work.
 
-Next action: the owner walks the [checklist](#owners-checklist), starting with input methods, and decides whether to merge. Milestone 16 stays unchecked until then.
+Next action: the owner reviews the documents and has them committed, then [milestone 18](milestones/18-writing-surface.md) starts.
 
 Follow-ups: attribute the heap's slow rise, and trim undo histories if they are the cause. Labels on theme fields through `TextInput::with_label`. Spelling in tables. Arrow keys in the diagnostics list. Show the theme's code font in the galley. Recovery copies with no unsaved text should go at a clean quit.
 

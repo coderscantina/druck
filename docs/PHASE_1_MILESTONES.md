@@ -23,12 +23,18 @@ The three delivery stages in [the product briefing](BRIEFING.md) remain intact: 
 13. [Rich tables](milestones/13-rich-tables.md).
 14. [Desktop spike](milestones/14-desktop-spike.md).
 15. [Engine amendment](milestones/15-engine-amendment.md).
-16. [Desktop public beta](milestones/16-desktop-beta.md).
-17. [Desktop 1.0](milestones/17-desktop-1-0.md).
+16. [Desktop public beta](milestones/16-desktop-beta.md). Superseded; the built work is the base of 18.
+17. [Desktop 1.0](milestones/17-desktop-1-0.md). Superseded by 23.
+18. [Writing surface](milestones/18-writing-surface.md).
+19. [Publish view](milestones/19-publish-view.md).
+20. [Writing partner](milestones/20-writing-partner.md).
+21. [Versions](milestones/21-versions.md).
+22. [Writer beta](milestones/22-writer-beta.md).
+23. [Desktop 1.0](milestones/23-desktop-1-0.md).
 
 Milestones 11 to 13 deliver the [business documents amendment](BRIEFING.md#business-documents-amendment) of 2026-10-07. Milestones 11 and 12 depend only on milestone 09 and may run in parallel; 13 needs both. The release acceptance of milestone 10 covers them once they are complete.
 
-Milestones 14 and 15 come before milestone 10. The [desktop briefing](DESKTOP_BRIEFING.md#sequence) sets their order.
+Milestones 14 and 15 come before milestone 10. Milestones 19 to 21 require 18 and may run in parallel. The [desktop briefing](DESKTOP_BRIEFING.md#sequence) sets the desktop order.
 
 Each milestone depends on the preceding milestones unless its brief states otherwise. Work may be split into smaller sessions. Begin a later milestone only within the user's authorized scope and with its prerequisites satisfied.
 

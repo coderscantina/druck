@@ -1,5 +1,7 @@
 # 16: Desktop public beta
 
+> Superseded on 2026-11-05 by [the writing-first direction](../DECISIONS.md#2026-11-05-writing-first-direction). Everything built here is the base of milestone 18, and this file stays as the record. It will not be completed as written: the release gate is now [milestone 22](22-writer-beta.md).
+
 ## Goal and prerequisites
 
 The [desktop app](../DESKTOP_BRIEFING.md) on the public crate, ready for a first public beta on macOS. Requires the phase 2 crate. Milestone 14's owner test (IME) stays open separately and must pass before a beta ships.

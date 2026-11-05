@@ -999,6 +999,8 @@ At the owner's request: Druck should produce book-quality pages from rules and t
 
 ## 2026-11-03: Desktop app
 
+The product direction here is replaced by [the writing-first direction](#2026-11-05-writing-first-direction). Its toolkit, text-as-truth, and theme decisions still stand.
+
 Settled with the owner in an interview. The contract is [the desktop briefing](DESKTOP_BRIEFING.md).
 
 - **Toolkit:** gpui through the crates `gpui-pre` and `gpui-pre-platform`, pinned at exactly 0.3.11, since Rust-only rules out Tauri and webviews. They are snapshots of zed@f816e1f published by one person, chosen because they have the editor APIs and AccessKit without Zed git sources. `src/` of gpui matches that commit apart from small `action.rs` changes; the platform crates beyond `gpui_platform` were not diffed. Zed's `editor` crate is GPL-3.0, so its code cannot be used in MIT Druck, and the rich text editor is our own.
@@ -1478,6 +1480,28 @@ What still takes a mouse: a block's convert menu and drag in the gutter (the sla
 **Insert menu.** Footnote, citation, cross-reference, image, and table, on the galley's existing actions, with a new Command+Option+T for the table. A menu item with no galley behind it does nothing, as Undo does.
 
 **`Cmd+Q after a keyboard-dismissed alert did not quit`: not reproduced.** Seven paths tried, with the app active and in the background: the About alert with Return, the failed-save alert with Escape, with Try again then Cancel, from the launch screen, with a field blurred, and with the settings card. Each quit, and each kept unsaved text as a recovery copy. With an alert still open, Command+Q does nothing, which is what a question about unsaved text should do. So there is no code change. If the owner sees it with a real keyboard, it is on the checklist.
+
+## 2026-11-05: Writing-first direction
+
+Settled with the owner in an interview, choosing from [the mockups](mockups/). The contract is [the desktop briefing](DESKTOP_BRIEFING.md), and the look is in [the design document](DESIGN.md). This replaces the three-pane composer with a live preview, and the app as it stood is the base. Nothing had been published, so the rework comes before any public beta.
+
+- **Audience:** long-form authors first, replacing "books, reports, articles, and offers equally". Report and offer starters leave the app. The engine and CLI keep everything.
+- **Two modes, no split:** page checking interrupts writing, so pages become a step. Authors who liked checking pages while drafting lose that; watch for it in beta feedback.
+- **Bare page by default, Binder on a key:** the owner wanted both. A live toggle that is remembered avoids a second preference. A persistent list alone and a rail in both modes (mockup C) lost, since each keeps chrome beside the text.
+- **Theme type on the app surface:** the kept sheet (G2) lost, since a white rectangle remains in dark mode. This reverses "App chrome never styles document content" for Write only.
+- **Publish:** spread and rail (P1) with the contact sheet (P3) as the far end of one zoom scale. A separate proof queue layout (P2) lost as the main view, since a clean book would feel like a to-do list. It stays as the proof tab.
+- **Proof slip:** chosen over editing on the page, where lines jump under the caret and input methods are hardest, and over jumping to Write, which would not meet the request. Layout help is limited to existing directives, so "no per-block overrides" holds. A one-line tighter or looser control was declined.
+- **Write reports only what writing can fix:** a real book had 243 loose-line warnings, so dots on chapters said little. Print lines leave with this, since Publish answers that question.
+- **All 30 theme panels stay, for 1.0:** behind a searchable index (S1), which beat an accordion (S2) and a group strip (S3) at this width. A smaller set of controls was offered and declined. The beta ships the sections authors use most, and JSON for the rest.
+- **Agent as a writing partner:** off until enabled, on `Cmd+J`. Margin notes with chat on call (M1) beat a docked column (M2) and threads on passages (M3).
+- **Agent edits land in the files:** the owner first chose proposals beside the text, then asked for IDE-style work on whole chapters and selections. Keeping edits in files means the CLI's normal tools, `CLAUDE.md`, skills, and MCP work unchanged, and the existing hunk tracking does the review. A shadow copy lost: more to build, and it drifts from what is being typed. Only advice stays beside the text.
+- **Two tiers of history:** local history for small changes, JetBrains style, kept outside the project, and Git for deliberate versions. Snapshots as hidden Git refs were proposed and declined, since the owner wants small changes out of Git entirely. This reverses "No built-in Git" and "The app makes no commits"; the app commits only on request.
+- **Git's own words:** commit and branch, chosen over version and draft. It narrows the audience a little and is a string table change if beta authors struggle.
+- **`Cmd+S` stays a save:** writers press it from habit, so a card on it would interrupt them. The commit card is on `Cmd+Shift+S`. `Cmd+Shift+G` is macOS's Find Previous, so the Git panel takes `Ctrl+Shift+G`. `Cmd+K` stays on Link, so the palette is on `Cmd+P` and `Cmd+Shift+P`.
+- **gitoxide plus the installed `git`:** gitoxide does not need Git on the machine, keeping the codebase Rust, unlike libgit2. It had no push as last checked, from a discussion written against 0.85, so push and pull call `git`, which also brings the author's keys. Check again before building.
+- **Settings:** one user-level `settings.json` after Zed's window. A per-book scope lost, since what belongs to a book is already in `druck.yaml`.
+
+Unresolved: Anthropic's answer on subscription logins, which no longer blocks a release since the agent is off by default and setup names an API key. How local history identifies a moved file. How the agent leaves a margin note. Whether proof slip reflow feels calm, since the mockups are HTML.
 
 ## Recording a decision
 

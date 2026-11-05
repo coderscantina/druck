@@ -1,5 +1,7 @@
 # 17: Desktop 1.0
 
+> Superseded on 2026-11-05 by [milestone 23](23-desktop-1-0.md), which keeps its deliverables under the new Style index.
+
 ## Goal and prerequisites
 
 The complete theme editor and the other platforms. Requires milestone 16 and feedback from the beta.
