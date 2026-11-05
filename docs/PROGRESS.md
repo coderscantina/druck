@@ -44,7 +44,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
   - [x] Slice 6: Agent panel.
   - [x] Slice 7: Rich blocks.
   - [ ] Slice 8: Beta gate, met with the gaps below.
-- [ ] 18: Writing surface. Next.
+- [ ] 18: Writing surface. Built and checked on `t3/writing-first-surface`, unmerged. Stays unchecked until the owner has run the input method test, see the resume note.
 - [ ] 19: Publish view.
 - [ ] 20: Writing partner.
 - [ ] 21: Versions.
@@ -74,7 +74,7 @@ Defects left, none blocking: chips and code spans can run a galley row a little 
 
 ## Owner's checklist
 
-Written for milestone 16. Items 1 and 3 to 6 and 10 to 14 still apply through milestone 22. Item 2 no longer blocks a release, item 7's print lines are going, and item 8 moves to milestone 20.
+Written for milestone 16. Items 1 and 3 to 6 and 10 to 14 still apply through milestone 22. Item 2 no longer blocks a release, item 7's print lines are gone so only its spelling question remains, and item 8 moves to milestone 20.
 
 Everything only a person can do or decide, most important first. Run the app with `cargo run --release -p druck-desktop -- --open <project folder>`, on a copy of a real book, or from `python3 scripts/package-desktop.py`.
 
@@ -95,11 +95,28 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
-The product changed direction on 2026-11-05: writing first, with Publish as a separate step. See [the decision](DECISIONS.md#2026-11-05-writing-first-direction), [the desktop briefing](DESKTOP_BRIEFING.md), [the design document](DESIGN.md), and [the mockups](mockups/). The desktop beta's code is on `main` at `f725d10`, which has not been pushed. The direction's documents are on branch `writing-first-direction`, uncommitted, in the worktree `.claude/worktrees/writing-first`. The main checkout's `typesetting-rules` has separate uncommitted work.
+Milestone 18 is built on branch `t3/writing-first-surface`, on top of `writing-first-direction`, not merged and not pushed. The app is writing-first: Write and Publish, a bare page in the theme's type, a Binder, a palette, one `settings.json` with its window, zoom per mode, and typewriter scrolling and dimming. See [the decisions](DECISIONS.md#2026-11-05-writing-surface).
 
-Next action: the owner reviews the documents and has them committed, then [milestone 18](milestones/18-writing-surface.md) starts.
+Next action: the owner runs the owner-only checks below and merges. Then milestones [19](milestones/19-publish-view.md), [20](milestones/20-writing-partner.md), and [21](milestones/21-versions.md) can run in parallel.
 
-Follow-ups: attribute the heap's slow rise, and trim undo histories if they are the cause. Labels on theme fields through `TextInput::with_label`. Spelling in tables. Arrow keys in the diagnostics list. Show the theme's code font in the galley. Recovery copies with no unsaved text should go at a clean quit.
+Seams for them: `Mode` and `ModeChanged` in `desktop/src/workspace.rs`; `Slots.footer` and `Slots.overlays` there; `Tokens` in `tokens.rs`; a setting is a line in `settings/file.rs::FIELDS` and in `settings/window.rs::ROWS`, read with `settings::get` and heard by observing `settings::Store`; a command is a line in `shell/commands.rs`, which the palette and the Keys list read; rail panels through `InspectorView::mount`; margin notes in `editor/margin.rs`; `EditorView::set_marks` for tints. Keys `Cmd+J`, `Cmd+Shift+S`, `Cmd+Y`, and `Ctrl+Shift+G` are free.
+
+Only the owner can check, and not yet done:
+
+- **The input method test** below, in the text, a margin note, the palette, and settings' fields. A dead key was driven here by posted keys (Option+E, then E wrote `é` in the text through the real input context). Holding a key for the accent popup, Pinyin's candidate window, and one Cmd+Z removing a composition were not.
+- **A real mouse:** hovering the ticks to open the card, the gutter appearing on entering the margin and its drag, clicking a tick, editing a margin note by click, and the settings window's controls. Automated mouse events do not reach the window here, so these states were shown through debug hooks, and the keyboard paths through keys by PID.
+- **`Cmd+\` on a German keyboard,** where the backslash needs Option and Shift.
+- **Feel:** whether a 2 second pause suits, the dim level, and the typewriter's height.
+
+Evidence, on 2026-11-05 on this M1 Pro, on a copy of the book made into a project as the older notes describe, with a project copy of `memoir-print`. `cargo test -q -p druck-desktop` passed 552 with 1 ignored. `cargo test -q` passed 444 unit tests and the integration and doc tests. `cargo clippy -q --all-targets --all-features -- -D warnings` and with `-p druck-desktop`, and `cargo fmt --all --check`, are clean.
+
+- **`DRUCK_GATE=1 DRUCK_GATE_REFRESHES=100`, release with `--features measure`, typewriter and dim on:** typing 15.4 ms median, 30.8 ms p95, 360 keys. Pause in Write to exact pages in Publish 13.9 ms median, 22.2 ms p95. Last key to ready pages 2.32 s, which is the 2 s pause and a layout. Theme edit to ready pages 368 ms, to painted text 375 ms. Heap 177 to 178 MB over 100 refreshes.
+- **Keys by PID:** `Cmd+P` to a chapter; all eleven former toolbar actions through `Cmd+Shift+P`, with the Markdown read back from disk; `Cmd+\` writing and removing only its own key; zoom kept in `state.json`; `Cmd+1`, `Cmd+2`, and `Cmd+Q`.
+- **`settings.json` by hand while running:** accent, language, line length, and dimming took effect, and the window showed them. A file with a comment was reported in the window and left as it was.
+- **Inspected on screen:** bare page, Binder, and the contents card in dark and light, oxide and blue accents, English and German; settings in each category; both palettes; Publish; the gutter, toolbar, and dimming; the launch screen.
+- **Not run:** a soak, VoiceOver, Linux, and Windows. The engine's output was not compared by bytes after the removal: it removed only code behind the `editor` feature, which the CLI does not build with, and the parity test passed.
+
+Follow-ups: attribute the heap's slow rise, and trim undo histories if they are the cause. Labels on theme fields through `TextInput::with_label`. Spelling in tables. Arrow keys in the diagnostics list. Recovery copies with no unsaved text should go at a clean quit. Write shows no custom styles, tracking, capitals, or a chapter's number above its heading. The toolbar still covers the line below a selection. Publish's accent labels (`EIGEN`, the chosen sub-tab, the language chip) go beyond what the accent is for, which milestone 19's redesign should settle. The launch screen still lists report and offer until milestone 22.
 
 Older notes follow.
 
