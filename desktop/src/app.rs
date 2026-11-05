@@ -5,7 +5,7 @@
 //! - `workspace.rs`: the two modes, the slots, and the wiring between panes.
 //! - `settings/`: `settings.json` and its window. `settings::get` reads a value, and observers of `settings::Store` hear
 //!   a change, by hand or from the window.
-//! - `shell/commands.rs`: the table of commands.
+//! - `shell/commands.rs`: the table of commands behind the palette. `palette/`: `Cmd+P` and `Cmd+Shift+P`.
 //! - `session/`: the document, without gpui. Read it through `EditorView::session`, change it through
 //!   `EditorView::update_session`.
 //! - `sidebar/`: identity, contents, the file lists, and its dialogs. Dots go in through `SidebarView::set_marks`.
@@ -52,6 +52,7 @@ const SCREEN_MARGIN: f32 = 80.;
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let persist = crate::persist::mount(parts, slots, window, cx);
     shell::mount(parts, slots, window, cx);
+    crate::palette::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
     crate::agent::mount(parts, persist, window, cx);
     crate::editor::mount(parts, cx);
@@ -80,6 +81,7 @@ pub fn open(
     crate::editor::bind_keys(cx);
     crate::persist::bind_keys(cx);
     shell::install(cx);
+    crate::palette::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
         async {}
