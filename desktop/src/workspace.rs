@@ -9,12 +9,13 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyView, Bounds, Context, Entity, EventEmitter, Focusable, MouseButton, PathPromptOptions, StyleRefinement,
-    Subscription, Task, Window, div, point, px,
+    AnyView, App, Bounds, Context, Entity, EventEmitter, Focusable, MouseButton, PathPromptOptions, Pixels,
+    StyleRefinement, Subscription, Task, Window, div, point, px,
 };
 
 use crate::a11y::Control as _;
@@ -83,7 +84,15 @@ pub struct Slots {
     /// Layers over the window, last on top. A layer draws nothing while it is closed.
     pub overlays: Vec<AnyView>,
     /// Panels at the right of the text or the pages, before the rail. A view that is closed draws nothing.
-    pub right: Vec<AnyView>,
+    pub right: Vec<RightPanel>,
+}
+
+/// A panel at the right, and how wide it is now, so the text knows its room before anything is laid out.
+#[derive(Clone)]
+pub struct RightPanel {
+    pub view: AnyView,
+    /// Zero while the panel is closed.
+    pub width: Rc<dyn Fn(&App) -> Pixels>,
 }
 
 /// What a slice's view can hold on to. Everything about the document is in the editor's session; events are on the
@@ -867,7 +876,11 @@ impl Render for Workspace {
                 .items_center()
                 .children(self.slots.footer.clone())
         });
-        let binder_on = settings::get(cx).binder;
+        // The Binder gives way before the text goes below its least width, so no line is cut or covered.
+        let right: Pixels = self.slots.right.iter().map(|panel| (panel.width)(cx)).sum();
+        let text_room = window.viewport_size().width - right - tokens::SIDEBAR_WIDTH;
+        let binder_fits = text_room >= tokens::GUTTER_WIDTH + tokens::TEXT_MIN_WIDTH + tokens::TEXT_MARGIN_RIGHT;
+        let binder_on = settings::get(cx).binder && binder_fits;
         let centre = div()
             .tab_group()
             .tab_index(tokens::TAB_CENTRE)
@@ -920,7 +933,7 @@ impl Render for Workspace {
                     .bg(tokens.canvas)
                     .children(binder)
                     .child(centre.children(foot))
-                    .children(self.slots.right.clone())
+                    .children(self.slots.right.iter().map(|panel| panel.view.clone()))
                     .children(rail),
             )
             .children(self.slots.overlays.clone())

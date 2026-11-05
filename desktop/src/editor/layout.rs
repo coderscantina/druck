@@ -281,7 +281,8 @@ impl Column {
         let note_room = tokens::NOTE_GAP + tokens::NOTE_WIDTH;
         let notes_fit = notes && right - left - note_room >= measure.max(tokens::TEXT_MIN_WIDTH);
         let room = right - left - if notes_fit { note_room } else { px(0.) };
-        let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH);
+        // Never wider than the room, so a line is never cut by the pane's edge or covered by a panel.
+        let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH.min(room));
         let centred = viewport.left() + (viewport.size.width - text_width) * 0.5;
         let last = right - text_width - if notes_fit { note_room } else { px(0.) };
         let text_left = centred.min(last).max(left);
@@ -768,5 +769,14 @@ mod tests {
         let narrowed = Column::place(viewport(400.), px(460.), true);
         assert_eq!(narrowed.note_left, None);
         assert!(narrowed.text_width < px(460.));
+    }
+
+    #[test]
+    fn the_text_never_runs_past_its_pane() {
+        // Narrower than the least width: the text takes what there is rather than run under a panel.
+        let pane = viewport(208.);
+        let column = Column::place(pane, px(460.), false);
+        assert!(column.text_left + column.text_width <= pane.right() - tokens::TEXT_MARGIN_RIGHT);
+        assert!(column.text_left >= pane.left() + tokens::GUTTER_WIDTH);
     }
 }

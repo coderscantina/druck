@@ -146,7 +146,11 @@ pub fn mount(
     slots.overlays.push(card.into());
     slots.overlays.push(timeline.into());
     let slot = cx.new(|_| Slot::new(panel.clone(), view.downgrade()));
-    slots.right.push(slot.into());
+    let shown = slot.downgrade();
+    slots.right.push(crate::workspace::RightPanel {
+        view: slot.into(),
+        width: std::rc::Rc::new(move |cx| shown.upgrade().map_or(gpui::px(0.), |slot| slot.read(cx).width(cx))),
+    });
     panel
 }
 

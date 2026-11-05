@@ -18,6 +18,9 @@ pub const SPACE_2: Pixels = px(8.);
 pub const SPACE_3: Pixels = px(12.);
 pub const SPACE_4: Pixels = px(16.);
 
+/// The smallest the window gets, which every view is laid out to work at.
+pub const WINDOW_MIN_SIZE: (f32, f32) = (720., 480.);
+
 pub const TITLEBAR_HEIGHT: Pixels = px(28.);
 pub const SECTION_HEIGHT: Pixels = px(30.);
 /// The Binder.
@@ -67,7 +70,8 @@ pub const TEXT_MARGIN_Y: Pixels = px(52.);
 pub const TEXT_START: Pixels = px(-52.);
 /// The least room kept right of the text.
 pub const TEXT_MARGIN_RIGHT: Pixels = px(24.);
-pub const TEXT_MIN_WIDTH: Pixels = px(200.);
+/// The least width the text keeps, about 40 characters, before the Binder gives way.
+pub const TEXT_MIN_WIDTH: Pixels = px(320.);
 /// A margin note, and the gap between it and the text.
 pub const NOTE_WIDTH: Pixels = px(220.);
 pub const NOTE_GAP: Pixels = px(28.);

@@ -482,13 +482,29 @@ impl Slot {
     }
 }
 
-impl Render for Slot {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl Slot {
+    /// Whether the panel stands beside the text: open, and not in Publish's rail.
+    fn shown(&self, cx: &gpui::App) -> bool {
         let in_rail = self.view.upgrade().is_some_and(|view| {
             let view = view.read(cx);
             view.mode(cx) == Mode::Publish && view.has_rail_tab(cx)
         });
-        if !self.panel.read(cx).is_open() || in_rail {
+        self.panel.read(cx).is_open() && !in_rail
+    }
+
+    /// How much of the window's width the panel takes now.
+    pub fn width(&self, cx: &gpui::App) -> gpui::Pixels {
+        if self.shown(cx) {
+            tokens::INSPECTOR_WIDTH
+        } else {
+            gpui::px(0.)
+        }
+    }
+}
+
+impl Render for Slot {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.shown(cx) {
             return div().into_any_element();
         }
         let tokens = Tokens::get(cx);

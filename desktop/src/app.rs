@@ -106,13 +106,16 @@ pub fn open(
     .detach();
 
     let display = cx.primary_display().map(|display| display.bounds().size);
-    let fit = |wanted: f32, available: Option<Pixels>| {
-        available.map_or(wanted, |available| wanted.min(f32::from(available) - SCREEN_MARGIN))
+    let fit = |wanted: f32, least: f32, available: Option<Pixels>| {
+        available
+            .map_or(wanted, |available| wanted.min(f32::from(available) - SCREEN_MARGIN))
+            .max(least)
     };
     let (wanted_width, wanted_height) = shell::prefs(cx).window_size().unwrap_or(WINDOW_SIZE);
+    let (least_width, least_height) = tokens::WINDOW_MIN_SIZE;
     let window_size = size(
-        px(fit(wanted_width, display.map(|display| display.width))),
-        px(fit(wanted_height, display.map(|display| display.height))),
+        px(fit(wanted_width, least_width, display.map(|display| display.width))),
+        px(fit(wanted_height, least_height, display.map(|display| display.height))),
     );
     let measuring = crate::gate::measuring();
     // Macs stop painting a covered window. A measurement run floats on the last display without taking focus.
@@ -139,6 +142,7 @@ pub fn open(
             WindowKind::Normal
         },
         display_id,
+        window_min_size: Some(size(px(least_width), px(least_height))),
         ..Default::default()
     };
     let window = cx.open_window(options, |window, cx| {
