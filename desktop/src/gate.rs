@@ -15,8 +15,10 @@
 //! `DRUCK_GATE_SLIP=100` instead edits the book through the proof slip that many times, in Publish, and checks that no
 //! text was lost: what the chapters hold is compared byte for byte, in memory and on disk, with what was asked for.
 //!
-//! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
-//! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
+//! Typing runs from when the key's handler runs to the end of the first paint showing it, as `DRUCK_TRACE` measures,
+//! and says whether its median meets the target. The time from when a key was due, which adds the timer's lateness, is
+//! printed apart and judges nothing. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's
+//! length.
 //!
 //! This whole module, and every hook that reads a variable, is left out of a build without `debug_assertions` or the
 //! `measure` feature. [`apply`] runs once after the workspace has mounted, and sets what the variables ask for from
@@ -51,6 +53,8 @@ const POLL: Duration = Duration::from_millis(1);
 /// Longer than any layout should take, so a stuck run reports rather than hangs.
 const GIVE_UP: Duration = Duration::from_secs(10);
 const MARK: &str = "QQQ";
+/// Typing's median, from the key's handler to paint, is under this.
+const TYPING_TARGET: Duration = Duration::from_millis(16);
 
 struct Gate {
     workspace: Entity<Workspace>,
@@ -343,9 +347,14 @@ impl Gate {
         self.sleep(Duration::from_millis(200), cx).await;
     }
 
+    /// Typing is measured from when the key's handler runs to the end of the first paint that shows it, as
+    /// `DRUCK_TRACE`'s `input_to_paint_us`, against the target of under 16 ms median. The gate's timer runs keys late
+    /// when the app is not frontmost, so that lateness, and the time from when a key was due, are reported apart and
+    /// decide nothing.
     async fn typing(&self, cx: &mut AsyncApp) {
         let mut idle = Vec::new();
         let mut during = Vec::new();
+        let mut from_due = Vec::new();
         let mut late = Vec::new();
         let mut next = Instant::now();
         for _ in 0..BURSTS {
@@ -354,14 +363,16 @@ impl Gate {
                 let due = next;
                 late.push(Instant::now() - due);
                 let laying_out = self.preview.read_with(cx, |preview, _| preview.is_laying_out());
+                let handled = Instant::now();
                 let revision = self.key(if key + 1 == BURST_KEYS { " " } else { "e" }, cx);
                 loop {
                     let painted = self
                         .editor
                         .read_with(cx, |editor, _| editor.revision_painted_at(revision));
                     if let Some(painted) = painted {
-                        let latency = painted.saturating_duration_since(due);
+                        let latency = painted.saturating_duration_since(handled);
                         if laying_out { &mut during } else { &mut idle }.push(latency);
+                        from_due.push(painted.saturating_duration_since(due));
                         break;
                     }
                     if due.elapsed() > GIVE_UP {
@@ -375,10 +386,15 @@ impl Gate {
             next += BETWEEN_BURSTS;
         }
         let all: Vec<_> = idle.iter().chain(&during).copied().collect();
-        report("typing, all keys", all);
-        report("typing, during a layout", during);
-        report("typing, no layout running", idle);
-        report("key timer lateness", late);
+        let median = report("typing, key handler to paint, all keys", all);
+        report("typing, key handler to paint, during a layout", during);
+        report("typing, key handler to paint, no layout running", idle);
+        eprintln!(
+            "gate: typing {} the target: median {median:?}, under {TYPING_TARGET:?} wanted",
+            if median < TYPING_TARGET { "meets" } else { "misses" }
+        );
+        report("not judged: key due to paint, with the timer's lateness", from_due);
+        report("not judged: key timer lateness", late);
         eprintln!("gate: after typing; {}", memory());
     }
 
@@ -784,7 +800,8 @@ impl Gate {
     }
 }
 
-fn report(name: &str, mut samples: Vec<Duration>) {
+/// Prints the samples' median, p95, and maximum, and returns the median.
+fn report(name: &str, mut samples: Vec<Duration>) -> Duration {
     samples.sort();
     let at = |share: f64| {
         let index = ((samples.len() as f64 - 1.0) * share).round() as usize;
@@ -797,4 +814,5 @@ fn report(name: &str, mut samples: Vec<Duration>) {
         at(0.95),
         at(1.0)
     );
+    at(0.5)
 }
