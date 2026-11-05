@@ -41,10 +41,9 @@ pub enum Event {
     },
     /// The CLI waits for the host to allow or deny a tool call.
     Permission(PermissionRequest),
-    /// The turn ended. `total_cost_usd` counts everything this CLI process has spent, not just this turn.
+    /// The turn ended.
     TurnFinished {
         session_id: String,
-        total_cost_usd: Option<f64>,
         is_error: bool,
         /// The turn was cut short by an interrupt.
         stopped: bool,
@@ -298,7 +297,6 @@ pub fn parse_line(line: &str) -> Vec<Event> {
         }
         (Some("result"), _) => vec![Event::TurnFinished {
             session_id: text(&value["session_id"]),
-            total_cost_usd: value["total_cost_usd"].as_f64(),
             is_error: value["is_error"].as_bool().unwrap_or(false),
             stopped: value["terminal_reason"]
                 .as_str()
@@ -397,27 +395,23 @@ mod tests {
     }
 
     #[test]
-    fn captured_turns_finish_with_session_and_cost() {
+    fn captured_turns_finish_with_their_session() {
         let finished: Vec<_> = captured_events()
             .into_iter()
             .filter_map(|e| {
                 if let Event::TurnFinished {
-                    session_id,
-                    total_cost_usd,
-                    is_error,
-                    ..
+                    session_id, is_error, ..
                 } = e
                 {
-                    Some((session_id, total_cost_usd, is_error))
+                    Some((session_id, is_error))
                 } else {
                     None
                 }
             })
             .collect();
         assert_eq!(finished.len(), 4);
-        assert!(finished[0].1.is_some_and(|cost| cost > 0.0));
         assert!(!finished[0].0.is_empty());
-        assert!(!finished[2].2 && finished[3].2);
+        assert!(!finished[2].1 && finished[3].1);
     }
 
     #[test]

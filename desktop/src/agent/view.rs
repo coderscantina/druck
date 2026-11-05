@@ -67,7 +67,7 @@ impl AgentView {
                     .gap(tokens::SPACE_1)
                     .child(
                         small_button("agent-model", format!("{}: {model}", crate::t!(Key::Model)), tokens)
-                            .when(busy, |button| button.opacity(0.5))
+                            .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY))
                             .when(!busy, |button| {
                                 button.on_click(cx.listener(|view, _, _, cx| {
                                     view.model_menu = !view.model_menu;
@@ -77,7 +77,7 @@ impl AgentView {
                     )
                     .child(
                         small_button("agent-new", crate::t!(Key::NewConversation).to_owned(), tokens)
-                            .when(busy, |button| button.opacity(0.5))
+                            .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY))
                             .when(!busy, |button| {
                                 button.on_click(cx.listener(|view, _, _, cx| view.new_conversation(cx)))
                             }),
@@ -124,7 +124,11 @@ impl AgentView {
 
     fn body(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let mut rows: Vec<AnyElement> = Vec::new();
-        rows.extend(self.status_rows(tokens));
+        if self.setup_folded() {
+            rows.push(self.setup_row(tokens, cx));
+        } else {
+            rows.extend(self.status_rows(tokens));
+        }
         if self.cli_usable() {
             if self.conversation.entries().is_empty() {
                 rows.push(quiet(
@@ -160,6 +164,29 @@ impl AgentView {
             .flex_col()
             .gap(tokens::SPACE_2)
             .children(rows)
+    }
+
+    /// After the first turn the setup lines say nothing new: they fold into one line, unless something needs the author.
+    fn setup_folded(&self) -> bool {
+        let settled = matches!(&self.cli, Some(cli) if matches!(cli.state, CliState::Ready(_) | CliState::Untested(_)));
+        settled && !self.setup_open && self.conversation.current_turn().is_some()
+    }
+
+    fn setup_row(&self, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
+        let label = crate::t!(Key::SetupFolded);
+        div()
+            .id("agent-setup")
+            .button(tokens, label)
+            .cursor_pointer()
+            .text_size(tokens::TEXT_SMALL)
+            .text_color(tokens.text_faint)
+            .hover(|row| row.text_color(tokens.text_quiet))
+            .on_click(cx.listener(|view, _, _, cx| {
+                view.setup_open = true;
+                cx.notify();
+            }))
+            .child(label)
+            .into_any_element()
     }
 
     /// What the panel says about the CLI: being looked for, missing, or what version and login it has.
@@ -255,23 +282,12 @@ impl AgentView {
                 .into_any_element(),
             Entry::Notice(message) => quiet_owned(tokens, message.clone()),
             Entry::Stopped => faint(tokens, crate::t!(Key::Stopped)),
-            Entry::TurnEnd { cost_usd, changes } => {
-                let cost = (*cost_usd).map(strings::turn_cost);
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(tokens::SPACE_1)
-                    .when_some(cost, |row, cost| {
-                        row.child(
-                            div()
-                                .text_size(tokens::TEXT_SMALL)
-                                .text_color(tokens.text_faint)
-                                .child(cost),
-                        )
-                    })
-                    .when_some(*changes, |row, turn| row.child(self.summary(turn, tokens, cx)))
-                    .into_any_element()
-            }
+            Entry::TurnEnd { changes } => div()
+                .flex()
+                .flex_col()
+                .gap(tokens::SPACE_1)
+                .when_some(*changes, |row, turn| row.child(self.summary(turn, tokens, cx)))
+                .into_any_element(),
         }
     }
 
@@ -502,7 +518,6 @@ impl AgentView {
             .filter(|kind| !self.removed.contains(kind))
             .map(|kind| self.chip(kind, tokens, cx))
             .collect();
-        let spent = self.conversation.spent();
         div()
             .flex_none()
             .flex()
@@ -527,30 +542,17 @@ impl AgentView {
             })
             .when(usable, |footer| footer.child(self.prompt.clone()))
             .when(usable, |footer| {
-                footer.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_size(tokens::TEXT_SMALL)
-                        .text_color(tokens.text_faint)
-                        .child(if spent > 0. {
-                            strings::turn_cost(spent)
-                        } else {
-                            String::new()
-                        })
-                        .child(if busy {
-                            small_button("agent-stop", crate::t!(Key::Stop).to_owned(), tokens)
-                                .text_color(tokens.accent)
-                                .on_click(cx.listener(|view, _, _, cx| view.stop(cx)))
-                                .into_any_element()
-                        } else {
-                            small_button("agent-send", crate::t!(Key::Send).to_owned(), tokens)
-                                .text_color(tokens.accent)
-                                .on_click(cx.listener(|view, _, window, cx| view.send(window, cx)))
-                                .into_any_element()
-                        }),
-                )
+                footer.child(div().flex().items_center().justify_end().child(if busy {
+                    small_button("agent-stop", crate::t!(Key::Stop).to_owned(), tokens)
+                        .text_color(tokens.accent)
+                        .on_click(cx.listener(|view, _, _, cx| view.stop(cx)))
+                        .into_any_element()
+                } else {
+                    small_button("agent-send", crate::t!(Key::Send).to_owned(), tokens)
+                        .text_color(tokens.accent)
+                        .on_click(cx.listener(|view, _, window, cx| view.send(window, cx)))
+                        .into_any_element()
+                }))
             })
     }
 
@@ -794,7 +796,7 @@ fn diff_view(lines: &[DiffLine], tokens: &Tokens) -> impl IntoElement + use<> {
                     (
                         range,
                         HighlightStyle {
-                            background_color: color.map(|color| Hsla::from(color).opacity(0.35)),
+                            background_color: color.map(|color| Hsla::from(color).opacity(tokens::DIFF_WORD_TINT)),
                             font_weight: Some(FontWeight::BOLD),
                             ..Default::default()
                         },
@@ -804,7 +806,9 @@ fn diff_view(lines: &[DiffLine], tokens: &Tokens) -> impl IntoElement + use<> {
                     .flex()
                     .gap(tokens::SPACE_1)
                     .px(tokens::SPACE_1)
-                    .when_some(color, |row, color| row.bg(Hsla::from(color).opacity(0.14)))
+                    .when_some(color, |row, color| {
+                        row.bg(Hsla::from(color).opacity(tokens::DIFF_ROW_TINT))
+                    })
                     .text_color(color.unwrap_or(tokens.text_quiet))
                     .child(
                         div()

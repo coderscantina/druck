@@ -100,7 +100,26 @@ impl Notes {
         self.save()
     }
 
+    /// Brings back a note an undo took back to life, under its id.
+    pub fn restore(&mut self, note: Note) -> io::Result<()> {
+        self.notes.push(note);
+        self.notes.sort_by_key(|note| note.id);
+        self.save()
+    }
+
+    /// With no notes left there is no file, so nothing empty stands in the project or a commit.
     fn save(&self) -> io::Result<()> {
+        if self.notes.is_empty() {
+            return match fs::remove_file(&self.file) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+                _ => {
+                    if let Some(folder) = self.file.parent() {
+                        fs::remove_dir(folder).ok();
+                    }
+                    Ok(())
+                }
+            };
+        }
         if let Some(folder) = self.file.parent() {
             fs::create_dir_all(folder)?;
         }
@@ -130,6 +149,20 @@ mod tests {
         assert_eq!(read.all()[0].suggestion.as_deref(), Some("the lamp"));
         notes.remove(read.all()[0].id).unwrap();
         assert!(Notes::open(&folder).all().is_empty());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn the_last_note_takes_the_file_and_its_folder_along_and_an_undo_brings_them_back() {
+        let folder = std::env::temp_dir().join(format!("druck-notes-last-{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        let mut notes = Notes::open(&folder);
+        notes.add(&input()).unwrap();
+        let note = notes.all()[0].clone();
+        notes.remove(note.id).unwrap();
+        assert!(!folder.join(FOLDER).exists());
+        notes.restore(note.clone()).unwrap();
+        assert_eq!(Notes::open(&folder).all(), [note]);
         fs::remove_dir_all(&folder).unwrap();
     }
 

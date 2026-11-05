@@ -9,7 +9,7 @@ use gpui::{
     App, Bounds, Context, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter,
     FocusHandle, Focusable, GlobalElementId, HighlightStyle, Hsla, InspectorElementId, KeyBinding, LayoutId,
     MouseButton, MouseDownEvent, Pixels, ScrollHandle, SharedString, StyledText, TextLayout, UTF16Selection,
-    UnderlineStyle, Window, actions, div, fill, point, px, size,
+    UnderlineStyle, Window, actions, div, fill, point, size,
 };
 
 use crate::source::buffer::{Buffer, Edit, EditKind, Selection};
@@ -460,7 +460,10 @@ impl Element for PromptText {
         cx: &mut App,
     ) -> (LayoutId, StyledText) {
         let tokens = Tokens::get(cx);
-        let (selection_color, marked_color) = (Hsla::from(tokens.accent).opacity(0.3), Hsla::from(tokens.text));
+        let (selection_color, marked_color) = (
+            Hsla::from(tokens.accent).opacity(tokens::PROMPT_SELECTION_TINT),
+            Hsla::from(tokens.text),
+        );
         let input = self.input.read(cx);
         let text = input.buffer.text();
         let empty = text.is_empty();
@@ -528,7 +531,7 @@ impl Element for PromptText {
             .is_empty()
             .then(|| layout.position_for_index(input.selection.head))
             .flatten()
-            .map(|origin| Bounds::new(origin, size(px(1.5), layout.line_height())));
+            .map(|origin| Bounds::new(origin, size(tokens::CARET_WIDTH, layout.line_height())));
         Prepaint { layout, caret }
     }
 

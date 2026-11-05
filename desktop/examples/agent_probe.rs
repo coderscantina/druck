@@ -132,14 +132,11 @@ fn turn(session: &mut Session, events: &Receiver<Event>, text: &str, policy: Pol
             Event::Started { session_id, model, .. } => println!("  [{ms:>5} ms] started {session_id} {model}"),
             Event::TurnFinished {
                 session_id,
-                total_cost_usd: cost_usd,
                 is_error,
                 result,
                 ..
             } => {
-                println!(
-                    "  [{ms:>5} ms] finished error={is_error} cost={cost_usd:?} first_token={first_token:?} {result:?}"
-                );
+                println!("  [{ms:>5} ms] finished error={is_error} first_token={first_token:?} {result:?}");
                 return session_id;
             }
             Event::Error(message) | Event::Exited(message) => panic!("{message}"),

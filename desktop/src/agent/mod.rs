@@ -36,6 +36,7 @@ mod diff;
 mod markdown;
 pub mod note_tool;
 mod notes;
+#[cfg(any(debug_assertions, feature = "measure"))]
 mod probe;
 mod prompt;
 mod review;
@@ -54,7 +55,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyWindowHandle, App, Context, Entity, Focusable, Global, ScrollHandle, Subscription, Task, WeakEntity, Window, px,
+    AnyWindowHandle, App, Context, Entity, Focusable, Global, ScrollHandle, Subscription, Task, WeakEntity, Window,
 };
 
 use crate::editor::review::{NoteClicked, ReviewClicked};
@@ -111,10 +112,16 @@ pub fn mount(
         window: window.window_handle(),
     });
     card::mount(&view, slots, window, cx);
-    probe::start(&view, window, cx);
     parts
         .inspector
         .update(cx, |inspector, _| inspector.mount(Tab::Agent, view.into()));
+}
+
+#[cfg(any(debug_assertions, feature = "measure"))]
+pub fn apply_gate(window: &mut Window, cx: &mut Context<Workspace>) {
+    if let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) {
+        probe::start(&view, window, cx);
+    }
 }
 
 /// `Cmd+J`: a prompt at the selection, the chat card, or in Publish the rail's tab. Closes what is open.
@@ -235,6 +242,12 @@ pub struct AgentView {
     notes: Notes,
     /// The note a reply in the prompt is about.
     replying: Option<u64>,
+    /// Notes whose suggestion was applied, until an undo brings them back or the turn of events makes that moot.
+    applied_notes: Vec<review::AppliedNote>,
+    /// Changes the author took back since the last turn, for the next one to hear.
+    rejections: Vec<String>,
+    /// The setup lines were opened after they folded.
+    setup_open: bool,
     turn_start: Option<TurnStart>,
     approvals_seen: usize,
     /// The turn that files changing on disk belong to, from its prompt until shortly after its end.
@@ -372,6 +385,9 @@ impl AgentView {
             unreviewed: Vec::new(),
             notes,
             replying: None,
+            applied_notes: Vec::new(),
+            rejections: Vec::new(),
+            setup_open: false,
             turn_start: None,
             approvals_seen: 0,
             collecting: None,
@@ -463,7 +479,6 @@ impl AgentView {
             ..SessionConfig::default()
         };
         let (session, events) = Child::spawn(&config).map_err(|error| strings::cannot_start(&error.to_string()))?;
-        self.conversation.process_started();
         self.running = Some(Running {
             session,
             events,
@@ -507,7 +522,7 @@ impl AgentView {
         }
         // New text follows the reader to the bottom, unless they scrolled up to read something.
         let max = self.scroll.max_offset().y;
-        let follow = max <= px(1.) || -self.scroll.offset().y >= max - px(32.);
+        let follow = max <= crate::tokens::HAIRLINE || -self.scroll.offset().y >= max - crate::tokens::FOLLOW_ROOM;
         for event in events {
             match &event {
                 Event::Started { .. } => {
@@ -754,6 +769,15 @@ impl AgentView {
         }
         self.label_local_history_before_turn(cx);
         self.turn_start = Some(self.project_now(cx));
+        // The conversation should know what was taken back, or it offers the same change again.
+        let message = if self.rejections.is_empty() {
+            message
+        } else {
+            format!(
+                "<druck-rejected>\n{}\n</druck-rejected>\n\n{message}",
+                self.rejections.join("\n\n")
+            )
+        };
         let running = self.running.as_mut().expect("started above");
         if let Err(error) = running.session.send(&message) {
             self.running = None;
@@ -761,6 +785,7 @@ impl AgentView {
             cx.notify();
             return false;
         }
+        self.rejections.clear();
         self.conversation.begin_turn(shown, context);
         self.collecting = self.conversation.current_turn();
         self.collecting_end = Task::ready(());
@@ -873,6 +898,7 @@ impl AgentView {
         let chapter = session
             .chapter(session.active())
             .map(|chapter| relative(&self.base, chapter.path()));
+        let chapter_title = session.title_of(session.active());
         let range = editor.selection_range();
         let selection = (!range.is_empty()).then(|| {
             let buffer = session.active_buffer();
@@ -888,6 +914,7 @@ impl AgentView {
             .collect();
         let context = PromptContext {
             chapter,
+            chapter_title,
             selection,
             diagnostics,
         };
@@ -908,7 +935,7 @@ impl AgentView {
 
     fn chip_label(&self, kind: ChipKind) -> String {
         match kind {
-            ChipKind::Chapter => strings::chip_chapter(self.context.chapter.as_deref().unwrap_or_default()),
+            ChipKind::Chapter => strings::chip_chapter(&self.context.chapter_title),
             ChipKind::Selection => {
                 let (first, last) = self
                     .context

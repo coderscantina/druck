@@ -67,7 +67,6 @@ pub enum Entry {
     Stopped,
     /// A turn is over. `changes` is its number when it changed files.
     TurnEnd {
-        cost_usd: Option<f64>,
         changes: Option<usize>,
     },
 }
@@ -103,9 +102,6 @@ pub struct Conversation {
     session_id: Option<String>,
     /// What each turn changed, by turn number. Empty for a turn that changed nothing.
     turns: Vec<TurnChanges>,
-    /// What the CLI process had spent when the last turn ended, since it counts from its start.
-    process_total: f64,
-    spent: f64,
     /// An event changed what the panel shows since the last [`Conversation::take_dirty`].
     dirty: bool,
     /// What the agent passed the note tool in calls that have not finished.
@@ -122,8 +118,6 @@ impl Conversation {
             approvals: VecDeque::new(),
             session_id: None,
             turns: Vec::new(),
-            process_total: 0.,
-            spent: 0.,
             dirty: false,
             note_calls: HashMap::new(),
         }
@@ -161,22 +155,12 @@ impl Conversation {
         self.session_id = id;
     }
 
-    /// What this conversation has spent since the app started it.
-    pub fn spent(&self) -> f64 {
-        self.spent
-    }
-
     pub fn changes(&self, turn: usize) -> Option<&TurnChanges> {
         self.turns.get(turn).filter(|changes| !changes.is_empty())
     }
 
     pub fn changes_mut(&mut self, turn: usize) -> Option<&mut TurnChanges> {
         self.turns.get_mut(turn)
-    }
-
-    /// A new CLI process starts counting its cost from nothing.
-    pub fn process_started(&mut self) {
-        self.process_total = 0.;
     }
 
     /// The author sent a prompt.
@@ -293,20 +277,10 @@ impl Conversation {
             }
             Event::TurnFinished {
                 session_id,
-                total_cost_usd,
                 is_error,
                 stopped,
                 result,
             } => {
-                let cost = total_cost_usd
-                    .map(|total| {
-                        let turn = (total - self.process_total).max(0.);
-                        self.process_total = total;
-                        self.spent += turn;
-                        turn
-                    })
-                    // A turn that was cut short reports nothing new.
-                    .filter(|turn| *turn > 0.);
                 let stopping = self.status == Status::Stopping;
                 self.status = Status::Idle;
                 self.approvals.clear();
@@ -316,7 +290,6 @@ impl Conversation {
                     self.entries.push(Entry::Error(result));
                 }
                 self.entries.push(Entry::TurnEnd {
-                    cost_usd: cost,
                     changes: self.turns.len().checked_sub(1),
                 });
                 effects.push(Effect::TurnEnded);
@@ -489,54 +462,17 @@ mod tests {
         assert!(c.changes(turn).is_some());
         let changes = c.changes(turn).expect("changes");
         assert_eq!((changes.files.len(), changes.hunk_count()), (1, 1));
-        let Some(Entry::TurnEnd { changes: Some(n), .. }) = c.entries().last() else {
+        let Some(Entry::TurnEnd { changes: Some(n) }) = c.entries().last() else {
             panic!("turn end names its changes")
         };
         assert_eq!(*n, turn);
     }
 
     #[test]
-    fn cost_is_per_turn_although_the_cli_counts_per_process() {
+    fn a_finished_turn_keeps_its_session() {
         let mut c = conversation();
-        c.process_started();
-        for n in [0, 1] {
-            c.begin_turn("x".into(), None);
-            run(&mut c, turn_events(n));
-        }
-        let costs: Vec<_> = c
-            .entries()
-            .iter()
-            .filter_map(|e| {
-                if let Entry::TurnEnd { cost_usd, .. } = e {
-                    *cost_usd
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert!((costs[0] - 0.00126701).abs() < 1e-9);
-        assert!((costs[1] - 0.00034193).abs() < 1e-9);
-        assert!((c.spent() - 0.00160894).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_resumed_process_starts_counting_again() {
-        let mut c = conversation();
-        c.process_started();
-        for n in [0, 1] {
-            c.begin_turn("x".into(), None);
-            run(&mut c, turn_events(n));
-        }
-        c.process_started();
         c.begin_turn("again".into(), None);
         let effects = run(&mut c, turn_events(2));
-        let Some(Entry::TurnEnd {
-            cost_usd: Some(cost), ..
-        }) = c.entries().last()
-        else {
-            panic!("turn end")
-        };
-        assert!((cost - 0.00008728).abs() < 1e-9);
         assert!(effects.iter().any(|e| matches!(e, Effect::SessionId(_))));
         assert_eq!(c.session_id(), Some("e1341d12-6f29-4505-acf2-d98202053623"));
     }

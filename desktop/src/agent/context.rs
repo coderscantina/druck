@@ -26,8 +26,10 @@ pub struct Selected {
 /// The state of the document when the author began writing a prompt.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Context {
-    /// The open chapter's file, relative to the project folder.
+    /// The open chapter's file, relative to the project folder, which is what a prompt names.
     pub chapter: Option<String>,
+    /// Its title, which is what the author reads.
+    pub chapter_title: String,
     pub selection: Option<Selected>,
     /// One line each, with the file and line they concern.
     pub diagnostics: Vec<String>,
@@ -96,6 +98,7 @@ mod tests {
     fn context() -> Context {
         Context {
             chapter: Some("manuscript/03-weg.md".into()),
+            chapter_title: "Der Weg".into(),
             selection: Some(Selected {
                 lines: (12, 13),
                 text: "Der erste Satz.\nDer zweite.".into(),

@@ -39,6 +39,7 @@ crate::strings! {
             "Dieses Projekt hat eine frühere Unterhaltung. Claude Code bewahrt sie auf, der nächste Prompt setzt sie fort."
         ),
         SetupTitle => ("Set up Claude Code", "Claude Code einrichten"),
+        SetupFolded => ("Claude Code setup", "Einrichtung von Claude Code"),
         SetupMissing => (
             "The agent runs the Claude Code program on this computer. It is not installed or not on the search path.",
             "Der Agent startet das Programm Claude Code auf diesem Computer. Es ist nicht installiert oder nicht im Suchpfad."
@@ -93,7 +94,7 @@ crate::strings! {
             "Claude Code meldet keine Version, die Druck lesen kann."
         ),
 
-        ChipChapter => ("Chapter {path}", "Kapitel {path}"),
+        ChipChapter => ("Chapter: {title}", "Kapitel: {title}"),
         ChipSelectionOne => ("Selection, {lines} line", "Auswahl, {lines} Zeile"),
         ChipSelectionMany => ("Selection, {lines} lines", "Auswahl, {lines} Zeilen"),
         ChipProblemOne => ("{count} problem", "{count} Problem"),
@@ -160,6 +161,15 @@ pub fn try_again(path: &str, old: &str, new: &str) -> String {
     )
 }
 
+/// What the next turn hears about a change the author took back, so it does not offer it again. Never translated.
+pub fn rejected(path: &str, old: &str, new: &str) -> String {
+    format!(
+        "The author rejected your change to {path}. The text is back as it was:\n> {}\nYou had written:\n> {}\nDo not offer this change again unless asked.",
+        old.trim_end().replace('\n', "\n> "),
+        new.trim_end().replace('\n', "\n> ")
+    )
+}
+
 pub fn review_foot(here: usize, elsewhere: usize) -> String {
     match (here, elsewhere) {
         (0, 1) => crate::t!(Key::ReviewElsewhereOne).to_owned(),
@@ -183,8 +193,8 @@ pub fn context_sent_with(labels: &[String]) -> String {
     format!("{}: {}", crate::t!(Key::ContextSent), labels.join(", "))
 }
 
-pub fn chip_chapter(path: &str) -> String {
-    crate::t!(Key::ChipChapter, path = path)
+pub fn chip_chapter(title: &str) -> String {
+    crate::t!(Key::ChipChapter, title = title)
 }
 
 pub fn chip_selection(lines: usize) -> String {
@@ -243,17 +253,6 @@ pub fn session_button(label: &SessionLabel) -> String {
         SessionLabel::Rule(rule) => crate::t!(Key::SessionRule, rule = rule),
         SessionLabel::Other => crate::t!(Key::SessionOther).to_owned(),
     }
-}
-
-pub fn turn_cost(cost: f64) -> String {
-    let digits = if cost < 0.01 {
-        4
-    } else if cost < 1. {
-        3
-    } else {
-        2
-    };
-    format!("${cost:.digits$}")
 }
 
 pub fn changes_summary(hunks: usize, files: usize) -> String {

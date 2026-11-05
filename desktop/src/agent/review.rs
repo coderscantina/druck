@@ -11,6 +11,7 @@ use gpui::{App, Context, Entity, Window};
 use serde_json::Value;
 
 use super::changes::{FileChanges, Presence};
+use super::notes::Note;
 use super::strings::{self, Key};
 use super::{AgentView, Standing, Unreviewed, file_in_session, relative};
 use crate::editor::SaveRequested;
@@ -97,6 +98,7 @@ impl AgentView {
 
     /// Works out where every hunk is in the text now, for the galley, the foot, the warnings, and the turn's rows.
     pub(super) fn refresh_changes(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_undone_notes(cx);
         if !self.enabled {
             self.unreviewed.clear();
             self.editor.update(cx, |editor, cx| {
@@ -164,7 +166,7 @@ impl AgentView {
     /// Typing moves the text under what review shows, and the galley keeps up by itself. When the text rests, this looks
     /// again for what the typing changed.
     pub(super) fn text_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.standing.is_empty() && self.notes.all().is_empty() {
+        if self.standing.is_empty() && self.notes.all().is_empty() && self.applied_notes.is_empty() {
             return;
         }
         self.settle = cx.spawn_in(window, async move |view, cx| {
@@ -257,12 +259,14 @@ impl AgentView {
         };
         let reverted = (file.hunks.iter_mut())
             .find(|tracked| tracked.id == id)
-            .and_then(|tracked| tracked.revert(&mine));
-        let Some(reverted) = reverted else {
+            .and_then(|tracked| Some((tracked.revert(&mine)?, tracked.old_core(), tracked.new_core())));
+        let Some((reverted, old, new)) = reverted else {
             self.conversation.note(crate::t!(Key::HunkConflict).to_owned());
             cx.notify();
             return;
         };
+        let told = strings::rejected(&relative(&self.base, &path), &old, &new);
+        self.rejections.push(told);
         if created && reverted.is_empty() {
             self.remove_created_file(&path, window, cx);
         } else {
@@ -286,8 +290,16 @@ impl AgentView {
                 let Some(mine) = current_text(session, &file.path) else {
                     continue;
                 };
+                let taken_back: Vec<(String, String)> = (file.hunks.iter_mut())
+                    .filter_map(|tracked| {
+                        let standing = matches!(tracked.presence(&mine), Presence::Applied(_));
+                        standing.then(|| (tracked.old_core(), tracked.new_core()))
+                    })
+                    .collect();
                 let new = file.reject_all(&mine);
                 let (path, created) = (file.path.clone(), file.created);
+                let name = relative(&self.base, &path);
+                (self.rejections).extend((taken_back.iter()).map(|(old, new)| strings::rejected(&name, old, new)));
                 if created && new.is_empty() {
                     gone.push(path);
                 } else if new != mine {
@@ -408,6 +420,8 @@ impl AgentView {
             return;
         };
         self.reject(id, window, cx);
+        // Try again says it itself, with the opposite wish.
+        self.rejections.pop();
         let shown = crate::t!(Key::TryAgainShown, place = path.clone());
         self.start_turn(shown, strings::try_again(&path, &old, &new), None, window, cx);
     }
@@ -528,8 +542,35 @@ impl AgentView {
             )
         });
         match result {
-            Ok(()) => self.dismiss_note(id, window, cx),
+            Ok(()) => {
+                self.applied_notes.push(AppliedNote {
+                    note,
+                    path,
+                    suggestion,
+                    before: text,
+                });
+                self.dismiss_note(id, window, cx);
+            }
             Err(error) => self.conversation.note(error.to_string()),
+        }
+    }
+
+    /// An undo of an Apply takes the suggestion out and puts the quote back, and so its note returns.
+    fn restore_undone_notes(&mut self, cx: &mut Context<Self>) {
+        let session = self.editor.read(cx).session();
+        let (undone, kept): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.applied_notes)
+                .into_iter()
+                .partition(|applied| {
+                    session
+                        .file_text(&applied.path)
+                        .is_some_and(|text| applied.undone_in(&text))
+                });
+        self.applied_notes = kept;
+        for applied in undone {
+            if let Err(error) = self.notes.restore(applied.note) {
+                self.conversation.note(error.to_string());
+            }
         }
     }
 
@@ -541,6 +582,22 @@ impl AgentView {
             self.conversation.note(error.to_string());
         }
         self.refresh_changes(window, cx);
+    }
+}
+
+/// A note whose suggestion went into the text. An undo can still bring it back.
+pub(super) struct AppliedNote {
+    note: Note,
+    path: std::path::PathBuf,
+    suggestion: String,
+    /// What the file held before the suggestion went in.
+    before: String,
+}
+
+impl AppliedNote {
+    /// Whether the suggestion was taken back: the text is as it was, or holds the quote again and not the suggestion.
+    fn undone_in(&self, text: &str) -> bool {
+        text == self.before || (text.contains(&self.note.quote) && !text.contains(&self.suggestion))
     }
 }
 
