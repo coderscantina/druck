@@ -17,11 +17,13 @@ use crate::tokens::{self, Tokens};
 
 const CONTEXT: &str = "AgentPrompt";
 const MAX_HEIGHT: Pixels = px(160.);
+const MIN_HEIGHT: Pixels = px(54.);
 
 actions!(
     agent_prompt,
     [
         Submit,
+        Dismiss,
         NewLine,
         Left,
         Right,
@@ -48,6 +50,7 @@ pub fn bind_keys(cx: &mut App) {
     let context = Some(CONTEXT);
     cx.bind_keys([
         KeyBinding::new("enter", Submit, context),
+        KeyBinding::new("escape", Dismiss, context),
         KeyBinding::new("shift-enter", NewLine, context),
         KeyBinding::new("left", Left, context),
         KeyBinding::new("right", Right, context),
@@ -77,12 +80,19 @@ pub struct Submitted;
 
 impl EventEmitter<Submitted> for PromptInput {}
 
+/// The author pressed Escape.
+pub struct Dismissed;
+
+impl EventEmitter<Dismissed> for PromptInput {}
+
 pub struct PromptInput {
     buffer: Buffer,
     selection: Selection,
     marked: Option<Range<usize>>,
     focus: FocusHandle,
     placeholder: SharedString,
+    /// One line with nothing around it, for a card that draws its own edge.
+    bare: bool,
     /// Where the last paint put the text, for input methods and for clicks.
     layout: Option<TextLayout>,
     scroll: ScrollHandle,
@@ -102,13 +112,29 @@ impl PromptInput {
             marked: None,
             focus: cx.focus_handle(),
             placeholder: placeholder.into(),
+            bare: false,
             layout: None,
             scroll: ScrollHandle::new(),
         }
     }
 
+    /// A box of one line for a card, which still wraps what does not fit.
+    pub fn one_line(placeholder: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
+        Self {
+            bare: true,
+            ..Self::new(placeholder, cx)
+        }
+    }
+
     pub fn text(&self) -> &str {
         self.buffer.text()
+    }
+
+    pub fn set_placeholder(&mut self, placeholder: &'static str, cx: &mut Context<Self>) {
+        if self.placeholder != placeholder {
+            self.placeholder = placeholder.into();
+            cx.notify();
+        }
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
@@ -324,6 +350,10 @@ impl PromptInput {
         self.replace_selection("\n", EditKind::Discrete, cx);
     }
 
+    fn on_dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(Dismissed);
+    }
+
     fn on_submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
         // While an input method composes, Enter commits the composition, which it handles before this runs.
         cx.emit(Submitted);
@@ -352,6 +382,7 @@ impl Render for PromptInput {
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_submit))
+            .on_action(cx.listener(Self::on_dismiss))
             .on_action(cx.listener(Self::on_new_line))
             .on_action(cx.listener(Self::on_left))
             .on_action(cx.listener(Self::on_right))
@@ -372,16 +403,19 @@ impl Render for PromptInput {
             .on_action(cx.listener(Self::on_undo))
             .on_action(cx.listener(Self::on_redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .min_h(px(54.))
             .max_h(MAX_HEIGHT)
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .px(tokens::SPACE_2)
-            .py(px(6.))
-            .rounded(tokens::RADIUS)
-            .border_1()
-            .border_color(tokens.divider)
-            .bg(tokens.field)
+            .when(!self.bare, |input| {
+                input
+                    .min_h(MIN_HEIGHT)
+                    .px(tokens::SPACE_2)
+                    .py(px(6.))
+                    .rounded(tokens::RADIUS)
+                    .border_1()
+                    .border_color(tokens.divider)
+                    .bg(tokens.field)
+            })
             .child(PromptText {
                 input: cx.entity(),
                 placeholder: self.placeholder.clone(),

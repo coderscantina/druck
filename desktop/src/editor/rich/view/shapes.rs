@@ -208,6 +208,7 @@ impl EditorView {
                 dim,
                 gap: px(0.),
                 indent: px(0.),
+                below: px(0.),
             },
             window,
         )

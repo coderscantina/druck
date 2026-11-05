@@ -14,6 +14,7 @@ crate::strings! {
         CategoryAppearance => ("Appearance", "Darstellung"),
         CategoryWriting => ("Writing", "Schreiben"),
         CategoryLanguage => ("Language and spelling", "Sprache"),
+        CategoryAgent => ("Agent", "Agent"),
         CategoryKeys => ("Keys", "Tasten"),
 
         Appearance => ("Appearance", "Erscheinungsbild"),
@@ -50,6 +51,11 @@ crate::strings! {
         LanguageEnglish => ("English", "English"),
         LanguageGerman => ("Deutsch", "Deutsch"),
         Spelling => ("Check spelling", "Rechtschreibung prüfen"),
+        Agent => ("Writing partner", "Schreibpartner"),
+        AgentHint => (
+            "Claude Code on Cmd+J, on this computer. Set it up with an API key. Druck holds no keys and starts nothing while this is off.",
+            "Claude Code auf Cmd+J, auf diesem Computer. Mit einem API-Schlüssel einrichten. Druck speichert keine Schlüssel und startet nichts, solange das aus ist."
+        ),
         SpellingHint => ("Underlines misspelled words while you write.", "Unterstreicht falsche Wörter beim Schreiben."),
     }
 }

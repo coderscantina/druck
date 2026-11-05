@@ -269,10 +269,11 @@ impl InspectorView {
 
 impl Render for InspectorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let agent_on = crate::settings::get(cx).agent;
         let mounted = |tabs: &[Tab]| -> Vec<Tab> {
             tabs.iter()
                 .copied()
-                .filter(|tab| self.panels.contains_key(tab))
+                .filter(|tab| self.panels.contains_key(tab) && (*tab != Tab::Agent || agent_on))
                 .collect()
         };
         let (top, bottom) = (mounted(&Tab::TOP), mounted(&Tab::BOTTOM));

@@ -13,6 +13,7 @@ mod gutter;
 mod layout;
 mod margin;
 mod place;
+pub mod review;
 pub(crate) mod rich;
 mod scrollbar;
 mod spelling;
@@ -27,9 +28,9 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
-    KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString,
-    Subscription, Task, UTF16Selection, Window, actions, div, point, px, size,
+    AnyView, App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable,
+    KeyBinding, KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent,
+    SharedString, Subscription, Task, UTF16Selection, Window, actions, div, point, px, size,
 };
 
 use crate::preview::BookType;
@@ -319,8 +320,12 @@ pub struct EditorView {
     /// At a soft wrap, whether the caret shows at the end of the upper row.
     upstream: bool,
     marked: Option<Range<usize>>,
-    /// Passages of the active chapter another slice marks, such as an agent's changes. See [`EditorView::set_marks`].
-    marks: Vec<Range<usize>>,
+    /// An agent's changes in the active chapter. See [`review`].
+    review: Vec<review::Passage>,
+    /// An agent's notes beside the active chapter.
+    advice: Vec<review::Advice>,
+    /// The card that floats under the selection while it has the keys.
+    selection_prompt: Option<AnyView>,
     /// The column up and down keep to, kept across lines that are too short for it.
     goal_x: Option<Pixels>,
     /// Where markers reveal. Follows the caret, but stays put during a drag, so text does not jump under the pointer.
@@ -446,7 +451,9 @@ impl EditorView {
             selection: Selection::caret(caret),
             upstream: false,
             marked: None,
-            marks: Vec::new(),
+            review: Vec::new(),
+            advice: Vec::new(),
+            selection_prompt: None,
             goal_x: None,
             reveal_at: caret,
             drag: None,
@@ -610,6 +617,7 @@ impl EditorView {
 
     /// Takes over the session's active chapter: derives its blocks again and restores its place.
     fn adopt_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.forget_review();
         let chapter = self.session.active_chapter();
         let text = chapter.text();
         let view = chapter.view;
@@ -663,15 +671,6 @@ impl EditorView {
     /// The selected bytes of the active chapter; empty for a caret.
     pub fn selection_range(&self) -> Range<usize> {
         self.selection.range()
-    }
-
-    /// Tints these byte ranges of the active chapter. They replace the earlier ones, and an empty list clears them.
-    /// The caller keeps them true to the text, since the galley does not move them as the text changes.
-    pub fn set_marks(&mut self, marks: Vec<Range<usize>>, cx: &mut Context<Self>) {
-        if self.marks != marks {
-            self.marks = marks;
-            cx.notify();
-        }
     }
 
     /// The session's revision: it changes with the text the pages are set from.
@@ -982,6 +981,7 @@ impl EditorView {
         self.scroll.block = self.blocks.index_at(moved);
         self.hovered = None;
         self.rich.atoms = rich::atoms(self.session.active_buffer().text(), &self.blocks);
+        review::shift(&mut self.review, &mut self.advice, &splice);
     }
 
     fn set_selection(&mut self, selection: Selection, upstream: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1704,7 +1704,7 @@ impl EditorView {
             (start < end).then(|| start - block.range.start..end - block.range.start)
         });
         let width = self.column.text_width;
-        let chips = if self.source || collapsed || whole_atom.is_some() || syntax.spans.is_empty() {
+        let mut chips = if self.source || collapsed || whole_atom.is_some() || syntax.spans.is_empty() {
             Vec::new()
         } else {
             let caret = self
@@ -1713,6 +1713,11 @@ impl EditorView {
                 .map(|at| at - block.range.start);
             self.rich.chips(block_text, &syntax.spans, caret)
         };
+        if !self.review.is_empty() && !collapsed && whole_atom.is_none() {
+            chips.extend(self.review_chips(&block.range, block_text, &hidden, &chips));
+            chips.sort_by_key(|chip| chip.range.start);
+        }
+        let below = self.review_room(index);
         let dim = self.is_dimmed(index);
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let list = self.blocks.as_slice();
@@ -1741,6 +1746,7 @@ impl EditorView {
             && layout.marked == marked
             && layout.collapsed == collapsed
             && layout.chips == chips
+            && layout.below == below
             && rich::view::shapes::still_fits(layout.whole.as_deref(), whole_atom.as_ref())
         {
             return layout.clone();
@@ -1773,6 +1779,7 @@ impl EditorView {
                 dim,
                 gap,
                 indent,
+                below,
             },
             window,
         ));
@@ -1810,7 +1817,8 @@ impl EditorView {
     }
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
-        let notes = !self.source && !notes::leading_notes(self.text(), &self.blocks).is_empty();
+        let notes =
+            !self.advice.is_empty() || (!self.source && !notes::leading_notes(self.text(), &self.blocks).is_empty());
         let column = Column::place(bounds, self.measure(), notes);
         if column.text_width != self.column.text_width {
             for slot in &self.slots {

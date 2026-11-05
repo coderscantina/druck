@@ -45,8 +45,8 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
   - [x] Slice 7: Rich blocks.
   - [ ] Slice 8: Beta gate, met with the gaps below.
 - [ ] 18: Writing surface. Built and checked on `t3/writing-first-surface`, unmerged. Stays unchecked until the owner has run the input method test, see the resume note.
-- [x] 19: Publish view. Built and checked on its task branch, unmerged. What only the owner can check is in the [note](#milestone-19-note).
-- [ ] 20: Writing partner.
+- [x] 19: Publish view. Built and checked, merged here. What only the owner can check is in the [note](#milestone-19-note).
+- [ ] 20: Writing partner. Built and checked with real turns, merged here. Stays unchecked until a person has clicked its buttons, see the [note](#milestone-20-note).
 - [ ] 21: Versions.
 - [ ] 22: Writer beta, the new gate for a first public release.
 - [ ] 23: Desktop 1.0, replacing 17.
@@ -129,6 +129,25 @@ Evidence on the book as a project, release with `measure`, `DRUCK_GATE=1 DRUCK_G
 Only the owner can check: a real mouse on all of this, since posted mouse events do not reach the window. An input method in the slip. Whether reflow feels calm, and whether a spread with many marks is too much tint. The Selection tab's removal means a custom style is now applied by writing `{.name}`, so decide whether the slip should offer them.
 
 Not done: the other 22 theme sections stay JSON, as the milestone says. Marks show a paragraph, not its single line.
+
+### Milestone 20 note
+
+Built on `t3/milestone-20-writing-partner`, on `writing-first-direction`, not merged. See [the decisions](DECISIONS.md#2026-11-05-writing-partner). The agent is off until `"agent": true`. `Cmd+J` prompts at a selection or opens the chat card, changes show in the text with Accept, Reject, and Try again, and notes stand in the margin.
+
+Next action: the integrator wires export and the commit card to `agent::unreviewed_changes(cx)` and milestone 21 fills `label_local_history_before_turn` in `agent/mod.rs`. Then the owner clicks the buttons with a real mouse.
+
+Evidence, on 2026-11-05 on this M1 Pro, on a copy of `buch-1-ttp404` made into a project, `claude` 2.1.318 with `--model haiku`, a release build without fat LTO and with `--features measure`. Clicks went through `DRUCK_AGENT_SCRIPT`, and keys through `CGEventPostToPid`. `cargo test -q -p druck-desktop` passed 570 with 1 ignored. `cargo clippy -q -p druck-desktop -- -D warnings` and `cargo fmt --check` are clean.
+
+- **Selection edit:** one passage. Keys typed in another paragraph during the turn stayed. Reject returned the file's bytes (`diff -r` against the copy found nothing). Undo with `Cmd+Z` brought the passage back under review, and Accept took it out and kept the text. Try again gave a new passage on the rejected text.
+- **Refined across chapters:** three chapters, three passages, with Next. Reject all returned the two chapters nobody typed in byte for byte, and kept typed words in the other.
+- **New chapter added to `druck.yaml`:** passages per block and one for the manifest, while keys were typed in another chapter. Reject one, reject another, then Reject all: `druck.yaml` byte-identical, the new file gone, only the typed words differ.
+- **Notes:** the CLI called `mcp__druck__leave_note` with no approval asked. Apply wrote the suggestion, Reply sent the note along, a note whose text was replaced said so, and notes came back after a restart.
+- **Approval:** a Bash call under an `ask` rule opened the card from the bare page. In Publish the Write switch and the rail's tab had a dot. Allow finished the turn.
+- **Off:** no process after `Cmd+J` (`pgrep -P` empty), no rail tab, no foot. Killing the app left no CLI or note tool behind.
+- **Inspected:** selection prompt, passage and note, whole chapter, chat card, and waiting approval in dark and light, English and German, changing `settings.json` while running. Captures are in `~/Development/products/.captures/milestone-20`.
+- **Not run:** a real mouse, since automated mouse events do not reach the window; input methods in the new prompt beyond what it shares with the panel's; typing latency during a turn after this change; Linux and Windows; a turn with a non-`haiku` model.
+
+Follow-ups: typing anywhere in a paragraph takes its passage out of review, since a Markdown paragraph is one line; a word-level reject through `three_way` could keep it. Removed words show their Markdown marks. Review is lost at a restart. The removal of every line of a chapter has no text to stand beside, so it shows only its buttons. A narrow window has no margin for notes, and says nothing of them. `Ask the Agent` sits in the View menu's Inspector submenu, since the menu is built as a fixed list. The selection's context could name the absolute path: `haiku` once guessed a wrong one from relative paths and recovered.
 
 Older notes follow.
 

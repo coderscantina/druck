@@ -72,6 +72,18 @@ pub const NOTE_GAP: Pixels = px(28.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
 pub const NOTE_TEXT: Pixels = px(12.);
 pub const NOTE_RULE: Pixels = px(1.);
+/// The buttons of the agent's cards and of a passage under review.
+pub const SMALL_BUTTON_HEIGHT: Pixels = px(22.);
+/// The room under a passage that holds its buttons, and how far below the text they stand.
+pub const REVIEW_ROW_HEIGHT: Pixels = px(36.);
+pub const REVIEW_ROW_GAP: Pixels = px(6.);
+/// The tints behind words an agent changed.
+pub const REVIEW_TINT: f32 = 0.22;
+/// The one-line card under a selection, and the small chat card over the text.
+pub const PROMPT_CARD_WIDTH: Pixels = px(420.);
+pub const PROMPT_CARD_HEIGHT: Pixels = px(34.);
+pub const CHAT_CARD_WIDTH: Pixels = px(300.);
+pub const CHAT_CARD_MAX_HEIGHT: Pixels = px(520.);
 /// The caret's width in the text.
 pub const CARET_WIDTH: Pixels = px(1.5);
 /// A line of the source view against the body size, and its line height.

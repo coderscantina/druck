@@ -45,6 +45,15 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
+    // The CLI starts this executable again as the tool that leaves margin notes. See `agent::note_tool`.
+    if std::env::args().nth(1).as_deref() == Some(agent::NOTE_TOOL_FLAG) {
+        let served = std::env::current_dir().and_then(|folder| agent::note_tool::serve(&folder));
+        return if served.is_ok() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
     let cli = Cli::parse();
     if let Some(path) = cli.open.as_deref().filter(|path| !path.exists()) {
         eprintln!("cannot open {}: no such file or folder", path.display());

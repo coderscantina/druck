@@ -30,6 +30,7 @@ actions!(
         ShowImages,
         ShowDetails,
         ShowAgent,
+        AskAgent,
         ChooseTheme,
         FocusEditor,
         CloseDocument,
@@ -61,6 +62,8 @@ actions!(
 pub struct MenuState {
     pub recent: Vec<PathBuf>,
     pub binder_shown: bool,
+    /// The agent is enabled in Settings, so its items are in the menus.
+    pub agent: bool,
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -83,6 +86,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-cmd-4", ShowImages, None),
         KeyBinding::new("ctrl-cmd-5", ShowDetails, None),
         KeyBinding::new("ctrl-cmd-6", ShowAgent, None),
+        KeyBinding::new("cmd-j", AskAgent, None),
         KeyBinding::new("cmd-=", ZoomIn, None),
         KeyBinding::new("cmd-+", ZoomIn, None),
         KeyBinding::new("cmd--", ZoomOut, None),
@@ -95,6 +99,24 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-h", HideOthers, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),
     ]);
+}
+
+/// The rail's tabs, without the agent's while it is off.
+fn inspector_items(state: &MenuState) -> Vec<MenuItem> {
+    let mut items = vec![
+        item(Key::ShowSelection, ShowSelection),
+        item(Key::ShowStyles, ShowStyles),
+        item(Key::ShowFonts, ShowFonts),
+        item(Key::ShowImages, ShowImages),
+        item(Key::ShowDetails, ShowDetails),
+    ];
+    if state.agent {
+        items.push(item(Key::AskAgent, AskAgent));
+        items.push(item(Key::ShowAgent, ShowAgent));
+    }
+    items.push(item(Key::ShowDiagnostics, ShowDiagnostics));
+    items.push(item(Key::ExportItem, ShowExport));
+    items
 }
 
 /// The name a recent document shows under: its folder or file name.
@@ -202,15 +224,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             },
             item(Key::FocusBinder, FocusBinder),
             item(Key::FocusEditor, FocusEditor),
-            MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items([
-                item(Key::ShowStyles, ShowStyles),
-                item(Key::ShowFonts, ShowFonts),
-                item(Key::ShowImages, ShowImages),
-                item(Key::ShowDetails, ShowDetails),
-                item(Key::ShowAgent, ShowAgent),
-                item(Key::ShowDiagnostics, ShowDiagnostics),
-                item(Key::ExportItem, ShowExport),
-            ])),
+            MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items(inspector_items(state))),
             item(Key::NextProblem, NextProblem),
             item(Key::PreviousProblem, PreviousProblem),
         ]),

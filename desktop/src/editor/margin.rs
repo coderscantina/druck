@@ -1,6 +1,6 @@
 //! The chapter's notes in the right margin: each comment that opens the chapter, with a thin accent line at its left and
 //! a field that edits its text where it stands in the buffer, so undo and the bytes around it are the editor's. They show
-//! only when there are any. Agent notes will stand in the same margin.
+//! only when there are any. An agent's notes stand in the same margin, see [`super::review`].
 
 use std::cell::Cell;
 use std::ops::Range;

@@ -80,6 +80,7 @@ crate::strings! {
         ShowImages => ("Images", "Bilder"),
         ShowDetails => ("Details", "Angaben"),
         ShowAgent => ("Agent", "Agent"),
+        AskAgent => ("Ask the Agent\u{2026}", "Agent fragen\u{2026}"),
         MenuInsert => ("Insert", "Einfügen"),
         InsertFootnote => ("Footnote", "Fußnote"),
         InsertCitation => ("Citation…", "Zitat…"),

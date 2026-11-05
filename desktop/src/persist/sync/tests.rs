@@ -286,6 +286,32 @@ fn our_own_write_is_recognized_by_its_content() {
 }
 
 #[test]
+fn a_change_after_a_reject_does_not_bring_back_what_was_rejected() {
+    let mut fixture = Fixture::new();
+    let path = fixture.path("manuscript/one.md");
+    let agent = "# One\n\nFirst line, shorter now and for good.\n\nSecond line.\n";
+    fs::write(&path, agent).unwrap();
+    let change = fixture.sync.on_disk(&mut fixture.session, &path, fs::read(&path).ok());
+    assert!(change.is_some());
+    // The author rejects it, and the rejected text is saved.
+    let rejected = "# One\n\nFirst line.\n\nSecond line.\n";
+    fixture.session.disown_versions(&path);
+    fixture.session.set_synced(&path, rejected.into(), true);
+    fs::write(&path, rejected).unwrap();
+    let edits = crate::persist::merge::edits_between(agent, rejected);
+    fixture
+        .session
+        .apply_to_file(&path, &edits, EditKind::Discrete)
+        .unwrap();
+    fixture.session.mark_clean(&path);
+    // The agent tries again from that text, closer to its first try than to what it started from.
+    let again = "# One\n\nFirst line, shorter now.\n\nSecond line.\n";
+    fs::write(&path, again).unwrap();
+    fixture.sync.on_disk(&mut fixture.session, &path, fs::read(&path).ok());
+    assert_eq!(fixture.session.file_text(&path).as_deref(), Some(again));
+}
+
+#[test]
 fn a_write_that_started_from_an_older_read_does_not_take_back_what_was_saved() {
     let mut fixture = Fixture::new();
     let read_by_the_agent = fixture.text(ONE);

@@ -19,7 +19,8 @@
 //! - **Theme core** owns `theme_file/` and the panels on the `Tab::Styles` and `Tab::Fonts` tabs.
 //! - **Shell** owns `shell/`: the `Tab::Proof` and `Tab::Export` panels, the Binder's dots, search and the word
 //!   count, the string tables, and the rest of the menus.
-//! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the rail.
+//! - **Agent** owns `agent/` and `editor/review.rs`: `Cmd+J`, the chat card that is also the `Tab::Agent` tab of the rail,
+//!   review in the text, and margin notes. Off until enabled in Settings.
 //! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Images` panel.
 
 use std::path::{Path, PathBuf};
@@ -54,7 +55,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     shell::mount(parts, slots, window, cx);
     crate::palette::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
-    crate::agent::mount(parts, persist, window, cx);
+    crate::agent::mount(parts, persist, slots, window, cx);
     crate::editor::mount(parts, cx);
 }
 

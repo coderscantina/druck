@@ -829,6 +829,11 @@ impl EditorView {
             right: f32::from(window.viewport_size().width),
             bottom: f32::from(viewport.bottom()),
         };
+        if let (Some(prompt), Some(target)) = (&self.selection_prompt, Self::selection_box(selection)) {
+            let wanted = size(tokens::PROMPT_CARD_WIDTH, tokens::PROMPT_CARD_HEIGHT);
+            let origin = point(self.column.text_left, placed_at_caret(target, wanted, area).y);
+            return vec![(prompt.clone().into_any_element(), origin)];
+        }
         match &self.float {
             Float::None => {
                 if let Some(target) = Self::selection_box(selection)

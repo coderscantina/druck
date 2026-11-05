@@ -1,13 +1,14 @@
 //! What the panel shows, as plain data. Events from the CLI go in, rows and pending approvals come out, and nothing
 //! here knows about gpui or a child process, so a captured stream replays against it in a test.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use super::approval::{self, Approval};
 use super::changes::{Hunk, TurnChanges};
+use super::note_tool::TOOL as NOTE_TOOL;
 use super::session::Event;
 use super::strings;
 
@@ -84,6 +85,8 @@ pub enum Effect {
     Created(PathBuf),
     /// The process ended; a new prompt starts a new one.
     ProcessEnded,
+    /// The note tool took a note, with what the agent passed it.
+    NoteLeft(Value),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +108,8 @@ pub struct Conversation {
     spent: f64,
     /// An event changed what the panel shows since the last [`Conversation::take_dirty`].
     dirty: bool,
+    /// What the agent passed the note tool in calls that have not finished.
+    note_calls: HashMap<String, Value>,
 }
 
 impl Conversation {
@@ -120,7 +125,15 @@ impl Conversation {
             process_total: 0.,
             spent: 0.,
             dirty: false,
+            note_calls: HashMap::new(),
         }
+    }
+
+    /// Starts over: rows, approvals, and the session go, and what the turns changed stays, since it is in the files.
+    pub fn restart(&mut self) {
+        let turns = std::mem::take(&mut self.turns);
+        *self = Self::new(std::mem::take(&mut self.base));
+        self.turns = turns;
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -159,11 +172,6 @@ impl Conversation {
 
     pub fn changes_mut(&mut self, turn: usize) -> Option<&mut TurnChanges> {
         self.turns.get_mut(turn)
-    }
-
-    /// The newest turn that changed something.
-    pub fn latest_changes(&self) -> Option<usize> {
-        (0..self.turns.len()).rev().find(|turn| self.changes(*turn).is_some())
     }
 
     /// A new CLI process starts counting its cost from nothing.
@@ -238,7 +246,14 @@ impl Conversation {
                 _ => self.entries.push(Entry::Assistant { text: delta }),
             },
             Event::ToolUse { id, name, input } => {
-                let target = approval::target(&name, &input, &self.base);
+                let target = if name == NOTE_TOOL {
+                    input["title"].as_str().unwrap_or_default().to_owned()
+                } else {
+                    approval::target(&name, &input, &self.base)
+                };
+                if name == NOTE_TOOL {
+                    self.note_calls.insert(id.clone(), input);
+                }
                 self.entries.push(Entry::Tool(ToolCall {
                     id,
                     name,
@@ -271,6 +286,9 @@ impl Conversation {
                 }
                 if !is_error && let Some(details) = details {
                     effects.extend(self.record_changes(&details));
+                }
+                if let Some(note) = self.note_calls.remove(&tool_use_id).filter(|_| !is_error) {
+                    effects.push(Effect::NoteLeft(note));
                 }
             }
             Event::TurnFinished {
@@ -467,7 +485,8 @@ mod tests {
         c.begin_turn("again".into(), None);
         let effects = run(&mut c, turn_events(1));
         assert!(effects.contains(&Effect::Patched(PathBuf::from("/work/project/notes.md"))));
-        let turn = c.latest_changes().expect("a turn with changes");
+        let turn = c.current_turn().expect("a turn with changes");
+        assert!(c.changes(turn).is_some());
         let changes = c.changes(turn).expect("changes");
         assert_eq!((changes.files.len(), changes.hunk_count()), (1, 1));
         let Some(Entry::TurnEnd { changes: Some(n), .. }) = c.entries().last() else {
