@@ -3,7 +3,8 @@
 //! The CLI reports each edit as a `structuredPatch`: hunks with line numbers and the lines on both sides. Those line
 //! numbers are only true for the file right after the edit. The author goes on typing, a reload replaces a buffer, a
 //! second edit shifts lines. So a hunk is never held as a position. It is found again by its lines, nearest to where
-//! it was last seen, and a hunk whose lines are gone is reported as such and offers nothing.
+//! it was last seen. The author may type around the words the agent changed and the hunk stays, with what they typed
+//! kept apart from it. A hunk whose changed words are gone is reported as such and offers nothing.
 //!
 //! Hunks come from what Persistence sees on disk, `base` to `theirs` of each [`FileChange`](crate::persist::FileChange),
 //! so an edit through Bash has them too. Persistence takes the text into the buffer. This module answers where a hunk
@@ -22,9 +23,9 @@ use serde_json::Value;
 
 use super::diff::{Mark, lines};
 use crate::editor::review::Passage;
-use crate::persist::merge::{edits_between, line_changes};
+use crate::persist::merge::{edits_between, line_changes, map_offset};
 use crate::session::ChapterId;
-use crate::source::{BlockKind, Blocks};
+use crate::source::{BlockKind, Blocks, Edit};
 
 /// Unchanged lines kept around a change, to find it again by.
 const CONTEXT: usize = 2;
@@ -209,13 +210,20 @@ pub struct Place {
     pub range: Range<usize>,
     /// The line the changed lines start at, counting from 0.
     pub line: usize,
+    /// What the author typed in these lines since the agent wrote them, against the agent's lines. It never touches the
+    /// words the agent changed.
+    pub typed: Vec<Edit>,
 }
 
 fn locate(hunk: &Hunk, side: Side, text: &Text, near: usize) -> Option<Place> {
     let sides = hunk.sides(side);
     let whole: Vec<&str> = [&sides.before[..], &sides.core[..], &sides.after[..]].concat();
     if whole.is_empty() {
-        return text.text.is_empty().then_some(Place { range: 0..0, line: 0 });
+        return text.text.is_empty().then_some(Place {
+            range: 0..0,
+            line: 0,
+            typed: Vec::new(),
+        });
     }
     let before = sides.before.len();
     let mut found = text
@@ -258,7 +266,60 @@ fn locate(hunk: &Hunk, side: Side, text: &Text, near: usize) -> Option<Place> {
     } else {
         text.start_of(first)..text.line_end(first + sides.core.len() - 1)
     };
-    Some(Place { range, line: first })
+    Some(Place {
+        range,
+        line: first,
+        typed: Vec::new(),
+    })
+}
+
+/// Whether what the author typed reaches the words the agent changed. `changes` are the edits from the agent's lines back
+/// to what stood there. Typing right beside a changed word leaves it alone, but a word that only went has no text of its
+/// own, so typing where it stood counts.
+fn touches(typed: &[Edit], changes: &[Edit]) -> bool {
+    typed.iter().any(|typed| {
+        changes.iter().any(|change| {
+            if change.range.is_empty() {
+                typed.range.start <= change.range.start && change.range.start <= typed.range.end
+            } else {
+                typed.range.start < change.range.end && change.range.start < typed.range.end
+            }
+        })
+    })
+}
+
+/// Finds the hunk's changed lines near where they were, with words of the author's among them. Lines the author changed
+/// more than half of are another text, whatever words they share with this one.
+fn locate_typed(core: &str, old: &str, text: &Text, near: usize) -> Option<Place> {
+    let count = core.split_inclusive('\n').count();
+    if core.is_empty() || count > text.lines.len() {
+        return None;
+    }
+    let changes = edits_between(core, old);
+    let mut starts: Vec<usize> = (0..=text.lines.len() - count)
+        .filter(|at| at.abs_diff(near) <= CLOSE_BY)
+        .collect();
+    starts.sort_by_key(|at| at.abs_diff(near));
+    starts.into_iter().find_map(|first| {
+        let range = text.start_of(first)..text.line_end(first + count - 1);
+        let typed = edits_between(core, &text.text[range.clone()]);
+        let replaced: usize = typed.iter().map(|edit| edit.range.len()).sum();
+        (!typed.is_empty() && replaced * 2 <= core.len() && !touches(&typed, &changes)).then_some(Place {
+            range,
+            line: first,
+            typed,
+        })
+    })
+}
+
+/// A range of the agent's lines in the text with `typed` in it. The range's start stays with its first word, past what
+/// was typed right before it.
+fn typed_range(range: &Range<usize>, typed: &[Edit]) -> Range<usize> {
+    if range.is_empty() {
+        let at = map_offset(range.start, typed);
+        return at..at;
+    }
+    map_offset(range.start + 1, typed) - 1..map_offset(range.end, typed)
 }
 
 /// The hunk as the author sees it in their text now.
@@ -312,8 +373,14 @@ impl Tracked {
             self.near = place.line;
             return Presence::Applied(place);
         }
-        match locate(&self.hunk, Side::Old, &text, self.near) {
-            Some(place) => Presence::Absent(place),
+        if let Some(place) = locate(&self.hunk, Side::Old, &text, self.near) {
+            return Presence::Absent(place);
+        }
+        match locate_typed(&self.new_core(), &self.old_core(), &text, self.near) {
+            Some(place) => {
+                self.near = place.line;
+                Presence::Applied(place)
+            }
             None => Presence::Moved,
         }
     }
@@ -325,6 +392,17 @@ impl Tracked {
             return None;
         };
         let mut old = self.old_core();
+        if !place.typed.is_empty() {
+            let mut lines = mine[place.range.clone()].to_owned();
+            for change in edits_between(&self.new_core(), &old).iter().rev() {
+                lines.replace_range(typed_range(&change.range, &place.typed), &change.text);
+            }
+            return Some(format!(
+                "{}{lines}{}",
+                &mine[..place.range.start],
+                &mine[place.range.end..]
+            ));
+        }
         // A last line that had no line break, with text the author added after it.
         let now_inside = place.range.end < mine.len() && mine[place.range.clone()].ends_with('\n');
         if now_inside && !old.is_empty() && !old.ends_with('\n') {
@@ -358,10 +436,16 @@ impl Tracked {
     pub fn passage(&self, text: &str, place: &Place, shift: isize) -> Passage {
         let moved = |offset: usize| offset.saturating_add_signed(shift);
         let new = &text[place.range.clone()];
+        let agents = if place.typed.is_empty() {
+            new.to_owned()
+        } else {
+            self.new_core()
+        };
         let old = self.old_core();
         let mut added = Vec::new();
         let mut removed = Vec::new();
-        for (range, gone) in word_changes(new, &old) {
+        for (range, gone) in word_changes(&agents, &old) {
+            let range = typed_range(&range, &place.typed);
             let range = place.range.start + range.start..place.range.start + range.end;
             let gone = shown_inline(&gone);
             if !gone.is_empty() {
@@ -766,9 +850,49 @@ mod tests {
     #[test]
     fn a_hunk_the_author_rewrote_offers_nothing() {
         let mut hunk = only_hunk(NOTES, "# Notes\n\nHowdy world.\n\nA second line.\n");
-        let rewritten = "# Notes\n\nHowdy there, world.\n\nA second line.\n";
+        let rewritten = "# Notes\n\nGood day, world.\n\nA second line.\n";
         assert_eq!(hunk.presence(rewritten), Presence::Moved);
         assert_eq!(hunk.revert(rewritten), None);
+    }
+
+    const LONG: &str = "One two three four five six seven eight nine ten.\n";
+
+    #[test]
+    fn typing_elsewhere_in_a_changed_line_keeps_the_passage_in_review() {
+        let theirs = "One two three FOUR five six seven eight nine ten.\n";
+        let mut hunk = only_hunk(LONG, theirs);
+        let mine = "One two three FOUR five six seven eight, typed here, nine ten.\n";
+        let Presence::Applied(place) = hunk.presence(mine) else {
+            panic!("still in review")
+        };
+        let passage = hunk.passage(mine, &place, 0);
+        let word = mine.find("FOUR").expect("in the text");
+        assert_eq!(passage.added, [word..word + 4], "the author's words are not tinted");
+        assert_eq!(passage.removed, [(word, "four ".to_owned())]);
+        assert_eq!(
+            hunk.revert(mine).as_deref(),
+            Some("One two three four five six seven eight, typed here, nine ten.\n"),
+            "a reject keeps what was typed"
+        );
+    }
+
+    #[test]
+    fn typing_in_front_of_a_changed_line_keeps_the_tint_on_the_agents_word() {
+        let mut hunk = only_hunk(LONG, "One two three FOUR five six seven eight nine ten.\n");
+        let mine = "Typed. One two three FOUR five six seven eight nine ten.\n";
+        let Presence::Applied(place) = hunk.presence(mine) else {
+            panic!("still in review")
+        };
+        let word = mine.find("FOUR").expect("in the text");
+        assert_eq!(hunk.passage(mine, &place, 0).added, [word..word + 4]);
+    }
+
+    #[test]
+    fn typing_over_the_changed_words_ends_the_review() {
+        let mut hunk = only_hunk(LONG, "One two three FOUR five six seven eight nine ten.\n");
+        let inside = "One two three FOURTH five six seven eight nine ten.\n";
+        assert_eq!(hunk.presence(inside), Presence::Moved);
+        assert_eq!(hunk.revert(inside), None);
     }
 
     #[test]

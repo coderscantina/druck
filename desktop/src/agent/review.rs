@@ -1,7 +1,7 @@
 //! What the agent does with changes and notes: where every hunk stands in the text now, what the galley shows of it, and
 //! what Accept, Reject, Try again, Apply, Reply, and Dismiss do. Nothing stays in the text's way: a reject is one undo
-//! step that merges with what the author typed since, and a hunk whose lines the author rewrote is theirs and leaves
-//! review.
+//! step that merges with what the author typed since, and a hunk whose changed words the author rewrote is theirs and
+//! leaves review.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
