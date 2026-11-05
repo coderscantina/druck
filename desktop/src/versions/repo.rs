@@ -239,16 +239,27 @@ impl Repo {
         let status = (self.repo.status(gix::progress::Discard)?)
             .untracked_files(gix::status::UntrackedFiles::Files)
             .index_worktree_rewrites(gix::diff::Rewrites::default())
-            .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
+            .tree_index_track_renames(gix::status::tree_index::TrackRenames::Given(
+                gix::diff::Rewrites::default(),
+            ))
             .into_iter(None)?;
         for item in status {
             let item = item?;
             let location = item.location().to_str_lossy().into_owned();
-            if let gix::status::Item::IndexWorktree(Worktree::Rewrite {
-                source, copy: false, ..
-            }) = &item
-            {
-                let from = source.rela_path().to_str_lossy().into_owned();
+            // A move not yet staged is one from the index to the worktree, and one another tool staged is one from the
+            // tree to the index.
+            let from = match &item {
+                gix::status::Item::IndexWorktree(Worktree::Rewrite {
+                    source, copy: false, ..
+                }) => Some(source.rela_path().to_str_lossy().into_owned()),
+                gix::status::Item::TreeIndex(gix::diff::index::ChangeRef::Rewrite {
+                    source_location,
+                    copy: false,
+                    ..
+                }) => Some(source_location.to_str_lossy().into_owned()),
+                _ => None,
+            };
+            if let Some(from) = from {
                 paths.insert(from.clone());
                 moved.insert(location.clone(), from);
             }

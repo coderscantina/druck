@@ -197,6 +197,27 @@ fn a_moved_file_shows_once_as_moved_and_commits_as_a_rename() {
 }
 
 #[test]
+fn a_move_another_tool_staged_shows_once_as_moved() {
+    let fixture = fixture("staged-move");
+    let dir = fixture.root.join("book");
+    repo_at(&dir);
+    git(&dir, &["mv", "manuscript/one.md", "manuscript/01-one.md"]);
+    let mut repo = Repo::open(&dir).unwrap().unwrap();
+    let overview = repo.overview(5).unwrap();
+    let listed: Vec<_> = overview.listed().collect();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind, ChangeKind::Moved);
+    assert_eq!(listed[0].from.as_deref(), Some("manuscript/one.md"));
+    assert_eq!(listed[0].words, Some((0, 0)));
+    repo.commit("Number the chapter", None).unwrap();
+    assert_eq!(
+        git(&dir, &["show", "--name-status", "--format=", "-M", "HEAD"]),
+        "R100\tmanuscript/one.md\tmanuscript/01-one.md"
+    );
+    assert!(clean(&dir));
+}
+
+#[test]
 fn a_book_in_a_bigger_repo_commits_only_its_folder() {
     let fixture = fixture("scope");
     let dir = fixture.root.join("shelf");
