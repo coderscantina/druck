@@ -422,6 +422,22 @@ const START_OF_CHAPTER: Anchor = Anchor {
     offset: tokens::TEXT_START,
 };
 
+/// Where the caret stands as a chapter opens: the place the session kept for it, and in the galley the first visible
+/// text rather than inside the notes hidden above it.
+fn opening_selection(text: &str, blocks: &Blocks, view: ChapterView, source: bool) -> Selection {
+    let clamp = |offset: usize| text.floor_char_boundary(offset.min(text.len()));
+    let selection = Selection {
+        anchor: clamp(view.selection.anchor),
+        head: clamp(view.selection.head),
+    };
+    match notes::leading_region(text, blocks) {
+        Some(region) if !source && selection.is_empty() && region.contains(&selection.head) => {
+            Selection::caret(region.end)
+        }
+        _ => selection,
+    }
+}
+
 /// What the settings say about the text.
 #[derive(Clone, Copy, PartialEq)]
 struct Writing {
@@ -450,9 +466,12 @@ impl EditorView {
         window.focus(&focus, cx);
         let spelling_folder = session.base_dir();
         let blocks = Blocks::parse(session.active_buffer().text());
-        let caret = notes::leading_region(session.active_buffer().text(), &blocks)
-            .filter(|region| region.start == 0)
-            .map_or(0, |region| region.end);
+        let selection = opening_selection(
+            session.active_buffer().text(),
+            &blocks,
+            session.active_chapter().view,
+            false,
+        );
         let focus_subscriptions = vec![
             cx.on_focus_in(&focus, window, |view, window, cx| view.restart_blink(window, cx)),
             cx.on_blur(&focus, window, |view, _, cx| {
@@ -475,7 +494,7 @@ impl EditorView {
             slots: vec![Slot::default(); blocks.as_slice().len()],
             session,
             blocks,
-            selection: Selection::caret(caret),
+            selection,
             upstream: false,
             marked: None,
             review: Vec::new(),
@@ -483,7 +502,7 @@ impl EditorView {
             conflict_mark: None,
             selection_prompt: None,
             goal_x: None,
-            reveal_at: caret,
+            reveal_at: selection.head,
             drag: None,
             scroll: START_OF_CHAPTER,
             autoscroll: false,
@@ -668,20 +687,8 @@ impl EditorView {
             block: block.min(last_block),
             offset: px(offset),
         });
-        let clamp = |offset: usize| text.floor_char_boundary(offset.min(text.len()));
         self.source = self.source_chapters.contains(&self.session.active());
-        self.selection = Selection {
-            anchor: clamp(view.selection.anchor),
-            head: clamp(view.selection.head),
-        };
-        // A chapter opens at its first visible text, not inside the notes hidden above it.
-        if !self.source
-            && self.selection.is_empty()
-            && let Some(region) = notes::leading_region(text, &self.blocks)
-            && region.contains(&self.selection.head)
-        {
-            self.selection = Selection::caret(region.end);
-        }
+        self.selection = opening_selection(text, &self.blocks, view, self.source);
         self.reveal_at = self.selection.head;
         self.upstream = false;
         self.marked = None;
@@ -1776,6 +1783,32 @@ mod tests {
 
     fn indices(visible: &[(usize, Pixels)]) -> Vec<usize> {
         visible.iter().map(|(index, _)| *index).collect()
+    }
+
+    #[test]
+    fn a_chapter_opens_where_the_session_put_its_caret() {
+        let view = |head: usize| ChapterView {
+            selection: Selection::caret(head),
+            scroll: None,
+        };
+        // A new project's caret after its title, which `{#sec:intro}` closes.
+        let text = "# Einleitung {#sec:intro}\n\nText.\n";
+        let title = "# Einleitung {#sec:intro}".len();
+        let blocks = Blocks::parse(text);
+        assert_eq!(
+            opening_selection(text, &blocks, view(title), false),
+            Selection::caret(title)
+        );
+        // In the galley a caret inside the notes above the first text moves after them, and the source view keeps it.
+        let text = "<!-- note -->\n\n# T\n";
+        let blocks = Blocks::parse(text);
+        assert_eq!(opening_selection(text, &blocks, view(0), false), Selection::caret(15));
+        assert_eq!(opening_selection(text, &blocks, view(0), true), Selection::caret(0));
+        // A kept place past the end of a shorter text is clamped.
+        assert_eq!(
+            opening_selection(text, &blocks, view(99), false),
+            Selection::caret(text.len())
+        );
     }
 
     #[test]
