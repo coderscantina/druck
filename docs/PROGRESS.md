@@ -95,6 +95,18 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Third review note
+
+On 2026-11-05 the third review's findings F1 to F23 went in, with the owner's decisions on F6, F18, and the typing gate's measure. The choices are in [decisions](DECISIONS.md#2026-11-05-third-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-review-3-2026-11-05` beside the repo.
+
+Typing **meets the target by the gate's new measure**, key handler to paint: 11.4 ms median, 18.7 ms p95, 360 keys, on a temp copy of `buch-1-ttp404` made a project, release with fat LTO and `--features measure`, `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25 DRUCK_GATE_THEME_EDITS=0`, load about 2.5. Not judged: from when a key was due, 15.9 ms median, and the timer's lateness 3.0 ms median.
+
+Evidence by captures on temp copies, keys by PID, with a sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`: new book, article, and paper through `DRUCK_NEW_PROJECT`, a real `git merge` with See both and Keep mine through `DRUCK_VERSIONS_RUN`, a branch made and switched to, Merge asking, moved notes in the commit card, a passage restore reading "The same as now", Tab and Escape in the question card, Page Down at Fit, the contact sheet, and the status line at 720 and 900 px.
+
+Not verified, for want of a pointer: clicks on Switch, Show in Finder, Save to `druck.yaml`, and the Marks switch. The new project dialog, which is the system's, was not captured, since it would write into Documents. The failures F5 shows were not caused for real: a watcher that cannot start and an unwritable recovery copy.
+
+Follow-ups: reopening the app mid-merge with See both's markers standing says nothing at the foot. The agent's remembered session, the galley's theme fonts, and `state.json` at quit still only print to stderr.
+
 ### Merge and typing note
 
 On 2026-11-05 an outside or agent change and the author's unsaved edits in the same sentence became a conflict, see [sentences in a merge](DECISIONS.md#2026-11-05-sentences-in-a-merge). Edits in different sentences of a paragraph still merge, Git's conflicts still never merge, and an agent change stays under review. `cargo test -p druck-desktop` passed 685 with 1 ignored.
@@ -106,7 +118,7 @@ Typing time was measured, not guessed, on a temp copy of the book made a project
 - **The gate's own timer adds 2.4 to 3.3 ms median and 17 to 18 ms p95.** Its "key timer lateness" is measured from when a key was due to when its task ran. The main thread was idle 97 percent of the time, so this is not app work in the way. It is most likely the system coalescing timers for an app that is not frontmost, which was not verified. A real keystroke does not go through that timer.
 - **The contents card was drawn in every frame of the profiled run,** about 200 ms of the 1,322 ms, likely because the pointer rested over the floating window's left edge. That is the environment, not typing.
 
-So there is no real and cheap fix left that would move the median: all of the app's work together is about 3 ms. No code was changed for typing. The proposal is that the gate measure from when the key's handler runs to the end of the first paint that shows it, as `DRUCK_TRACE`'s `input_to_paint_us` does, and report the timer's lateness on its own as it already does. Measured that way the median is 11.5 ms against the 16 ms target. Its floor at 60 Hz is half a frame plus the work, and its p95 cannot go below one frame, 16.7 ms. The target was not changed.
+So there is no real and cheap fix left that would move the median: all of the app's work together is about 3 ms. No code was changed for typing. The owner decided that the gate measures from when the key's handler runs to the end of the first paint that shows it, as `DRUCK_TRACE`'s `input_to_paint_us` does, and reports the timer's lateness apart, judging nothing by it. The gate does so since the [third review](DECISIONS.md#2026-11-05-third-review-findings). Its floor at 60 Hz is half a frame plus the work, and its p95 cannot go below one frame, 16.7 ms. The target was not changed.
 
 ### Second review note
 
