@@ -187,6 +187,10 @@ pub struct TextInput {
     prose: bool,
     /// Enter keeps the focus here, for a field that is used again and again, such as the find bar's.
     keep_focus: bool,
+    /// The type of a field that shows a book's text, in place of the interface's.
+    book_type: Option<(gpui::Font, Pixels)>,
+    /// No frame of its own, for a field that stands on a card as its text.
+    bare: bool,
     arrows_to_parent: bool,
     /// Shown in the quiet color while the field is empty.
     placeholder: SharedString,
@@ -250,6 +254,8 @@ impl TextInput {
             multiline,
             prose: false,
             keep_focus: false,
+            book_type: None,
+            bare: false,
             arrows_to_parent: false,
             placeholder: SharedString::default(),
             label: SharedString::default(),
@@ -266,6 +272,37 @@ impl TextInput {
     pub fn in_prose(mut self) -> Self {
         self.prose = true;
         self
+    }
+
+    /// Shows the text with no frame around it.
+    pub fn bare(mut self) -> Self {
+        self.bare = true;
+        self
+    }
+
+    /// Sets the text in a book's type, or the interface's again for `None`.
+    pub fn set_book_type(&mut self, book_type: Option<(gpui::Font, Pixels)>, cx: &mut Context<Self>) {
+        self.book_type = book_type;
+        cx.notify();
+    }
+
+    /// Whether an input method has text in progress.
+    pub fn is_composing(&self) -> bool {
+        self.marked.is_some()
+    }
+
+    /// Where the caret's row is below the text's top, and its height, as last painted.
+    pub fn caret_row(&self) -> Option<(Pixels, Pixels)> {
+        let shaped = self.shaped.as_ref()?;
+        let (position, height) = Self::position(shaped, self.selection.head);
+        Some((position.y - shaped.origin.y, height))
+    }
+
+    /// Puts the caret at a byte of the text, on a character boundary at or before it.
+    pub fn set_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let text = self.buffer.text();
+        let at = text.floor_char_boundary(offset.min(text.len()));
+        self.set_selection(Selection::caret(at), cx);
     }
 
     /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
@@ -671,6 +708,7 @@ impl EntityInputHandler for TextInput {
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.marked = None;
+        cx.emit(Edited);
         cx.notify();
     }
 
@@ -938,12 +976,14 @@ impl TextInput {
         } else {
             tokens::FONT_UI
         };
-        let font = font(family);
-        let size = if self.multiline {
-            tokens::TEXT_SMALL + px(1.)
-        } else {
-            tokens::TEXT_BODY
-        };
+        let (font, size) = self.book_type.clone().unwrap_or_else(|| {
+            let size = if self.multiline {
+                tokens::TEXT_SMALL + px(1.)
+            } else {
+                tokens::TEXT_BODY
+            };
+            (font(family), size)
+        });
         let line_height = size * 1.45;
         let wrap = self.multiline.then_some(width);
         let text = if showing_placeholder {
@@ -1158,8 +1198,12 @@ impl Render for TextInput {
                 window.blur(cx);
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .overflow_hidden();
+        if self.bare {
+            return field.child(InputElement { input: cx.entity() });
+        }
+        let field = field
             .px(tokens::SPACE_2)
-            .overflow_hidden()
             .rounded(tokens::RADIUS)
             .border_1()
             .border_color(if focused { tokens.accent } else { tokens.divider })

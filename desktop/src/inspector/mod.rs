@@ -7,11 +7,12 @@ mod geometry;
 pub mod input;
 mod model;
 mod picker;
+mod running_heads;
 mod source_view;
 mod strings;
+mod style_index;
 mod style_property;
 mod styles;
-mod theme_tabs;
 mod theme_tokens;
 pub(crate) mod widgets;
 
@@ -19,22 +20,24 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{AnyView, Context, Entity, EventEmitter, FontWeight, Role, Subscription, Window, div, px, svg};
+use gpui::{AnyView, Context, Entity, EventEmitter, Role, Subscription, Window, div, px, svg};
 
 use fonts::FontsPanel;
 pub use fork_prompt::ForkPrompt;
-use geometry::GeometryPanel;
 pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
 pub use picker::ThemePicker;
-use source_view::SourceView;
+use style_index::{IndexEvent, StyleIndex};
 use styles::StylesPanel;
-use theme_tabs::ThemeTabs;
-use theme_tokens::TokensPanel;
 
 use self::strings::Key;
 use crate::a11y::Control as _;
 use crate::theme_file::editor::Dirs;
 use crate::tokens::{self, Tokens};
+
+/// A style's name as the author reads it.
+pub fn style_title(style: &str) -> String {
+    style_property::style_label(style).to_owned()
+}
 
 /// The keys of the block styles the Styles tab lists.
 #[cfg(test)]
@@ -45,19 +48,19 @@ pub fn style_keys() -> impl Iterator<Item = &'static str> {
 /// A tab of the rail. A panel takes one with [`InspectorView::mount`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
-    Selection,
+    Details,
     Styles,
     Fonts,
     Images,
-    Details,
-    Diagnostics,
-    Export,
     Agent,
+    Git,
+    Proof,
+    Export,
 }
 
 impl Tab {
-    const TOP: [Self; 5] = [Self::Selection, Self::Styles, Self::Fonts, Self::Images, Self::Details];
-    const BOTTOM: [Self; 3] = [Self::Agent, Self::Diagnostics, Self::Export];
+    const TOP: [Self; 4] = [Self::Details, Self::Styles, Self::Fonts, Self::Images];
+    const BOTTOM: [Self; 4] = [Self::Agent, Self::Git, Self::Proof, Self::Export];
 
     /// The tab `DRUCK_TAB` names, for screenshots.
     fn from_env() -> Option<Self> {
@@ -70,12 +73,12 @@ impl Tab {
 
     fn id(self) -> &'static str {
         match self {
-            Self::Selection => "tab-selection",
             Self::Styles => "tab-styles",
             Self::Fonts => "tab-fonts",
             Self::Images => "tab-images",
             Self::Details => "tab-details",
-            Self::Diagnostics => "tab-diagnostics",
+            Self::Proof => "tab-proof",
+            Self::Git => "tab-git",
             Self::Export => "tab-export",
             Self::Agent => "tab-agent",
         }
@@ -83,12 +86,12 @@ impl Tab {
 
     fn icon(self) -> &'static str {
         match self {
-            Self::Selection => "icons/selection.svg",
             Self::Styles => "icons/styles.svg",
             Self::Fonts => "icons/fonts.svg",
             Self::Images => "icons/images.svg",
             Self::Details => "icons/details.svg",
-            Self::Diagnostics => "icons/diagnostics.svg",
+            Self::Proof => "icons/diagnostics.svg",
+            Self::Git => "icons/git.svg",
             Self::Export => "icons/export.svg",
             Self::Agent => "icons/agent.svg",
         }
@@ -96,12 +99,12 @@ impl Tab {
 
     fn label(self) -> &'static str {
         crate::t!(match self {
-            Self::Selection => Key::TabSelection,
             Self::Styles => Key::TabStyles,
             Self::Fonts => Key::TabFonts,
             Self::Images => Key::TabImages,
             Self::Details => Key::TabDetails,
-            Self::Diagnostics => Key::TabDiagnostics,
+            Self::Proof => Key::TabProof,
+            Self::Git => Key::TabGit,
             Self::Export => Key::TabExport,
             Self::Agent => Key::TabAgent,
         })
@@ -110,11 +113,12 @@ impl Tab {
 
 pub struct InspectorView {
     active: Tab,
-    /// The view each tab shows. A tab without one shows its label until its slice mounts a panel.
+    /// The view each tab shows. A tab shows on the rail once its slice has mounted a panel with [`Self::mount`].
     panels: HashMap<Tab, AnyView>,
     /// Tabs that want the author's eye while another tab is open, shown as a dot on the rail.
     attention: HashSet<Tab>,
     styles: Entity<StylesPanel>,
+    index: Entity<StyleIndex>,
     fonts: Entity<FontsPanel>,
     model: Entity<ThemeModel>,
     /// The theme picker, at the top of the Styles tab.
@@ -131,21 +135,14 @@ impl InspectorView {
         input::bind_keys(cx);
         let model = cx.new(|cx| ThemeModel::new(theme.as_deref(), dirs, cx));
         let styles = cx.new(|cx| StylesPanel::new(model.clone(), window, cx));
-        let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
-        let geometry = cx.new(|cx| GeometryPanel::new(model.clone(), window, cx));
-        let source = cx.new(|cx| SourceView::new(model.clone(), window, cx));
+        let index = cx.new(|cx| StyleIndex::new(model.clone(), styles.clone(), window, cx));
         let fonts = cx.new(|cx| FontsPanel::new(model.clone(), window, cx));
-        let theme_tabs = cx.new(|_| {
-            ThemeTabs::new(vec![
-                (Key::PanelStyles, styles.clone().into()),
-                (Key::PanelTokens, tokens_panel.into()),
-                (Key::PanelPage, geometry.into()),
-                (Key::PanelSource, source.into()),
-            ])
-        });
         let subscriptions = vec![
             cx.subscribe(&model, |_, _, event: &ThemeChanged, cx| cx.emit(event.clone())),
             cx.subscribe(&model, |_, _, _: &ThemeSwitched, cx| cx.notify()),
+            cx.subscribe(&index, |inspector, _, IndexEvent::ShowTab(tab), cx| {
+                inspector.show(*tab, cx)
+            }),
         ];
         // `DRUCK_PROBE_EDIT=1` makes one edit at the start, for screenshots of what an edit asks.
         if crate::gate::var("DRUCK_PROBE_EDIT").is_some() {
@@ -163,9 +160,10 @@ impl InspectorView {
         }
         Self {
             active: Tab::from_env().unwrap_or(Tab::Details),
-            panels: HashMap::from([(Tab::Styles, theme_tabs.into()), (Tab::Fonts, fonts.clone().into())]),
+            panels: HashMap::from([(Tab::Styles, index.clone().into()), (Tab::Fonts, fonts.clone().into())]),
             attention: HashSet::new(),
             styles,
+            index,
             fonts,
             model,
             picker: None,
@@ -214,6 +212,12 @@ impl InspectorView {
         cx.notify();
     }
 
+    /// Shows a style's place in the Style tab: its own section, or its row's detail.
+    pub fn open_style(&mut self, style: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.show(Tab::Styles, cx);
+        self.index.update(cx, |index, cx| index.open_style(style, window, cx));
+    }
+
     /// Reads the theme file again after it changed outside the app.
     pub fn reload_theme(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |model, cx| model.reload(cx));
@@ -238,7 +242,7 @@ impl InspectorView {
             .flex()
             .items_center()
             .justify_center()
-            .when(active, |button| button.bg(tokens.raised))
+            .when(active, |button| button.bg(tokens.raised).rounded_r(tokens::RADIUS))
             .hover(|button| button.bg(tokens.raised))
             .child(svg().path(tab.icon()).size(tokens::ICON_SIZE).text_color(if active {
                 tokens.text
@@ -265,8 +269,15 @@ impl InspectorView {
 
 impl Render for InspectorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let top: Vec<_> = Tab::TOP.iter().map(|&tab| self.rail_button(tab, cx)).collect();
-        let bottom: Vec<_> = Tab::BOTTOM.iter().map(|&tab| self.rail_button(tab, cx)).collect();
+        let mounted = |tabs: &[Tab]| -> Vec<Tab> {
+            tabs.iter()
+                .copied()
+                .filter(|tab| self.panels.contains_key(tab))
+                .collect()
+        };
+        let (top, bottom) = (mounted(&Tab::TOP), mounted(&Tab::BOTTOM));
+        let top: Vec<_> = top.into_iter().map(|tab| self.rail_button(tab, cx)).collect();
+        let bottom: Vec<_> = bottom.into_iter().map(|tab| self.rail_button(tab, cx)).collect();
         let tokens = Tokens::get(cx);
         let panel = div()
             .id("inspector-panel")
@@ -280,24 +291,7 @@ impl Render for InspectorView {
             .border_l_1()
             .border_color(tokens.divider);
         let panel = panel.when(self.active == Tab::Styles, |panel| panel.children(self.picker.clone()));
-        let panel = if let Some(mounted) = self.panels.get(&self.active) {
-            panel.child(mounted.clone())
-        } else {
-            panel.child(
-                div()
-                    .flex_none()
-                    .h(tokens::SECTION_HEIGHT)
-                    .px(tokens::SPACE_3)
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(tokens.divider)
-                    .text_size(tokens::TEXT_SMALL)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(tokens.text_quiet)
-                    .child(self.active.label()),
-            )
-        };
+        let panel = panel.children(self.panels.get(&self.active).cloned());
         let rail = div()
             .id("inspector-rail")
             .role(Role::TabList)

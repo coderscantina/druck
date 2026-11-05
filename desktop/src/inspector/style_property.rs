@@ -29,6 +29,8 @@ pub enum Control {
     List,
     /// The name of a style.
     StyleName,
+    /// A whole number, such as a count of lines.
+    Count,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -64,7 +66,7 @@ const fn property(key: &'static [&'static str], label: Key, control: Control) ->
     }
 }
 
-use Control::{Align, Choice, List, Number, Reference, StyleName, Toggle, Weight};
+use Control::{Align, Choice, Count, List, Number, Reference, StyleName, Toggle, Weight};
 
 pub const FONT: Property = property(&["font"], Key::Font, Reference(Group::Fonts));
 pub const SIZE: Property = property(&["size"], Key::Size, Reference(Group::Sizes));
@@ -98,6 +100,54 @@ pub const BASED_ON: Property = property(&["based-on"], Key::BasedOn, StyleName);
 pub const BULLETS: Property = property(&["bullets"], Key::Bullets, List);
 pub const MARKER: Property = property(&["marker"], Key::Marker, StyleName);
 pub const RULE: Property = property(&["rule-below"], Key::RuleBelow, Choice(RULE_BELOW));
+
+/// A section of the theme with its own form: fields at full paths, then links to the styles it goes with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Form {
+    pub fields: &'static [Property],
+    pub styles: &'static [&'static str],
+}
+
+const BREAK_BEFORE: &[(&str, Key)] = &[
+    ("none", Key::BreakNone),
+    ("page", Key::BreakPage),
+    ("recto", Key::BreakRecto),
+];
+const NUMBER_FORMAT: &[(&str, Key)] = &[
+    ("decimal", Key::FormatDecimal),
+    ("decimal-leading-zero", Key::FormatLeadingZero),
+    ("lower-roman", Key::FormatLowerRoman),
+    ("upper-roman", Key::FormatUpperRoman),
+];
+const NUMBER_POSITION: &[(&str, Key)] = &[("inline", Key::NumberInline), ("above", Key::NumberAbove)];
+
+pub const CHAPTERS: Form = Form {
+    fields: &[
+        property(&["chapters", "break-before"], Key::StartOn, Choice(BREAK_BEFORE)),
+        property(&["chapters", "sink"], Key::Sink, Reference(Group::Spacing)),
+        property(&["chapters", "drop-cap"], Key::DropCap, Count),
+        property(&["chapters", "lead-in"], Key::LeadIn, Count),
+        property(
+            &["chapters", "number-position"],
+            Key::NumberPosition,
+            Choice(NUMBER_POSITION),
+        ),
+        property(&["chapters", "number-format"], Key::NumberFormat, Choice(NUMBER_FORMAT)),
+        property(&["chapters", "number-style"], Key::NumberStyle, StyleName),
+        property(&["chapters", "number-label"], Key::NumberLabel, Toggle),
+    ],
+    styles: &["heading-1"],
+};
+
+pub const CONTENTS: Form = Form {
+    fields: &[
+        property(&["document", "toc-depth"], Key::TocDepth, Count),
+        property(&["toc", "level-indent"], Key::LevelIndent, Reference(Group::Spacing)),
+        property(&["toc", "leader"], Key::Leader, Toggle),
+        property(&["toc", "level-styles"], Key::LevelStyles, List),
+    ],
+    styles: &["toc-heading", "toc-entry"],
+};
 
 /// The properties the detail view of a built-in style shows.
 pub fn of_builtin(style: &str) -> Vec<Property> {
@@ -142,6 +192,10 @@ impl Property {
                 .and_then(JsonNumber::from_f64)
                 .map(Value::Number)
                 .ok_or(crate::t!(Key::NotANumber)),
+            Control::Count => input
+                .parse::<u64>()
+                .map(|count| Value::Number(count.into()))
+                .map_err(|_| crate::t!(Key::NotACount)),
             Control::Weight => Ok(input.parse::<u64>().map_or_else(
                 |_| Value::String(input.to_owned()),
                 |weight| Value::Number(weight.into()),
@@ -284,6 +338,7 @@ mod tests {
                 values.push(Value::String("sideways".to_owned()));
                 values
             }
+            Control::Count => vec![Value::from(0), Value::from(3)],
             Control::Number if property.key() == "tracking" => vec![Value::from(0.05), Value::from(3)],
             Control::Number => vec![Value::from(1.2), Value::from(9)],
             Control::Weight => vec![Value::from("bold"), Value::from(600), Value::from(450)],

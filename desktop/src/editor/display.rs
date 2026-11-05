@@ -179,7 +179,7 @@ pub fn hidden_ranges(
             hidden.push(line.start..line.start + spaces);
         }
     }
-    // A label or style at the end of a heading or paragraph, which the Selection tab and the pickers show.
+    // A label or style at the end of a heading or paragraph, which the pickers show.
     if matches!(kind, BlockKind::Heading { .. } | BlockKind::Paragraph)
         && let Some(line) = lines.iter().rev().find(|line| !line.is_empty())
         && !line_holds(&lines, caret, line.start)

@@ -53,11 +53,12 @@ pub fn row(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedStr
         .child(div().min_w_0().truncate().child(label))
 }
 
-pub fn tag(tokens: &Tokens, text: impl Into<SharedString>, accent: bool) -> Div {
+/// A quiet tag, in full ink when the theme itself sets what it stands for.
+pub fn tag(tokens: &Tokens, text: impl Into<SharedString>, own: bool) -> Div {
     div()
         .flex_none()
         .text_size(tokens::TEXT_SMALL)
-        .text_color(if accent { tokens.accent } else { tokens.text_faint })
+        .text_color(if own { tokens.text } else { tokens.text_faint })
         .child(text.into())
 }
 
@@ -72,6 +73,22 @@ pub fn link(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedSt
         .text_color(tokens.accent)
         .cursor_pointer()
         .hover(|link| link.opacity(0.8))
+        .child(label)
+}
+
+/// A small text button in the quiet color, for the way back or to another view.
+pub fn quiet_link(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
+    let label = label.into();
+    let hover = tokens.text;
+    div()
+        .id(id)
+        .control(tokens, gpui::Role::Link, label.clone())
+        .flex_none()
+        .text_size(tokens::TEXT_SMALL)
+        .font_weight(FontWeight::NORMAL)
+        .text_color(tokens.text_quiet)
+        .cursor_pointer()
+        .hover(move |link| link.text_color(hover))
         .child(label)
 }
 
@@ -142,7 +159,7 @@ pub fn segmented(tokens: &Tokens, items: Vec<(Stateful<Div>, bool)>) -> Div {
             .justify_center()
             .text_size(tokens::TEXT_SMALL)
             .cursor_pointer()
-            .when(active, |button| button.bg(tokens.raised).text_color(tokens.accent))
+            .when(active, |button| button.bg(tokens.raised).text_color(tokens.text))
             .when(!active, |button| {
                 button.text_color(tokens.text_quiet).hover(|b| b.bg(tokens.raised))
             })
@@ -177,7 +194,7 @@ pub fn menu_item(
         .gap(tokens::SPACE_2)
         .cursor_pointer()
         .hover(|item| item.bg(tokens.raised))
-        .text_color(if active { tokens.accent } else { tokens.text })
+        .text_color(if active { tokens.text } else { tokens.text_quiet })
         .child(div().min_w_0().truncate().child(label))
         .when_some(detail, |item, detail| {
             item.child(

@@ -1,6 +1,6 @@
-//! The Styles tab: a list of the theme's block styles and custom styles, and a detail view for one with every
-//! property the schema has. Every edit goes through the shared [`ThemeModel`], which checks it with the engine and
-//! keeps the file's other bytes as they were.
+//! The form behind the Style tab's sections: a list of block styles or custom styles, a detail view of one with every
+//! property the schema has, or a section's own form. Every edit goes through the shared [`ThemeModel`], which checks it
+//! with the engine and keeps the file's other bytes as they were.
 
 use std::collections::HashMap;
 
@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::input::{Committed, Submitted, TextInput};
 use super::model::ThemeModel;
 use super::strings::{Key, STYLES};
-use super::style_property::{self, ALIGNMENTS, Control, Property, style_label};
+use super::style_property::{self, ALIGNMENTS, CHAPTERS, CONTENTS, Control, Form, Property, style_label};
 use super::widgets;
 use crate::a11y::Control as _;
 use crate::theme_file::editor::Change;
@@ -23,13 +23,24 @@ use crate::tokens::{self as chrome, Tokens};
 pub enum Selected {
     Builtin(&'static str),
     Custom(String),
+    /// A section's own form, whose fields hold their whole paths.
+    Form(Form),
+}
+
+/// What is selected for a style's key.
+pub fn selected_of(style: &str) -> Selected {
+    STYLES
+        .iter()
+        .find(|(key, _)| *key == style)
+        .map_or_else(|| Selected::Custom(style.to_owned()), |(key, _)| Selected::Builtin(key))
 }
 
 impl Selected {
-    fn prefix(&self) -> [&str; 2] {
+    fn prefix(&self) -> Vec<&str> {
         match self {
-            Self::Builtin(key) => ["styles", key],
-            Self::Custom(name) => ["custom-styles", name],
+            Self::Builtin(key) => vec!["styles", key],
+            Self::Custom(name) => vec!["custom-styles", name],
+            Self::Form(_) => Vec::new(),
         }
     }
 
@@ -38,6 +49,7 @@ impl Selected {
         match self {
             Self::Builtin(key) => key,
             Self::Custom(name) => name,
+            Self::Form(_) => "",
         }
     }
 
@@ -45,12 +57,23 @@ impl Selected {
         match self {
             Self::Builtin(key) => style_label(key).to_owned(),
             Self::Custom(name) => name.clone(),
+            Self::Form(_) => String::new(),
         }
     }
 }
 
+/// What the panel goes back to.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Root {
+    /// The list of block styles, or of custom styles.
+    List { custom: bool },
+    /// One style or form the index opened.
+    One(Selected),
+}
+
 pub struct StylesPanel {
     model: Entity<ThemeModel>,
+    root: Root,
     selected: Option<Selected>,
     inputs: HashMap<String, Entity<TextInput>>,
     errors: HashMap<String, String>,
@@ -71,11 +94,13 @@ impl StylesPanel {
         // Every property a style or a custom style can have that is typed, once, since they share keys.
         let every = style_property::of_custom()
             .into_iter()
-            .chain(style_property::BLOCK.iter().copied());
+            .chain(style_property::BLOCK.iter().copied())
+            .chain(CHAPTERS.fields.iter().copied())
+            .chain(CONTENTS.fields.iter().copied());
         for property in every {
             if matches!(
                 property.control,
-                Control::Reference(_) | Control::Number | Control::Weight | Control::List
+                Control::Reference(_) | Control::Number | Control::Weight | Control::List | Control::Count
             ) {
                 inputs.entry(property.key()).or_insert_with(|| {
                     let input = cx.new(|cx| TextInput::new(window, cx));
@@ -86,17 +111,10 @@ impl StylesPanel {
                 });
             }
         }
-        // `DRUCK_STYLE` opens a style for screenshots.
-        let selected = crate::gate::var("DRUCK_STYLE").and_then(|name| {
-            STYLES
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(key, _)| Selected::Builtin(key))
-                .or(Some(Selected::Custom(name)))
-        });
         let mut panel = Self {
             model,
-            selected,
+            root: Root::List { custom: false },
+            selected: None,
             inputs,
             errors: HashMap::new(),
             open: None,
@@ -115,10 +133,30 @@ impl StylesPanel {
         self.commit(style_property::SIZE, text, cx);
     }
 
-    /// The style the panel shows, for others that want to know what is being edited.
-    #[allow(dead_code, reason = "the jump from a theme edit reads it in a later pass")]
-    pub fn selected(&self) -> Option<&Selected> {
-        self.selected.as_ref()
+    /// Shows the list of block styles, or of custom styles.
+    pub fn show_list(&mut self, custom: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.root = Root::List { custom };
+        self.select(None, window, cx);
+    }
+
+    /// Shows one style or form as the place to go back to.
+    pub fn show_root(&mut self, selected: Selected, window: &mut Window, cx: &mut Context<Self>) {
+        self.root = Root::One(selected.clone());
+        self.select(Some(selected), window, cx);
+    }
+
+    /// Shows a style from what the panel shows now, which is where its back link goes.
+    pub fn go_to(&mut self, selected: Selected, window: &mut Window, cx: &mut Context<Self>) {
+        self.select(Some(selected), window, cx);
+    }
+
+    /// Back to where the index opened the panel.
+    fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let to = match &self.root {
+            Root::List { .. } => None,
+            Root::One(selected) => Some(selected.clone()),
+        };
+        self.select(to, window, cx);
     }
 
     fn select(&mut self, style: Option<Selected>, window: &mut Window, cx: &mut Context<Self>) {
@@ -152,6 +190,12 @@ impl StylesPanel {
             .inputs
             .iter()
             .map(|(key, input)| {
+                // A field that belongs to another section has no value in this one.
+                if let Selected::Form(form) = &selected
+                    && !form.fields.iter().any(|field| field.key() == *key)
+                {
+                    return (input.clone(), String::new(), false);
+                }
                 let path = [&selected.prefix()[..], &key.split('.').collect::<Vec<_>>()].concat();
                 let own = file.get(&path);
                 let value = own.or_else(|| inherited(file.merged(), file.value(), &selected, key));
@@ -285,21 +329,20 @@ impl StylesPanel {
 
     // Rendering
 
-    fn top(&self, title: SharedString, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let bar = widgets::bar(tokens);
-        if self.selected.is_some() {
-            bar.child(
-                widgets::link(tokens, "styles-back", format!("‹ {}", crate::t!(Key::Back)))
-                    .on_click(cx.listener(|panel, _, window, cx| panel.select(None, window, cx))),
-            )
-            .child(title)
-        } else {
-            bar.justify_between().child(title).child(
-                widgets::link(tokens, "styles-new", "+")
-                    .text_size(chrome::TEXT_BODY)
-                    .on_click(cx.listener(|panel, _, window, cx| panel.start_creating(window, cx))),
-            )
-        }
+    /// The bar under the index's, when the panel went further than the index opened it: the way back and what this is.
+    fn top(&self, title: String, tokens: &Tokens, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let at_root = match &self.root {
+            Root::List { .. } => self.selected.is_none(),
+            Root::One(selected) => self.selected.as_ref() == Some(selected),
+        };
+        (!at_root).then(|| {
+            widgets::bar(tokens)
+                .child(
+                    widgets::quiet_link(tokens, "styles-back", format!("‹ {}", crate::t!(Key::Back)))
+                        .on_click(cx.listener(|panel, _, window, cx| panel.back(window, cx))),
+                )
+                .child(title)
+        })
     }
 
     fn list(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -312,29 +355,46 @@ impl StylesPanel {
                 .and_then(|value| value.as_object())
                 .is_some_and(|fields| !fields.is_empty())
         };
-        let mut rows: Vec<gpui::AnyElement> = STYLES
-            .iter()
-            .map(|&(key, label)| {
-                let used = customized(&["styles", key]);
-                widgets::row(tokens, SharedString::from(format!("style-{key}")), crate::t!(label))
-                    .child(widgets::tag(
-                        tokens,
-                        if used { Key::Customized } else { Key::Inherited },
-                        used,
-                    ))
-                    .on_click(cx.listener(move |panel, _, window, cx| {
-                        panel.select(Some(Selected::Builtin(key)), window, cx);
-                    }))
-                    .into_any_element()
-            })
-            .collect();
+        let shows_custom = self.root == Root::List { custom: true };
+        let mut rows: Vec<gpui::AnyElement> = if shows_custom {
+            Vec::new()
+        } else {
+            STYLES
+                .iter()
+                .map(|&(key, label)| {
+                    let used = customized(&["styles", key]);
+                    widgets::row(tokens, SharedString::from(format!("style-{key}")), crate::t!(label))
+                        .child(widgets::tag(
+                            tokens,
+                            if used { Key::Customized } else { Key::Inherited },
+                            used,
+                        ))
+                        .on_click(cx.listener(move |panel, _, window, cx| {
+                            panel.select(Some(Selected::Builtin(key)), window, cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect()
+        };
         let custom: Vec<String> = file
             .value()
             .get("custom-styles")
             .and_then(Value::as_object)
+            .filter(|_| shows_custom)
             .map(|styles| styles.keys().cloned().collect())
             .unwrap_or_default();
-        rows.push(widgets::section(tokens, crate::t!(Key::CustomStyles).to_uppercase()).into_any_element());
+        if shows_custom {
+            rows.push(
+                widgets::bar(tokens)
+                    .justify_end()
+                    .child(
+                        widgets::quiet_link(tokens, "styles-new", "+")
+                            .text_size(chrome::TEXT_BODY)
+                            .on_click(cx.listener(|panel, _, window, cx| panel.start_creating(window, cx))),
+                    )
+                    .into_any_element(),
+            );
+        }
         if let Some(input) = &self.creating {
             rows.push(
                 div()
@@ -381,6 +441,7 @@ impl StylesPanel {
         let properties = match selected {
             Selected::Builtin(key) => style_property::of_builtin(key),
             Selected::Custom(_) => style_property::of_custom(),
+            Selected::Form(form) => form.fields.to_vec(),
         };
         let mut fields: Vec<gpui::AnyElement> = Vec::new();
         if let Selected::Custom(name) = selected {
@@ -419,6 +480,24 @@ impl StylesPanel {
         }
         for property in properties {
             fields.push(self.field(property, selected, tokens, cx).into_any_element());
+        }
+        if let Selected::Form(form) = selected {
+            fields.push(widgets::section(tokens, crate::t!(Key::RelatedStyles)).into_any_element());
+            for style in form.styles {
+                let key = *style;
+                fields.push(
+                    widgets::row(
+                        tokens,
+                        SharedString::from(format!("related-{key}")),
+                        style_label(key).to_owned(),
+                    )
+                    .child(widgets::tag(tokens, "›", false))
+                    .on_click(cx.listener(move |panel, _, window, cx| {
+                        panel.select(Some(selected_of(key)), window, cx);
+                    }))
+                    .into_any_element(),
+                );
+            }
         }
         div()
             .id("style-detail")
@@ -799,6 +878,7 @@ fn inherited<'a>(merged: &'a Value, own: &'a Value, selected: &Selected, key: &s
         Some(value)
     };
     match selected {
+        Selected::Form(_) => path.iter().try_fold(merged, |value, part| value.get(*part)),
         Selected::Builtin(style) => find(merged, ["styles", style]),
         Selected::Custom(name) => {
             let mut base = own.get("custom-styles")?.get(name)?.get("based-on")?.as_str()?;
@@ -831,7 +911,7 @@ fn resolve(theme: &Value, reference: &str) -> Option<String> {
     None
 }
 
-fn resolve_value(theme: &Value, value: &Value) -> String {
+pub(super) fn resolve_value(theme: &Value, value: &Value) -> String {
     let text = Property::display(value);
     if text.starts_with('$') {
         resolve(theme, &text).unwrap_or(text)
@@ -852,16 +932,14 @@ pub fn parse_color(text: &str) -> Option<gpui::Rgba> {
 impl Render for StylesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = &Tokens::get(cx).clone();
-        let column = div().flex_1().min_w_0().h_full().flex().flex_col();
-        let model = self.model.read(cx);
-        if let Err(message) = model.file() {
+        let column = div().flex_1().min_w_0().min_h_0().flex().flex_col();
+        if let Err(message) = self.model.read(cx).file() {
             let message = if message.is_empty() {
                 crate::t!(Key::NoTheme).to_owned()
             } else {
                 message.to_owned()
             };
             return column
-                .child(widgets::header(tokens, crate::t!(Key::StylesTitle).to_uppercase()))
                 .child(
                     div()
                         .p(chrome::SPACE_3)
@@ -872,11 +950,11 @@ impl Render for StylesPanel {
         }
         match self.selected.clone() {
             None => column
-                .child(self.top(crate::t!(Key::StylesTitle).into(), tokens, cx))
+                .children(self.top(String::new(), tokens, cx))
                 .child(self.list(tokens, cx))
                 .into_any_element(),
             Some(selected) => column
-                .child(self.top(SharedString::from(selected.title().to_uppercase()), tokens, cx))
+                .children(self.top(selected.title(), tokens, cx))
                 .child(self.detail(&selected, tokens, cx))
                 .into_any_element(),
         }

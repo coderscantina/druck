@@ -4,12 +4,12 @@
 crate::strings! {
     #[derive(Hash)]
     pub enum Key {
-        TabSelection => ("SELECTION", "AUSWAHL"),
         TabStyles => ("STYLES", "STILE"),
         TabFonts => ("FONTS", "SCHRIFTEN"),
         TabImages => ("IMAGES", "BILDER"),
         TabDetails => ("DETAILS", "DETAILS"),
-        TabDiagnostics => ("DIAGNOSTICS", "DIAGNOSE"),
+        TabProof => ("PROOF", "KORREKTUR"),
+        TabGit => ("GIT", "GIT"),
         TabExport => ("EXPORT", "EXPORT"),
         TabAgent => ("AGENT", "AGENT"),
 
@@ -81,14 +81,9 @@ crate::strings! {
         NotANumber => ("Enter a number, such as 1.4", "Gib eine Zahl ein, etwa 1,4"),
         Yes => ("On", "An"),
         No => ("Off", "Aus"),
-        PanelStyles => ("Styles", "Stile"),
-        PanelTokens => ("Tokens", "Tokens"),
-        PanelPage => ("Page", "Seite"),
-        PanelSource => ("Source", "Quelle"),
+        NotACount => ("Enter a whole number", "Gib eine ganze Zahl ein"),
 
         // Styles
-        StylesTitle => ("STYLES", "STILE"),
-        CustomStyles => ("CUSTOM STYLES", "EIGENE STILE"),
         NewStyleHint => ("Name, such as pull-quote", "Name, etwa zitat-gross"),
         BasedOn => ("Based on", "Basiert auf"),
         UsedAs => ("Use in a document with {.name}", "Im Dokument mit {.name} verwenden"),
@@ -177,7 +172,6 @@ crate::strings! {
         DecimalPoint => (".", ","),
 
         // Tokens
-        TokensTitle => ("TOKENS", "TOKENS"),
         GroupFonts => ("Fonts", "Schriften"),
         GroupSizes => ("Sizes", "Größen"),
         GroupSpacing => ("Spacing", "Abstände"),
@@ -192,7 +186,6 @@ crate::strings! {
         ),
 
         // Page geometry
-        GeometryTitle => ("PAGE", "SEITE"),
         PageSize => ("Page size", "Seitenformat"),
         CustomSize => ("Custom", "Eigen"),
         Width => ("Width", "Breite"),
@@ -218,14 +211,91 @@ crate::strings! {
         Decimal => (".", ","),
 
         // JSON view
-        JsonTitle => ("THEME SOURCE", "THEME-QUELLE"),
         JsonValid => ("Valid. Changes apply as you type.", "Gültig. Änderungen gelten sofort."),
         JsonInvalid => ("Not applied: {value}", "Nicht übernommen: {value}"),
-        JsonDesigned => ("Own panel", "Eigenes Panel"),
-        JsonOnly => ("Source view only", "Nur Quellansicht"),
-        JsonNote => (
-            "These sections have no panel yet. Edit them here.",
-            "Für diese Abschnitte gibt es noch kein Panel. Bearbeite sie hier."
+
+        // The Style tab's index
+        SearchSections => ("Search 30 sections", "30 Abschnitte durchsuchen"),
+        AllSections => ("All sections", "Alle Abschnitte"),
+        SectionJson => ("JSON", "JSON"),
+        SectionForm => ("Fields", "Felder"),
+        GroupPage => ("Page", "Seite"),
+        GroupText => ("Text", "Text"),
+        GroupBookParts => ("Book parts", "Buchteile"),
+        GroupNotes => ("Notes", "Anmerkungen"),
+        GroupTheme => ("Theme", "Theme"),
+        SectionGeometry => ("Page geometry", "Seitenaufbau"),
+        SectionRunningHeads => ("Running heads", "Kolumnentitel"),
+        SectionTitlePage => ("Title page", "Titelseite"),
+        SectionTitleBlock => ("Title block", "Titelblock"),
+        SectionWatermark => ("Watermark", "Wasserzeichen"),
+        SectionPlacement => ("Placement", "Platzierung"),
+        SectionBody => ("Body text", "Fließtext"),
+        SectionHeadings => ("Headings", "Überschriften"),
+        SectionStyles => ("All block styles", "Alle Blockstile"),
+        SectionCustomStyles => ("Custom styles", "Eigene Stile"),
+        SectionInline => ("Inline", "Im Text"),
+        SectionLists => ("Lists", "Listen"),
+        SectionTables => ("Tables", "Tabellen"),
+        SectionCallouts => ("Callouts", "Hinweisboxen"),
+        SectionCaptions => ("Captions", "Beschriftungen"),
+        SectionHighlight => ("Code colors", "Codefarben"),
+        SectionTypesetting => ("Typesetting", "Satzregeln"),
+        SectionChapters => ("Chapter openings", "Kapitelanfänge"),
+        SectionContents => ("Contents", "Inhaltsverzeichnis"),
+        SectionMatter => ("Page numbering", "Seitenzählung"),
+        SectionSceneBreak => ("Scene break", "Szenenwechsel"),
+        SectionBibliography => ("Bibliography", "Literaturverzeichnis"),
+        SectionIndex => ("Index", "Register"),
+        SectionFootnotes => ("Footnotes", "Fußnoten"),
+        SectionMarginNotes => ("Margin notes", "Randnotizen"),
+        SectionFonts => ("Fonts", "Schriften"),
+        SectionTokens => ("Tokens", "Tokens"),
+        SectionImages => ("Images", "Bilder"),
+        SectionDocument => ("Document defaults", "Dokumentvorgaben"),
+        SectionLabels => ("Labels", "Bezeichnungen"),
+        SectionVersion => ("Format version", "Formatversion"),
+        SectionSchema => ("Schema", "Schema"),
+        SectionSource => ("Theme source", "Theme-Quelle"),
+        RelatedStyles => ("STYLES", "STILE"),
+
+        // Chapter openings and contents
+        StartOn => ("Start on", "Beginnt auf"),
+        BreakNone => ("Any page", "Jeder Seite"),
+        BreakPage => ("New page", "Neuer Seite"),
+        BreakRecto => ("Odd page", "Ungerader"),
+        Sink => ("Sink", "Absenkung"),
+        DropCap => ("Drop capital, lines", "Initiale, Zeilen"),
+        LeadIn => ("Lead-in, words", "Kapitälchen, Wörter"),
+        NumberPosition => ("Number stands", "Nummer steht"),
+        NumberInline => ("Inline", "Im Titel"),
+        NumberAbove => ("Above", "Darüber"),
+        NumberFormat => ("Number format", "Nummernformat"),
+        FormatDecimal => ("1", "1"),
+        FormatLeadingZero => ("01", "01"),
+        FormatLowerRoman => ("i", "i"),
+        FormatUpperRoman => ("I", "I"),
+        NumberStyle => ("Number style", "Nummernstil"),
+        NumberLabel => ("Chapter label", "Kapitelwort"),
+        TocDepth => ("Depth, levels", "Tiefe, Ebenen"),
+        LevelIndent => ("Indent per level", "Einzug je Ebene"),
+        Leader => ("Dot leaders", "Punktlinien"),
+        LevelStyles => ("Styles per level", "Stile je Ebene"),
+
+        // Running heads
+        PagesOdd => ("Odd", "Ungerade"),
+        PagesEven => ("Even", "Gerade"),
+        PagesOpening => ("Opening", "Anfang"),
+        PagesFirst => ("First", "Erste"),
+        PagesBody => ("Other", "Übrige"),
+        PagesTitle => ("Title", "Titel"),
+        BandHeader => ("HEADER", "KOPFZEILE"),
+        BandFooter => ("FOOTER", "FUSSZEILE"),
+        BandEmpty => ("Nothing stands here.", "Hier steht nichts."),
+        SlotText => ("Text", "Text"),
+        SlotHint => (
+            "Use {section}, {title}, {page}, {pages}, and {author}.",
+            "Nutze {section}, {title}, {page}, {pages} und {author}."
         ),
 
         // Picker
