@@ -54,6 +54,16 @@ fn is_epub(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"))
 }
 
+/// What a project's output is called when no export names it: its folder's name.
+fn document_name(dir: &Path) -> &str {
+    dir.file_name().and_then(|folder| folder.to_str()).unwrap_or("document")
+}
+
+/// Where a project's PDF goes when no export names one, as `druck.yaml` would write it.
+pub fn built_in_output(dir: &Path) -> String {
+    format!("build/{}.pdf", document_name(dir))
+}
+
 fn failed(message: String) -> Failure {
     Failure::Errors(vec![Diagnostic::error(message)])
 }
@@ -99,9 +109,7 @@ pub fn run(request: Request, cancel: &Cancel, stage: &dyn Fn(Stage)) -> Result<W
             let (text, settings) = project.export(name)?;
             let extension = if request.target == Target::Epub { "epub" } else { "pdf" };
             let output = settings.output.unwrap_or_else(|| {
-                let file = name
-                    .or(dir.file_name().and_then(|folder| folder.to_str()))
-                    .unwrap_or("document");
+                let file = name.unwrap_or_else(|| document_name(dir));
                 dir.join("build").join(format!("{file}.{extension}"))
             });
             if is_epub(&output)

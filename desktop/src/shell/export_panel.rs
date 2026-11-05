@@ -1,5 +1,6 @@
 //! The export panel: the named exports of `druck.yaml` with their settings, a run button with progress and cancel, and
-//! the finished file to open or reveal. A single file offers a plain PDF and EPUB.
+//! the finished file to open or reveal. A single file offers a plain PDF and EPUB. A project that names no export offers one
+//! built-in PDF, and `druck.yaml` stays as it is until the author changes or saves that one.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -31,6 +32,9 @@ pub enum ExportEvent {
 
 impl EventEmitter<ExportEvent> for ExportPanel {}
 
+/// The name of the PDF a document offers without naming one.
+const PDF: &str = "pdf";
+
 /// What the document offers: one file's plain export, or a project's named exports.
 #[derive(Debug, Clone, Default)]
 pub struct Setup {
@@ -38,6 +42,19 @@ pub struct Setup {
     pub defs: Vec<Def>,
     /// Why the exports cannot be read.
     pub problem: Option<String>,
+    /// Where the built-in PDF goes, which is where a run without a named export writes.
+    pub built_in_output: String,
+}
+
+impl Setup {
+    /// The PDF offered while a project names no export and its manifest can be read.
+    pub fn built_in(&self) -> Option<Def> {
+        (!self.single && self.defs.is_empty() && !self.built_in_output.is_empty()).then(|| Def {
+            name: PDF.to_owned(),
+            output: self.built_in_output.clone(),
+            ..Def::default()
+        })
+    }
 }
 
 /// Where the latest run is.
@@ -69,6 +86,8 @@ pub struct ExportPanel {
     run: RunState,
     /// The finished run's Open button, which takes the keys its run button had.
     open_file: FocusHandle,
+    /// The first run button, which `Cmd+E` gives the keys to.
+    first_run: FocusHandle,
     expanded: HashSet<String>,
     fields: HashMap<String, Fields>,
     adding: bool,
@@ -85,6 +104,7 @@ impl ExportPanel {
             setup: Setup::default(),
             run: RunState::Idle,
             open_file: cx.focus_handle().tab_stop(true),
+            first_run: cx.focus_handle().tab_stop(true),
             expanded: HashSet::new(),
             fields: HashMap::new(),
             adding: false,
@@ -95,7 +115,7 @@ impl ExportPanel {
     }
 
     pub fn set_setup(&mut self, setup: Setup, window: &mut Window, cx: &mut Context<Self>) {
-        for def in &setup.defs {
+        for def in setup.defs.iter().chain(setup.built_in().as_ref()) {
             if !self.fields.contains_key(&def.name) {
                 let fields = self.make_fields(&def.name, window, cx);
                 self.fields.insert(def.name.clone(), fields);
@@ -127,6 +147,11 @@ impl ExportPanel {
         cx.notify();
     }
 
+    /// Gives the keys to the first run button, once it has been drawn.
+    pub fn focus_first_run(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.on_next_frame(window, |panel, window, cx| window.focus(&panel.first_run, cx));
+    }
+
     /// Gives the keys to the finished run's Open button, once it has been drawn.
     pub fn focus_result(&self, window: &mut Window, cx: &mut Context<Self>) {
         cx.on_next_frame(window, |panel, window, cx| window.focus(&panel.open_file, cx));
@@ -141,13 +166,9 @@ impl ExportPanel {
             let input = cx.new(|cx| TextInput::new(window, cx).with_placeholder(placeholder));
             let name = name.to_owned();
             self._subscriptions
-                .push(cx.subscribe(&input, move |_, _, Committed(text): &Committed, cx| {
+                .push(cx.subscribe(&input, move |panel, _, Committed(text): &Committed, cx| {
                     let value = Some(text.trim().to_owned()).filter(|text| !text.is_empty());
-                    cx.emit(ExportEvent::Set {
-                        name: name.clone(),
-                        key,
-                        value,
-                    });
+                    panel.set_field(&name, key, value, cx);
                 }));
             input
         };
@@ -156,6 +177,34 @@ impl ExportPanel {
             output: make("output", "build/name.pdf"),
             bleed: make("bleed", "3mm"),
         }
+    }
+
+    /// Changes one value of an export. The built-in one gets a place in `druck.yaml` with this, first with where it writes,
+    /// and tabbing through its fields changes nothing, so it writes nothing.
+    fn set_field(&mut self, name: &str, key: &'static str, value: Option<String>, cx: &mut Context<Self>) {
+        if let Some(built_in) = self.setup.built_in() {
+            let same = match key {
+                "theme" => built_in.theme.as_str(),
+                "output" => built_in.output.as_str(),
+                "bleed" => built_in.bleed.as_str(),
+                _ => "",
+            } == value.as_deref().unwrap_or_default();
+            if same {
+                return;
+            }
+            if key != "output" {
+                cx.emit(ExportEvent::Set {
+                    name: name.to_owned(),
+                    key: "output",
+                    value: Some(built_in.output),
+                });
+            }
+        }
+        cx.emit(ExportEvent::Set {
+            name: name.to_owned(),
+            key,
+            value,
+        });
     }
 
     fn add(&mut self, cx: &mut Context<Self>) {
@@ -298,16 +347,28 @@ impl ExportPanel {
                 .into_any_element();
         }
         let busy = self.is_running();
+        let first = self.first_runner().as_deref() == Some(id.as_str());
         ui::button(tokens, SharedString::from(format!("run-{id}")), label)
-            .when(busy, |button| button.opacity(0.4).cursor_default())
+            .when(first, |button| button.track_focus(&self.first_run))
+            .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY).cursor_default())
             .when(!busy, |button| {
                 button.on_click(cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Run(target.clone()))))
             })
             .into_any_element()
     }
 
+    /// The name of what the first run button runs.
+    fn first_runner(&self) -> Option<String> {
+        if self.setup.single {
+            return Some(PDF.to_owned());
+        }
+        let built_in = self.setup.built_in();
+        (self.setup.defs.first().or(built_in.as_ref())).map(|def| def.name.clone())
+    }
+
     fn card(&self, def: &Def, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::AnyElement {
         let name = def.name.clone();
+        let built_in = self.setup.defs.is_empty();
         let open = self.expanded.contains(&name);
         let toggle_name = name.clone();
         let mut flags = Vec::new();
@@ -365,12 +426,8 @@ impl ExportPanel {
         let switch = |id: &'static str, key: &'static str, label: &'static str, on: bool, cx: &mut Context<Self>| {
             let name = name.clone();
             ui::check(tokens, SharedString::from(format!("{id}-{name}")), label, on).on_click(cx.listener(
-                move |_, _, _, cx| {
-                    cx.emit(ExportEvent::Set {
-                        name: name.clone(),
-                        key,
-                        value: (!on).then(|| "true".to_owned()),
-                    });
+                move |panel, _, _, cx| {
+                    panel.set_field(&name, key, (!on).then(|| "true".to_owned()), cx);
                 },
             ))
         };
@@ -423,7 +480,27 @@ impl ExportPanel {
                     .child(summary),
             )
             .when_some(editor, |card, editor| card.child(editor))
-            .child(self.runner(name.clone(), Target::Named(name), crate::t!(Key::ExportRun), tokens, cx))
+            .when(built_in, |card| {
+                let (name, output) = (name.clone(), def.output.clone());
+                card.child(
+                    ui::button(tokens, "export-save", crate::t!(Key::ExportSave)).on_click(cx.listener(
+                        move |_, _, _, cx| {
+                            cx.emit(ExportEvent::Set {
+                                name: name.clone(),
+                                key: "output",
+                                value: Some(output.clone()),
+                            });
+                        },
+                    )),
+                )
+            })
+            .child(self.runner(
+                name.clone(),
+                if built_in { Target::Pdf } else { Target::Named(name) },
+                crate::t!(Key::ExportRun),
+                tokens,
+                cx,
+            ))
             .into_any_element()
     }
 }
@@ -438,15 +515,12 @@ impl Render for ExportPanel {
                 .flex()
                 .flex_col()
                 .gap(tokens::SPACE_2)
-                .child(self.runner("pdf".into(), Target::Pdf, crate::t!(Key::ExportPdf), &tokens, cx))
+                .child(self.runner(PDF.into(), Target::Pdf, crate::t!(Key::ExportPdf), &tokens, cx))
                 .child(self.runner("epub".into(), Target::Epub, crate::t!(Key::ExportEpub), &tokens, cx))
                 .into_any_element()
         } else {
-            let cards: Vec<_> = self
-                .setup
-                .defs
-                .clone()
-                .iter()
+            let built_in = self.setup.built_in();
+            let cards: Vec<_> = (self.setup.defs.clone().iter().chain(built_in.as_ref()))
                 .map(|def| self.card(def, &tokens, cx))
                 .collect();
             let add = if self.adding {
@@ -508,10 +582,12 @@ impl Render for ExportPanel {
                             .child(crate::t!(Key::ExportUnreviewed, count = unreviewed)),
                     )
                 })
-                .when(cards.is_empty() && self.setup.problem.is_none(), |column| {
+                .when(built_in.is_some(), |column| {
                     column.child(
                         div()
-                            .p(tokens::SPACE_3)
+                            .px(tokens::SPACE_3)
+                            .pt(tokens::SPACE_3)
+                            .text_size(tokens::TEXT_SMALL)
                             .text_color(tokens.text_quiet)
                             .child(crate::t!(Key::NoExports)),
                     )

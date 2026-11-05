@@ -100,6 +100,7 @@ impl DiagnosticsPanel {
                 .into_any_element(),
             Item::Entry(number, entry) => {
                 let number = *number;
+                let looked_at = self.current == Some(number);
                 let goes_somewhere = entry.place.is_some() || entry.page.is_some();
                 let kind = match entry.kind {
                     Kind::Error => crate::t!(Key::KindError),
@@ -113,12 +114,11 @@ impl DiagnosticsPanel {
                 div()
                     .id(("entry", at))
                     .button(tokens, format!("{label}: {}", entry.message))
-                    .h(tokens::PROOF_ENTRY_HEIGHT)
                     .px(tokens::SPACE_3)
                     .py(tokens::SPACE_1)
                     .flex()
                     .gap(tokens::SPACE_2)
-                    .when(self.current == Some(number), |row| row.bg(tokens.raised))
+                    .when(looked_at, |row| row.bg(tokens.raised))
                     .when(goes_somewhere, |row| {
                         row.cursor_pointer()
                             .hover(|row| row.bg(tokens.raised))
@@ -138,7 +138,11 @@ impl DiagnosticsPanel {
                                     .text_color(tokens.text_faint)
                                     .child(label),
                             )
-                            .child(div().line_clamp(2).child(entry.message.clone())),
+                            .child(
+                                div()
+                                    .when(entry.kind != Kind::Error && !looked_at, |text| text.line_clamp(2))
+                                    .child(entry.message.clone()),
+                            ),
                     )
                     .into_any_element()
             }

@@ -21,12 +21,13 @@ use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, SpecimenRequested, Tab, TabShown, ThemeChanged, ThemeSwitched};
+#[cfg(any(debug_assertions, feature = "measure"))]
 use crate::preview::proof::BlockAt;
 #[cfg(any(debug_assertions, feature = "measure"))]
 use crate::preview::slip::Directive;
 use crate::preview::slip::{ProofSlip, SlipEvent};
 use crate::preview::slip_control;
-use crate::preview::{Ahead, BookType, PageClicked, PreviewView, ProblemsWanted, Typeset};
+use crate::preview::{Ahead, BookType, DetailsWanted, PageClicked, PreviewView, ProblemsWanted, Typeset};
 use crate::session::{Group, Session};
 use crate::settings;
 use crate::shell::text::Key;
@@ -64,15 +65,6 @@ pub enum Mode {
 
 impl Mode {
     const ALL: [(Self, Key); 2] = [(Self::Write, Key::Write), (Self::Publish, Key::Publish)];
-
-    /// The mode `DRUCK_MODE` names, for screenshots and measurements.
-    fn from_env() -> Option<Self> {
-        match crate::gate::var("DRUCK_MODE")?.as_str() {
-            "write" => Some(Self::Write),
-            "publish" => Some(Self::Publish),
-            _ => None,
-        }
-    }
 }
 
 /// The window went to another mode.
@@ -125,8 +117,6 @@ pub struct Workspace {
     theme_setting: Option<String>,
     /// The style whose block to show once the pages catch up with the theme.
     jump: Option<String>,
-    /// `DRUCK_SLIP`: the words of a paragraph to open a slip on once there are pages, for screenshots.
-    slip_words: Option<String>,
     /// Something in Write wants the author, who is elsewhere: a dot on the switch.
     write_attention: bool,
     _subscriptions: Vec<Subscription>,
@@ -178,15 +168,6 @@ impl Workspace {
                 workspace.jump_to_style(window, cx);
                 workspace.ready_pages(window, cx);
                 slip_control::sync(&workspace.parts, cx);
-                if let Some(words) = workspace.slip_words.take() {
-                    workspace.open_slip_on(&words, window, cx);
-                    #[cfg(any(debug_assertions, feature = "measure"))]
-                    if crate::gate::var("DRUCK_SLIP_BREAK").is_some() {
-                        workspace.toggle_page_break_for_gate(window, cx);
-                    }
-                    #[cfg(any(debug_assertions, feature = "measure"))]
-                    slip_control::try_from_gate(&workspace.parts, window, cx);
-                }
             }),
             cx.observe_global_in::<settings::Store>(window, |_, _, cx| cx.notify()),
             cx.subscribe(&editor, |workspace, _, CaretMoved(offset), cx| {
@@ -199,6 +180,12 @@ impl Workspace {
                     .parts
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
+            }),
+            cx.subscribe(&preview, |workspace, _, _: &DetailsWanted, cx| {
+                workspace
+                    .parts
+                    .inspector
+                    .update(cx, |inspector, cx| inspector.show(Tab::Details, cx));
             }),
             cx.subscribe(&inspector, |workspace, _, TabShown(tab), cx| {
                 let proof_open = *tab == Tab::Proof;
@@ -227,9 +214,8 @@ impl Workspace {
         let mut slots = Slots::default();
         crate::app::mount(&parts, &mut slots, window, cx);
         slots.overlays.push(dialog.clone().into());
-        let mode = Mode::from_env().unwrap_or(Mode::Write);
         let mut workspace = Self {
-            mode,
+            mode: Mode::Write,
             parts,
             details,
             dialog,
@@ -242,7 +228,6 @@ impl Workspace {
             theme_setting: None,
             explicit: asked,
             jump: None,
-            slip_words: crate::gate::var("DRUCK_SLIP"),
             write_attention: false,
             _subscriptions: subscriptions,
         };
@@ -253,45 +238,9 @@ impl Workspace {
             .preview
             .update(cx, |preview, cx| preview.set_proof_open(proof_open, cx));
         workspace.sync_panels(window, cx);
-        // `DRUCK_SPECIMEN=1` opens on the specimen, for screenshots.
-        if crate::gate::var("DRUCK_SPECIMEN").is_some() {
-            workspace
-                .parts
-                .preview
-                .update(cx, |preview, cx| preview.set_specimen(true, cx));
-        }
         workspace.request_pages(cx);
-        if mode == Mode::Publish {
-            workspace.focus_main(window, cx);
-        }
-        cx.emit(ModeChanged(mode));
-        // For screenshots: `DRUCK_CHAPTER=4` opens that chapter of the book.
-        if let Some(chapter) = crate::gate::var("DRUCK_CHAPTER").and_then(|chapter| chapter.parse::<usize>().ok()) {
-            let id = workspace.parts.editor.read(cx).session().book().get(chapter).copied();
-            if let Some(id) = id {
-                workspace
-                    .parts
-                    .editor
-                    .update(cx, |editor, cx| editor.show_chapter(id, window, cx));
-            }
-        }
-        // `DRUCK_SELECT=word` selects a word in it.
-        #[cfg(any(debug_assertions, feature = "measure"))]
-        if let Some(word) = crate::gate::var("DRUCK_SELECT") {
-            workspace.parts.editor.update(cx, |editor, cx| {
-                if let Some(at) = editor.text().find(&word) {
-                    editor.select_for_screenshot(at..at + word.len(), window, cx);
-                }
-            });
-        }
-        crate::gate::start(
-            cx.entity(),
-            workspace.parts.editor.clone(),
-            workspace.parts.preview.clone(),
-            workspace.parts.inspector.clone(),
-            window.window_handle(),
-            cx,
-        );
+        cx.emit(ModeChanged(Mode::Write));
+        crate::gate::apply(&workspace.parts, cx.entity(), window, cx);
         workspace
     }
 
@@ -378,6 +327,10 @@ impl Workspace {
             problem: session.problem().map(str::to_owned),
         };
         let cover = data.cover.clone();
+        let title = session.window_title();
+        if window.window_title() != title {
+            window.set_window_title(&title);
+        }
         self.parts
             .ticks
             .update(cx, |ticks, cx| ticks.set_data(data.clone(), cx));
@@ -514,10 +467,20 @@ impl Workspace {
         }
     }
 
-    /// Asks for pages unless they are set from this revision or being set from it.
+    /// Asks for pages unless they are set from this revision or being set from it. A layout that failed asks again, since
+    /// what it lacked may be there now, and that is no change of the text.
     fn request_if_changed(&mut self, cx: &mut Context<Self>) {
         if self.requested != Some(self.parts.editor.read(cx).revision()) {
             self.request_pages(cx);
+        } else {
+            self.retry_failed_layout(cx);
+        }
+    }
+
+    /// A file the book may lack changed: if the last layout failed, typesets again.
+    pub fn retry_failed_layout(&mut self, cx: &mut Context<Self>) {
+        if self.parts.preview.read(cx).layout_failed() {
+            self.parts.preview.update(cx, |preview, cx| preview.refresh(cx));
         }
     }
 
@@ -574,12 +537,14 @@ impl Workspace {
         slip_control::toggled(&self.parts, Directive::PageBreak, window, cx);
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     /// Opens the slip on the first paragraph with these words, as a click on them would. For scripted runs.
     pub fn open_slip_on(&mut self, words: &str, window: &mut Window, cx: &mut Context<Self>) {
         let block = self.parts.preview.read(cx).block_with_text(words);
         self.open_slip_at(block, window, cx);
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     /// Opens the slip on a block, as a click on it would. For scripted runs.
     pub fn open_slip_at(&mut self, block: Option<BlockAt>, window: &mut Window, cx: &mut Context<Self>) {
         let preview = self.parts.preview.clone();
@@ -694,20 +659,29 @@ impl Workspace {
                 editor.update_session(|session| session.remove_meta(key), window, cx)
             }),
             DetailsEdit::ChooseCover => {
-                self.choose_cover(window, cx);
+                self.choose_file(Session::set_cover, window, cx);
+                return;
+            }
+            DetailsEdit::ChooseBibliography => {
+                self.choose_file(Session::set_bibliography, window, cx);
                 return;
             }
         };
         self.details.update(cx, |panel, cx| panel.set_error(result.err(), cx));
     }
 
-    /// Asks for an image and makes it the cover.
-    fn choose_cover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Asks for a file and hands it to the session: the cover or the bibliography.
+    fn choose_file(
+        &mut self,
+        set: fn(&mut Session, &std::path::Path) -> Result<(), String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(crate::t!(Key::ChooseFile).into()),
         });
         cx.spawn_in(window, async move |workspace, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
@@ -720,7 +694,7 @@ impl Workspace {
                 .update_in(cx, |workspace, window, cx| {
                     let editor = workspace.parts.editor.clone();
                     let result = editor.update(cx, |editor, cx| {
-                        editor.update_session(|session| session.set_cover(&path), window, cx)
+                        editor.update_session(|session| set(session, &path), window, cx)
                     });
                     workspace
                         .details
@@ -827,6 +801,9 @@ impl Workspace {
 pub fn titlebar(tokens: &Tokens, center: impl IntoElement, end: impl IntoElement) -> impl IntoElement {
     div()
         .id("titlebar")
+        .tab_group()
+        .tab_index(tokens::TAB_TITLEBAR)
+        .tab_stop(false)
         .flex_none()
         .h(tokens::TITLEBAR_HEIGHT)
         .relative()
@@ -878,6 +855,9 @@ impl Render for Workspace {
             .children(self.slots.footer.clone());
         let binder_on = settings::get(cx).binder;
         let centre = div()
+            .tab_group()
+            .tab_index(tokens::TAB_CENTRE)
+            .tab_stop(false)
             .flex_1()
             .min_w_0()
             .flex()
@@ -892,7 +872,12 @@ impl Render for Workspace {
             // Cached, so a key repaints the galley and not every row beside it. A cached view that is reused reports no
             // accessibility nodes in gpui, so with assistive technology nothing is.
             let style = StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full();
-            pane(self.parts.sidebar.clone(), style, accessible)
+            div()
+                .tab_group()
+                .tab_index(tokens::TAB_PANEL)
+                .tab_stop(false)
+                .h_full()
+                .child(pane(self.parts.sidebar.clone(), style, accessible))
         });
         let rail = (self.mode == Mode::Publish).then(|| {
             let style = StyleRefinement::default()

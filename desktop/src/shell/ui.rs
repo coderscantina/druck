@@ -43,6 +43,27 @@ pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<Shared
         .child(label)
 }
 
+/// A 22 px button with a thin border and quiet text.
+pub fn small_button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<gpui::Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .button(tokens, label.clone())
+        .flex_none()
+        .h(tokens::SMALL_BUTTON_HEIGHT)
+        .px(tokens::SPACE_2)
+        .flex()
+        .items_center()
+        .rounded(tokens::CHIP_RADIUS)
+        .border_1()
+        .border_color(tokens.divider)
+        .text_size(tokens::TEXT_SMALL)
+        .text_color(tokens.text_quiet)
+        .cursor_pointer()
+        .hover(|button| button.bg(tokens.raised))
+        .child(label)
+}
+
 /// A small square switch with its label, filled when on.
 pub fn check(
     tokens: &Tokens,

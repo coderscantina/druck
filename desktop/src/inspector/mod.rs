@@ -62,13 +62,13 @@ impl Tab {
     const TOP: [Self; 4] = [Self::Details, Self::Styles, Self::Fonts, Self::Images];
     const BOTTOM: [Self; 4] = [Self::Agent, Self::Git, Self::Proof, Self::Export];
 
-    /// The tab `DRUCK_TAB` names, for screenshots.
-    fn from_env() -> Option<Self> {
-        let name = crate::gate::var("DRUCK_TAB")?;
+    /// The tab of this name. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn named(name: &str) -> Option<Self> {
         Self::TOP
             .into_iter()
             .chain(Self::BOTTOM)
-            .find(|tab| tab.id().strip_prefix("tab-") == Some(name.as_str()))
+            .find(|tab| tab.id().strip_prefix("tab-") == Some(name))
     }
 
     fn id(self) -> &'static str {
@@ -117,6 +117,7 @@ pub struct InspectorView {
     panels: HashMap<Tab, AnyView>,
     /// Tabs that want the author's eye while another tab is open, shown as a dot on the rail.
     attention: HashSet<Tab>,
+    #[cfg(any(debug_assertions, feature = "measure"))]
     styles: Entity<StylesPanel>,
     index: Entity<StyleIndex>,
     fonts: Entity<FontsPanel>,
@@ -149,24 +150,11 @@ impl InspectorView {
                 inspector.show(*tab, cx)
             }),
         ];
-        // `DRUCK_PROBE_EDIT=1` makes one edit at the start, for screenshots of what an edit asks.
-        if crate::gate::var("DRUCK_PROBE_EDIT").is_some() {
-            let probe = model.clone();
-            cx.defer(move |cx| {
-                probe.update(cx, |model, cx| {
-                    model
-                        .change(
-                            crate::theme_file::editor::Change::set(&["styles", "body", "size"], "11pt".into()),
-                            cx,
-                        )
-                        .ok();
-                });
-            });
-        }
         Self {
-            active: Tab::from_env().unwrap_or(Tab::Details),
+            active: Tab::Details,
             panels: HashMap::from([(Tab::Styles, index.clone().into()), (Tab::Fonts, fonts.clone().into())]),
             attention: HashSet::new(),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             styles,
             index,
             fonts,
@@ -233,7 +221,21 @@ impl InspectorView {
         self.model.update(cx, |model, cx| model.reload(cx));
     }
 
+    /// Opens a section of the Style tab by its name in the theme, or `body`, `headings`, or `source`. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn open_section_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.index
+            .update(cx, |index, cx| index.open_section_named(name, window, cx));
+    }
+
+    /// Opens a family of the Fonts tab, once the pages have it. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn select_font(&mut self, family: String, cx: &mut Context<Self>) {
+        self.fonts.update(cx, |fonts, _| fonts.wanted = Some(family));
+    }
+
     /// Sets the body size as if typed into its field. For measurements.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn set_body_size(&mut self, text: &str, cx: &mut Context<Self>) {
         self.styles.update(cx, |styles, cx| styles.set_body_size(text, cx));
     }
@@ -289,6 +291,9 @@ impl Render for InspectorView {
         let tokens = Tokens::get(cx);
         let panel = div()
             .id("inspector-panel")
+            .tab_group()
+            .tab_index(tokens::TAB_PANEL)
+            .tab_stop(false)
             .role(Role::TabPanel)
             .aria_label(self.active.label())
             .flex_none()
@@ -302,6 +307,9 @@ impl Render for InspectorView {
         let panel = panel.children(self.panels.get(&self.active).cloned());
         let rail = div()
             .id("inspector-rail")
+            .tab_group()
+            .tab_index(tokens::TAB_RAIL)
+            .tab_stop(false)
             .role(Role::TabList)
             .flex_none()
             .w(tokens::RAIL_WIDTH)

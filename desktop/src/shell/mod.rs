@@ -29,7 +29,7 @@ pub mod search_panel;
 pub mod state;
 pub mod strings;
 pub mod text;
-mod ui;
+pub mod ui;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -131,7 +131,7 @@ pub fn init(forced: Option<Scheme>, cx: &mut App) {
         },
         window: None,
         applied,
-        persist: crate::gate::var("DRUCK_GATE").is_none(),
+        persist: !crate::gate::measuring(),
     });
     cx.observe_global::<settings::Store>(settings_changed).detach();
 }
@@ -401,6 +401,8 @@ pub struct Hub {
     /// The places of the report's entries in its order, and the one being looked at.
     problem_places: Vec<Option<(ChapterId, usize)>>,
     current_problem: Option<usize>,
+    /// `DRUCK_PROOF=3` looks at a problem once there are pages, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     proof_hook: Option<usize>,
     /// Where the caret is, and where the find bar started.
     caret: usize,
@@ -422,7 +424,7 @@ impl Hub {
         let subscriptions = vec![
             cx.subscribe_in(&parts.preview, window, |hub, _, _: &Laid, window, cx| {
                 hub.laid(window, cx);
-                // `DRUCK_PROOF=3` looks at a problem once there are pages, for screenshots.
+                #[cfg(any(debug_assertions, feature = "measure"))]
                 if let Some(at) = hub.proof_hook.take() {
                     hub.go_to_problem(at, window, cx);
                 }
@@ -462,6 +464,7 @@ impl Hub {
             replaced: None,
             problem_places: Vec::new(),
             current_problem: None,
+            #[cfg(any(debug_assertions, feature = "measure"))]
             proof_hook: crate::gate::var("DRUCK_PROOF").and_then(|at| at.parse().ok()),
             caret: 0,
             find_origin: 0,
@@ -664,6 +667,9 @@ impl Hub {
     fn show_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
         self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Publish, window, cx));
         self.parts.inspector.update(cx, |inspector, cx| inspector.show(tab, cx));
+        if tab == Tab::Export {
+            self.export.update(cx, |panel, cx| panel.focus_first_run(window, cx));
+        }
     }
 
     fn choose_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -690,11 +696,13 @@ impl Hub {
                         single: false,
                         defs,
                         problem: self.export_edit_error.clone(),
+                        built_in_output: export::built_in_output(dir),
                     },
                     Err(problem) => Setup {
                         single: false,
                         defs: Vec::new(),
                         problem: Some(format!("{} {problem}", crate::t!(Key::ManifestProblem))),
+                        built_in_output: String::new(),
                     },
                 }
             }

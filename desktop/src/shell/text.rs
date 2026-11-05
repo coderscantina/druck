@@ -18,6 +18,7 @@ crate::strings! {
         Discard => ("Discard changes", "Änderungen verwerfen"),
         Cancel => ("Cancel", "Abbrechen"),
         OpenPrompt => ("Open", "Öffnen"),
+        ChooseFile => ("Choose", "Auswählen"),
 
         // Menus
         MenuFile => ("File", "Ablage"),
@@ -133,8 +134,8 @@ crate::strings! {
         ExportEpub => ("Export as EPUB", "Als EPUB exportieren"),
         NamedExports => ("NAMED EXPORTS", "BENANNTE EXPORTE"),
         NoExports => (
-            "This project has no named exports yet. An export is a way to build the book, such as a print PDF.",
-            "Dieses Projekt hat noch keine benannten Exporte. Ein Export ist eine Art, das Buch zu bauen, etwa als Druck-PDF."
+            "No export is named yet, so this one is built in. druck.yaml stays as it is until you change or save it.",
+            "Noch ist kein Export benannt, darum ist dieser eingebaut. druck.yaml bleibt, wie sie ist, bis du ihn änderst oder sicherst."
         ),
         ExportRun => ("Export", "Exportieren"),
         ExportCancel => ("Cancel", "Abbrechen"),
@@ -157,6 +158,7 @@ crate::strings! {
         StageTypesetting => ("Typesetting\u{2026}", "Wird gesetzt\u{2026}"),
         StageWriting => ("Writing the file\u{2026}", "Datei wird geschrieben\u{2026}"),
         ExportCancelled => ("Cancelled.", "Abgebrochen."),
+        ExportSave => ("Save to druck.yaml", "In druck.yaml sichern"),
         ExportUnreviewed => ("Agent changes not reviewed yet: {count}", "Noch nicht geprüfte Agent-Änderungen: {count}"),
         ExportFailedSee => (
             "The export failed. The reasons are in Proof.",
