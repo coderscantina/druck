@@ -18,6 +18,21 @@ use crate::tokens::{self, Tokens};
 
 /// `meta` keys offered before they are set.
 const SUGGESTED: &[(&str, Key)] = &[("isbn", Key::Isbn), ("publisher", Key::Publisher)];
+/// `meta` keys with a label of their own, beside the suggested ones.
+const KNOWN: &[(&str, Key)] = &[("author", Key::MetaAuthor)];
+
+/// A `meta` key's label: its own in the app's language, or the key in sentence case, as `cover-artist` reads
+/// "Cover artist".
+fn meta_label(key: &str) -> String {
+    if let Some(&(_, label)) = SUGGESTED.iter().chain(KNOWN).find(|(known, _)| *known == key) {
+        return crate::t!(label).to_owned();
+    }
+    let spaced = key.replace(['-', '_'], " ");
+    let mut chars = spaced.chars();
+    chars
+        .next()
+        .map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
+}
 
 /// What the author asked to change.
 pub enum DetailsEdit {
@@ -315,10 +330,7 @@ impl DetailsPanel {
 
     fn meta_row(&self, row: &MetaRow, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let key = row.key.clone();
-        let label = SUGGESTED
-            .iter()
-            .find(|(suggested, _)| *suggested == row.key)
-            .map_or(row.key.clone(), |&(_, label)| crate::t!(label).to_owned());
+        let label = meta_label(&row.key);
         let remove = div()
             .id(SharedString::from(format!("meta-remove-{key}")))
             .button(tokens, format!("{key}: {}", crate::t!(Key::Remove)))
@@ -489,5 +501,16 @@ impl Render for DetailsPanel {
                             .child(add),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_meta_key_reads_in_sentence_case() {
+        assert_eq!(meta_label("cover-artist"), "Cover artist");
+        assert_eq!(meta_label("edition"), "Edition");
     }
 }

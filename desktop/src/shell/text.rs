@@ -167,8 +167,8 @@ crate::strings! {
             "The export failed. The reasons are in Proof.",
             "Der Export ist fehlgeschlagen. Die Gründe stehen unter Korrektur."
         ),
-        ExportDonePages => ("Pages: {parts} \u{b7} {seconds} s", "Seiten: {parts} \u{b7} {seconds} s"),
-        ExportDoneSections => ("Sections: {parts} \u{b7} {seconds} s", "Abschnitte: {parts} \u{b7} {seconds} s"),
+        ExportDonePages => ("Pages: {parts} \u{b7} {time}", "Seiten: {parts} \u{b7} {time}"),
+        ExportDoneSections => ("Sections: {parts} \u{b7} {time}", "Abschnitte: {parts} \u{b7} {time}"),
         OpenFile => ("Open", "Öffnen"),
         RevealFile => ("Show in Finder", "Im Finder zeigen"),
         ManifestProblem => ("Cannot read the exports.", "Die Exporte lassen sich nicht lesen."),

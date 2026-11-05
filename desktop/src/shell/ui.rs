@@ -1,10 +1,38 @@
 //! Small pieces the shell's panels share, built from the tokens.
 
 use gpui::prelude::*;
-use gpui::{ElementId, FontWeight, Pixels, SharedString, Stateful, TextRun, Window, div, font};
+use gpui::{
+    ElementId, FontWeight, Hsla, Pixels, ScrollHandle, SharedString, Stateful, TextRun, Window, div, font,
+    linear_color_stop, linear_gradient,
+};
 
 use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
+
+/// Whether a list that scrolls has more below what shows.
+pub fn more_below(scroll: &ScrollHandle) -> bool {
+    let (offset, most) = (scroll.offset().y, scroll.max_offset().y);
+    most > tokens::HAIRLINE && -offset < most
+}
+
+/// The fade over the foot of a list on the panel colour that has more below. Its parent is `relative`.
+pub fn foot_fade(tokens: &Tokens) -> gpui::Div {
+    let (clear, solid) = (
+        Hsla::from(tokens.panel).opacity(tokens::CLEAR),
+        Hsla::from(tokens.panel),
+    );
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(tokens::VERSIONS_ROW_HEIGHT)
+        .bg(linear_gradient(
+            tokens::FADE_DOWN,
+            linear_color_stop(clear, 0.),
+            linear_color_stop(solid, 1.),
+        ))
+}
 
 /// The small label at the top of a panel, on a divider.
 pub fn section_label(tokens: &Tokens, label: impl Into<SharedString>) -> gpui::Div {

@@ -137,13 +137,14 @@ impl SearchPanel {
     fn option(
         &self,
         id: &'static str,
-        label: &'static str,
+        (mark, name): (&'static str, &'static str),
         on: bool,
         tokens: &Tokens,
         cx: &mut Context<Self>,
         flip: fn(&mut Options),
     ) -> gpui::AnyElement {
-        ui::chip(tokens, id, label, on)
+        ui::chip(tokens, id, mark, on)
+            .aria_label(name)
             .on_click(cx.listener(move |panel, _, _, cx| {
                 flip(&mut panel.options);
                 cx.emit(SearchEvent::Changed);
@@ -264,17 +265,27 @@ impl Render for SearchPanel {
         let options = div()
             .flex()
             .gap(tokens::SPACE_1)
-            .child(self.option("opt-regex", ".*", self.options.regex, &tokens, cx, |o| {
-                o.regex = !o.regex
-            }))
-            .child(
-                self.option("opt-case", "Aa", self.options.case_sensitive, &tokens, cx, |o| {
+            .child(self.option(
+                "opt-regex",
+                (".*", crate::t!(Key::OptionRegex)),
+                self.options.regex,
+                &tokens,
+                cx,
+                |o| o.regex = !o.regex,
+            ))
+            .child(self.option(
+                "opt-case",
+                ("Aa", crate::t!(Key::OptionCase)),
+                self.options.case_sensitive,
+                &tokens,
+                cx,
+                |o| {
                     o.case_sensitive = !o.case_sensitive;
-                }),
-            )
+                },
+            ))
             .child(self.option(
                 "opt-word",
-                "\u{201c}\u{201d}",
+                ("\u{201c}\u{201d}", crate::t!(Key::OptionWord)),
                 self.options.whole_word,
                 &tokens,
                 cx,
@@ -282,12 +293,6 @@ impl Render for SearchPanel {
                     o.whole_word = !o.whole_word;
                 },
             ));
-        let legend = [
-            (".*", crate::t!(Key::OptionRegex)),
-            ("Aa", crate::t!(Key::OptionCase)),
-            ("\u{201c}\u{201d}", crate::t!(Key::OptionWord)),
-        ]
-        .map(|(mark, name)| div().flex_none().child(format!("{mark} {name}")));
         div()
             .id("search-card")
             .occlude()
@@ -355,15 +360,6 @@ impl Render for SearchPanel {
                                     }),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_x(tokens::SPACE_3)
-                            .text_size(tokens::TEXT_SMALL)
-                            .text_color(tokens.text_faint)
-                            .children(legend),
-                    )
                     .when_some(status, |column, (text, problem)| {
                         column.child(
                             div()
@@ -376,13 +372,18 @@ impl Render for SearchPanel {
             .when(!rows.is_empty(), |card| {
                 card.child(
                     div()
-                        .id("search-results")
-                        .max_h(tokens::SEARCH_RESULTS_HEIGHT)
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
+                        .relative()
                         .border_t_1()
                         .border_color(tokens.divider)
-                        .children(rows),
+                        .child(
+                            div()
+                                .id("search-results")
+                                .max_h(tokens::SEARCH_RESULTS_HEIGHT)
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll)
+                                .children(rows),
+                        )
+                        .when(ui::more_below(&self.scroll), |list| list.child(ui::foot_fade(&tokens))),
                 )
             })
             .into_any_element()

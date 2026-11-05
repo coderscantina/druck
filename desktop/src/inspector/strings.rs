@@ -60,6 +60,7 @@ crate::strings! {
         Choose => ("Choose\u{2026}", "Auswählen\u{2026}"),
         Remove => ("Remove", "Entfernen"),
         Isbn => ("ISBN", "ISBN"),
+        MetaAuthor => ("Author", "Autor"),
         Publisher => ("Publisher", "Verlag"),
         Other => ("Other", "Weitere"),
         NewKey => ("New key", "Neuer Schlüssel"),

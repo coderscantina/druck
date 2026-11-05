@@ -260,11 +260,11 @@ impl ExportPanel {
                 seconds,
                 epub,
             } => {
-                let seconds = format!("{seconds:.1}");
+                let time = run_time(*seconds);
                 let line = if *epub {
-                    crate::t!(Key::ExportDoneSections, parts = parts, seconds = seconds)
+                    crate::t!(Key::ExportDoneSections, parts = parts, time = time)
                 } else {
-                    crate::t!(Key::ExportDonePages, parts = parts, seconds = seconds)
+                    crate::t!(Key::ExportDonePages, parts = parts, time = time)
                 };
                 let (open, reveal) = (output.clone(), output.clone());
                 let name = output
@@ -632,5 +632,26 @@ impl Render for ExportPanel {
                 )
             })
             .child(body)
+    }
+}
+
+/// How long a run took: milliseconds under a second, so a quick run never reads "0.0 s".
+fn run_time(seconds: f32) -> String {
+    if seconds < 1.0 {
+        format!("{} ms", (seconds * 1000.0).round().max(1.0))
+    } else {
+        format!("{seconds:.1} s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_quick_run_reads_in_milliseconds() {
+        assert_eq!(run_time(0.04), "40 ms");
+        assert_eq!(run_time(0.0), "1 ms");
+        assert_eq!(run_time(2.25), "2.2 s");
     }
 }

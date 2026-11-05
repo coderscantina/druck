@@ -102,20 +102,46 @@ pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<Shared
         .child(label)
 }
 
-/// A file's row in a list of changes: its title, and quiet words at the end.
+/// A file's or commit's row in a list of changes: its title, and quiet words at the end.
 pub fn change_row(tokens: &Tokens, title: String, words: String) -> gpui::Div {
+    let (lead, title) = split_lead(&title);
     div()
         .flex_none()
         .min_h(tokens::VERSIONS_ROW_HEIGHT)
         .px(tokens::SPACE_3)
         .flex()
         .items_center()
-        .justify_between()
         .gap(tokens::SPACE_2)
         .text_size(tokens::TEXT_SMALL)
         .text_color(tokens.text_quiet)
-        .child(div().flex_1().min_w_0().truncate().child(title))
+        .children(lead.map(|lead| div().flex_none().child(lead.to_owned())))
+        .child(div().flex_1().min_w_0().truncate().child(title.to_owned()))
         .child(div().flex_none().text_color(tokens.text_faint).child(words))
+}
+
+/// A leading symbol, such as a commit's gitmoji, and the rest. An emoji drawn wider than it measures, as `✏️` is, would
+/// push a cut title's ellipsis out of its box, so it stands apart from the text that is cut.
+fn split_lead(title: &str) -> (Option<&str>, &str) {
+    let Some((first, rest)) = title.split_once(' ') else {
+        return (None, title);
+    };
+    let symbol = !first.is_empty() && first.chars().all(|c| !c.is_ascii() && !c.is_alphanumeric());
+    if symbol { (Some(first), rest) } else { (None, title) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_leading_symbol_stands_apart_from_the_title() {
+        assert_eq!(
+            split_lead("\u{270f}\u{fe0f} Michael's own pass"),
+            (Some("\u{270f}\u{fe0f}"), "Michael's own pass")
+        );
+        assert_eq!(split_lead("Add a sentence"), (None, "Add a sentence"));
+        assert_eq!(split_lead("Über den Autor"), (None, "Über den Autor"));
+    }
 }
 
 /// A line of text that says something is off, or what to do next, in the accent colour.

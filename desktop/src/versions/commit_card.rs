@@ -3,8 +3,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, Hsla, KeyBinding, ScrollHandle, Subscription, WeakEntity, Window,
-    actions, div, linear_color_stop, linear_gradient, relative,
+    App, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollHandle, Subscription, WeakEntity, Window, actions,
+    div, relative,
 };
 
 use super::repo::{self, Overview};
@@ -284,25 +284,7 @@ impl CommitCard {
                             .flex_col()
                             .children(rows.collect::<Vec<_>>()),
                     )
-                    .when(more_below, |list| {
-                        let (clear, solid) = (
-                            Hsla::from(tokens.panel).opacity(tokens::CLEAR),
-                            Hsla::from(tokens.panel),
-                        );
-                        list.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .bottom_0()
-                                .h(tokens::VERSIONS_ROW_HEIGHT)
-                                .bg(linear_gradient(
-                                    tokens::FADE_DOWN,
-                                    linear_color_stop(clear, 0.),
-                                    linear_color_stop(solid, 1.),
-                                )),
-                        )
-                    })
+                    .when(more_below, |list| list.child(crate::shell::ui::foot_fade(tokens)))
                     .into_any_element(),
             );
         }

@@ -4,8 +4,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Anchor, Context, Entity, Focusable, Hsla, MouseButton, PromptLevel, ScrollHandle, SharedString, Subscription,
-    Window, anchored, deferred, div, linear_color_stop, linear_gradient,
+    Anchor, Context, Entity, Focusable, MouseButton, PromptLevel, ScrollHandle, SharedString, Subscription, Window,
+    anchored, deferred, div,
 };
 
 use super::input::{Submitted, TextInput};
@@ -319,14 +319,7 @@ impl ThemePicker {
                     .into_any_element(),
             );
         }
-        let more_below = {
-            let (offset, most) = (self.scroll.offset().y, self.scroll.max_offset().y);
-            most > tokens::HAIRLINE && -offset < most
-        };
-        let (clear, solid) = (
-            Hsla::from(tokens.panel).opacity(tokens::CLEAR),
-            Hsla::from(tokens.panel),
-        );
+        let more_below = crate::shell::ui::more_below(&self.scroll);
         div()
             .relative()
             .w(tokens::INSPECTOR_WIDTH)
@@ -350,21 +343,7 @@ impl ThemePicker {
                     .py(tokens::SPACE_1)
                     .children(rows),
             )
-            .when(more_below, |menu| {
-                menu.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .h(tokens::VERSIONS_ROW_HEIGHT)
-                        .bg(linear_gradient(
-                            tokens::FADE_DOWN,
-                            linear_color_stop(clear, 0.),
-                            linear_color_stop(solid, 1.),
-                        )),
-                )
-            })
+            .when(more_below, |menu| menu.child(crate::shell::ui::foot_fade(tokens)))
     }
 }
 
