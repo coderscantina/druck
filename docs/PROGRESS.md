@@ -95,6 +95,18 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Second review note
+
+On 2026-11-05 the second review's findings F1 to F25 went in, with the owner's decisions on F1, F6, and the cost display. The choices are in [decisions](DECISIONS.md#2026-11-05-second-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-2026-11-05` beside the repo.
+
+Evidence on temp copies of `buch-1-ttp404` in a copy of its parent, made a project through the launch card with keys by PID: `../literatur.bib` stayed, 203 pages. Without the file: the offer says so, Publish has the empty state, and pages came back when the file appeared. A real `git merge` of `probe` over a conflicting sentence: `UU` in `git status`, the conflict line names `probe`, shows their words, and See both holds the card. Tab walks title bar, panel, rail, and status line with a ring on each stop. Two real `haiku` turns: setup folded, no cost, and after a Reject the agent answered that its change was rejected. Undo after Apply brought the note and `notes.json` back.
+
+Typing is **not under 16 ms median today, and this change did not cause that.** `DRUCK_GATE=1` on the book, release with `measure` and fat LTO: 17.0, 16.5, and 17.0 ms median, 29 to 32 ms p95, 360 keys. Without fat LTO, alternating with a build of `e66b5f0` on the same copy: `e66b5f0` 16.9, 17.3, 17.5 ms, and this branch 17.2, 16.9, 17.3 ms. The earlier 15.4 ms came from another day's machine state: other work was running here, load about 2. It should be measured again on an idle machine before the beta's gate is called met. Pause in Write to exact pages in Publish 22.6 ms median.
+
+Commands: `cargo test -p druck-desktop` 682 passed, 1 ignored. `cargo test` 444 unit tests and the acceptance, CLI, parity, public API, and doc tests passed, and `cargo test --test parity` passed, without `DRUCK_BOOK`. `cargo clippy -p druck-desktop --all-targets -- -D warnings`, the same with `--features measure`, root `cargo clippy --all-targets -- -D warnings`, `cargo check -p druck-desktop --release` with no warnings, and `cargo fmt --all --check` are clean. `python3 scripts/notices.py --check` and `--desktop --check` pass.
+
+Not verified, for want of a pointer: clicks on the new buttons (Book details, Proof, Save to `druck.yaml`, the Bibliography links), and the fade while scrolling the commit list. Not run: German captures of the new lines, and Windows and Linux for the data folder. The state where the panel shows nothing before a fetch returns passes too quickly on a local remote to capture; the state after it, "1 behind", was. Open for the owner: outside and agent changes still merge by words, see the decision.
+
 ### Review findings note
 
 On 2026-11-05 the review's findings F1 to F26 went in, with the owner's decisions on F2, F3, F5, F7, F9, and F21. The choices are in [decisions](DECISIONS.md#2026-11-05-review-findings), and [the design](DESIGN.md) follows them.
@@ -105,7 +117,7 @@ Not verified, because they need a pointer or a live agent turn: the review foot'
 
 While the normal window was frontmost in testing, real keystrokes landed in it and changed a temp copy of the book, which is F26's warning in practice. No original was touched. Use `DRUCK_GATE=2` where no keys are needed.
 
-Follow-ups: the zoom's text and the warning count share a narrow status line, so the count truncates first. `DRUCK_SELECT` at startup does not show a selection, though `select` through `DRUCK_AGENT_SCRIPT` does. The toolbar's `Tt` contradicts the design's "There is no `Tt` button". A proof slip near the foot of the window covers its own paragraph.
+Follow-up: the zoom's text and the warning count share a narrow status line, so the count truncates first.
 
 ### Milestone 21 note
 

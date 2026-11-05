@@ -111,7 +111,7 @@ Spawn the user's installed `claude` CLI as a child process over `stream-json`, b
 - **Accent:** the author picks it, from presets or a hex value. Oxide red is the default. It colours only the caret, selection, marks, and the action that moves on.
 - **Zoom:** `Cmd++`, `Cmd+-`, and `Cmd+0` act on the current mode, and each mode remembers its level. Write zoom scales the text and keeps the characters per line.
 - **Settings:** a separate window after Zed's: categories on the left, a search field, rows with a label, a description, and a control, and a link to the file. One user-level `settings.json` is the source, and only changed values are written. What belongs to a book stays in `druck.yaml`, so there is no per-book scope.
-- **Details:** title, subtitle, authors as text, date, language, cover, and free `meta` rows with suggestions such as ISBN and publisher.
+- **Details:** title, subtitle, authors as text, date, language, cover, bibliography, and free `meta` rows with suggestions such as ISBN and publisher.
 - **New section:** inserts plain Markdown from a template list. No section type exists.
 - The UI ships in English and German from the first public release, with all strings in one table.
 - Full keyboard use, and AccessKit through gpui where it works. Record the gaps.
