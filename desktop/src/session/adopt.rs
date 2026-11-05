@@ -169,8 +169,8 @@ struct Named {
 
 /// Where a path written in a file in `from` is, from the project's folder `dir`: from that file's folder, then from the
 /// project's, since a build script may have read it from there, then by name in the folders above the project. With none
-/// of these it stays as written from the file's folder.
-fn located(value: &str, from: &Path, dir: &Path) -> Named {
+/// of these it stays as written from the file's folder. Says too whether it was found.
+fn located(value: &str, from: &Path, dir: &Path) -> (String, bool) {
     let written = from_project(value, from);
     let name = Path::new(value)
         .file_name()
@@ -180,10 +180,9 @@ fn located(value: &str, from: &Path, dir: &Path) -> Named {
         .into_iter()
         .chain(above)
         .find(|candidate| dir.join(candidate).is_file());
-    Named {
-        key: "",
-        found: found.is_some(),
-        path: found.unwrap_or(written),
+    match found {
+        Some(path) => (path, true),
+        None => (written, false),
     }
 }
 
@@ -202,9 +201,9 @@ fn named_paths(front_matter: &str, from: &Path, dir: &Path) -> Result<Vec<Named>
     Ok(named
         .into_iter()
         .filter_map(|(key, value)| {
-            value.map(|value| Named {
-                key,
-                ..located(&value, from, dir)
+            value.map(|value| {
+                let (path, found) = located(&value, from, dir);
+                Named { key, path, found }
             })
         })
         .collect())
