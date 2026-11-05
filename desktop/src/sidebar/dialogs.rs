@@ -2,8 +2,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Context, ElementId, Entity, EventEmitter, Focusable, FontWeight, KeyDownEvent, SharedString, Subscription, Window,
-    div, svg,
+    Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, SharedString,
+    Subscription, Window, div, svg,
 };
 
 use super::strings::Key;
@@ -12,6 +12,7 @@ use crate::inspector::input::{Submitted, TextInput};
 use crate::session::templates::Group;
 use crate::session::{ChapterId, TEMPLATES, Template};
 use crate::tokens::{self, Tokens};
+use crate::workspace::{FocusNext, FocusPrevious};
 
 pub enum DialogEvent {
     Insert(&'static Template, String),
@@ -35,21 +36,30 @@ enum State {
 pub struct SectionDialog {
     state: State,
     name: Entity<TextInput>,
+    /// The card, which keeps Tab inside it.
+    card: FocusHandle,
+    /// What had the keys before the dialog opened, to give them back.
+    before: Option<FocusHandle>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl SectionDialog {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name = cx.new(|cx| TextInput::new(window, cx));
-        let subscriptions = vec![cx.subscribe(&name, |dialog, _, Submitted, cx| dialog.submit(cx))];
+        let subscriptions = vec![cx.subscribe_in(&name, window, |dialog, _, Submitted, window, cx| {
+            dialog.submit(window, cx)
+        })];
         Self {
             state: State::Closed,
             name,
+            card: cx.focus_handle(),
+            before: None,
             _subscriptions: subscriptions,
         }
     }
 
     pub fn open_new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_keys(window, cx);
         self.state = State::NewSection;
         self.open_name(String::new(), window, cx);
     }
@@ -62,6 +72,7 @@ impl SectionDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.remember_keys(window, cx);
         self.state = State::Edit {
             id,
             title: title.clone().into(),
@@ -76,15 +87,25 @@ impl SectionDialog {
         cx.notify();
     }
 
-    fn close(&mut self, cx: &mut Context<Self>) {
+    fn remember_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.state, State::Closed) {
+            self.before = window.focused(cx);
+        }
+    }
+
+    /// Closes the dialog and gives the keys back to what had them.
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = State::Closed;
+        if let Some(before) = self.before.take() {
+            window.focus(&before, cx);
+        }
         cx.notify();
     }
 
-    fn submit(&mut self, cx: &mut Context<Self>) {
+    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let State::Edit { id, .. } = self.state {
             let name = self.name.read(cx).text().to_owned();
-            self.close(cx);
+            self.close(window, cx);
             cx.emit(DialogEvent::Rename(id, name));
         }
     }
@@ -100,9 +121,9 @@ impl SectionDialog {
             .cursor_pointer()
             .rounded(tokens::RADIUS)
             .hover(|row| row.bg(tokens.raised))
-            .on_click(cx.listener(move |dialog, _, _, cx| {
+            .on_click(cx.listener(move |dialog, _, window, cx| {
                 let name = dialog.name.read(cx).text().to_owned();
-                dialog.close(cx);
+                dialog.close(window, cx);
                 cx.emit(DialogEvent::Insert(template, name));
             }))
             .child(
@@ -208,8 +229,8 @@ impl Render for SectionDialog {
                 .child(div().when(removable, |left| {
                     left.child(
                         Self::button(&tokens, "remove", crate::t!(Key::RemoveFromBook)).on_click(cx.listener(
-                            move |dialog, _, _, cx| {
-                                dialog.close(cx);
+                            move |dialog, _, window, cx| {
+                                dialog.close(window, cx);
                                 cx.emit(DialogEvent::Remove(id));
                             },
                         )),
@@ -217,13 +238,14 @@ impl Render for SectionDialog {
                 }))
                 .child(
                     Self::button(&tokens, "rename", crate::t!(Key::Save))
-                        .on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx))),
+                        .on_click(cx.listener(|dialog, _, window, cx| dialog.submit(window, cx))),
                 )
                 .into_any_element(),
             State::Closed => div().into_any_element(),
         };
         let card = div()
             .id("dialog")
+            .track_focus(&self.card)
             .occlude()
             .absolute()
             .top(tokens::SPACE_4 * 3.)
@@ -251,7 +273,7 @@ impl Render for SectionDialog {
                             .id(ElementId::from("dialog-close"))
                             .button(&tokens, crate::t!(Key::CloseDialog))
                             .cursor_pointer()
-                            .on_click(cx.listener(|dialog, _, _, cx| dialog.close(cx)))
+                            .on_click(cx.listener(|dialog, _, window, cx| dialog.close(window, cx)))
                             .child(
                                 svg()
                                     .path("icons/close.svg")
@@ -269,14 +291,21 @@ impl Render for SectionDialog {
             .left_0()
             .size_full()
             .occlude()
-            .on_key_down(cx.listener(|dialog, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|dialog, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
-                    dialog.close(cx);
+                    cx.stop_propagation();
+                    dialog.close(window, cx);
                 }
+            }))
+            .on_action(cx.listener(|dialog, _: &FocusNext, window, cx| {
+                crate::a11y::cycle_within(&dialog.card, true, window, cx)
+            }))
+            .on_action(cx.listener(|dialog, _: &FocusPrevious, window, cx| {
+                crate::a11y::cycle_within(&dialog.card, false, window, cx)
             }))
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|dialog, _, _, cx| dialog.close(cx)),
+                cx.listener(|dialog, _, window, cx| dialog.close(window, cx)),
             )
             .child(card)
             .into_any_element()

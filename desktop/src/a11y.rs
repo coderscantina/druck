@@ -4,7 +4,7 @@
 //! control.
 
 use gpui::prelude::*;
-use gpui::{BoxShadow, Div, Role, SharedString, Stateful, Toggled, point, px};
+use gpui::{App, BoxShadow, Div, FocusHandle, Role, SharedString, Stateful, Toggled, Window, point, px};
 
 use crate::tokens::{self, Tokens};
 
@@ -40,5 +40,22 @@ impl Control for Stateful<Div> {
     fn toggle(self, tokens: &Tokens, label: impl Into<SharedString>, on: bool) -> Self {
         let toggled = if on { Toggled::True } else { Toggled::False };
         self.control(tokens, Role::Button, label).aria_toggled(toggled)
+    }
+}
+
+/// Moves the keys to the next stop inside `card`, or the previous one, around its ends, so Tab stays in a card that
+/// asks. `card` is the handle its outer element tracks.
+pub fn cycle_within(card: &FocusHandle, forward: bool, window: &mut Window, cx: &mut App) {
+    // The window's stops form one loop, so this comes back into the card unless it has none.
+    const MOST_STOPS: usize = 1000;
+    for _ in 0..MOST_STOPS {
+        if forward {
+            window.focus_next(cx);
+        } else {
+            window.focus_prev(cx);
+        }
+        if card.contains_focused(window, cx) {
+            return;
+        }
     }
 }

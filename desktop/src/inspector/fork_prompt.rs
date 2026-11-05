@@ -2,7 +2,7 @@
 //! safe choice, or change the shared file that other documents may use too.
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, KeyDownEvent, MouseButton, Subscription, Window, div};
+use gpui::{Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, Subscription, Window, div};
 
 use super::model::ThemeModel;
 use super::strings::Key;
@@ -10,11 +10,20 @@ use super::widgets;
 use crate::a11y::Control as _;
 use crate::editor::EditorView;
 use crate::tokens::{self, Tokens};
+use crate::workspace::{FocusNext, FocusPrevious};
 
+/// The card holds the keys while it asks: the recommended choice has them first, Tab stays among its buttons, and
+/// Escape cancels it. Once it is answered or cancelled, the keys go back to what had them.
 pub struct ForkPrompt {
     model: Entity<ThemeModel>,
     editor: Entity<EditorView>,
     error: Option<String>,
+    card: FocusHandle,
+    /// The recommended choice, a copy in the project.
+    copy: FocusHandle,
+    /// Whether the card was showing at the last render, to take and give back the keys once.
+    showing: bool,
+    before: Option<FocusHandle>,
     _subscription: Subscription,
 }
 
@@ -25,7 +34,25 @@ impl ForkPrompt {
             model,
             editor,
             error: None,
+            card: cx.focus_handle(),
+            copy: cx.focus_handle(),
+            showing: false,
+            before: None,
             _subscription: subscription,
+        }
+    }
+
+    /// Takes the keys as the card appears and gives them back as it goes.
+    fn follow_keys(&mut self, showing: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if showing == self.showing {
+            return;
+        }
+        self.showing = showing;
+        if showing {
+            self.before = window.focused(cx);
+            self.copy.focus(window, cx);
+        } else if let Some(before) = self.before.take() {
+            window.focus(&before, cx);
         }
     }
 
@@ -47,11 +74,13 @@ impl ForkPrompt {
 }
 
 impl Render for ForkPrompt {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let model = self.model.read(cx);
-        if model.editor().pending().is_none() {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let showing = self.model.read(cx).editor().pending().is_some();
+        self.follow_keys(showing, window, cx);
+        if !showing {
             return div().into_any_element();
         }
+        let model = self.model.read(cx);
         let tokens = Tokens::get(cx).clone();
         let name = model.editor().name().unwrap_or_default();
         let document = self
@@ -66,6 +95,7 @@ impl Render for ForkPrompt {
             div()
                 .id(id)
                 .button(&tokens, crate::t!(title))
+                .when(recommended, |option| option.track_focus(&self.copy))
                 .px(tokens::SPACE_3)
                 .py(tokens::SPACE_2)
                 .flex()
@@ -82,6 +112,7 @@ impl Render for ForkPrompt {
         };
         let card = div()
             .id("fork-prompt")
+            .track_focus(&self.card)
             .occlude()
             .absolute()
             .top(tokens::SPACE_4 * 3.)
@@ -137,8 +168,15 @@ impl Render for ForkPrompt {
             .occlude()
             .on_key_down(cx.listener(|prompt, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
+                    cx.stop_propagation();
                     prompt.cancel(cx);
                 }
+            }))
+            .on_action(cx.listener(|prompt, _: &FocusNext, window, cx| {
+                crate::a11y::cycle_within(&prompt.card, true, window, cx)
+            }))
+            .on_action(cx.listener(|prompt, _: &FocusPrevious, window, cx| {
+                crate::a11y::cycle_within(&prompt.card, false, window, cx)
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(|prompt, _, _, cx| prompt.cancel(cx)))
             .child(card)
