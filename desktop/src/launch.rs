@@ -183,6 +183,7 @@ impl Render for LaunchView {
                         .child(
                             Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
                                 .track_focus(&self.offer_focus)
+                                .ring_while_focused(&tokens)
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(move |_, _, _, cx| {
                                     cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));

@@ -285,6 +285,7 @@ impl ExportPanel {
                                 .child(
                                     ui::button(tokens, "open-file", crate::t!(Key::OpenFile))
                                         .track_focus(&self.open_file)
+                                        .ring_while_focused(tokens)
                                         .on_click(
                                             cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Open(open.clone()))),
                                         ),
@@ -350,7 +351,9 @@ impl ExportPanel {
         let first = self.first_runner().as_deref() == Some(id.as_str());
         ui::button(tokens, SharedString::from(format!("run-{id}")), label)
             .when(!busy, |button| button.text_color(tokens.accent))
-            .when(first, |button| button.track_focus(&self.first_run))
+            .when(first, |button| {
+                button.track_focus(&self.first_run).ring_while_focused(tokens)
+            })
             .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY).cursor_default())
             .when(!busy, |button| {
                 button.on_click(cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Run(target.clone()))))

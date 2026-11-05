@@ -95,7 +95,9 @@ impl Render for ForkPrompt {
             div()
                 .id(id)
                 .button(&tokens, crate::t!(title))
-                .when(recommended, |option| option.track_focus(&self.copy))
+                .when(recommended, |option| {
+                    option.track_focus(&self.copy).ring_while_focused(&tokens)
+                })
                 .px(tokens::SPACE_3)
                 .py(tokens::SPACE_2)
                 .flex()

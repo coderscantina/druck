@@ -19,22 +19,35 @@ pub trait Control: Sized {
 
     /// A button that stays on or off.
     fn toggle(self, tokens: &Tokens, label: impl Into<SharedString>, on: bool) -> Self;
+
+    /// The ring shows whenever the control has the keys, also when the app gave them to it as a view opened, since Enter
+    /// acts there. gpui shows a keyboard's focus only after a key, and hides it when the pointer moves.
+    fn ring_while_focused(self, tokens: &Tokens) -> Self;
+}
+
+fn ring(tokens: &Tokens) -> BoxShadow {
+    BoxShadow {
+        color: tokens.accent.into(),
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: tokens::FOCUS_RING,
+        inset: true,
+    }
 }
 
 impl Control for Stateful<Div> {
     fn control(self, tokens: &Tokens, role: Role, label: impl Into<SharedString>) -> Self {
-        let ring = BoxShadow {
-            color: tokens.accent.into(),
-            offset: point(px(0.), px(0.)),
-            blur_radius: px(0.),
-            spread_radius: tokens::FOCUS_RING,
-            inset: true,
-        };
+        let ring = ring(tokens);
         self.role(role)
             .aria_label(label)
             .focusable()
             .tab_stop(true)
             .focus_visible(move |style| style.shadow(vec![ring.clone()]))
+    }
+
+    fn ring_while_focused(self, tokens: &Tokens) -> Self {
+        let ring = ring(tokens);
+        self.focus(move |style| style.shadow(vec![ring.clone()]))
     }
 
     fn toggle(self, tokens: &Tokens, label: impl Into<SharedString>, on: bool) -> Self {

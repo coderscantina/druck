@@ -18,8 +18,8 @@ use gpui::{
 use super::commands::notes::{Note, comments_in, first_meaningful_line, leading_notes, leading_region, shown_range};
 use super::strings::Key;
 use super::{
-    Backspace, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView, Left, LineEnd,
-    LineStart, NewBlock, NewLine, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectLineEnd,
+    Backspace, CaretMoved, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView,
+    Left, LineEnd, LineStart, NewBlock, NewLine, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectLineEnd,
     SelectLineStart, SelectRight, SelectUp, SelectWordLeft, SelectWordRight, SessionChanged, TextChanged, Undo, Up,
     WordLeft, WordRight,
 };
@@ -58,6 +58,8 @@ pub struct ChapterNotes {
     /// Holds the keys while they are in the notes, so leaving folds them.
     focus: FocusHandle,
     unfolded: bool,
+    /// The text's selection is inside a note, as a find leaves it, so the notes stay open and nothing changes out of sight.
+    held_open: bool,
     /// What the notes show, so a key elsewhere in the chapter draws nothing here.
     shown: Vec<String>,
     /// The line that stands for them when folded.
@@ -73,6 +75,7 @@ impl ChapterNotes {
         let subscriptions = vec![
             cx.subscribe(&editor, |notes, _, _: &TextChanged, cx| notes.sync(cx)),
             cx.subscribe(&editor, |notes, _, _: &SessionChanged, cx| notes.sync(cx)),
+            cx.subscribe(&editor, |notes, _, _: &CaretMoved, cx| notes.hold_for_selection(cx)),
             cx.on_focus_in(&focus, window, |notes, window, cx| notes.unfold(window, cx)),
             cx.on_focus_out(&focus, window, |notes, _, _, cx| notes.set_unfolded(false, cx)),
         ];
@@ -80,6 +83,7 @@ impl ChapterNotes {
             editor,
             focus,
             unfolded: false,
+            held_open: false,
             shown: Vec::new(),
             line: None,
             chapter: None,
@@ -114,6 +118,17 @@ impl ChapterNotes {
             field.update(cx, |field, cx| field.text_changed(cx));
         }
         cx.notify();
+    }
+
+    fn hold_for_selection(&mut self, cx: &mut Context<Self>) {
+        let held = self.editor.read(cx).selection_in_note().is_some();
+        if held != self.held_open || held {
+            self.held_open = held;
+            cx.notify();
+            for field in &self.fields {
+                field.update(cx, |_, cx| cx.notify());
+            }
+        }
     }
 
     fn set_unfolded(&mut self, unfolded: bool, cx: &mut Context<Self>) {
@@ -152,7 +167,7 @@ impl Render for ChapterNotes {
         let tokens = Tokens::get(cx).clone();
         let line = self.line.clone().unwrap_or_default();
         let label = crate::t!(Key::ChapterNotes);
-        let unfolded = self.unfolded;
+        let unfolded = self.unfolded || self.held_open;
         let icon = svg()
             .flex_none()
             .path("icons/block-comment.svg")
@@ -339,6 +354,19 @@ impl EditorView {
     }
 
     /// The room the unfolded opening notes need above the chapter's first text, past the line the folded ones stand in.
+    /// Which opening note the selection is inside, and where in its shown text. The source view shows notes as text.
+    pub(super) fn selection_in_note(&self) -> Option<(usize, Range<usize>)> {
+        if self.source {
+            return None;
+        }
+        let range = self.selection.range();
+        leading_notes(self.text(), &self.blocks)
+            .into_iter()
+            .enumerate()
+            .find(|(_, note)| note.shown.start <= range.start && range.end <= note.shown.end)
+            .map(|(index, note)| (index, range.start - note.shown.start..range.end - note.shown.start))
+    }
+
     pub(super) fn set_note_room(&mut self, height: Pixels, cx: &mut Context<Self>) {
         let room = (height - LINE_HEIGHT).max(px(0.));
         if self.note_room != room {
@@ -611,7 +639,10 @@ impl Render for NoteField {
                 (!range.is_empty()).then(|| self.selection_rectangles(range)),
             )
         } else {
-            (None, None)
+            // What the text has selected in this note, as a find leaves it, shows here.
+            let found = (self.editor.read(cx).selection_in_note())
+                .filter(|(index, range)| *index == self.index && !range.is_empty());
+            (None, found.map(|(_, range)| self.selection_rectangles(range)))
         };
         let accent = gpui::Hsla::from(tokens.accent);
         let this = cx.entity();
