@@ -55,7 +55,7 @@ crate::strings! {
             "Numbered headings, an abstract, and references",
             "Nummerierte Überschriften, Abstract und Literatur"
         ),
-        PaperFolder => ("Untitled paper", "Unbenanntes Paper"),
+        PaperFolder => ("Untitled paper", "Unbenannte Arbeit"),
         ArticleName => ("Article", "Artikel"),
         ArticleDescription => (
             "One file, a title, and PDF and ebook exports",

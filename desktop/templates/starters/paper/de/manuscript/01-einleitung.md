@@ -1,5 +1,5 @@
 # Einleitung {#sec:intro}
 
-Nenne die Frage, die dieses Paper beantwortet, und warum sie für seine Leser zählt. @bringhurst2004 ist ein Zitat aus `references.bib`, und die Ergebnisse stehen in @sec:findings.
+Nenne die Frage, die diese Arbeit beantwortet, und warum sie für ihre Leser zählt. @bringhurst2004 ist ein Zitat aus `references.bib`, und die Ergebnisse stehen in @sec:findings.
 
-Publizieren, oben im Fenster, zeigt die Seiten, und Schreiben führt zurück. Cmd+\ zeigt die Abschnitte links.
+Oben im Fenster zeigt Publizieren die Seiten, und Schreiben führt zurück. Cmd+\ zeigt links die Abschnitte.

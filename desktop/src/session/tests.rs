@@ -584,16 +584,17 @@ fn a_section_written_out_has_no_placeholder_the_document_lacks() {
 }
 
 #[test]
-fn every_starter_opens_renders_and_keeps_its_manifest_readable() {
+fn every_starter_opens_renders_without_a_warning_and_keeps_its_manifest_readable() {
     for (starter, language) in STARTERS
         .iter()
         .flat_map(|starter| [Language::English, Language::German].map(|language| (starter, language)))
     {
         let folder = Folder::new(&format!("starter-{}-{language:?}", starter.slug));
-        let dir = folder.0.join("My Project");
+        let name = crate::shell::strings::Table::text(starter.folder, language);
+        let dir = folder.0.join(name);
         starter.create(&dir, language).expect("creates");
         let session = Session::open(&dir).expect("opens");
-        assert_eq!(session.details().title, "My Project");
+        assert_eq!(session.details().title, name);
         assert!(session.problem().is_none(), "{}", starter.slug);
         assert!(session.contents().not_in_book.is_empty(), "{}", starter.slug);
         assert!(
@@ -603,11 +604,8 @@ fn every_starter_opens_renders_and_keeps_its_manifest_readable() {
         );
         let laid = layout(&session);
         assert!(!laid.pages().is_empty(), "{}", starter.slug);
-        assert!(
-            laid.warnings()
-                .iter()
-                .all(|warning| !warning.message.contains("unknown"))
-        );
+        let warnings: Vec<_> = laid.warnings().iter().map(|warning| &warning.message).collect();
+        assert!(warnings.is_empty(), "{} {language:?}: {warnings:?}", starter.slug);
         assert!(
             starter.create(&dir, language).is_err(),
             "a starter does not write over a project"

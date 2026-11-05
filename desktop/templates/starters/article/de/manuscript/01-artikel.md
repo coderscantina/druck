@@ -2,4 +2,4 @@
 
 Beginne mit dem, was die Leser mitnehmen sollen. Ein Artikel ist eine Datei in `manuscript/`, und sein Titel steht in `druck.yaml`.
 
-Publizieren, oben im Fenster, zeigt die Seiten, und Schreiben führt zurück.
+Oben im Fenster zeigt Publizieren die Seiten, und Schreiben führt zurück.

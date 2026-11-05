@@ -182,6 +182,7 @@ pub const STARTERS: &[Starter] = &[
         files: [
             &[
                 file!("book", "druck.yaml"),
+                file!("book", "druck-words.txt"),
                 file!("book", "manuscript/00-front.md"),
                 file!("book", "manuscript/01-first-chapter.md"),
                 file!("book", "manuscript/02-second-chapter.md"),
