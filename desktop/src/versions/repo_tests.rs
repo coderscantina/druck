@@ -266,7 +266,7 @@ fn history_matches_git_log() {
 fn branches_made_and_deleted_here_are_what_git_lists() {
     let fixture = fixture("branches");
     let dir = fixture.root.join("book");
-    let mut repo = repo_at(&dir);
+    let repo = repo_at(&dir);
     repo.create_branch("second-ending").unwrap();
     assert_eq!(
         repo.create_branch("second-ending"),
