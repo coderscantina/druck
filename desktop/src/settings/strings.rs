@@ -11,6 +11,17 @@ crate::strings! {
             "settings.json ist nicht verwendbar: {problem}. Die Datei bleibt, wie sie ist."
         ),
 
+        ShouldBe => ("\"{key}\" should be {what}", "\"{key}\" sollte {what} sein"),
+        OneObject => ("the file should hold one object", "die Datei sollte ein Objekt enthalten"),
+        WantedSwitch => ("true or false", "true oder false"),
+        WantedAppearance => ("\"system\", \"dark\", or \"light\"", "\"system\", \"dark\" oder \"light\""),
+        WantedAccent => ("a colour such as \"#2f8fb8\"", "eine Farbe wie \"#2f8fb8\""),
+        WantedLanguage => ("\"system\", \"english\", or \"german\"", "\"system\", \"english\" oder \"german\""),
+        WantedLineLength => (
+            "\"book\" or a number of characters from 20 to 240",
+            "\"book\" oder eine Zeichenzahl von 20 bis 240"
+        ),
+
         CategoryAppearance => ("Appearance", "Darstellung"),
         CategoryWriting => ("Writing", "Schreiben"),
         CategoryLanguage => ("Language and spelling", "Sprache"),

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::library;
+use super::strings::Key;
 use super::tokens::{self, Group};
 use super::writer::Commit;
 use super::{ThemeFile, patch};
@@ -214,7 +215,7 @@ impl Editor {
         let (Some(project), Some(common), Some(name)) =
             (self.dirs.project.clone(), self.dirs.common.clone(), self.name())
         else {
-            return Err("there is no project to copy the theme into".to_owned());
+            return Err(crate::t!(Key::NoProject).to_owned());
         };
         let forked = library::fork(&project, &common, &name, &name)?;
         self.file = ThemeFile::open(&forked.path);
@@ -258,7 +259,7 @@ impl Editor {
         let file = self.file.as_mut().map_err(|message| message.clone())?;
         let refused = |problems: Vec<Problem>| {
             problems.first().map_or_else(
-                || "the theme cannot take this change".to_owned(),
+                || crate::t!(Key::CannotTake).to_owned(),
                 |problem| problem.message.clone(),
             )
         };
@@ -279,9 +280,9 @@ impl Editor {
 
     /// Copies a font file next to the theme and names it for a face. A file that is not a font changes nothing.
     fn add_font(&mut self, family: &str, face: &str, from: &Path) -> Result<Outcome, String> {
-        let bytes = fs::read(from).map_err(|error| format!("cannot read {}: {error}", from.display()))?;
+        let bytes = fs::read(from).map_err(|error| crate::t!(Key::CannotRead, path = from.display(), error = error))?;
         crate::theme_file::font_info::FontInfo::read(&bytes, 0)
-            .map_err(|_| format!("{} is not an OpenType or TrueType font", from.display()))?;
+            .map_err(|_| crate::t!(Key::NotAFont, path = from.display()))?;
         let theme = self.file.as_ref().map_err(|message| message.clone())?.path().to_owned();
         let folder = theme.parent().unwrap_or(Path::new("")).join("fonts");
         self.confine(&folder)?;
@@ -293,8 +294,10 @@ impl Editor {
         let copied = if target.is_file() {
             false
         } else {
-            fs::create_dir_all(&folder).map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
-            fs::write(&target, &bytes).map_err(|error| format!("cannot write {}: {error}", target.display()))?;
+            fs::create_dir_all(&folder)
+                .map_err(|error| crate::t!(Key::CannotCreate, path = folder.display(), error = error))?;
+            fs::write(&target, &bytes)
+                .map_err(|error| crate::t!(Key::CannotWrite, path = target.display(), error = error))?;
             true
         };
         let result = file.set(&["fonts", family, face], Value::String(relative));
@@ -374,7 +377,7 @@ fn rename_custom_style(file: &mut ThemeFile, from: &str, to: &str) -> Result<(),
         .and_then(|styles| styles.get(to))
         .is_some()
     {
-        return Err(Problem::internal(format!("a style named \"{to}\" already exists")));
+        return Err(Problem::internal(crate::t!(Key::StyleExists, name = to)));
     }
     file.rewrite(|text| {
         let renamed = patch::rename_key(text, &["custom-styles", from], to)?;

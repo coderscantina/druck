@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use super::strings::Key;
+use crate::persist::atomic;
 use crate::shell::strings::LanguageSetting;
 use crate::theme_file::patch;
 use crate::tokens::{ACCENTS, Scheme};
@@ -94,7 +96,9 @@ macro_rules! switch {
         Field {
             key: $key,
             read: |settings, value| {
-                settings.$field = value.as_bool().ok_or_else(|| wanted($key, "true or false"))?;
+                settings.$field = value
+                    .as_bool()
+                    .ok_or_else(|| wanted($key, crate::t!(Key::WantedSwitch)))?;
                 Ok(())
             },
             write: |settings| json!(settings.$field),
@@ -110,7 +114,7 @@ const FIELDS: &[Field] = &[
                 Some("system") => Appearance::System,
                 Some("dark") => Appearance::Dark,
                 Some("light") => Appearance::Light,
-                _ => return Err(wanted("appearance", "\"system\", \"dark\", or \"light\"")),
+                _ => return Err(wanted("appearance", crate::t!(Key::WantedAppearance))),
             };
             Ok(())
         },
@@ -126,7 +130,7 @@ const FIELDS: &[Field] = &[
         key: "accent",
         read: |settings, value| {
             let color = value.as_str().and_then(parse_hex);
-            settings.accent = Some(color.ok_or_else(|| wanted("accent", "a colour such as \"#2f8fb8\""))?);
+            settings.accent = Some(color.ok_or_else(|| wanted("accent", crate::t!(Key::WantedAccent)))?);
             Ok(())
         },
         write: |settings| settings.accent.map_or(Value::Null, |color| json!(hex(color))),
@@ -138,7 +142,7 @@ const FIELDS: &[Field] = &[
                 Some("system") => LanguageSetting::System,
                 Some("english") => LanguageSetting::English,
                 Some("german") => LanguageSetting::German,
-                _ => return Err(wanted("language", "\"system\", \"english\", or \"german\"")),
+                _ => return Err(wanted("language", crate::t!(Key::WantedLanguage))),
             };
             Ok(())
         },
@@ -157,10 +161,7 @@ const FIELDS: &[Field] = &[
                 (Some("book"), _) => LineLength::Book,
                 (_, Some(count)) if LINE_LENGTHS.contains(&count) => LineLength::Characters(count as u32),
                 _ => {
-                    return Err(wanted(
-                        "line_length",
-                        "\"book\" or a number of characters from 20 to 240",
-                    ));
+                    return Err(wanted("line_length", crate::t!(Key::WantedLineLength)));
                 }
             };
             Ok(())
@@ -180,7 +181,7 @@ const FIELDS: &[Field] = &[
 ];
 
 fn wanted(key: &str, what: &str) -> String {
-    format!("\"{key}\" should be {what}")
+    crate::t!(Key::ShouldBe, key = key, what = what)
 }
 
 /// A colour written `#rrggbb`.
@@ -204,7 +205,7 @@ fn is_default_accent(color: u32) -> bool {
 pub fn parse(text: &str) -> Result<Settings, String> {
     let root: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
     let Value::Object(members) = root else {
-        return Err("the file should hold one object".to_owned());
+        return Err(crate::t!(Key::OneObject).to_owned());
     };
     let mut settings = Settings::default();
     for field in FIELDS {
@@ -259,9 +260,7 @@ pub fn write_changes(file: &Path, before: &Settings, after: &Settings) -> Result
     if let Some(folder) = file.parent() {
         fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     }
-    let temporary = file.with_extension("json.part");
-    fs::write(&temporary, text).map_err(|error| error.to_string())?;
-    fs::rename(&temporary, file).map_err(|error| error.to_string())
+    atomic::write(file, text.as_bytes()).map_err(|error| error.to_string())
 }
 
 /// `settings.json` in the user's config folder, beside the common themes.

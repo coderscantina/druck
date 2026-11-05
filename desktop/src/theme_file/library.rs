@@ -11,6 +11,7 @@ pub use druck::editor::theme_path::Scope;
 use druck::editor::theme_path::{self, PROJECT_FILE, common_file as common_path};
 
 use super::patch;
+use super::strings::Key;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -29,9 +30,7 @@ fn check_name(name: &str) -> Result<(), String> {
     if theme_path::is_name(name) {
         Ok(())
     } else {
-        Err(format!(
-            "\"{name}\" is not a theme name: use letters, digits, hyphens, and underscores"
-        ))
+        Err(crate::t!(Key::NotAThemeName, name = name))
     }
 }
 
@@ -114,11 +113,11 @@ pub fn create(common: &Path, name: &str) -> Result<PathBuf, String> {
     check_name(name)?;
     let path = common_path(common, name);
     if path.exists() {
-        return Err(format!("a theme named \"{name}\" already exists"));
+        return Err(crate::t!(Key::ThemeExists, name = name));
     }
-    fs::create_dir_all(common).map_err(|e| format!("cannot create {}: {e}", common.display()))?;
+    fs::create_dir_all(common).map_err(|e| crate::t!(Key::CannotCreate, path = common.display(), error = e))?;
     crate::persist::atomic::write(&path, b"{\n  \"version\": 1\n}\n")
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        .map_err(|e| crate::t!(Key::CannotWrite, path = path.display(), error = e))?;
     Ok(path)
 }
 
@@ -128,12 +127,12 @@ pub fn rename(common: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
     let source = common_path(common, from);
     let target = common_path(common, to);
     if !source.is_file() {
-        return Err(format!("no common theme named \"{from}\""));
+        return Err(crate::t!(Key::NoCommonTheme, name = from));
     }
     if target.exists() {
-        return Err(format!("a theme named \"{to}\" already exists"));
+        return Err(crate::t!(Key::ThemeExists, name = to));
     }
-    fs::rename(&source, &target).map_err(|e| format!("cannot rename {}: {e}", source.display()))?;
+    fs::rename(&source, &target).map_err(|e| crate::t!(Key::CannotRename, path = source.display(), error = e))?;
     Ok(target)
 }
 
@@ -143,12 +142,12 @@ pub fn duplicate(common: &Path, from: &str, to: &str) -> Result<PathBuf, String>
     let source = common_path(common, from);
     let target = common_path(common, to);
     if !source.is_file() {
-        return Err(format!("no common theme named \"{from}\""));
+        return Err(crate::t!(Key::NoCommonTheme, name = from));
     }
     if target.exists() {
-        return Err(format!("a theme named \"{to}\" already exists"));
+        return Err(crate::t!(Key::ThemeExists, name = to));
     }
-    fs::copy(&source, &target).map_err(|e| format!("cannot copy {}: {e}", source.display()))?;
+    fs::copy(&source, &target).map_err(|e| crate::t!(Key::CannotCopy, path = source.display(), error = e))?;
     Ok(target)
 }
 
@@ -167,9 +166,9 @@ pub fn free_copy_name(common: &Path, name: &str) -> String {
 pub fn delete(common: &Path, name: &str) -> Result<(), String> {
     let path = common_path(common, name);
     if !path.is_file() {
-        return Err(format!("no common theme named \"{name}\""));
+        return Err(crate::t!(Key::NoCommonTheme, name = name));
     }
-    fs::remove_file(&path).map_err(|e| format!("cannot delete {}: {e}", path.display()))
+    fs::remove_file(&path).map_err(|e| crate::t!(Key::CannotDelete, path = path.display(), error = e))
 }
 
 /// What copying a theme into a project left behind.
@@ -186,12 +185,13 @@ pub struct Forked {
 pub fn fork(project: &Path, common: &Path, theme: &str, name: &str) -> Result<Forked, String> {
     check_name(name)?;
     let source = common_path(common, theme);
-    let text = fs::read_to_string(&source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
+    let text =
+        fs::read_to_string(&source).map_err(|e| crate::t!(Key::CannotRead, path = source.display(), error = e))?;
     let value: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", source.display()))?;
     let folder = project.join("themes").join(name);
     let path = folder.join(PROJECT_FILE);
     if path.exists() {
-        return Err(format!("the project already has a theme named \"{name}\""));
+        return Err(crate::t!(Key::ProjectHasTheme, name = name));
     }
 
     let origin = source.parent().unwrap_or(common);
@@ -222,13 +222,13 @@ pub fn fork(project: &Path, common: &Path, theme: &str, name: &str) -> Result<Fo
     for (from, relative) in &copies {
         let to = folder.join(relative);
         if let Some(parent) = to.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|e| crate::t!(Key::CannotCreate, path = parent.display(), error = e))?;
         }
-        fs::copy(from, &to).map_err(|e| format!("cannot copy {}: {e}", from.display()))?;
+        fs::copy(from, &to).map_err(|e| crate::t!(Key::CannotCopy, path = from.display(), error = e))?;
     }
-    fs::create_dir_all(&folder).map_err(|e| format!("cannot create {}: {e}", folder.display()))?;
+    fs::create_dir_all(&folder).map_err(|e| crate::t!(Key::CannotCreate, path = folder.display(), error = e))?;
     crate::persist::atomic::write(&path, text.as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        .map_err(|e| crate::t!(Key::CannotWrite, path = path.display(), error = e))?;
     Ok(Forked { path, missing })
 }
 

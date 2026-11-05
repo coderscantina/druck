@@ -9,6 +9,7 @@ pub mod font_info;
 pub mod geometry;
 pub mod library;
 pub mod patch;
+mod strings;
 pub mod tokens;
 mod validate;
 pub mod writer;
@@ -43,7 +44,8 @@ pub struct ThemeFile {
 impl ThemeFile {
     pub fn open(path: &Path) -> Result<Self, String> {
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let text = fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let text = fs::read_to_string(&path)
+            .map_err(|e| crate::t!(strings::Key::CannotRead, path = path.display(), error = e))?;
         let mut file = Self {
             path,
             own: Value::Null,

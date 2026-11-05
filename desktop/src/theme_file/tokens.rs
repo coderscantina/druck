@@ -4,6 +4,7 @@
 use serde_json::Value;
 
 use super::patch;
+use super::strings::Key;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Group {
@@ -93,12 +94,10 @@ pub fn walk(value: &Value, path: &mut Vec<String>, visit: &mut impl FnMut(&[Stri
 /// The text with the token under a new name, and every reference to it following. A name taken is refused.
 pub fn rename(theme: &Value, text: &str, group: Group, from: &str, to: &str) -> Result<String, String> {
     if !is_name(to) {
-        return Err(format!(
-            "\"{to}\" is not a token name: use letters, digits, and hyphens"
-        ));
+        return Err(crate::t!(Key::NotATokenName, name = to));
     }
     if of(theme, group).iter().any(|(name, _)| name == to) {
-        return Err(format!("a token named \"{to}\" already exists"));
+        return Err(crate::t!(Key::TokenExists, name = to));
     }
     let renamed = patch::rename_key(text, &["tokens", group.key(), from], to)?;
     Ok(patch::rename_values(

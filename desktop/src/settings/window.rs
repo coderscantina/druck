@@ -168,7 +168,7 @@ pub fn open(category: Option<&str>, cx: &mut App) {
     {
         return;
     }
-    let measuring = crate::gate::var("DRUCK_GATE").is_some();
+    let measuring = crate::gate::measuring();
     let (width, height) = tokens::SETTINGS_WINDOW;
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
