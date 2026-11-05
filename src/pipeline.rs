@@ -151,32 +151,6 @@ pub fn typeset(
     Ok((set, laid))
 }
 
-/// The lines of running text as a layout with this configuration sets them, without making pages.
-#[cfg(feature = "editor")]
-pub fn set_lines(
-    job: &JobContext,
-    config: &Config,
-    document: &DocumentFile,
-    today: Date,
-) -> Result<layout::SetLines, Failure> {
-    let set = load_fonts(job, config)?;
-    let fonts = set.fonts();
-    let content = parse_mapped(config, document)?;
-    let prepared = prepare_parsed(job, config, document, content)?;
-    layout::set_lines(
-        &prepared.content,
-        &prepared.cited,
-        &prepared.images,
-        &prepared.theme_images,
-        config,
-        &fonts,
-        &document.source,
-        &document.path,
-        today,
-        job.cancel,
-    )
-}
-
 /// The faces the configuration names, from their files and among installed fonts. The installed fonts are looked
 /// at only when a style names such a family.
 fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Failure> {
