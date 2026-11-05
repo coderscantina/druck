@@ -92,6 +92,7 @@ crate::strings! {
         CannotChangeFrontMatter => ("cannot change the front matter here. Edit it directly.", "Die Front Matter lässt sich hier nicht ändern. Bearbeite sie direkt."),
         OutsideProject => ("{path} is outside the project.", "{path} liegt außerhalb des Projekts."),
 
+        CannotReadYaml => ("cannot read this YAML line: {line}", "diese YAML-Zeile lässt sich nicht lesen: {line}"),
         MakeProject => ("Make this a project", "Daraus ein Projekt machen"),
         MakeProjectHint => (
             "Writes {manifest} with {count} chapters in name order. Your files stay where they are.",
@@ -101,6 +102,16 @@ crate::strings! {
             "Writes {manifest} with {count} chapters in name order, and moves the front matter of {file} into it.",
             "Schreibt {manifest} mit {count} Kapiteln nach Namen und übernimmt die Front Matter aus {file}."
         ),
+        MakeProjectMissing => (
+            "It names {paths}, which cannot be found, so there are no pages until the file is there.",
+            "Sie nennt {paths}, nicht auffindbar, also gibt es keine Seiten, bis die Datei da ist."
+        ),
+        MadeProject => ("Wrote {manifest} with {count} chapters.", "{manifest} mit {count} Kapiteln geschrieben."),
+        MadeProjectMoved => (
+            "Wrote {manifest} with {count} chapters, and moved the front matter of {file} into it.",
+            "{manifest} mit {count} Kapiteln geschrieben und die Front Matter aus {file} übernommen."
+        ),
+        NoManifestInFolder => ("{folder} has no {manifest} yet.", "{folder} hat noch keine {manifest}."),
         ManifestExists => ("{path} already has a {manifest}.", "{path} hat schon eine {manifest}."),
     }
 }

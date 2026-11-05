@@ -29,29 +29,50 @@ pub struct LaunchView {
     offer: Option<(PathBuf, Offer)>,
     /// With nothing focused Tab has nowhere to start from, so the card holds the keys.
     focus: FocusHandle,
+    /// The offer's row, which gets the keys while it shows.
+    offer_focus: FocusHandle,
 }
 
 impl LaunchView {
     /// `error` says why what was asked for failed to open, and what that was.
     pub fn new(error: Option<(String, PathBuf)>, cx: &mut Context<Self>) -> Self {
         let (error, asked) = error.unzip();
-        Self {
-            error: error.map(SharedString::from),
-            offer: asked.as_deref().and_then(offer_for),
+        let mut view = Self {
+            error: None,
+            offer: None,
             focus: cx.focus_handle(),
-        }
+            offer_focus: cx.focus_handle().tab_stop(true),
+        };
+        view.take_error(error, asked.as_deref());
+        view
     }
 
-    /// Gives the keys to the card, as the window shows it.
+    /// A folder that only lacks a manifest is no error: the offer's own line says what is missing.
+    fn take_error(&mut self, error: Option<String>, asked: Option<&Path>) {
+        self.offer = asked.and_then(offer_for);
+        self.error = error.filter(|_| self.offer.is_none()).map(SharedString::from);
+    }
+
+    /// Gives the keys to the offer if there is one, or the card, as the window shows it.
     pub fn take_focus(view: &gpui::Entity<Self>, window: &mut Window, cx: &mut gpui::App) {
-        let focus = view.read(cx).focus.clone();
+        let view = view.read(cx);
+        let focus = if view.offer.is_some() {
+            view.offer_focus.clone()
+        } else {
+            view.focus.clone()
+        };
         window.focus(&focus, cx);
     }
 
     /// Says why `asked` did not open, or with `None`, that nothing is wrong.
     pub fn set_error(&mut self, error: Option<String>, asked: Option<&Path>, cx: &mut Context<Self>) {
-        self.error = error.map(SharedString::from);
-        self.offer = asked.and_then(offer_for);
+        self.take_error(error, asked);
+        cx.notify();
+    }
+
+    /// Says why the offer did not work. The offer stays, to try again.
+    pub fn offer_failed(&mut self, problem: String, cx: &mut Context<Self>) {
+        self.error = Some(problem.into());
         cx.notify();
     }
 
@@ -150,6 +171,27 @@ impl Render for LaunchView {
                             )
                             .child(div().text_color(tokens.text_quiet).child(crate::t!(Key::Tagline))),
                     )
+                    .when_some(self.offer.clone(), |card, (dir, offer)| {
+                        card.child(
+                            div()
+                                .px(tokens::SPACE_3)
+                                .pt(tokens::SPACE_2)
+                                .text_size(tokens::TEXT_SMALL)
+                                .text_color(tokens.text_quiet)
+                                .child(adopt::reason(&dir)),
+                        )
+                        .child(
+                            Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
+                                .track_focus(&self.offer_focus)
+                                .text_color(tokens.accent)
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
+                                })),
+                        )
+                    })
+                    .when_some(self.error.clone(), |card, error| {
+                        card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
+                    })
                     .child(
                         Self::row(
                             &tokens,
@@ -171,19 +213,7 @@ impl Render for LaunchView {
                             .text_color(tokens.text_quiet)
                             .child(crate::t!(Key::NewProject)),
                     )
-                    .children(starters)
-                    .when_some(self.error.clone(), |card, error| {
-                        card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
-                    })
-                    .when_some(self.offer.clone(), |card, (dir, offer)| {
-                        card.child(
-                            Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
-                                .text_color(tokens.accent)
-                                .on_click(cx.listener(move |_, _, _, cx| {
-                                    cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
-                                })),
-                        )
-                    }),
+                    .children(starters),
             )
     }
 }

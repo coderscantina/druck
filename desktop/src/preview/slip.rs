@@ -550,7 +550,7 @@ impl Render for ProofSlip {
             .role(Role::Dialog)
             .aria_label(crate::t!(Key::SlipLabel))
             .occlude()
-            .w(tokens::SLIP_WIDTH)
+            .w_full()
             .p(tokens::SPACE_3)
             .flex()
             .flex_col()

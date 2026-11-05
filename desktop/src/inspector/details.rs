@@ -1,4 +1,5 @@
-//! The Details tab: title, subtitle, authors, date, language, cover, and free `meta` rows, for every kind of document.
+//! The Details tab: title, subtitle, authors, date, language, cover, bibliography, and free `meta` rows, for every kind of
+//! document.
 //! It holds no document: the workspace gives it what the session says and hears what the author changes.
 
 use std::collections::HashMap;
@@ -24,6 +25,7 @@ pub enum DetailsEdit {
     Meta(String, String),
     RemoveMeta(String),
     ChooseCover,
+    ChooseBibliography,
 }
 
 impl EventEmitter<DetailsEdit> for DetailsPanel {}
@@ -93,7 +95,7 @@ impl DetailsPanel {
                 Field::Subtitle => &details.subtitle,
                 Field::Authors => &details.authors,
                 Field::Date => &details.date,
-                Field::Language | Field::Cover | Field::Theme => continue,
+                Field::Language | Field::Cover | Field::Bibliography | Field::Theme => continue,
             };
             set_unless_editing(input, text, window, cx);
         }
@@ -269,6 +271,48 @@ impl DetailsPanel {
             )
     }
 
+    /// The bibliography: its file's name, or that it has none, and the same links as the cover.
+    fn bibliography(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let written = (!self.details.bibliography.is_empty()).then(|| self.details.bibliography.clone());
+        div()
+            .flex()
+            .flex_col()
+            .gap(tokens::SPACE_1)
+            .child(
+                div()
+                    .text_color(tokens.text_quiet)
+                    .child(crate::t!(Key::FieldBibliography)),
+            )
+            .child(
+                div().truncate().child(
+                    written
+                        .clone()
+                        .unwrap_or_else(|| crate::t!(Key::NoBibliography).to_owned()),
+                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(tokens::SPACE_2)
+                    .child(
+                        link(tokens, "bibliography-choose", crate::t!(Key::Choose)).on_click(cx.listener(
+                            |_, _, _, cx| {
+                                cx.emit(DetailsEdit::ChooseBibliography);
+                            },
+                        )),
+                    )
+                    .when(written.is_some(), |row| {
+                        row.child(
+                            link(tokens, "bibliography-remove", crate::t!(Key::Remove)).on_click(cx.listener(
+                                |_, _, _, cx| {
+                                    cx.emit(DetailsEdit::Field(Field::Bibliography, String::new()));
+                                },
+                            )),
+                        )
+                    }),
+            )
+    }
+
     fn meta_row(&self, row: &MetaRow, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let key = row.key.clone();
         let label = SUGGESTED
@@ -314,6 +358,7 @@ fn set_unless_editing(input: &Entity<TextInput>, text: &str, window: &Window, cx
 fn link(tokens: &Tokens, id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
+        .button(tokens, label)
         .text_color(tokens.text_quiet)
         .cursor_pointer()
         .hover(|link| link.text_color(tokens.text))
@@ -337,13 +382,14 @@ impl Render for DetailsPanel {
                     Field::Subtitle => crate::t!(Key::FieldSubtitle),
                     Field::Authors => crate::t!(Key::FieldAuthors),
                     Field::Date => crate::t!(Key::FieldDate),
-                    Field::Language | Field::Cover | Field::Theme => "",
+                    Field::Language | Field::Cover | Field::Bibliography | Field::Theme => "",
                 };
                 Self::field(&tokens, label, input.clone())
             })
             .collect();
         let languages = self.languages(&tokens, cx);
         let cover = self.cover(&tokens, cx);
+        let bibliography = self.bibliography(&tokens, cx);
         let rows: Vec<_> = self
             .details
             .meta
@@ -418,7 +464,8 @@ impl Render for DetailsPanel {
                     .border_b_1()
                     .border_color(tokens.divider)
                     .children(fields)
-                    .child(languages),
+                    .child(languages)
+                    .child(bibliography),
             )
             .child(Self::section_label(&tokens, crate::t!(Key::CoverImageTitle)))
             .child(cover)

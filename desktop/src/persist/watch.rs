@@ -23,6 +23,8 @@ const MOST: Duration = Duration::from_secs(1);
 pub const GRACE: Duration = Duration::from_millis(500);
 
 const FOLDERS: [&str; 3] = ["manuscript", "notes", "research"];
+/// What a project's folder holds that no book is set from: its output.
+const OUTPUT: &str = "build";
 
 /// What the watcher reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +32,8 @@ pub enum Signal {
     Path(PathBuf),
     /// Too much changed to name, such as a folder moved. Everything needs a look.
     Everything,
+    /// A file that is no text of the book, such as an image or a bibliography, which a layout that failed may have lacked.
+    Resource,
 }
 
 /// Which paths matter.
@@ -42,6 +46,8 @@ struct Scope {
     project: bool,
     /// Files that matter wherever they are, by real path, with the path the session knows them by.
     files: HashMap<PathBuf, PathBuf>,
+    /// Files a book names that are not its text, by real path, wherever they are.
+    resources: HashSet<PathBuf>,
 }
 
 impl Scope {
@@ -52,6 +58,9 @@ impl Scope {
         if let Some(known) = self.files.get(path) {
             return Some(Signal::Path(known.clone()));
         }
+        if self.resources.contains(path) {
+            return Some(Signal::Resource);
+        }
         if !self.project {
             return None;
         }
@@ -60,12 +69,16 @@ impl Scope {
         }
         let relative = path.strip_prefix(&self.real_root).ok()?;
         let top = relative.components().next()?.as_os_str();
-        if !FOLDERS.iter().any(|folder| OsStr::new(folder) == top) {
-            return (relative == Path::new(druck::input::MANIFEST)).then(|| Signal::Path(self.root.join(relative)));
-        }
         let hidden = relative
             .file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with('.'));
+        if !FOLDERS.iter().any(|folder| OsStr::new(folder) == top) {
+            if relative == Path::new(druck::input::MANIFEST) {
+                return Some(Signal::Path(self.root.join(relative)));
+            }
+            let quiet = hidden || top.to_string_lossy().starts_with('.') || top == OsStr::new(OUTPUT);
+            return (!quiet).then_some(Signal::Resource);
+        }
         let text = (relative.extension())
             .and_then(OsStr::to_str)
             .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("txt"));
@@ -73,6 +86,7 @@ impl Scope {
             // A name without an extension here is a folder that came or went, and its files with it, unannounced.
             None if !hidden => Some(Signal::Everything),
             _ if text && !hidden => Some(Signal::Path(self.root.join(relative))),
+            _ if !hidden => Some(Signal::Resource),
             _ => None,
         }
     }
@@ -94,6 +108,7 @@ impl Watcher {
             real_root: fs::canonicalize(root)?,
             project,
             files: HashMap::new(),
+            resources: HashSet::new(),
         }));
         let filter = scope.clone();
         let mut inner = notify::recommended_watcher(move |event: notify::Result<Event>| {
@@ -126,8 +141,8 @@ impl Watcher {
 
     /// Sets the files that matter by name: a project's chapters, wherever the manifest lists them, the theme, a single
     /// file. A symlink's target or a file outside the folder gets a watch of its own, on its folder, which survives the
-    /// file being replaced.
-    pub fn set_files(&mut self, files: &[PathBuf]) {
+    /// file being replaced. `resources` are watched the same way and report only as [`Signal::Resource`].
+    pub fn set_files(&mut self, files: &[PathBuf], resources: &[PathBuf]) {
         let (root, project) = match self.scope.lock() {
             Ok(scope) => (scope.real_root.clone(), scope.project),
             Err(_) => return,
@@ -148,8 +163,19 @@ impl Watcher {
                 known.insert(parent.join(name), file.clone());
             }
         }
+        let mut named = HashSet::new();
+        for file in resources {
+            let real = real_path(file);
+            if let Some(folder) = real.parent()
+                && !(project && folder.starts_with(&root))
+            {
+                folders.insert(folder.to_owned());
+            }
+            named.insert(real);
+        }
         if let Ok(mut scope) = self.scope.lock() {
             scope.files = known;
+            scope.resources = named;
         }
         for folder in folders.difference(&self.watched).cloned().collect::<Vec<_>>() {
             if self.inner.watch(&folder, RecursiveMode::NonRecursive).is_ok() {
@@ -183,6 +209,7 @@ fn real_path(file: &Path) -> PathBuf {
 pub struct Waiting {
     paths: HashMap<PathBuf, (Instant, Instant)>,
     everything: bool,
+    resource: bool,
 }
 
 /// What is ready to read.
@@ -190,6 +217,7 @@ pub struct Waiting {
 pub struct Ready {
     pub paths: Vec<PathBuf>,
     pub everything: bool,
+    pub resource: bool,
 }
 
 impl Waiting {
@@ -200,6 +228,7 @@ impl Waiting {
                 times.1 = now;
             }
             Signal::Everything => self.everything = true,
+            Signal::Resource => self.resource = true,
         }
     }
 
@@ -222,7 +251,7 @@ impl Waiting {
 
     /// How long until something may be ready. `plain` says a path is a known file that exists, so it needs no grace.
     pub fn wait(&self, now: Instant, plain: impl Fn(&Path) -> bool) -> Option<Duration> {
-        if self.everything {
+        if self.everything || self.resource {
             return Some(Duration::ZERO);
         }
         if let Some(ends) = self.grace_ends(&plain) {
@@ -241,6 +270,7 @@ impl Waiting {
             return Ready {
                 paths: Vec::new(),
                 everything: std::mem::take(&mut self.everything),
+                resource: std::mem::take(&mut self.resource),
             };
         }
         let mut ready = Vec::new();
@@ -255,6 +285,7 @@ impl Waiting {
         Ready {
             paths: ready,
             everything: std::mem::take(&mut self.everything),
+            resource: std::mem::take(&mut self.resource),
         }
     }
 }
@@ -271,6 +302,7 @@ mod tests {
             real_root: PathBuf::from("/real/book"),
             project: true,
             files: HashMap::from([(PathBuf::from("/themes/mine.json"), PathBuf::from("/themes/mine.json"))]),
+            resources: HashSet::from([PathBuf::from("/shared/refs.bib")]),
         }
     }
 
@@ -297,12 +329,22 @@ mod tests {
             "/real/book/build/book.pdf",
             "/real/book/manuscript/.a.md.12.druck-tmp",
             "/real/book/manuscript/.a.md.swp",
-            "/real/book/manuscript/a.md~",
-            "/real/book/manuscript/picture.png",
-            "/real/book/other.md",
+            "/real/book/.druck/notes.json",
             "/elsewhere/manuscript/a.md",
         ] {
             assert_eq!(found(quiet), None, "{quiet}");
+        }
+    }
+
+    #[test]
+    fn a_file_a_layout_may_lack_reports_as_a_resource() {
+        for resource in [
+            "/real/book/literatur.bib",
+            "/real/book/assets/cover.png",
+            "/real/book/manuscript/picture.png",
+            "/shared/refs.bib",
+        ] {
+            assert_eq!(found(resource), Some(Signal::Resource), "{resource}");
         }
     }
 
@@ -388,7 +430,7 @@ mod tests {
                 match receive.recv_timeout(left) {
                     Ok(signal) if signal == expected => break,
                     Ok(Signal::Path(other)) => assert!(!other.ends_with(".git/index"), "noise passed"),
-                    Ok(Signal::Everything) => {}
+                    Ok(Signal::Everything | Signal::Resource) => {}
                     Err(_) => panic!("no event in round {round}"),
                 }
             }

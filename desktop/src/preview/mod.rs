@@ -7,6 +7,7 @@
 //! A click on a line opens the [`slip::ProofSlip`] through the workspace and [`slip_control`], which this view shows at its paragraph. Problems
 //! come in through [`PreviewView::set_problems`], and only these and the slip's paragraph are ever marked on a page.
 
+#[cfg(any(debug_assertions, feature = "measure"))]
 mod bench;
 mod cache;
 pub mod directives;
@@ -26,7 +27,9 @@ use std::time::Instant;
 
 use druck::Failure;
 use druck::diagnostic::Diagnostic;
-use druck::output::{ChapterId, Item, SourcePos};
+#[cfg(any(debug_assertions, feature = "measure"))]
+use druck::output::Item;
+use druck::output::{ChapterId, SourcePos};
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding,
@@ -36,7 +39,9 @@ use gpui::{
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
 
+#[cfg(any(debug_assertions, feature = "measure"))]
 use self::bench::Bench;
+#[cfg(any(debug_assertions, feature = "measure"))]
 pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
 pub use self::fonts::FontUse;
@@ -104,12 +109,20 @@ fn next_zoom(now: Zoom, current: f32, fit: f32, direction: isize) -> Option<Zoom
     }
 }
 
+/// Where the proof slip stands.
+struct SlipPlace {
+    at: gpui::Point<Pixels>,
+    anchor: Anchor,
+    width: Pixels,
+}
+
 /// A sheet to paint this frame.
 struct Placed {
     bounds: Bounds<Pixels>,
     page: usize,
     image: Option<Arc<RenderImage>>,
     /// Rastered for this zoom and these pages, not an older image standing in.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     exact: bool,
 }
 
@@ -137,6 +150,11 @@ impl EventEmitter<ZoomChanged> for PreviewView {}
 pub struct ProblemsWanted;
 
 impl EventEmitter<ProblemsWanted> for PreviewView {}
+
+/// The author asked for the book's details from the empty pages.
+pub struct DetailsWanted;
+
+impl EventEmitter<DetailsWanted> for PreviewView {}
 
 pub struct PreviewView {
     focus: FocusHandle,
@@ -168,6 +186,7 @@ pub struct PreviewView {
     view: (f32, f32),
     /// The first page on screen in the last frame.
     page: usize,
+    #[cfg(any(debug_assertions, feature = "measure"))]
     bench: Option<Bench>,
     /// The request whose pages are published.
     published: u64,
@@ -178,6 +197,7 @@ pub struct PreviewView {
     /// The newest request whose visible pages were all exact, and when.
     ready: (u64, Instant),
     /// The last frame in which every visible page was exact.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     exact_frame: Option<Instant>,
     /// While the pages are not on screen: where they would paint, to raster for.
     ahead: Option<Ahead>,
@@ -219,8 +239,9 @@ impl PreviewView {
     /// A view of the document in `theme`, or the theme it names.
     pub fn new(kind: Kind, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
-        let mut view = Self {
-            focus: cx.focus_handle().tab_stop(true),
+        let view = Self {
+            // The keys rest here, but Tab walks only what can be pressed.
+            focus: cx.focus_handle(),
             scheduler: Scheduler::new(),
             specimen_typesetter: Arc::new(Mutex::new(Typesetter::new(
                 Kind::Single {
@@ -244,11 +265,13 @@ impl PreviewView {
             scroll: (0.0, 0.0),
             view: (0.0, 0.0),
             page: 0,
+            #[cfg(any(debug_assertions, feature = "measure"))]
             bench: Bench::from_env(),
             published: 0,
             revision: None,
             origin: (0.0, 0.0),
             ready: (0, Instant::now()),
+            #[cfg(any(debug_assertions, feature = "measure"))]
             exact_frame: None,
             ahead: None,
             slip: cx.new(|cx| ProofSlip::new(window, cx)),
@@ -261,6 +284,9 @@ impl PreviewView {
             proof_open: false,
             current_problem: None,
         };
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        let mut view = view;
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
             view.zoom = Zoom::Fixed(fixed);
         }
@@ -270,6 +296,7 @@ impl PreviewView {
     /// Lays out a copy of the document on a background thread and publishes the pages when done. A newer request
     /// cancels this one.
     pub fn request(&mut self, joined: Joined, cx: &mut Context<Self>) {
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some(bench) = &mut self.bench {
             bench.requested(&joined.text);
         }
@@ -468,6 +495,7 @@ impl PreviewView {
     }
 
     /// Marks the problems again and says how many and how long it took. For measurements.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn mark_again(&mut self, cx: &mut Context<Self>) -> (usize, std::time::Duration) {
         let started = Instant::now();
         self.mark_problems();
@@ -499,16 +527,19 @@ impl PreviewView {
     }
 
     /// The block of the first text that holds `words`. For scripted runs, which have no pointer.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn block_with_text(&self, words: &str) -> Option<BlockAt> {
         proof::block_with_text(&self.layout.as_ref()?.laid, words)
     }
 
     /// A paragraph on a page, or the next page that has one. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn paragraph_on_page(&self, page: usize) -> Option<(usize, BlockAt)> {
         proof::paragraph_on_page(&self.layout.as_ref()?.laid, page)
     }
 
     /// The window position of a line on the page in the middle of the view. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn point_on_a_line(&self) -> Option<gpui::Point<Pixels>> {
         let sheets = self.sheets(self.current_zoom)?;
         let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
@@ -523,6 +554,7 @@ impl PreviewView {
     }
 
     /// The window position of the middle of the view. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn middle_of_view(&self) -> gpui::Point<Pixels> {
         point(
             px(self.origin.0 + self.view.0 / 2.0),
@@ -567,16 +599,19 @@ impl PreviewView {
     }
 
     /// Whether a layout is running, which the next request would cancel.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn is_laying_out(&self) -> bool {
         self.scheduler.is_running()
     }
 
     /// The moment the pages of the newest request were first ready to paint, if they have been.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn ready_at(&self) -> Option<Instant> {
         (self.ready.0 == self.scheduler.latest()).then_some(self.ready.1)
     }
 
     /// The last frame that showed every visible page exact.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn exact_frame(&self) -> Option<Instant> {
         self.exact_frame
     }
@@ -595,6 +630,7 @@ impl PreviewView {
     }
 
     /// The page a run of text containing `needle` is on, and shows it.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn show_text(&mut self, needle: &str, cx: &mut Context<Self>) -> Option<usize> {
         let layout = self.layout.as_ref()?;
         let page = layout.laid.pages().iter().position(|page| {
@@ -611,6 +647,11 @@ impl PreviewView {
     /// Why the latest text has no pages; empty when the pages on screen are current.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// Whether the latest layout gave errors instead of pages, which a change of a file it lacked may mend.
+    pub fn layout_failed(&self) -> bool {
+        !self.diagnostics.is_empty()
     }
 
     /// What the pages on screen broke, such as typesetting rules.
@@ -665,6 +706,7 @@ impl PreviewView {
                 // Offsets in the specimen are not offsets in any chapter.
                 self.revision = (!specimen).then_some(revision);
                 self.diagnostics.clear();
+                #[cfg(any(debug_assertions, feature = "measure"))]
                 if let Some(bench) = &mut self.bench {
                     bench.published(&layout);
                 }
@@ -758,16 +800,20 @@ impl PreviewView {
 
     /// A frame on screen: frees what the atlas no longer needs, and places the sheets.
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Placed> {
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some(bench) = &mut self.bench {
             bench.frame_started();
         }
         for image in self.dropped.drain(..) {
             window.drop_image(image).ok();
         }
+        #[cfg_attr(not(any(debug_assertions, feature = "measure")), allow(unused_variables))]
         let (placed, all_exact) = self.prepare(bounds, window.scale_factor(), cx);
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if all_exact {
             self.exact_frame = Some(Instant::now());
         }
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if self.bench.is_some() {
             let waiting = placed.len() - placed.iter().filter(|sheet| sheet.exact).count();
             let height = self.sheets(self.current_zoom).map_or(0.0, |sheets| sheets.height());
@@ -804,6 +850,7 @@ impl PreviewView {
         if let Some(page) = self.centre_on.take().or(keep) {
             self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
+        #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some(page) = self.bench.as_mut().and_then(Bench::take_page) {
             self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
@@ -862,6 +909,7 @@ impl PreviewView {
                     size(px(snap(width)), px(snap(height))),
                 ),
                 image: found.or_else(|| self.cache.stale(page)),
+                #[cfg(any(debug_assertions, feature = "measure"))]
                 exact: exact_here,
             });
         }
@@ -916,7 +964,7 @@ impl PreviewView {
     }
 
     fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let delta = event.delta.pixel_delta(px(20.));
+        let delta = event.delta.pixel_delta(tokens::SCROLL_LINE);
         self.scroll.0 -= f32::from(delta.x);
         self.scroll.1 -= f32::from(delta.y);
         cx.notify();
@@ -993,21 +1041,92 @@ impl PreviewView {
             .collect()
     }
 
-    /// Where the slip stands: under its paragraph's first part on the pages, within the view. `None` while the slip is closed.
-    fn slip_position(&self) -> Option<gpui::Point<Pixels>> {
+    /// Where the slip stands and how wide: as wide as its paragraph's column and under its first part on the pages, within
+    /// the view, or above it near the view's foot, so it never covers its own paragraph. `None` while the slip is closed.
+    fn slip_place(&self) -> Option<SlipPlace> {
         let mark = self.slip_anchor()?;
         let sheets = self.sheets(self.current_zoom)?;
         let zoom = self.current_zoom;
-        let left = sheets.left(mark.page, self.view.0, self.scroll.0) + mark.rect.x.0 as f32 * zoom;
-        let bottom = sheets.top(mark.page) - self.scroll.1 + (mark.rect.y.0 + mark.rect.height.0) as f32 * zoom;
-        let width = f32::from(tokens::SLIP_WIDTH);
+        let padding = tokens::MARK_PADDING * zoom;
+        let left = sheets.left(mark.page, self.view.0, self.scroll.0) + mark.rect.x.0 as f32 * zoom - padding;
+        let top = sheets.top(mark.page) - self.scroll.1 + mark.rect.y.0 as f32 * zoom;
+        let bottom = top + mark.rect.height.0 as f32 * zoom;
         let room = f32::from(tokens::SPACE_2);
+        let column = mark.rect.width.0 as f32 * zoom + 2. * padding;
+        let width = column
+            .max(f32::from(tokens::SLIP_WIDTH))
+            .min((self.view.0 - 2. * room).max(f32::from(tokens::SLIP_WIDTH)));
         let x = left.clamp(room, (self.view.0 - width - room).max(room));
-        let y = bottom + (tokens::MARK_PADDING + tokens::MARK_PADDING) * zoom;
-        Some(point(
-            px(self.origin.0 + x),
-            px(self.origin.1 + y).max(tokens::TITLEBAR_HEIGHT),
-        ))
+        let gap = 2. * padding;
+        let below = self.view.1 - bottom - gap;
+        let above = top - gap;
+        let over = below < f32::from(tokens::SLIP_ROOM_BELOW) && above > below;
+        let y = if over { top - gap } else { bottom + gap };
+        Some(SlipPlace {
+            at: point(
+                px(self.origin.0 + x),
+                px(self.origin.1 + y).max(tokens::TITLEBAR_HEIGHT),
+            ),
+            anchor: if over { Anchor::BottomLeft } else { Anchor::TopLeft },
+            width: px(width),
+        })
+    }
+
+    /// What stands in place of the pages when the document has none: every message in full, and where to mend it.
+    fn empty_state(&self, tokens: &Tokens, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        if self.layout.is_some() || self.diagnostics.is_empty() {
+            return None;
+        }
+        let messages = self
+            .diagnostics
+            .iter()
+            .map(|problem| div().text_color(tokens.text_quiet).child(in_words(problem)));
+        Some(
+            div()
+                .id("no-pages")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .overflow_y_scroll()
+                .child(
+                    div()
+                        .w(tokens::EMPTY_STATE_WIDTH)
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::SPACE_2)
+                        .text_size(tokens::TEXT_BODY)
+                        .child(
+                            div()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(tokens.text)
+                                .child(crate::t!(Key::NoPages)),
+                        )
+                        .children(messages)
+                        .child(
+                            div()
+                                .pt(tokens::SPACE_1)
+                                .flex()
+                                .gap(tokens::SPACE_2)
+                                .child(
+                                    crate::shell::ui::small_button(
+                                        tokens,
+                                        "no-pages-details",
+                                        crate::t!(Key::OpenDetails),
+                                    )
+                                    .text_color(tokens.accent)
+                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DetailsWanted))),
+                                )
+                                .child(
+                                    crate::shell::ui::small_button(tokens, "no-pages-proof", crate::t!(Key::OpenProof))
+                                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted))),
+                                ),
+                        ),
+                ),
+        )
     }
 
     /// The status line's zoom: smaller, the value, larger, and fit.
@@ -1059,6 +1178,15 @@ impl PreviewView {
                 )
                 .on_click(cx.listener(|view, _, _, cx| view.zoom_to_fit(cx))),
             )
+    }
+}
+
+/// A diagnostic in the language now set where it has a code, with the engine's own location where it has none.
+fn in_words(problem: &Diagnostic) -> String {
+    if problem.code.is_some() {
+        crate::shell::engine_text::message(problem)
+    } else {
+        problem.to_string()
     }
 }
 
@@ -1140,6 +1268,7 @@ impl Render for PreviewView {
                         }
                     }
                 });
+                #[cfg(any(debug_assertions, feature = "measure"))]
                 painted.update(cx, |view, _| {
                     if let Some(bench) = &mut view.bench {
                         bench.frame_painted();
@@ -1148,16 +1277,13 @@ impl Render for PreviewView {
             },
         )
         .size_full();
-        let problem = self.diagnostics.first().map(|first| {
+        // With no pages the whole message stands where they would, see `empty_state`.
+        let problem = self.layout.as_ref().and(self.diagnostics.first()).map(|first| {
             let more = self.diagnostics.len() - 1;
             let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
-            let first = if first.code.is_some() {
-                crate::shell::engine_text::message(first)
-            } else {
-                first.to_string()
-            };
-            format!("{first}{suffix}")
+            format!("{}{suffix}", in_words(first))
         });
+        let empty = self.empty_state(&tokens, cx);
         let warnings = self.problems.iter().filter(|problem| problem.warning).count();
         let count = self.problems.len() - warnings;
         let to_look_at = (count > 0).then(|| {
@@ -1229,13 +1355,13 @@ impl Render for PreviewView {
                 slot.min_w_0().truncate().text_color(tokens.accent).child(problem)
             }))
             .child(self.zoom_controls(&tokens, cx));
-        let slip = self.slip.read(cx).opened().and(self.slip_position()).map(|position| {
+        let slip = self.slip.read(cx).opened().and(self.slip_place()).map(|place| {
             deferred(
                 anchored()
-                    .position(position)
-                    .anchor(Anchor::TopLeft)
+                    .position(place.at)
+                    .anchor(place.anchor)
                     .snap_to_window_with_margin(tokens::SPACE_2)
-                    .child(self.slip.clone()),
+                    .child(div().w(place.width).child(self.slip.clone())),
             )
             .with_priority(1)
         });
@@ -1266,7 +1392,16 @@ impl Render for PreviewView {
                 cx.notify();
             }))
             .on_action(cx.listener(|_, _: &CloseSlip, _, cx| cx.emit(PageClicked(None))))
-            .child(div().flex_1().min_h_0().overflow_hidden().child(pages))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .relative()
+                    .bg(tokens.pages_canvas)
+                    .child(pages)
+                    .children(empty),
+            )
             .child(strip)
             .children(slip)
     }

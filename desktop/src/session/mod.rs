@@ -652,6 +652,28 @@ impl Session {
         }
     }
 
+    /// The window's title: the book's, or the file's or folder's name if it has none.
+    pub fn window_title(&self) -> String {
+        let title = &self.details().title;
+        if title.is_empty() {
+            let name = self.location().file_name().unwrap_or_default();
+            name.to_string_lossy().into_owned()
+        } else {
+            title.clone()
+        }
+    }
+
+    /// The files besides its text that pages cannot be set without and the book names itself.
+    pub fn named_files(&self) -> Vec<PathBuf> {
+        let Ok(settings) = &self.settings else {
+            return Vec::new();
+        };
+        let base = self.base_dir();
+        (settings.bibliography.iter().chain(&settings.cover))
+            .map(|file| base.join(file))
+            .collect()
+    }
+
     /// The text of the bibliography the document names, if it has one.
     pub fn bibliography_text(&self) -> Option<String> {
         let file = self.settings.as_ref().ok()?.bibliography.as_ref()?;

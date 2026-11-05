@@ -1,9 +1,9 @@
 //! Makes a folder of Markdown a project: writes `druck.yaml` beside the author's files, which stay where they are. The
 //! first chapter's front matter moves into it, since a project's chapters have none. Nothing else changes, and nothing is
-//! written unless the whole of it can be: a front matter the manifest could not read stops it before the first write.
+//! written unless the whole of it can be: a front matter the manifest could not read stops it before the first write, and
+//! the manifest is written whole or not at all, so a failure leaves nothing that blocks trying again.
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use druck::editor::resolved_config::split_front_matter;
@@ -11,12 +11,14 @@ use druck::input::MANIFEST;
 
 use super::strings::Key;
 use super::{MANUSCRIPT, details, templates, yaml};
-use crate::persist::atomic;
+use crate::persist::atomic::{self, Outcome};
 
 const CHAPTERS: &str = "chapters";
 const TITLE: &str = "title";
 /// Markdown that sits in a project's root for other tools, not for the book.
 const NOT_CHAPTERS: [&str; 3] = ["README.md", "CLAUDE.md", "AGENTS.md"];
+/// How many folders above the project to look for a file the front matter names.
+const SEARCH_UP: usize = 3;
 
 /// What making a folder a project would do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,13 +27,15 @@ pub struct Offer {
     pub chapters: Vec<String>,
     /// The file whose front matter would move.
     pub moves_front_matter_of: Option<String>,
+    /// Paths that front matter names and that could not be found, as they would be written.
+    pub missing: Vec<String>,
 }
 
 impl Offer {
     /// One line saying what it does, so nothing happens that the author did not read.
     pub fn hint(&self) -> String {
         let count = self.chapters.len();
-        match &self.moves_front_matter_of {
+        let does = match &self.moves_front_matter_of {
             Some(file) => crate::t!(
                 Key::MakeProjectHintMoves,
                 manifest = MANIFEST,
@@ -39,6 +43,21 @@ impl Offer {
                 file = file
             ),
             None => crate::t!(Key::MakeProjectHint, manifest = MANIFEST, count = count),
+        };
+        if self.missing.is_empty() {
+            does
+        } else {
+            let missing = crate::t!(Key::MakeProjectMissing, paths = self.missing.join(", "));
+            format!("{does} {missing}")
+        }
+    }
+
+    /// One line saying what was written, for after it ran.
+    pub fn done(&self) -> String {
+        let count = self.chapters.len();
+        match &self.moves_front_matter_of {
+            Some(file) => crate::t!(Key::MadeProjectMoved, manifest = MANIFEST, count = count, file = file),
+            None => crate::t!(Key::MadeProject, manifest = MANIFEST, count = count),
         }
     }
 }
@@ -46,6 +65,14 @@ impl Offer {
 /// The label of the offer.
 pub fn label() -> &'static str {
     crate::t!(Key::MakeProject)
+}
+
+/// Why a folder with an offer did not open, by the folder's name.
+pub fn reason(dir: &Path) -> String {
+    let folder = dir
+        .file_name()
+        .map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned());
+    crate::t!(Key::NoManifestInFolder, folder = folder, manifest = MANIFEST)
 }
 
 fn markdown_in(dir: &Path) -> Vec<String> {
@@ -81,11 +108,23 @@ pub fn offer(dir: &Path) -> Option<Offer> {
     };
     let first = chapters.first()?.clone();
     let text = fs::read_to_string(dir.join(&first)).ok()?;
-    let has_front_matter = split_front_matter(&text).ok()?.is_some();
+    let split = split_front_matter(&text).ok()?;
+    let missing = (split.as_ref())
+        .and_then(|split| named_paths(split.yaml, parent_of(&first), dir).ok())
+        .into_iter()
+        .flatten()
+        .filter(|named| !named.found)
+        .map(|named| named.path)
+        .collect();
     Some(Offer {
         chapters,
-        moves_front_matter_of: has_front_matter.then_some(first),
+        moves_front_matter_of: split.is_some().then_some(first),
+        missing,
     })
+}
+
+fn parent_of(file: &str) -> &Path {
+    Path::new(file).parent().unwrap_or(Path::new(""))
 }
 
 /// A path `value` written in a file in `from`, as written from the project's folder. A path that is not relative stays.
@@ -107,24 +146,63 @@ fn from_project(value: &str, from: &Path) -> String {
     parts.iter().collect::<PathBuf>().to_string_lossy().replace('\\', "/")
 }
 
-/// The front matter with the paths it names written from the project's folder, since it moves there from `from`. A
-/// theme's bare name is no path.
-fn rebased(front_matter: &str, from: &Path, manifest: &Path) -> Result<String, String> {
-    if from.as_os_str().is_empty() || front_matter.is_empty() {
-        return Ok(front_matter.to_owned());
+/// A path the front matter names.
+struct Named {
+    key: &'static str,
+    /// As it goes in the manifest, from the project's folder.
+    path: String,
+    found: bool,
+}
+
+/// Where a path written in a file in `from` is, from the project's folder `dir`: from that file's folder, then from the
+/// project's, since a build script may have read it from there, then by name in the folders above the project. With none
+/// of these it stays as written from the file's folder.
+fn located(value: &str, from: &Path, dir: &Path) -> Named {
+    let written = from_project(value, from);
+    let name = Path::new(value)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned());
+    let above = (1..=SEARCH_UP).filter_map(|levels| Some(format!("{}{}", "../".repeat(levels), name.as_deref()?)));
+    let found = [written.clone(), from_project(value, Path::new(""))]
+        .into_iter()
+        .chain(above)
+        .find(|candidate| dir.join(candidate).is_file());
+    Named {
+        key: "",
+        found: found.is_some(),
+        path: found.unwrap_or(written),
     }
-    let settings = details::parse(front_matter, manifest)?;
+}
+
+/// The paths a front matter in a file in `from` names. A theme's bare name is no path.
+fn named_paths(front_matter: &str, from: &Path, dir: &Path) -> Result<Vec<Named>, String> {
+    if front_matter.is_empty() {
+        return Ok(Vec::new());
+    }
+    let settings = details::parse(front_matter, &dir.join(MANIFEST))?;
     let theme = settings.theme.filter(|theme| theme.contains('/'));
-    let mut text = front_matter.to_owned();
-    for (key, value) in [
+    let named = [
         ("bibliography", settings.bibliography),
         ("cover", settings.cover),
         ("theme", theme),
-    ] {
-        if let Some(value) = value {
-            let edit = yaml::set(&text, key, &yaml::scalar(&from_project(&value, from)), &[])?;
-            text = details::applied(&text, &edit);
-        }
+    ];
+    Ok(named
+        .into_iter()
+        .filter_map(|(key, value)| {
+            value.map(|value| Named {
+                key,
+                ..located(&value, from, dir)
+            })
+        })
+        .collect())
+}
+
+/// The front matter with the paths it names written from the project's folder, since it moves there from `from`.
+fn rebased(front_matter: &str, from: &Path, dir: &Path) -> Result<String, String> {
+    let mut text = front_matter.to_owned();
+    for named in named_paths(front_matter, from, dir)? {
+        let edit = yaml::set(&text, named.key, &yaml::scalar(&named.path), &[])?;
+        text = details::applied(&text, &edit);
     }
     Ok(text)
 }
@@ -160,25 +238,19 @@ pub fn make_project(dir: &Path, offer: &Offer) -> Result<(), String> {
         None => None,
     };
     let front_matter = split.as_ref().map_or("", |split| split.yaml);
-    let from = offer
-        .moves_front_matter_of
-        .as_deref()
-        .and_then(|first| Path::new(first).parent());
-    let front_matter = rebased(front_matter, from.unwrap_or(Path::new("")), &manifest_path)?;
+    let from = offer.moves_front_matter_of.as_deref().map_or(Path::new(""), parent_of);
+    let front_matter = rebased(front_matter, from, dir)?;
     let manifest = manifest_text(&front_matter, &offer.chapters, dir)?;
     details::parse(&manifest, &manifest_path)?;
-    let describe = |error: std::io::Error| crate::t!(Key::CannotCreate, path = manifest_path.display(), error = error);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&manifest_path)
-        .map_err(|error| match error.kind() {
-            std::io::ErrorKind::AlreadyExists => {
-                crate::t!(Key::ManifestExists, path = dir.display(), manifest = MANIFEST)
-            }
-            _ => describe(error),
-        })?;
-    file.write_all(manifest.as_bytes()).map_err(describe)?;
+    let written = atomic::write_if(&manifest_path, manifest.as_bytes(), None)
+        .map_err(|error| crate::t!(Key::CannotCreate, path = manifest_path.display(), error = error))?;
+    if written != Outcome::Written {
+        return Err(crate::t!(
+            Key::ManifestExists,
+            path = dir.display(),
+            manifest = MANIFEST
+        ));
+    }
     if let (Some(path), Some(split)) = (&first_path, &split) {
         let body = split.body.trim_start_matches(['\n', '\r']);
         atomic::write(path, body.as_bytes())
@@ -251,12 +323,73 @@ mod tests {
     fn paths_in_the_front_matter_still_name_their_files_from_the_project() {
         let folder = Folder::new("paths");
         let front = "bibliography: ../refs.bib\ncover: images/c.png\ntheme: memoir\n";
+        fs::create_dir_all(folder.0.join("manuscript/images")).expect("folder");
+        folder.write("manuscript/images/c.png", "");
+        folder.write("refs.bib", "");
         folder.write("manuscript/01-a.md", &format!("---\n{front}---\n\n# A\n"));
-        make_project(&folder.0, &offer(&folder.0).expect("has Markdown")).expect("made");
+        let found = offer(&folder.0).expect("has Markdown");
+        assert!(found.missing.is_empty());
+        make_project(&folder.0, &found).expect("made");
         let manifest = fs::read_to_string(folder.0.join(MANIFEST)).expect("written");
         assert!(manifest.contains("bibliography: refs.bib\n"), "{manifest}");
         assert!(manifest.contains("cover: manuscript/images/c.png\n"), "{manifest}");
         assert!(manifest.contains("theme: memoir\n"), "{manifest}");
+    }
+
+    /// The real book: `../literatur.bib` was read from the project's folder by its build script, and stands beside it.
+    #[test]
+    fn a_path_written_from_the_project_still_finds_its_file() {
+        let folder = Folder::new("beside");
+        let project = folder.0.join("book");
+        fs::create_dir_all(project.join(MANUSCRIPT)).expect("folder");
+        folder.write("literatur.bib", "");
+        let front = "title: T\nbibliography: ../literatur.bib\n";
+        folder.write("book/manuscript/01-a.md", &format!("---\n{front}---\n\n# A\n"));
+        let found = offer(&project).expect("has Markdown");
+        assert!(found.missing.is_empty());
+        make_project(&project, &found).expect("made");
+        let manifest = fs::read_to_string(project.join(MANIFEST)).expect("written");
+        assert!(manifest.contains("bibliography: \"../literatur.bib\"\n"), "{manifest}");
+    }
+
+    #[test]
+    fn a_file_named_from_elsewhere_is_found_in_the_folders_above() {
+        let folder = Folder::new("above");
+        let project = folder.0.join("series/book");
+        fs::create_dir_all(project.join(MANUSCRIPT)).expect("folder");
+        folder.write("refs.bib", "");
+        let front = "bibliography: sources/refs.bib\n";
+        folder.write("series/book/manuscript/01-a.md", &format!("---\n{front}---\n\n# A\n"));
+        make_project(&project, &offer(&project).expect("has Markdown")).expect("made");
+        let manifest = fs::read_to_string(project.join(MANIFEST)).expect("written");
+        assert!(manifest.contains("bibliography: \"../../refs.bib\"\n"), "{manifest}");
+    }
+
+    #[test]
+    fn the_offer_says_what_it_cannot_find_before_anything_is_written() {
+        let folder = Folder::new("missing");
+        let front = "bibliography: ../gone.bib\n";
+        folder.write("manuscript/01-a.md", &format!("---\n{front}---\n\n# A\n"));
+        let found = offer(&folder.0).expect("has Markdown");
+        assert_eq!(found.missing, ["gone.bib"]);
+        assert!(found.hint().contains("gone.bib"), "{}", found.hint());
+        assert!(!folder.0.join(MANIFEST).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_leaves_nothing_that_blocks_a_retry() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let folder = Folder::new("retry");
+        folder.write("manuscript/01-a.md", "---\ntitle: T\n---\n\n# A\n");
+        let found = offer(&folder.0).expect("has Markdown");
+        let set_mode = |mode| fs::set_permissions(&folder.0, fs::Permissions::from_mode(mode)).expect("mode");
+        set_mode(0o555);
+        let failed = make_project(&folder.0, &found);
+        set_mode(0o755);
+        assert!(failed.is_err());
+        assert!(!folder.0.join(MANIFEST).exists());
+        make_project(&folder.0, &found).expect("the retry works");
     }
 
     #[test]
@@ -281,6 +414,7 @@ mod tests {
         let found = Offer {
             chapters: vec!["manuscript/01-a.md".to_owned()],
             moves_front_matter_of: Some("manuscript/01-a.md".to_owned()),
+            missing: Vec::new(),
         };
         assert!(make_project(&folder.0, &found).is_err());
         assert!(!folder.0.join(MANIFEST).exists());

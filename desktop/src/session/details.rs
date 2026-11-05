@@ -15,7 +15,17 @@ use crate::source::{Edit, EditKind};
 
 /// Where a new key goes among the keys already written.
 pub(crate) const ORDER: &[&str] = &[
-    "title", "subtitle", "author", "date", "lang", "cover", "theme", "meta", "chapters", "exports",
+    "title",
+    "subtitle",
+    "author",
+    "date",
+    "lang",
+    "cover",
+    "bibliography",
+    "theme",
+    "meta",
+    "chapters",
+    "exports",
 ];
 
 /// The languages the engine sets, as `lang` writes them, with what the panel shows.
@@ -39,6 +49,8 @@ pub struct Details {
     pub language: String,
     /// The cover path as written.
     pub cover: String,
+    /// The bibliography's path as written.
+    pub bibliography: String,
     pub meta: Vec<MetaRow>,
     /// Why the settings cannot be read. They stay as they were until the file is fixed.
     pub problem: Option<String>,
@@ -53,6 +65,7 @@ pub enum Field {
     Date,
     Language,
     Cover,
+    Bibliography,
     Theme,
 }
 
@@ -65,6 +78,7 @@ impl Field {
             Self::Date => "date",
             Self::Language => "lang",
             Self::Cover => "cover",
+            Self::Bibliography => "bibliography",
             Self::Theme => "theme",
         }
     }
@@ -87,6 +101,7 @@ impl Field {
                 .and_then(|lang| lang.as_str().map(str::to_owned))
                 .unwrap_or_default(),
             Self::Cover => settings.cover.clone().unwrap_or_default(),
+            Self::Bibliography => settings.bibliography.clone().unwrap_or_default(),
             Self::Theme => settings.theme.clone().unwrap_or_default(),
         }
     }
@@ -127,6 +142,7 @@ pub(super) fn read(settings: &FrontMatter) -> Details {
         date: Field::Date.read(settings),
         language: Field::Language.read(settings),
         cover: Field::Cover.read(settings),
+        bibliography: Field::Bibliography.read(settings),
         meta: meta.collect(),
         problem: None,
     }
@@ -197,23 +213,33 @@ impl Session {
     /// Sets the cover to an image at `path`, copying it to `assets/` if it is outside a project, so the project stays
     /// whole. A single file refers to it as it is.
     pub fn set_cover(&mut self, path: &Path) -> Result<(), String> {
-        let base = self.base_dir();
-        let inside = path.strip_prefix(&base).ok().map(Path::to_path_buf);
-        let relative = match (inside, &self.kind) {
-            (Some(relative), _) => relative,
-            (None, Kind::Project { .. }) => {
-                let name = path
-                    .file_name()
-                    .ok_or_else(|| crate::t!(Key::NotAFile, path = path.display()))?;
-                let assets = base.join("assets");
-                let describe = |error: std::io::Error| crate::t!(Key::CannotCopy, path = path.display(), error = error);
-                fs::create_dir_all(&assets).map_err(describe)?;
-                fs::copy(path, assets.join(name)).map_err(describe)?;
-                PathBuf::from("assets").join(name)
-            }
-            (None, Kind::Single { .. }) => path.to_path_buf(),
-        };
+        let relative = self.inside_project(path, Path::new("assets"))?;
         self.set_field(Field::Cover, &relative.to_string_lossy())
+    }
+
+    /// Sets the bibliography to a BibTeX file at `path`, copying it into the project's folder if it is outside it.
+    pub fn set_bibliography(&mut self, path: &Path) -> Result<(), String> {
+        let relative = self.inside_project(path, Path::new(""))?;
+        self.set_field(Field::Bibliography, &relative.to_string_lossy())
+    }
+
+    /// `path` as a project's settings name it, relative to the project, after copying a file from outside to `folder`
+    /// there. A single file refers to it as it is.
+    fn inside_project(&self, path: &Path, folder: &Path) -> Result<PathBuf, String> {
+        let base = self.base_dir();
+        if let Ok(relative) = path.strip_prefix(&base) {
+            return Ok(relative.to_path_buf());
+        }
+        if matches!(self.kind, Kind::Single { .. }) {
+            return Ok(path.to_path_buf());
+        }
+        let name = path
+            .file_name()
+            .ok_or_else(|| crate::t!(Key::NotAFile, path = path.display()))?;
+        let describe = |error: std::io::Error| crate::t!(Key::CannotCopy, path = path.display(), error = error);
+        fs::create_dir_all(base.join(folder)).map_err(describe)?;
+        fs::copy(path, base.join(folder).join(name)).map_err(describe)?;
+        Ok(folder.join(name))
     }
 
     /// The cover image as a file, if one is set.

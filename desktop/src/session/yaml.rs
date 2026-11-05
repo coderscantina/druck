@@ -8,6 +8,8 @@ use std::ops::Range;
 
 use crate::source::Edit;
 
+use super::strings::Key;
+
 /// One `key: value` of a mapping: the key's line and whatever belongs to its value below it.
 pub(crate) struct Entry {
     pub(crate) key: String,
@@ -40,15 +42,15 @@ pub(crate) fn entries(text: &str, range: Range<usize>, indent: usize) -> Result<
         if continues {
             match found.last_mut() {
                 Some(entry) => entry.end = at,
-                None => return Err(format!("cannot read this YAML line: {trimmed}")),
+                None => return Err(crate::t!(Key::CannotReadYaml, line = trimmed)),
             }
             continue;
         }
         if width < indent {
-            return Err(format!("cannot read this YAML line: {trimmed}"));
+            return Err(crate::t!(Key::CannotReadYaml, line = trimmed));
         }
         let Some((key, colon)) = split_key(&line[width..]) else {
-            return Err(format!("cannot read this YAML line: {trimmed}"));
+            return Err(crate::t!(Key::CannotReadYaml, line = trimmed));
         };
         found.push(Entry {
             key,

@@ -4,6 +4,8 @@ crate::strings! {
     pub enum Key {
         NoPagesYet => ("No pages yet", "Noch keine Seiten"),
         NoPages => ("No pages", "Keine Seiten"),
+        OpenDetails => ("Book details", "Buchdaten"),
+        OpenProof => ("Proof", "Korrektur"),
         PageOf => ("Page {page} of {pages}", "Seite {page} von {pages}"),
         PagesOf => ("Pages {first}\u{2013}{last} of {pages}", "Seiten {first}\u{2013}{last} von {pages}"),
         PageCount => ("{pages} pages", "{pages} Seiten"),
