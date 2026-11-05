@@ -33,41 +33,6 @@ pub struct GalleyStyle {
     pub error: Hsla,
 }
 
-/// The type before a layout has read the theme, and for a theme that does not lay out.
-fn stand_in() -> BookType {
-    let face = |size: f32, weight: u16, line_height: f32, before: f32, after: f32| Face {
-        family: "Georgia".to_owned(),
-        size,
-        weight,
-        italic: false,
-        line_height,
-        space_before: before,
-        space_after: after,
-        first_line_indent: 0.,
-    };
-    let body = face(10.7, 400, 1.45, 0., 7.5);
-    BookType {
-        headings: [
-            face(18.2, 700, 1.25, 18., 8.),
-            face(14.4, 700, 1.25, 14., 6.),
-            face(12.3, 700, 1.25, 12., 5.),
-            face(10.7, 700, 1.25, 10., 5.),
-            face(10.7, 700, 1.25, 10., 5.),
-            face(10.7, 700, 1.25, 10., 5.),
-        ],
-        quote: body.clone(),
-        list: body.clone(),
-        footnote: face(9.3, 400, 1.45, 0., 3.),
-        code: Face {
-            family: tokens::FONT_MONO.to_owned(),
-            ..face(8.6, 400, 1.4, 0., 7.5)
-        },
-        measure: 330.,
-        files: Vec::new(),
-        body,
-    }
-}
-
 fn font_of(face: &Face) -> Font {
     Font {
         weight: FontWeight(f32::from(face.weight)),
@@ -82,7 +47,7 @@ fn font_of(face: &Face) -> Font {
 
 impl GalleyStyle {
     pub fn new(tokens: &Tokens) -> Self {
-        let book = stand_in();
+        let book = tokens::stand_in_type();
         let mut style = Self {
             zoom: 1.,
             body: font_of(&book.body),
@@ -175,14 +140,14 @@ impl GalleyStyle {
                 ..font(tokens::FONT_MONO)
             },
             size: self.body_size * tokens::SOURCE_SCALE,
-            leading: 1.5,
+            leading: tokens::SOURCE_LEADING,
             color,
         }
     }
 
     /// The width of a word's worth of body text per character, for estimating blocks not yet shaped.
     fn estimated_char_width(&self) -> Pixels {
-        self.body_size * 0.47
+        self.body_size * tokens::CHAR_WIDTH
     }
 
     /// The room between two blocks: the larger of what the upper leaves below it and the lower wants above it. Paragraphs
@@ -193,7 +158,7 @@ impl GalleyStyle {
         let gap = after.max(before);
         let runs_together = gap == 0. && self.indent_of(lower) == px(0.);
         if runs_together {
-            self.body_size * 0.7
+            self.body_size * tokens::PARAGRAPH_GAP
         } else {
             px(gap * self.scale())
         }
@@ -275,7 +240,7 @@ impl GalleyStyle {
     /// A height for a block not yet shaped. Close enough for scrolling, corrected when it comes into view.
     pub fn estimate_height(&self, kind: BlockKind, text: &str, width: Pixels, source: bool) -> Pixels {
         if kind == BlockKind::Blank && !source {
-            return (self.body_size * 0.7)
+            return (self.body_size * tokens::PARAGRAPH_GAP)
                 .max(self.body_size * self.leading * (text.matches('\n').count() as f32 - 1.));
         }
         let style = if source {

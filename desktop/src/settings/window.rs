@@ -164,7 +164,7 @@ pub fn open(category: Option<&str>, cx: &mut App) {
         titlebar: Some(TitlebarOptions {
             title: Some(crate::t!(Key::Title).into()),
             appears_transparent: true,
-            traffic_light_position: Some(point(px(9.), px(7.))),
+            traffic_light_position: Some(point(px(tokens::TRAFFIC_LIGHTS.0), px(tokens::TRAFFIC_LIGHTS.1))),
         }),
         focus: !measuring,
         kind: if measuring {
@@ -310,7 +310,7 @@ impl SettingsWindow {
             .relative()
             .w(tokens::SWITCH_WIDTH)
             .h(tokens::SWITCH_HEIGHT)
-            .rounded(px(4.))
+            .rounded(tokens::SWITCH_RADIUS)
             .cursor_pointer()
             .bg(if on { tokens.accent } else { tokens.raised })
             .on_click(cx.listener(move |_, _, _, cx| change(cx, |settings| set(settings, !on))))
@@ -321,7 +321,7 @@ impl SettingsWindow {
                     .when(on, |knob| knob.right(inset))
                     .when(!on, |knob| knob.left(inset))
                     .size(tokens::SWITCH_KNOB)
-                    .rounded(px(3.))
+                    .rounded(tokens::SWITCH_KNOB_RADIUS)
                     .bg(gpui::white()),
             )
     }
@@ -338,7 +338,7 @@ impl SettingsWindow {
                 .toggle(tokens, hex(color), on)
                 .flex_none()
                 .size(tokens::SETTINGS_SWATCH)
-                .rounded(px(4.))
+                .rounded(tokens::SETTINGS_SWATCH_RADIUS)
                 .bg(rgb(shown))
                 .cursor_pointer()
                 .when(on, |swatch| swatch.border_2().border_color(tokens.text))
@@ -354,7 +354,7 @@ impl SettingsWindow {
                 div()
                     .flex()
                     .items_center()
-                    .gap(tokens::SPACE_1 + px(1.))
+                    .gap(tokens::SETTINGS_SWATCH_GAP)
                     .children(swatches)
                     .child(
                         div()
@@ -452,7 +452,7 @@ impl SettingsWindow {
             .flex()
             .items_center()
             .gap(tokens::SPACE_4)
-            .py(tokens::SPACE_2 + px(2.))
+            .py(tokens::SETTINGS_ROW_PADDING)
             .border_t_1()
             .border_color(tokens.divider)
             .child(

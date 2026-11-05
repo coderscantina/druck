@@ -4,6 +4,8 @@
 use clap::ValueEnum;
 use gpui::{App, Global, Pixels, Rgba, WindowAppearance, px, rgb};
 
+use crate::preview::job::{BookType, Face};
+
 pub const FONT_UI: &str = ".SystemUIFont";
 /// For code and diffs.
 pub const FONT_MONO: &str = "Menlo";
@@ -68,10 +70,17 @@ pub const TEXT_MIN_WIDTH: Pixels = px(200.);
 pub const NOTE_WIDTH: Pixels = px(220.);
 pub const NOTE_GAP: Pixels = px(28.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
+pub const NOTE_TEXT: Pixels = px(12.);
+pub const NOTE_RULE: Pixels = px(1.);
 /// The caret's width in the text.
 pub const CARET_WIDTH: Pixels = px(1.5);
-/// A line of the source view, and a code block, against the body size.
+/// A line of the source view against the body size, and its line height.
 pub const SOURCE_SCALE: f32 = 0.85;
+pub const SOURCE_LEADING: f32 = 1.5;
+/// A character's width against the body size, for estimating what is not shaped yet and for a line length in characters.
+pub const CHAR_WIDTH: f32 = 0.47;
+/// The room kept between paragraphs a theme neither spaces nor indents, against the body size.
+pub const PARAGRAPH_GAP: f32 = 0.7;
 /// Logical pixels per point of a theme's sizes at 100 percent zoom. Write is for reading on screen, larger than the page.
 pub const POINT: f32 = 1.4;
 /// How other paragraphs show when they are dimmed.
@@ -97,13 +106,57 @@ pub const PALETTE_MAX_ROWS: usize = 12;
 pub const SETTINGS_WINDOW: (f32, f32) = (860., 620.);
 pub const SETTINGS_NAV_WIDTH: Pixels = px(190.);
 pub const SETTINGS_SWATCH: Pixels = px(17.);
+pub const SETTINGS_SWATCH_RADIUS: Pixels = px(4.);
+pub const SETTINGS_SWATCH_GAP: Pixels = px(5.);
+pub const SETTINGS_ROW_PADDING: Pixels = px(10.);
 pub const SETTINGS_HEX_WIDTH: Pixels = px(78.);
 pub const SWITCH_WIDTH: Pixels = px(30.);
 pub const SWITCH_HEIGHT: Pixels = px(17.);
 pub const SWITCH_KNOB: Pixels = px(13.);
+pub const SWITCH_RADIUS: Pixels = px(4.);
+pub const SWITCH_KNOB_RADIUS: Pixels = px(3.);
+/// Where the window controls stand in a window with its own title bar.
+pub const TRAFFIC_LIGHTS: (f32, f32) = (9., 7.);
+/// The thin line around a page in Publish, which a white page on a light surface needs.
+pub const PAGE_EDGE: Pixels = px(1.);
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;
+
+/// The text's type before a layout has read the theme, and for a theme that does not lay out.
+pub fn stand_in_type() -> BookType {
+    let face = |size: f32, weight: u16, line_height: f32, before: f32, after: f32| Face {
+        family: "Georgia".to_owned(),
+        size,
+        weight,
+        italic: false,
+        line_height,
+        space_before: before,
+        space_after: after,
+        first_line_indent: 0.,
+    };
+    let body = face(10.7, 400, 1.45, 0., 7.5);
+    BookType {
+        headings: [
+            face(18.2, 700, 1.25, 18., 8.),
+            face(14.4, 700, 1.25, 14., 6.),
+            face(12.3, 700, 1.25, 12., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+        ],
+        quote: body.clone(),
+        list: body.clone(),
+        footnote: face(9.3, 400, 1.45, 0., 3.),
+        code: Face {
+            family: FONT_MONO.to_owned(),
+            ..face(8.6, 400, 1.4, 0., 7.5)
+        },
+        measure: 330.,
+        files: Vec::new(),
+        body,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Scheme {

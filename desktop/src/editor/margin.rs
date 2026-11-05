@@ -92,7 +92,7 @@ impl Render for MarginNotes {
 
 /// The width text wraps at in the margin.
 fn text_width() -> Pixels {
-    tokens::NOTE_WIDTH - tokens::SPACE_2 - px(1.)
+    tokens::NOTE_WIDTH - tokens::SPACE_2 - tokens::NOTE_RULE
 }
 
 /// One note, edited in place. Offsets are into the note's shown text.
@@ -309,7 +309,7 @@ impl Render for NoteField {
         let shared: SharedString = text.clone().into();
         let shaped = window
             .text_system()
-            .shape_text(shared, tokens::TEXT_SMALL + px(1.), &[run], Some(text_width()), None)
+            .shape_text(shared, tokens::NOTE_TEXT, &[run], Some(text_width()), None)
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         self.lines = Rc::new(shaped);

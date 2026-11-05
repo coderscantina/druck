@@ -107,7 +107,7 @@ pub fn open(
         titlebar: Some(TitlebarOptions {
             title: Some("Druck".into()),
             appears_transparent: true,
-            traffic_light_position: Some(point(px(9.), px(7.))),
+            traffic_light_position: Some(point(px(tokens::TRAFFIC_LIGHTS.0), px(tokens::TRAFFIC_LIGHTS.1))),
         }),
         focus: !measuring,
         // An inactive window is held to 30 frames a second. A focused one, which is what is being measured, is not.
