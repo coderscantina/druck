@@ -4,8 +4,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Anchor, Context, Entity, Focusable, MouseButton, PromptLevel, SharedString, Subscription, Window, anchored,
-    deferred, div,
+    Anchor, Context, Entity, Focusable, Hsla, MouseButton, PromptLevel, ScrollHandle, SharedString, Subscription,
+    Window, anchored, deferred, div, linear_color_stop, linear_gradient,
 };
 
 use super::input::{Submitted, TextInput};
@@ -33,6 +33,8 @@ pub struct ThemePicker {
     expanded: Option<String>,
     naming: Option<(Naming, Entity<TextInput>)>,
     error: Option<String>,
+    /// The menu's list, which fades at its foot while more is below.
+    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -54,6 +56,7 @@ impl ThemePicker {
             model,
             open: false,
             expanded: None,
+            scroll: ScrollHandle::new(),
             naming: None,
             error: None,
             _subscriptions: subscriptions,
@@ -265,7 +268,7 @@ impl ThemePicker {
                 .pb(tokens::SPACE_1)
                 .text_size(tokens::TEXT_SMALL)
                 .text_color(tokens.text_faint)
-                .child(crate::t!(text).to_uppercase())
+                .child(crate::t!(text))
         };
         let mut rows: Vec<gpui::AnyElement> = Vec::new();
         let default_active = current.is_none();
@@ -316,23 +319,52 @@ impl ThemePicker {
                     .into_any_element(),
             );
         }
+        let more_below = {
+            let (offset, most) = (self.scroll.offset().y, self.scroll.max_offset().y);
+            most > tokens::HAIRLINE && -offset < most
+        };
+        let (clear, solid) = (
+            Hsla::from(tokens.panel).opacity(tokens::CLEAR),
+            Hsla::from(tokens.panel),
+        );
         div()
-            .id("theme-menu")
-            .occlude()
-            .w(tokens::DIALOG_WIDTH * 0.7)
-            .max_h(tokens::DIALOG_LIST_HEIGHT)
-            .overflow_y_scroll()
+            .relative()
+            .w(tokens::INSPECTOR_WIDTH)
             .mt(tokens::SPACE_1)
-            .py(tokens::SPACE_1)
             .bg(tokens.panel)
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
             .shadow_lg()
+            .overflow_hidden()
             .text_size(tokens::TEXT_BODY)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down_out(cx.listener(|picker, _, _, cx| picker.close(cx)))
-            .children(rows)
+            .child(
+                div()
+                    .id("theme-menu")
+                    .occlude()
+                    .max_h(tokens::DIALOG_LIST_HEIGHT)
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .py(tokens::SPACE_1)
+                    .children(rows),
+            )
+            .when(more_below, |menu| {
+                menu.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(tokens::VERSIONS_ROW_HEIGHT)
+                        .bg(linear_gradient(
+                            tokens::FADE_DOWN,
+                            linear_color_stop(clear, 0.),
+                            linear_color_stop(solid, 1.),
+                        )),
+                )
+            })
     }
 }
 
@@ -396,9 +428,9 @@ impl Render for ThemePicker {
                     .child(crate::t!(Key::Specimen)),
             )
             .when(self.open, |bar| {
-                // The menu hangs from the bottom edge of the buttons, its right edge under theirs.
-                bar.child(div().absolute().top_full().right_0().child(deferred(
-                    anchored().anchor(Anchor::TopRight).child(self.menu(&tokens, cx)),
+                // The menu hangs from the bar across the panel's width, so nothing of the index shows beside it.
+                bar.child(div().absolute().top_full().left_0().child(deferred(
+                    anchored().anchor(Anchor::TopLeft).child(self.menu(&tokens, cx)),
                 )))
             })
     }
