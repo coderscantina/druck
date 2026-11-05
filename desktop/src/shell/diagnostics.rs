@@ -4,7 +4,7 @@
 use gpui::prelude::*;
 use gpui::{Context, EventEmitter, FontWeight, ScrollHandle, SharedString, Window, div};
 
-use super::report::{Entry, Kind, Report};
+use super::report::{Counts, Entry, Kind, Report};
 use super::text::Key;
 use super::ui;
 use crate::a11y::Control as _;
@@ -150,16 +150,24 @@ impl DiagnosticsPanel {
     }
 }
 
+/// The counts above the list, leaving out what there is none of. `None` when there is nothing at all.
+fn summary(counts: Counts) -> Option<String> {
+    let parts: Vec<String> = [
+        (counts.errors, Key::SummaryErrors),
+        (counts.warnings, Key::SummaryWarnings),
+        (counts.todos, Key::SummaryTodos),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, key)| crate::t!(key, count = count))
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
 impl Render for DiagnosticsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
-        let counts = self.counts;
-        let summary = crate::t!(
-            Key::Summary,
-            errors = counts.errors,
-            warnings = counts.warnings,
-            todos = counts.todos
-        );
+        let summary = summary(self.counts);
         let rows: Vec<_> = (0..self.items.len()).map(|at| self.row(at, &tokens, cx)).collect();
         div()
             .id("diagnostics")
@@ -168,17 +176,19 @@ impl Render for DiagnosticsPanel {
             .flex()
             .flex_col()
             .child(ui::section_label(&tokens, crate::t!(Key::DiagnosticsTitle)))
-            .child(
-                div()
-                    .flex_none()
-                    .px(tokens::SPACE_3)
-                    .py(tokens::SPACE_2)
-                    .border_b_1()
-                    .border_color(tokens.divider)
-                    .text_size(tokens::TEXT_SMALL)
-                    .text_color(tokens.text_quiet)
-                    .child(summary),
-            )
+            .when_some(summary, |panel, summary| {
+                panel.child(
+                    div()
+                        .flex_none()
+                        .px(tokens::SPACE_3)
+                        .py(tokens::SPACE_2)
+                        .border_b_1()
+                        .border_color(tokens.divider)
+                        .text_size(tokens::TEXT_SMALL)
+                        .text_color(tokens.text_quiet)
+                        .child(summary),
+                )
+            })
             .when_some(self.notice.clone(), |panel, notice| {
                 panel.child(
                     div()
@@ -222,5 +232,25 @@ impl Render for DiagnosticsPanel {
                     .children(rows)
                     .into_any_element()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell::strings::{LANGUAGE_TEST, Language, set_language};
+
+    #[test]
+    fn the_summary_leaves_out_what_there_is_none_of() {
+        let _guard = LANGUAGE_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_language(Language::English);
+        let counts = |errors, warnings, todos| Counts {
+            errors,
+            warnings,
+            todos,
+        };
+        assert_eq!(summary(counts(0, 3, 0)).as_deref(), Some("Warnings 3"));
+        assert_eq!(summary(counts(1, 0, 2)).as_deref(), Some("Errors 1 \u{b7} Open 2"));
+        assert_eq!(summary(counts(0, 0, 0)), None);
     }
 }

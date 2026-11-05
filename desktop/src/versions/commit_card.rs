@@ -324,7 +324,9 @@ impl CommitCard {
             })
             .child(
                 ui::button(tokens, "card-commit", crate::t!(Key::Commit))
-                    .text_color(tokens.accent)
+                    .when(overview.has_something_to_commit(), |button| {
+                        button.text_color(tokens.accent)
+                    })
                     .on_click(cx.listener(|card, _, window, cx| card.commit(false, window, cx))),
             );
         parts.push(row.into_any_element());

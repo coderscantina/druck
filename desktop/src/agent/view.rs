@@ -549,7 +549,7 @@ impl AgentView {
                         .into_any_element()
                 } else {
                     small_button("agent-send", crate::t!(Key::Send).to_owned(), tokens)
-                        .text_color(tokens.accent)
+                        .when(self.can_send, |button| button.text_color(tokens.accent))
                         .on_click(cx.listener(|view, _, window, cx| view.send(window, cx)))
                         .into_any_element()
                 }))

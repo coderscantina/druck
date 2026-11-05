@@ -349,7 +349,7 @@ impl ExportPanel {
         let busy = self.is_running();
         let first = self.first_runner().as_deref() == Some(id.as_str());
         ui::button(tokens, SharedString::from(format!("run-{id}")), label)
-            .text_color(tokens.accent)
+            .when(!busy, |button| button.text_color(tokens.accent))
             .when(first, |button| button.track_focus(&self.first_run))
             .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY).cursor_default())
             .when(!busy, |button| {

@@ -112,10 +112,9 @@ crate::strings! {
 
         // Proof
         DiagnosticsTitle => ("PROOF", "KORREKTUR"),
-        Summary => (
-            "Errors {errors} \u{b7} Warnings {warnings} \u{b7} Open {todos}",
-            "Fehler {errors} \u{b7} Warnungen {warnings} \u{b7} Offen {todos}"
-        ),
+        SummaryErrors => ("Errors {count}", "Fehler {count}"),
+        SummaryWarnings => ("Warnings {count}", "Warnungen {count}"),
+        SummaryTodos => ("Open {count}", "Offen {count}"),
         NothingToReport => (
             "Nothing to report. The pages are set without problems.",
             "Nichts zu melden. Die Seiten sind ohne Probleme gesetzt."

@@ -454,7 +454,9 @@ impl Render for GitPanel {
                 })
                 .child(
                     ui::button(&tokens, "git-commit", crate::t!(Key::Commit))
-                        .text_color(tokens.accent)
+                        .when(overview.has_something_to_commit(), |button| {
+                            button.text_color(tokens.accent)
+                        })
                         .on_click(cx.listener(|panel, _, window, cx| panel.commit(false, window, cx))),
                 ),
         )

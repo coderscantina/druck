@@ -205,6 +205,8 @@ pub struct AgentView {
     chat_open: bool,
     /// The prompt at the selection.
     selection_prompt: Entity<prompt::PromptInput>,
+    /// The chat prompt holds words to send, which puts Send in the accent.
+    can_send: bool,
     selection_card: Option<Entity<card::SelectionCard>>,
     editor: Entity<EditorView>,
     preview: Entity<PreviewView>,
@@ -292,6 +294,13 @@ impl AgentView {
             cx.subscribe_in(&prompt, window, |view, _, _: &prompt::Dismissed, window, cx| {
                 view.close_chat(window, cx);
             }),
+            cx.observe(&prompt, |view, prompt, cx| {
+                let can_send = !prompt.read(cx).text().trim().is_empty();
+                if can_send != view.can_send {
+                    view.can_send = can_send;
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(
                 &selection_prompt,
                 window,
@@ -356,6 +365,7 @@ impl AgentView {
             enabled: settings::get(cx).agent,
             chat_open: false,
             selection_prompt,
+            can_send: false,
             selection_card: None,
             editor: parts.editor.clone(),
             preview: parts.preview.clone(),

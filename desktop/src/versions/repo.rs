@@ -154,6 +154,11 @@ pub struct Overview {
 }
 
 impl Overview {
+    /// Whether a commit would record anything: a change, or a merge to finish. Commit is in the accent only then.
+    pub fn has_something_to_commit(&self) -> bool {
+        !self.changes.is_empty() || self.merging.is_some()
+    }
+
     /// The changes a list shows: a file that moved shows once, where it went.
     pub fn listed(&self) -> impl Iterator<Item = &Change> {
         (self.changes.iter()).filter(|change| change.kind != ChangeKind::MovedAway)
