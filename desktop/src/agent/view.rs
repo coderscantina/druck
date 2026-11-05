@@ -357,7 +357,12 @@ impl AgentView {
         };
         let mut files = Vec::new();
         for file in &changes.files {
-            let path = super::relative(&self.base, &file.path);
+            // A chapter goes by its title, as the text names it, and anything else by its path.
+            let session = self.editor.read(cx).session();
+            let path = file.chapter.filter(|&chapter| session.chapter(chapter).is_some()).map_or_else(
+                || super::relative(&self.base, &file.path),
+                |chapter| session.title_of(chapter),
+            );
             let hunks: Vec<_> = file
                 .hunks
                 .iter()
@@ -421,8 +426,10 @@ impl AgentView {
             Standing::Moved => Some(crate::t!(Key::HunkMoved)),
             Standing::NotOpen => Some(crate::t!(Key::HunkNotOpen)),
         };
-        let shown: Vec<_> = hunk
-            .lines
+        // Prose changes inside a line, which two whole lines show as the same text: a chapter's row counts lines, and Show
+        // goes to the words in the text.
+        let lines = if can_show { &[][..] } else { &hunk.lines[..] };
+        let shown: Vec<_> = lines
             .iter()
             .filter(|line| line.mark != Mark::Context)
             .take(4)
