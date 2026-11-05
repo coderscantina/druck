@@ -1,11 +1,12 @@
 //! Three-way merge of two versions of a text against what they started from. Holds no gpui types.
 //!
-//! The merge works on lines. Where both sides changed the same lines it tries again on words, so two edits in one
-//! paragraph merge if they do not touch the same words. Edits on adjacent lines do not overlap. What overlaps stays
-//! as a [`Chunk::Conflict`] of whole lines, for the person to decide.
+//! The merge works on lines. Where both sides changed the same lines it tries again on sentences, so two edits in one
+//! paragraph merge if they do not touch the same sentence. Edits on adjacent lines do not overlap. What overlaps stays
+//! as a [`Chunk::Conflict`] of whole lines, for the person to decide. Two edits in one sentence are never blended,
+//! since that can make a sentence neither side wrote.
 //!
-//! [`git_conflict`] is the same merge by Git's rule, for a file Git reported as conflicting: lines only, and lines next to
-//! each other do overlap, so a place Git would not merge is never merged here by words.
+//! [`git_conflict`] is the same merge by Git's rule, for a file Git reported as conflicting: lines only, and lines next
+//! to each other do overlap, so a place Git would not merge is never merged here by sentences.
 
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -110,7 +111,7 @@ fn push_line(text: &mut String, line: &str) {
 pub fn three_way(base: &str, mine: &str, theirs: &str) -> Merged {
     let mut merged = Merged::default();
     let rules = Rules {
-        by_words: true,
+        by_sentences: true,
         touching_overlaps: false,
     };
     merge_tokens(&lines(base), &lines(mine), &lines(theirs), rules, &mut merged);
@@ -122,7 +123,7 @@ pub fn three_way(base: &str, mine: &str, theirs: &str) -> Merged {
 pub fn git_conflict(base: &str, mine: &str, theirs: &str) -> Merged {
     let mut merged = Merged::default();
     let rules = Rules {
-        by_words: false,
+        by_sentences: false,
         touching_overlaps: true,
     };
     merge_tokens(&lines(base), &lines(mine), &lines(theirs), rules, &mut merged);
@@ -138,8 +139,8 @@ pub fn git_conflict(base: &str, mine: &str, theirs: &str) -> Merged {
 /// What counts as an overlap in a merge.
 #[derive(Clone, Copy)]
 struct Rules {
-    /// Lines both sides changed get a second try, word by word.
-    by_words: bool,
+    /// Lines both sides changed get a second try, sentence by sentence.
+    by_sentences: bool,
     /// Changes with nothing unchanged between them meet.
     touching_overlaps: bool,
 }
@@ -150,6 +151,17 @@ fn lines(text: &str) -> Vec<&str> {
 
 fn words(text: &str) -> Vec<&str> {
     text.split_word_bounds().collect()
+}
+
+/// UAX #29 sentences, each without the white space after it, which is a token of its own. So a sentence added after
+/// the last one of a line does not change that one, and another edit to it still merges.
+fn sentences(text: &str) -> Vec<&str> {
+    text.split_sentence_bounds()
+        .flat_map(|sentence| {
+            let (body, space) = sentence.split_at(sentence.trim_end().len());
+            [body, space].into_iter().filter(|token| !token.is_empty())
+        })
+        .collect()
 }
 
 /// A run of changed tokens: `base` was replaced by `other`.
@@ -284,16 +296,23 @@ fn side<'a, 'b>(tokens: &'a [&'b str], hunks: &[Hunk], start: usize, end: usize)
     Some(&tokens[from..to])
 }
 
-/// Both sides changed these tokens differently. Tries the same merge on words, and otherwise keeps both as a conflict.
+/// Both sides changed these tokens differently. Tries the same merge on sentences, and otherwise keeps both as a
+/// conflict.
 fn settle(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, merged: &mut Merged) {
     let (base, mine, theirs) = (base.concat(), mine.concat(), theirs.concat());
-    if rules.by_words {
+    if rules.by_sentences {
         let inner_rules = Rules {
-            by_words: false,
+            by_sentences: false,
             ..rules
         };
         let mut inner = Merged::default();
-        merge_tokens(&words(&base), &words(&mine), &words(&theirs), inner_rules, &mut inner);
+        merge_tokens(
+            &sentences(&base),
+            &sentences(&mine),
+            &sentences(&theirs),
+            inner_rules,
+            &mut inner,
+        );
         if inner.is_clean() {
             for chunk in inner.chunks {
                 if let Chunk::Clean(text) = chunk {
@@ -432,16 +451,42 @@ mod tests {
     }
 
     #[test]
-    fn the_same_line_merges_when_the_words_differ() {
-        let base = "The quick brown fox jumps over the lazy dog.\n";
+    fn different_sentences_of_one_line_merge() {
+        let base = "The quick fox jumps. The dog sleeps. It is late.\n";
         assert_eq!(
             clean(
                 base,
-                "The slow brown fox jumps over the lazy dog.\n",
-                "The quick brown fox jumps over the sleepy dog.\n"
+                "The slow fox jumps. The dog sleeps. It is late.\n",
+                "The quick fox jumps. The dog sleeps. It is very late.\n"
             ),
-            "The slow brown fox jumps over the sleepy dog.\n"
+            "The slow fox jumps. The dog sleeps. It is very late.\n"
         );
+    }
+
+    #[test]
+    fn a_sentence_added_after_one_the_other_side_edited_merges() {
+        assert_eq!(
+            clean("Foo. Bar.\n", "Foo. Bar. Baz.\n", "Foo. Bars.\n"),
+            "Foo. Bars. Baz.\n"
+        );
+    }
+
+    /// What an outside change once did to the real book's sentence: "gar nur Leere.", which neither side wrote.
+    #[test]
+    fn different_words_of_one_sentence_conflict_on_the_whole_line() {
+        let (base, mine, theirs) = (
+            "Er sah. Da war nichts.\n",
+            "Er sah. Da war nur Leere.\n",
+            "Er sah. Da war gar nichts.\n",
+        );
+        let merged = three_way(base, mine, theirs);
+        assert_eq!(merged.first_conflict(), Some((mine, theirs)));
+        let merged = three_way(
+            "The quick brown fox jumps over the lazy dog.\n",
+            "The slow brown fox jumps over the lazy dog.\n",
+            "The quick brown fox jumps over the sleepy dog.\n",
+        );
+        assert!(!merged.is_clean());
     }
 
     #[test]
@@ -456,10 +501,14 @@ mod tests {
         assert_eq!(merged.text(Choice::Theirs), "Before.\nThe sly fox.\nAfter.\n");
     }
 
-    /// What a Git merge once did to the real book's sentence. Outside changes still merge this way, see the decision.
+    /// Git reported a conflict, so even different sentences of one line stay one.
     #[test]
-    fn git_s_conflict_is_never_merged_by_words() {
-        let (base, mine, theirs) = ("Da war nichts.\n", "Da war nur Leere.\n", "Da war gar nichts.\n");
+    fn git_s_conflict_is_never_merged_by_sentences() {
+        let (base, mine, theirs) = (
+            "Er sah. Da war es.\n",
+            "Er sah nichts. Da war es.\n",
+            "Er sah. Da war er.\n",
+        );
         assert!(three_way(base, mine, theirs).is_clean());
         let merged = git_conflict(base, mine, theirs);
         assert_eq!(merged.first_conflict(), Some((mine, theirs)));
@@ -528,11 +577,11 @@ mod tests {
         );
         assert_eq!(
             clean(
-                "Größe und Maß hier.\n",
-                "Größte und Maß hier.\n",
-                "Größe und Maß dort.\n"
+                "Größe und Maß. Überall hier.\n",
+                "Größte und Maß. Überall hier.\n",
+                "Größe und Maß. Überall dort.\n"
             ),
-            "Größte und Maß dort.\n"
+            "Größte und Maß. Überall dort.\n"
         );
     }
 
@@ -598,13 +647,13 @@ mod tests {
     }
 
     #[test]
-    fn a_write_from_an_older_read_keeps_words_typed_in_its_own_paragraph() {
-        let old = "One two three.\n";
-        let saved = "One two three four.\n";
-        let theirs = "One TWO three.\n";
+    fn a_write_from_an_older_read_keeps_a_sentence_typed_in_its_own_paragraph() {
+        let old = "One two three. Four.\n";
+        let saved = "One two three. Four five.\n";
+        let theirs = "One TWO three. Four.\n";
         let earlier = [old];
         let start = starting_point(saved, &earlier, theirs);
-        assert_eq!(clean(start, saved, theirs), "One TWO three four.\n");
+        assert_eq!(clean(start, saved, theirs), "One TWO three. Four five.\n");
     }
 
     #[test]

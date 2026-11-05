@@ -4,7 +4,8 @@
 //! A file on disk is compared by content with the last text the session and the file agreed on. If it differs, someone
 //! else wrote it, and:
 //! - a buffer with nothing unsaved takes the new text, as one undo step;
-//! - a buffer with unsaved text merges, line by line and then word by word, and stays unsaved until the merge is written;
+//! - a buffer with unsaved text merges, line by line and then sentence by sentence, and stays unsaved until the merge is
+//!   written;
 //! - where both changed the same text, a person decides. Until then the buffer keeps its text and the file keeps its
 //!   text, and nothing is written over it.
 
@@ -121,7 +122,7 @@ struct Pending {
     base: Arc<str>,
     /// `None`: the file was deleted.
     theirs: Option<Arc<str>>,
-    /// Git reported this as a conflict, so nothing here merges by words and only a person settles it.
+    /// Git reported this as a conflict, so nothing here merges by sentences and only a person settles it.
     from_git: bool,
 }
 
@@ -242,7 +243,7 @@ impl FileSync {
     }
 
     /// Takes in one file Git stopped on, which the disk has `theirs` of now: it starts over from the merge's `base` and goes
-    /// to a person. Git said both sides overlap, so nothing tries to merge it by words.
+    /// to a person. Git said both sides overlap, so nothing tries to merge it by sentences.
     pub fn take_git_conflict(
         &mut self,
         session: &mut Session,

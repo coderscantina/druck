@@ -305,8 +305,8 @@ impl PersistView {
     }
 
     /// Takes in one file of a Git merge that overlapped. The file gets their text, the buffer keeps ours, and the conflict
-    /// goes to the line at the window's foot. Git reported it, so it does not merge by words. The view goes to the passage,
-    /// since the author asked for this merge and is looking at it.
+    /// goes to the line at the window's foot. Git reported it, so it does not merge by sentences. The view goes to the
+    /// passage, since the author asked for this merge and is looking at it.
     pub fn take_merge(
         &mut self,
         path: &Path,

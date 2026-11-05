@@ -1042,6 +1042,29 @@ mod tests {
         ));
     }
 
+    /// The author adds a sentence to a line while the agent rewrites the sentence before it: both stay, and the agent's
+    /// words are still a passage to review.
+    #[test]
+    fn an_agent_change_beside_the_authors_sentence_merges_and_stays_in_review() {
+        let folder = Folder::new("sentence");
+        let mut session = Session::open(&folder.0).expect("opens");
+        let id = session.book()[0];
+        let at = session.buffer(id).text().find("Second paragraph.").expect("text") + "Second paragraph.".len();
+        session
+            .edit_chapter(id, vec![Edit::new(at..at, " Typed by the author.")], EditKind::Typing)
+            .expect("edit");
+        let mut turn = TurnChanges::default();
+        let theirs = CHAPTER.replace("Second paragraph.", "Second paragraph, rewritten.");
+        let kind = agent_writes(&mut session, &folder.chapter(), &theirs, &mut turn);
+        assert_eq!(kind, ChangeKind::Merged);
+        let expected = CHAPTER.replace("Second paragraph.", "Second paragraph, rewritten. Typed by the author.");
+        assert_eq!(session.buffer(id).text(), expected);
+        assert!(matches!(
+            turn.files[0].hunks[0].presence(session.buffer(id).text()),
+            Presence::Applied(_)
+        ));
+    }
+
     #[test]
     fn a_hunk_on_lines_the_author_edited_is_left_alone() {
         let folder = Folder::new("overlap");

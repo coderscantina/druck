@@ -766,14 +766,16 @@ fn a_git_merge_that_overlaps_holds_both_sides_until_a_choice() {
     assert_eq!(fixture.kept().len(), 1);
 }
 
+/// An outside change merges with the author's unsaved edit in another sentence of the same line, and asks in the same
+/// one.
 #[test]
-fn a_git_merge_that_overlaps_by_line_only_merges_by_word() {
+fn an_outside_change_merges_by_sentences_and_asks_in_the_same_sentence() {
     let mut fixture = Fixture::new();
     let path = fixture.one();
-    let base = "# One\n\nFirst line of words.\n\nSecond line.\n";
-    let ours = "# One\n\nFirst line of my words.\n\nSecond line.\n";
-    let theirs = "# One\n\nFirst long line of words.\n\nSecond line.\n";
-    fixture.type_in("manuscript/one.md", "First line.", "First line of my words.");
+    let base = "# One\n\nFirst line. Of words.\n\nSecond line.\n";
+    let ours = "# One\n\nFirst line. Of my words.\n\nSecond line.\n";
+    let theirs = "# One\n\nFirst long line. Of words.\n\nSecond line.\n";
+    fixture.type_in("manuscript/one.md", "First line.", "First line. Of my words.");
     fixture.save();
     assert_eq!(fixture.text("manuscript/one.md"), ours);
     fs::write(&path, theirs).unwrap();
@@ -784,8 +786,18 @@ fn a_git_merge_that_overlaps_by_line_only_merges_by_word() {
         .expect("a change");
     assert_eq!(change.kind, ChangeKind::Merged);
     assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
-    assert_eq!(
-        fixture.disk("manuscript/one.md"),
-        "# One\n\nFirst long line of my words.\n\nSecond line.\n"
-    );
+    let merged = "# One\n\nFirst long line. Of my words.\n\nSecond line.\n";
+    assert_eq!(fixture.disk("manuscript/one.md"), merged);
+
+    fixture.type_in("manuscript/one.md", "Of my words.", "Of nothing.");
+    let theirs = "# One\n\nFirst long line. Of all words.\n\nSecond line.\n";
+    fs::write(&path, theirs).unwrap();
+    let change = fixture
+        .sync
+        .on_disk(&mut fixture.session, &path, Some(theirs.as_bytes().to_vec()))
+        .expect("a change");
+    assert_eq!(change.kind, ChangeKind::Conflict);
+    let passage = fixture.sync.conflict_passage(&fixture.session, &path).unwrap();
+    assert_eq!(passage.mine, "First long line. Of nothing.\n");
+    assert_eq!(passage.theirs, "First long line. Of all words.\n");
 }
