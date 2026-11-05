@@ -7,6 +7,9 @@
 //! pages, and memory over many refreshes, and quits. `DRUCK_GATE_THEME_EDITS=0` skips the theme edits, for a read-only
 //! theme. `DRUCK_SOAK_MEMORY=1` only reports, for a run driven from outside.
 //!
+//! `DRUCK_GATE_SLIP=100` instead edits the book through the proof slip that many times, in Publish, and checks that no
+//! text was lost: what the chapters hold is compared byte for byte, in memory and on disk, with what was asked for.
+//!
 //! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
 //! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
 
@@ -124,6 +127,10 @@ impl Gate {
     async fn run(&self, cx: &mut AsyncApp) {
         self.wait_for_pages(cx).await;
         eprintln!("gate: first pages; {}", memory());
+        if let Some(count) = var("DRUCK_GATE_SLIP").and_then(|count| count.parse().ok()) {
+            self.slip_edits(count, cx).await;
+            return;
+        }
         self.place_caret(cx).await;
         if var("DRUCK_GATE_THEME_ONLY").is_none() {
             self.typing(cx).await;
@@ -300,6 +307,290 @@ impl Gate {
             self.sleep(Duration::from_millis(100), cx).await;
         }
         report("pause in Write to exact pages in Publish", samples);
+    }
+
+    /// Opens a slip on a paragraph of a page some way into the book, and returns the page.
+    async fn open_slip(&self, page: usize, cx: &mut AsyncApp) -> Option<usize> {
+        let (page, block) = self
+            .preview
+            .read_with(cx, |preview, _| preview.paragraph_on_page(page))?;
+        let workspace = self.workspace.clone();
+        self.window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| workspace.open_slip_at(Some(block), window, cx));
+            })
+            .ok();
+        self.sleep(Duration::from_millis(30), cx).await;
+        Some(page)
+    }
+
+    /// Types into the open slip through the field's input handler, as an input method or the keyboard does.
+    fn slip_key(&self, text: &str, cx: &mut AsyncApp) {
+        let preview = self.preview.clone();
+        self.window
+            .update(cx, |_, window, cx| {
+                let input = preview.read(cx).slip().read(cx).input().clone();
+                input.update(cx, |input, cx| input.replace_text_in_range(None, text, window, cx));
+            })
+            .ok();
+    }
+
+    fn chapter_texts(&self, cx: &mut AsyncApp) -> Vec<(crate::session::ChapterId, std::path::PathBuf, String)> {
+        self.editor.read_with(cx, |editor, _| {
+            let session = editor.session();
+            session
+                .book()
+                .iter()
+                .filter_map(|id| {
+                    let chapter = session.chapter(*id)?;
+                    Some((*id, chapter.path().to_owned(), chapter.text().to_owned()))
+                })
+                .collect()
+        })
+    }
+
+    async fn slip_edits(&self, count: usize, cx: &mut AsyncApp) {
+        self.show(Mode::Publish, cx);
+        self.settle(cx).await;
+        self.clicks(cx).await;
+        let before = self.chapter_texts(cx);
+        let mut expected = before.clone();
+        let mut to_pages = Vec::new();
+        let mut typing = Vec::new();
+        let mut lost_opens = 0;
+        for edit in 0..count {
+            // Across the book, so the edits land in many chapters and on pages of every kind.
+            let Some(page) = self.open_slip(edit * 7, cx).await else {
+                lost_opens += 1;
+                continue;
+            };
+            let opened = self
+                .preview
+                .read_with(cx, |preview, cx| preview.slip().read(cx).opened().cloned());
+            let Some(opened) = opened else {
+                lost_opens += 1;
+                continue;
+            };
+            let word = format!(" qslip{edit}x");
+            let at = opened.caret;
+            // The caret is where the click was. What is typed goes in at a word's end of the paragraph.
+            for letter in word.chars() {
+                let started = Instant::now();
+                self.slip_key(&letter.to_string(), cx);
+                typing.push(started.elapsed());
+                self.sleep(Duration::from_millis(12), cx).await;
+            }
+            let last = Instant::now();
+            if let Some((_, _, text)) = expected.iter_mut().find(|(id, ..)| *id == opened.chapter) {
+                text.insert_str(opened.range.start + at, &word);
+            }
+            let ready = self.wait_for_pages(cx).await;
+            to_pages.push(ready.saturating_duration_since(last));
+            let found = self
+                .preview
+                .update(cx, |preview, cx| preview.show_text(word.trim_start(), cx));
+            if found.is_none() {
+                eprintln!("gate: edit {edit} (page {page}) is on no page: {word}");
+            }
+            self.close_slip(cx);
+            self.sleep(Duration::from_millis(40), cx).await;
+        }
+        report("slip edit, handling a key", typing);
+        report("slip edit, last key to ready pages", to_pages);
+        eprintln!("gate: slips that did not open: {lost_opens}");
+        self.compare(&expected, "after the edits", cx);
+        self.moving_paragraph(cx).await;
+        self.compare(&expected, "after the page break came away", cx);
+        // Autosave runs after a pause.
+        self.sleep(Duration::from_secs(4), cx).await;
+        let mut on_disk = 0;
+        for (_, path, text) in &expected {
+            if std::fs::read_to_string(path).ok().as_deref() == Some(text) {
+                on_disk += 1;
+            } else {
+                eprintln!("gate: the file differs from what was asked: {}", path.display());
+            }
+        }
+        eprintln!("gate: chapters on disk as asked: {on_disk} of {}", expected.len());
+        self.theme_field(cx).await;
+        let (marked, took) = self.preview.update(cx, |preview, cx| preview.mark_again(cx));
+        eprintln!("gate: marking {marked} problems on the pages took {took:?}, on the window's thread");
+    }
+
+    /// A press and release of the left button, through the window's own event path, at a place in the window.
+    fn click(&self, position: gpui::Point<gpui::Pixels>, cx: &mut AsyncApp) {
+        self.window
+            .update(cx, |_, window, cx| {
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                        position,
+                        pressed_button: None,
+                        modifiers: gpui::Modifiers::default(),
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                        button: gpui::MouseButton::Left,
+                        position,
+                        modifiers: gpui::Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                        button: gpui::MouseButton::Left,
+                        position,
+                        modifiers: gpui::Modifiers::default(),
+                        click_count: 1,
+                    }),
+                    cx,
+                );
+            })
+            .ok();
+    }
+
+    /// Clicks as a person would: on a line of a spread, on a contact sheet, and on nothing.
+    async fn clicks(&self, cx: &mut AsyncApp) {
+        self.preview.update(cx, |preview, cx| preview.show_page(20, cx));
+        self.sleep(Duration::from_millis(300), cx).await;
+        let spread = self.preview.read_with(cx, |preview, _| preview.point_on_a_line());
+        let Some(spread) = spread else {
+            eprintln!("gate: no line to click");
+            return;
+        };
+        self.click(spread, cx);
+        self.sleep(Duration::from_millis(300), cx).await;
+        let opened = self
+            .preview
+            .read_with(cx, |preview, cx| preview.slip().read(cx).opened().is_some());
+        eprintln!("gate: a click on a line opened the slip: {opened}");
+        self.preview.update(cx, |preview, cx| preview.zoom_step(-1, cx));
+        self.sleep(Duration::from_millis(300), cx).await;
+        let contact = self.preview.read_with(cx, |preview, _| preview.is_contact_sheet());
+        let middle = self.preview.read_with(cx, |preview, _| preview.middle_of_view());
+        self.click(middle, cx);
+        self.sleep(Duration::from_millis(300), cx).await;
+        let spread_again = self.preview.read_with(cx, |preview, _| !preview.is_contact_sheet());
+        eprintln!(
+            "gate: zooming out made a contact sheet: {contact}; a click on it went back to a spread: {spread_again}"
+        );
+        self.close_slip(cx);
+        self.sleep(Duration::from_millis(100), cx).await;
+    }
+
+    fn close_slip(&self, cx: &mut AsyncApp) {
+        let workspace = self.workspace.clone();
+        self.window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.close_slip_for_gate(window, cx);
+                });
+            })
+            .ok();
+    }
+
+    fn compare(
+        &self,
+        expected: &[(crate::session::ChapterId, std::path::PathBuf, String)],
+        when: &str,
+        cx: &mut AsyncApp,
+    ) {
+        let now = self.chapter_texts(cx);
+        let same = now.iter().zip(expected).filter(|(a, b)| a.2 == b.2).count();
+        eprintln!("gate: chapters in memory as asked {when}: {same} of {}", expected.len());
+        for ((_, path, have), (_, _, wanted)) in now.iter().zip(expected) {
+            if have != wanted {
+                let at = have.bytes().zip(wanted.bytes()).take_while(|(a, b)| a == b).count();
+                eprintln!(
+                    "gate: {} differs at byte {at}: {:?} against {:?}",
+                    path.display(),
+                    have.get(at..(at + 40).min(have.len())),
+                    wanted.get(at..(at + 40).min(wanted.len()))
+                );
+            }
+        }
+    }
+
+    /// A page break before a paragraph moves it to another page: the slip goes with it. Taking it away restores the bytes.
+    async fn moving_paragraph(&self, cx: &mut AsyncApp) {
+        let Some(_) = self.open_slip(40, cx).await else {
+            eprintln!("gate: no paragraph to move");
+            return;
+        };
+        self.settle(cx).await;
+        let from = self.preview.read_with(cx, |preview, _| preview.slip_page());
+        let toggle = |gate: &Self, cx: &mut AsyncApp| {
+            let workspace = gate.workspace.clone();
+            gate.window
+                .update(cx, |_, window, cx| {
+                    workspace.update(cx, |workspace, cx| workspace.toggle_page_break_for_gate(window, cx));
+                })
+                .ok();
+        };
+        toggle(self, cx);
+        self.sleep(Duration::from_millis(250), cx).await;
+        self.settle(cx).await;
+        self.sleep(Duration::from_millis(100), cx).await;
+        let (to, shown) = self
+            .preview
+            .read_with(cx, |preview, _| (preview.slip_page(), preview.slip_in_view()));
+        eprintln!("gate: a page break moved the slip's paragraph from page {from:?} to {to:?}, in view: {shown}");
+        let has_directive = self.editor.read_with(cx, |editor, _| {
+            editor.session().book().iter().any(|id| {
+                editor.session().buffer(*id).text().contains(
+                    "::: page-break
+
+",
+                )
+            })
+        });
+        eprintln!("gate: the directive is in the source: {has_directive}");
+        toggle(self, cx);
+        self.sleep(Duration::from_millis(250), cx).await;
+        self.settle(cx).await;
+        self.close_slip(cx);
+    }
+
+    /// A style change writes one field of the theme file and nothing else.
+    async fn theme_field(&self, cx: &mut AsyncApp) {
+        let path = self.inspector.read_with(cx, |inspector, cx| {
+            inspector
+                .model()
+                .read(cx)
+                .file()
+                .ok()
+                .map(|file| file.path().to_owned())
+        });
+        let Some(path) = path else {
+            eprintln!("gate: no theme file to change");
+            return;
+        };
+        let before = std::fs::read_to_string(&path).unwrap_or_default();
+        let start = Instant::now();
+        self.inspector
+            .update(cx, |inspector, cx| inspector.set_body_size("10.7pt", cx));
+        while start.elapsed() < GIVE_UP && self.preview.read_with(cx, |preview, _| preview.ready_at()).is_some() {
+            self.sleep(POLL, cx).await;
+        }
+        let ready = self.wait_for_pages(cx).await;
+        let after = std::fs::read_to_string(&path).unwrap_or_default();
+        let same_start = before.bytes().zip(after.bytes()).take_while(|(a, b)| a == b).count();
+        let same_end = before[same_start..]
+            .bytes()
+            .rev()
+            .zip(after[same_start..].bytes().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "gate: a style change reached the pages in {:?}, and of the theme file's {} bytes it replaced {:?} with {:?}",
+            ready.saturating_duration_since(start),
+            before.len(),
+            &before[same_start..before.len() - same_end],
+            &after[same_start..after.len() - same_end],
+        );
     }
 
     fn show(&self, mode: Mode, cx: &mut AsyncApp) {
