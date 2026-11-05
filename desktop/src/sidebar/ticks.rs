@@ -112,7 +112,22 @@ impl TicksView {
             .children(rows)
     }
 
-    fn card(&self, height: gpui::Pixels, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// As wide as the longest title needs, between the card's narrowest and widest.
+    fn card_width(&self, window: &Window) -> gpui::Pixels {
+        let longest = (self.data.contents.book.iter())
+            .map(|chapter| crate::shell::ui::text_width(&chapter.title, tokens::TEXT_BODY, window))
+            .fold(gpui::px(0.), gpui::Pixels::max);
+        let around = tokens::SPACE_3 + tokens::LIST_LEAD_WIDTH + tokens::SPACE_1 + tokens::DOT_SIZE + tokens::SPACE_2;
+        (longest + around).clamp(tokens::CONTENTS_CARD_WIDTH, tokens::CONTENTS_CARD_MAX_WIDTH)
+    }
+
+    fn card(
+        &self,
+        width: gpui::Pixels,
+        height: gpui::Pixels,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let rows: Vec<_> = self
             .data
             .contents
@@ -149,7 +164,7 @@ impl TicksView {
             .absolute()
             .top(tokens::SPACE_2)
             .left(tokens::SPACE_2)
-            .w(tokens::CONTENTS_CARD_WIDTH)
+            .w(width)
             .max_h(height)
             .flex()
             .flex_col()
@@ -190,6 +205,11 @@ impl Render for TicksView {
         let room = window.viewport_size().height - tokens::TITLEBAR_HEIGHT;
         let height = room - tokens::SPACE_4 * 2.;
         let open = self.open;
+        let width = if open {
+            self.card_width(window)
+        } else {
+            tokens::CONTENTS_CARD_WIDTH
+        };
         div()
             .id("chapter-ticks")
             .absolute()
@@ -201,13 +221,13 @@ impl Render for TicksView {
                 (tokens::TICK_ROW * self.data.contents.book.len() as f32 + tokens::SPACE_4 * 2.).min(room)
             })
             .w(if open {
-                tokens::CONTENTS_CARD_WIDTH + tokens::SPACE_4
+                width + tokens::SPACE_4
             } else {
                 tokens::TICK_ZONE_WIDTH
             })
             .when(open, |zone| zone.occlude())
             .on_hover(cx.listener(|ticks, hovered: &bool, _, cx| ticks.hovered(*hovered, cx)))
             .child(self.ticks(height, &tokens))
-            .when(open, |zone| zone.child(self.card(height, &tokens, cx)))
+            .when(open, |zone| zone.child(self.card(width, height, &tokens, cx)))
     }
 }

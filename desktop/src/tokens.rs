@@ -113,6 +113,8 @@ pub const TICK_ZONE_WIDTH: Pixels = px(36.);
 pub const TICK_OPACITY: f32 = 0.65;
 /// The contents card that opens from the ticks.
 pub const CONTENTS_CARD_WIDTH: Pixels = px(240.);
+/// The widest the contents card grows for its longest title.
+pub const CONTENTS_CARD_MAX_WIDTH: Pixels = px(360.);
 /// The command palette: one card at the top centre of the window.
 pub const PALETTE_WIDTH: Pixels = px(480.);
 pub const PALETTE_TOP: Pixels = px(72.);

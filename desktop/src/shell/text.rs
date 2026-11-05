@@ -132,7 +132,7 @@ crate::strings! {
         ExportThisDocument => ("This document", "Dieses Dokument"),
         ExportPdf => ("Export as PDF", "Als PDF exportieren"),
         ExportEpub => ("Export as EPUB", "Als EPUB exportieren"),
-        NamedExports => ("NAMED EXPORTS", "BENANNTE EXPORTE"),
+        ExportLabel => ("EXPORT", "EXPORT"),
         NoExports => (
             "No export is named yet, so this one is built in. druck.yaml stays as it is until you change or save it.",
             "Noch ist kein Export benannt, darum ist dieser eingebaut. druck.yaml bleibt, wie sie ist, bis du ihn änderst oder sicherst."

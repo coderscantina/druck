@@ -133,6 +133,11 @@ pub fn dot(tokens: &Tokens, kind: super::report::Kind) -> gpui::Div {
 
 /// How wide `text` is at the small size in the app's font, for a line that drops words it has no room for.
 pub fn small_text_width(text: &str, window: &Window) -> Pixels {
+    text_width(text, tokens::TEXT_SMALL, window)
+}
+
+/// How wide `text` is at `size` in the app's font.
+pub fn text_width(text: &str, size: Pixels, window: &Window) -> Pixels {
     let run = TextRun {
         len: text.len(),
         font: font(tokens::FONT_UI),
@@ -142,7 +147,7 @@ pub fn small_text_width(text: &str, window: &Window) -> Pixels {
         strikethrough: None,
     };
     (window.text_system())
-        .shape_line(text.to_owned().into(), tokens::TEXT_SMALL, &[run], None)
+        .shape_line(text.to_owned().into(), size, &[run], None)
         .width
 }
 

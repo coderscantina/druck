@@ -349,6 +349,7 @@ impl ExportPanel {
         let busy = self.is_running();
         let first = self.first_runner().as_deref() == Some(id.as_str());
         ui::button(tokens, SharedString::from(format!("run-{id}")), label)
+            .text_color(tokens.accent)
             .when(first, |button| button.track_focus(&self.first_run))
             .when(busy, |button| button.opacity(tokens::DISABLED_OPACITY).cursor_default())
             .when(!busy, |button| {
@@ -480,27 +481,36 @@ impl ExportPanel {
                     .child(summary),
             )
             .when_some(editor, |card, editor| card.child(editor))
-            .when(built_in, |card| {
-                let (name, output) = (name.clone(), def.output.clone());
-                card.child(
-                    ui::button(tokens, "export-save", crate::t!(Key::ExportSave)).on_click(cx.listener(
-                        move |_, _, _, cx| {
-                            cx.emit(ExportEvent::Set {
-                                name: name.clone(),
-                                key: "output",
-                                value: Some(output.clone()),
-                            });
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(tokens::SPACE_3)
+                    .child(self.runner(
+                        name.clone(),
+                        if built_in {
+                            Target::Pdf
+                        } else {
+                            Target::Named(name.clone())
                         },
-                    )),
-                )
-            })
-            .child(self.runner(
-                name.clone(),
-                if built_in { Target::Pdf } else { Target::Named(name) },
-                crate::t!(Key::ExportRun),
-                tokens,
-                cx,
-            ))
+                        crate::t!(Key::ExportRun),
+                        tokens,
+                        cx,
+                    ))
+                    .when(built_in, |row| {
+                        let output = def.output.clone();
+                        row.child(
+                            crate::inspector::widgets::quiet_link(tokens, "export-save", crate::t!(Key::ExportSave))
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    cx.emit(ExportEvent::Set {
+                                        name: name.clone(),
+                                        key: "output",
+                                        value: Some(output.clone()),
+                                    });
+                                })),
+                        )
+                    }),
+            )
             .into_any_element()
     }
 }
@@ -609,7 +619,7 @@ impl Render for ExportPanel {
                 if self.setup.single {
                     crate::t!(Key::ExportThisDocument)
                 } else {
-                    crate::t!(Key::NamedExports)
+                    crate::t!(Key::ExportLabel)
                 },
             ))
             .when_some(status, |panel, status| {
