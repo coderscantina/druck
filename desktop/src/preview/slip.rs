@@ -618,6 +618,61 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
+    /// What the chapter holds after the slip writes `typed` to its paragraph, as a write looks for it first.
+    fn slip_write(buffer: &mut crate::source::Buffer, synced: &str, range: &Range<usize>, revision: u64, typed: &str) {
+        let splice = (buffer.revision() == revision + 1)
+            .then(|| buffer.last_splice())
+            .flatten();
+        let found = relocated(buffer.text(), synced, range, splice).expect("the paragraph is there");
+        let edit = directives::edit_between(found.start, synced, typed).expect("the text changed");
+        let caret = crate::source::Selection::caret(0);
+        buffer
+            .transact(
+                crate::source::EditKind::Typing,
+                vec![edit],
+                caret,
+                caret,
+                std::time::Instant::now(),
+            )
+            .expect("a valid edit");
+    }
+
+    #[test]
+    fn a_composition_that_ends_after_an_outside_write_keeps_what_was_written() {
+        let text = "First.\n\nThe slip's paragraph.\n\nLast.\n";
+        let mut buffer = crate::source::Buffer::new(text);
+        let range = 8..29;
+        let revision = buffer.revision();
+        // While the field composes, a line lands in front of the paragraph. The stale range now holds other words.
+        let caret = crate::source::Selection::caret(0);
+        buffer
+            .transact(
+                crate::source::EditKind::External,
+                vec![crate::source::Edit::new(0..0, "Written from outside.\n\n")],
+                caret,
+                caret,
+                std::time::Instant::now(),
+            )
+            .expect("a valid edit");
+        slip_write(
+            &mut buffer,
+            &text[range.clone()],
+            &range,
+            revision,
+            "The slip's own paragraph.",
+        );
+        assert_eq!(
+            buffer.text(),
+            "Written from outside.\n\nFirst.\n\nThe slip's own paragraph.\n\nLast.\n"
+        );
+    }
+
+    #[test]
+    fn a_paragraph_that_went_while_composing_is_not_written_back() {
+        let held = "The slip's paragraph.";
+        assert_eq!(relocated("First.\n\nSomething else.\n", held, &(8..29), None), None);
+    }
+
     #[test]
     fn a_style_grows_a_paragraph_and_moves_a_list() {
         let closing = crate::source::Edit::new(10..10, " {.lead}");

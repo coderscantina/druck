@@ -187,6 +187,8 @@ pub struct PreviewView {
     slip_marks: Vec<Mark>,
     /// The page of the paragraph the slip stands on, which is where it was clicked when it runs over two pages.
     slip_page: Option<usize>,
+    /// The view is to go to the slip's paragraph on the next frame, once the zoom is known.
+    slip_follow: bool,
     problems: Vec<Problem>,
     marks: Marks,
     /// The Proof tab is open, so warnings are marked.
@@ -253,6 +255,7 @@ impl PreviewView {
             slip_source: None,
             slip_marks: Vec::new(),
             slip_page: None,
+            slip_follow: false,
             problems: Vec::new(),
             marks: Marks::default(),
             proof_open: false,
@@ -429,7 +432,7 @@ impl PreviewView {
         }
         if let Some(anchor) = self.slip_anchor().copied() {
             self.slip_page = Some(anchor.page);
-            self.bring_into_view(anchor, cx);
+            self.slip_follow = true;
         }
         cx.notify();
     }
@@ -804,6 +807,12 @@ impl PreviewView {
         if let Some(page) = self.bench.as_mut().and_then(Bench::take_page) {
             self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
+        if std::mem::take(&mut self.slip_follow)
+            && let Some(mark) = self.slip_anchor().copied()
+        {
+            let (top, height) = (mark.rect.y.0 as f32, mark.rect.height.0 as f32);
+            self.scroll.1 = sheets.scroll_to_show(mark.page, (top, top + height), self.view.1, self.scroll.1);
+        }
         self.scroll.0 = clamp_scroll(self.scroll.0, sheets.width(), self.view.0);
         self.scroll.1 = clamp_scroll(self.scroll.1, sheets.height(), self.view.1);
 
@@ -1167,7 +1176,7 @@ impl Render for PreviewView {
             let marks_on = crate::settings::get(cx).warning_marks;
             let toggle = crate::t!(Key::WarningMarks);
             div()
-                .flex_none()
+                .min_w_0()
                 .flex()
                 .items_center()
                 .gap(tokens::SPACE_1)
@@ -1175,6 +1184,8 @@ impl Render for PreviewView {
                     div()
                         .id("warnings")
                         .control(&tokens, Role::Link, SharedString::from(label.clone()))
+                        .min_w_0()
+                        .truncate()
                         .cursor_pointer()
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
                         .child(label),
@@ -1214,8 +1225,8 @@ impl Render for PreviewView {
             .child(div().flex_none().child(self.status()))
             .children(to_look_at)
             .children(warning_count)
-            .child(div().flex_1().min_w_0().when_some(problem, |slot, problem| {
-                slot.truncate().text_color(tokens.accent).child(problem)
+            .child(div().flex_1().when_some(problem, |slot, problem| {
+                slot.min_w_0().truncate().text_color(tokens.accent).child(problem)
             }))
             .child(self.zoom_controls(&tokens, cx));
         let slip = self.slip.read(cx).opened().and(self.slip_position()).map(|position| {

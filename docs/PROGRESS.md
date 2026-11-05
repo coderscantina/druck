@@ -95,6 +95,18 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Review findings note
+
+On 2026-11-05 the review's findings F1 to F26 went in, with the owner's decisions on F2, F3, F5, F7, F9, and F21. The choices are in [decisions](DECISIONS.md#2026-11-05-review-findings), and [the design](DESIGN.md) follows them.
+
+Evidence on a temp copy of `buch-1-ttp404`, made a project through the launch card's own row: 27 chapters, 37,508 words, 203 pages, 243 warnings. `cargo test -p druck-desktop` passed 666 with 1 ignored, `cargo test` passed 444 unit tests and the acceptance, CLI, parity, public API, and doc tests, `DRUCK_BOOK=<book with draft and print exports> cargo test --test parity` passed, and `cargo clippy` on both crates with `-D warnings`, `cargo check -p druck-desktop --release`, and `cargo fmt --all --check` are clean. `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25`, release with `measure`: typing 15.4 ms median, 32.5 ms p95, 360 keys. Pause in Write to exact pages in Publish 17.8 ms median. That run prints "the galley did not change" for its theme edits, because the book's theme is a common one here and the question about it waits; it was not looked into further.
+
+Not verified, because they need a pointer or a live agent turn: the review foot's new place and the chat card's "This turn" label with real changes, the Marks toggle by a click, the keys reaching Open after a real export, a click on More, and folding by a click on the icon. F18's cut left page did not reproduce at 720 px, before or after: a spread fits at 46 percent, and Fit no longer has a floor at the smallest level.
+
+While the normal window was frontmost in testing, real keystrokes landed in it and changed a temp copy of the book, which is F26's warning in practice. No original was touched. Use `DRUCK_GATE=2` where no keys are needed.
+
+Follow-ups: the zoom's text and the warning count share a narrow status line, so the count truncates first. `DRUCK_SELECT` at startup does not show a selection, though `select` through `DRUCK_AGENT_SCRIPT` does. The toolbar's `Tt` contradicts the design's "There is no `Tt` button". A proof slip near the foot of the window covers its own paragraph.
+
 ### Milestone 21 note
 
 Local history, the commit card, the timeline, and the Git panel are on branch `t3/add-versions-history-git`, not merged and not pushed. [The decision](DECISIONS.md#2026-11-05-versions) has the choices and the evidence. It also fixes a crash from `47433dd` in the text: a Backspace merging paragraphs at the end of a chapter aborted the app (`023c917`). Any branch with that commit but not the fix has it.

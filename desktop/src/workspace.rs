@@ -184,6 +184,8 @@ impl Workspace {
                     if crate::gate::var("DRUCK_SLIP_BREAK").is_some() {
                         workspace.toggle_page_break_for_gate(window, cx);
                     }
+                    #[cfg(any(debug_assertions, feature = "measure"))]
+                    slip_control::try_from_gate(&workspace.parts, window, cx);
                 }
             }),
             cx.observe_global_in::<settings::Store>(window, |_, _, cx| cx.notify()),

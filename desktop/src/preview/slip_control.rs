@@ -279,6 +279,19 @@ pub fn pick_alignment(parts: &Parts, align: &'static str, window: &mut Window, c
     }
 }
 
+/// `DRUCK_SLIP_ALIGN=center` presses that alignment, and `DRUCK_SLIP_STYLES=1` opens the list. For screenshots.
+#[cfg(any(debug_assertions, feature = "measure"))]
+pub fn try_from_gate(parts: &Parts, window: &mut Window, cx: &mut App) {
+    if let Some(align) = crate::gate::var("DRUCK_SLIP_ALIGN")
+        && let Some(align) = styles::ALIGNMENTS.into_iter().find(|known| *known == align)
+    {
+        pick_alignment(parts, align, window, cx);
+    }
+    if crate::gate::var("DRUCK_SLIP_STYLES").is_some() {
+        toggle_styles(parts, window, cx);
+    }
+}
+
 /// The theme changed. A style the question about a common theme held back is there now.
 pub fn theme_changed(parts: &Parts, window: &mut Window, cx: &mut App) {
     let slip = slip_of(parts, cx);
