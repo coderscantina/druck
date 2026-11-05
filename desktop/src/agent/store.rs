@@ -3,18 +3,29 @@
 //! The file maps a project's path to the id of its conversation and the model last chosen. An id is a handle the
 //! CLI understands, not a credential.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+
+use crate::persist::{atomic, recovery};
 
 const FILE: &str = "agent-sessions.json";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Remembered {
     pub session: Option<String>,
     pub model: Option<String>,
+}
+
+/// The file, as written.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Record {
+    projects: BTreeMap<String, Remembered>,
 }
 
 pub struct Store {
@@ -22,25 +33,9 @@ pub struct Store {
 }
 
 impl Store {
-    /// The app's data folder: `DRUCK_DATA_DIR` if set, else the platform's own place.
+    /// The store in the app's data folder.
     pub fn open() -> Option<Self> {
-        let var = |name: &str| {
-            std::env::var_os(name)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        };
-        let dir = var("DRUCK_DATA_DIR").or_else(|| {
-            if cfg!(target_os = "macos") {
-                var("HOME").map(|home| home.join("Library/Application Support/Druck"))
-            } else if cfg!(target_os = "windows") {
-                var("APPDATA").map(|dir| dir.join("Druck"))
-            } else {
-                var("XDG_DATA_HOME")
-                    .or_else(|| var("HOME").map(|home| home.join(".local/share")))
-                    .map(|dir| dir.join("druck"))
-            }
-        })?;
-        Some(Self::in_dir(&dir))
+        Some(Self::in_dir(&recovery::data_dir()?))
     }
 
     pub fn in_dir(dir: &Path) -> Self {
@@ -49,42 +44,28 @@ impl Store {
 
     /// What is kept for `project`. A missing or unreadable file keeps nothing.
     pub fn get(&self, project: &Path) -> Remembered {
-        let all = self.read();
-        let entry = &all[key(project)];
-        Remembered {
-            session: entry["session"].as_str().map(str::to_owned),
-            model: entry["model"].as_str().map(str::to_owned),
-        }
+        self.read().projects.remove(&key(project)).unwrap_or_default()
     }
 
     /// Keeps `remembered` for `project`. Nothing at all removes its entry.
     pub fn set(&self, project: &Path, remembered: &Remembered) -> io::Result<()> {
         let mut all = self.read();
-        let projects = all.as_object_mut().expect("read returns an object");
         if remembered == &Remembered::default() {
-            projects.remove(&key(project));
+            all.projects.remove(&key(project));
         } else {
-            projects.insert(
-                key(project),
-                json!({"session": remembered.session, "model": remembered.model}),
-            );
+            all.projects.insert(key(project), remembered.clone());
         }
         if let Some(dir) = self.file.parent() {
             fs::create_dir_all(dir)?;
         }
-        // Written beside the file and renamed over it, so a crash never leaves half of one.
-        let temporary = self.file.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::write(&temporary, serde_json::to_string_pretty(&json!({"projects": all}))?)?;
-        fs::rename(&temporary, &self.file)
+        atomic::write(&self.file, serde_json::to_string_pretty(&all)?.as_bytes())
     }
 
-    fn read(&self) -> Value {
-        let projects = fs::read_to_string(&self.file)
+    fn read(&self) -> Record {
+        fs::read_to_string(&self.file)
             .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value["projects"].as_object().cloned())
-            .unwrap_or_default();
-        Value::Object(projects)
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
     }
 }
 

@@ -5,7 +5,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+
+use crate::persist::atomic;
+use crate::persist::recovery::data_dir;
 
 /// How many recent documents are kept.
 pub const RECENT: usize = 10;
@@ -34,56 +37,13 @@ impl State {
         self.recent.clear();
     }
 
-    fn to_json(&self) -> Value {
-        json!({
-            "window": self.window.map(|(width, height)| json!({ "width": width, "height": height })),
-            "recent": self.recent.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>(),
-            "zoom": { "write": self.write_zoom, "publish": self.publish_zoom },
-        })
-    }
-
-    fn from_json(value: &Value) -> Self {
-        let window = value.get("window").and_then(|window| {
-            let size = |key: &str| {
-                window
-                    .get(key)?
-                    .as_f64()
-                    .map(|size| size as f32)
-                    .filter(|size| *size > 0.)
-            };
-            Some((size("width")?, size("height")?))
-        });
-        let recent = value
-            .get("recent")
-            .and_then(Value::as_array)
-            .map(|paths| {
-                paths
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(PathBuf::from)
-                    .take(RECENT)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let zoom = |mode: &str| {
-            let zoom = value.get("zoom")?.get(mode)?.as_f64()? as f32;
-            (zoom > 0.).then_some(zoom)
-        };
-        Self {
-            window,
-            recent,
-            write_zoom: zoom("write"),
-            publish_zoom: zoom("publish"),
-        }
-    }
-
     /// Reads the file. One that is missing or unreadable gives the defaults, since a lost setting is not worth a
     /// message.
     pub fn load(file: &Path) -> Self {
         fs::read_to_string(file)
             .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .map(|value| Self::from_json(&value))
+            .and_then(|text| serde_json::from_str::<Record>(&text).ok())
+            .map(Self::from)
             .unwrap_or_default()
     }
 
@@ -93,32 +53,65 @@ impl State {
         if let Some(folder) = file.parent() {
             fs::create_dir_all(folder).map_err(describe)?;
         }
-        let temporary = file.with_extension("json.part");
-        let text = serde_json::to_string_pretty(&self.to_json()).map_err(|error| error.to_string())?;
-        fs::write(&temporary, text).map_err(describe)?;
-        fs::rename(&temporary, file).map_err(describe)
+        let text = serde_json::to_string_pretty(&Record::from(self)).map_err(|error| error.to_string())?;
+        atomic::write(file, text.as_bytes()).map_err(describe)
     }
 }
 
-/// The folder the operating system gives this app for its own data, such as `~/Library/Application Support/Druck`.
-/// `DRUCK_DATA_DIR` names another one, so a measurement or a test leaves the real one alone.
-pub fn app_data_dir() -> Option<PathBuf> {
-    if let Some(folder) = std::env::var_os("DRUCK_DATA_DIR") {
-        return Some(PathBuf::from(folder));
+/// `state.json`, as written.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct Record {
+    window: Option<WindowRecord>,
+    recent: Vec<String>,
+    zoom: ZoomRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WindowRecord {
+    width: f32,
+    height: f32,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct ZoomRecord {
+    write: Option<f32>,
+    publish: Option<f32>,
+}
+
+impl From<&State> for Record {
+    fn from(state: &State) -> Self {
+        Self {
+            window: state.window.map(|(width, height)| WindowRecord { width, height }),
+            recent: (state.recent.iter())
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+            zoom: ZoomRecord {
+                write: state.write_zoom,
+                publish: state.publish_zoom,
+            },
+        }
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    if cfg!(target_os = "macos") {
-        return Some(home.join("Library/Application Support/Druck"));
+}
+
+impl From<Record> for State {
+    fn from(record: Record) -> Self {
+        let positive = |value: f32| (value > 0.).then_some(value);
+        Self {
+            window: record
+                .window
+                .and_then(|window| Some((positive(window.width)?, positive(window.height)?))),
+            recent: record.recent.into_iter().map(PathBuf::from).take(RECENT).collect(),
+            write_zoom: record.zoom.write.and_then(positive),
+            publish_zoom: record.zoom.publish.and_then(positive),
+        }
     }
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".local/share"));
-    Some(data.join("druck"))
 }
 
 /// The file the state is kept in.
 pub fn state_file() -> Option<PathBuf> {
-    Some(app_data_dir()?.join("state.json"))
+    Some(data_dir()?.join("state.json"))
 }
 
 #[cfg(test)]
@@ -143,6 +136,20 @@ mod tests {
         state.remember(Path::new("/books/one"));
         state.save(&file).expect("saves");
         assert_eq!(State::load(&file), state);
+        fs::remove_dir_all(file.parent().expect("folder")).ok();
+    }
+
+    #[test]
+    fn a_file_written_before_the_records_still_loads() {
+        let file = file("old");
+        fs::create_dir_all(file.parent().expect("folder")).expect("folder");
+        let text =
+            r#"{"window":{"width":1000.0,"height":700.0},"recent":["/books/a"],"zoom":{"write":1.5,"publish":null}}"#;
+        fs::write(&file, text).expect("file");
+        let state = State::load(&file);
+        assert_eq!(state.window, Some((1000., 700.)));
+        assert_eq!(state.recent, [PathBuf::from("/books/a")]);
+        assert_eq!((state.write_zoom, state.publish_zoom), (Some(1.5), None));
         fs::remove_dir_all(file.parent().expect("folder")).ok();
     }
 

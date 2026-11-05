@@ -1356,6 +1356,7 @@ dependencies = [
  "pulldown-cmark",
  "regex",
  "resvg 0.47.0",
+ "serde",
  "serde_json",
  "similar",
  "skrifa 0.42.1",

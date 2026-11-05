@@ -4,7 +4,8 @@
 //! `history/blobs/ab/cdef...` holds each text once, named by its Git blob id, as plain files a person can read.
 //! `history/files/<id>.jsonl` is one file's log: a line with its path, then one line per snapshot. A snapshot writes its
 //! blob by rename first and appends its line second, in one write, so a crash leaves at worst a line that does not parse
-//! or a blob nothing names. Reading skips the first, and thinning clears the second.
+//! or a blob nothing names. Reading skips the first, an append starts on a line of its own after one, and thinning clears
+//! the second.
 //!
 //! A file is known by its path. When a path has no log, [`History::follow`] looks for the log of a file that is gone:
 //! one that once held this exact text, or one whose folder another file's move has shown to have moved. What it cannot
@@ -12,12 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Write as _};
+use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
 
 use crate::persist::atomic;
 
@@ -33,14 +34,23 @@ const BLOB_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 const THINNED_STAMP: &str = "thinned";
 
 /// One saved state of a file, oldest first in a log.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     /// Milliseconds since 1970.
+    #[serde(rename = "t")]
     pub time: i64,
     /// The blob's name.
+    #[serde(rename = "h")]
     pub hash: String,
     /// Why it was taken, when it was not a pause.
+    #[serde(rename = "l", default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+}
+
+/// A log's first line.
+#[derive(Serialize, Deserialize)]
+struct Header {
+    path: String,
 }
 
 /// A log whose file is not at its path any more.
@@ -125,6 +135,8 @@ impl History {
         let mut lines = String::new();
         if !log.exists() {
             lines.push_str(&header(path));
+        } else if !ends_in_line_break(&log)? {
+            lines.push('\n');
         }
         lines.push_str(&line(&Snapshot {
             time,
@@ -374,21 +386,23 @@ fn thin(snapshots: &[Snapshot], now: i64) -> Vec<Snapshot> {
 }
 
 fn header(path: &Path) -> String {
-    format!("{}\n", json!({ "path": path.to_string_lossy() }))
+    let path = path.to_string_lossy().into_owned();
+    format!("{}\n", to_json(&Header { path }))
 }
 
 fn line(snapshot: &Snapshot) -> String {
-    let record = match &snapshot.label {
-        Some(label) => json!({ "t": snapshot.time, "h": snapshot.hash, "l": label }),
-        None => json!({ "t": snapshot.time, "h": snapshot.hash }),
-    };
-    format!("{record}\n")
+    format!("{}\n", to_json(snapshot))
+}
+
+/// Strings and numbers, which always serialize.
+fn to_json(record: &impl Serialize) -> String {
+    serde_json::to_string(record).unwrap_or_default()
 }
 
 fn read_path(log: &Path) -> Option<PathBuf> {
     let text = fs::read_to_string(log).ok()?;
-    let record = serde_json::from_str::<Value>(text.lines().next()?).ok()?;
-    record.get("path")?.as_str().map(PathBuf::from)
+    let header: Header = serde_json::from_str(text.lines().next()?).ok()?;
+    Some(PathBuf::from(header.path))
 }
 
 /// A log's snapshots. A line a crash cut short does not parse and is skipped.
@@ -397,15 +411,20 @@ fn read_log(log: &Path) -> Vec<Snapshot> {
         return Vec::new();
     };
     (text.lines())
-        .filter_map(|line| {
-            let record = serde_json::from_str::<Value>(line).ok()?;
-            Some(Snapshot {
-                time: record.get("t")?.as_i64()?,
-                hash: record.get("h")?.as_str()?.to_owned(),
-                label: record.get("l").and_then(Value::as_str).map(str::to_owned),
-            })
-        })
+        .filter_map(|line| serde_json::from_str(line).ok())
         .collect()
+}
+
+/// Whether the log's last write finished its line. One a crash cut short would glue the next record to it.
+fn ends_in_line_break(log: &Path) -> io::Result<bool> {
+    let mut file = fs::File::open(log)?;
+    if file.seek(SeekFrom::End(0))? == 0 {
+        return Ok(true);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0; 1];
+    file.read_exact(&mut last)?;
+    Ok(last[0] == b'\n')
 }
 
 /// The folders that differ, once the part of two paths they share at their ends is taken off.
@@ -431,6 +450,39 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let history = History::new(&dir.join("data"));
         (dir, history)
+    }
+
+    #[test]
+    fn a_line_cut_by_a_crash_loses_only_itself() {
+        let (dir, history) = store("cut");
+        let path = dir.join("a.md");
+        let now = now_ms();
+        history.snapshot(&path, "first", None, now).unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(history.log_of(&path))
+            .unwrap()
+            .write_all(b"{\"t\":123,\"h\":\"ab")
+            .unwrap();
+        history.snapshot(&path, "second", None, now + 1).unwrap();
+        let versions = history.versions(&path);
+        assert_eq!(versions.len(), 2);
+        assert_eq!(history.text(&versions[1].hash).unwrap(), "second");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_log_keeps_its_format() {
+        let (dir, history) = store("format");
+        let path = dir.join("a.md");
+        history.snapshot(&path, "text", Some("label"), 5).unwrap();
+        history.snapshot(&path, "more", None, 6).unwrap();
+        let log = fs::read_to_string(history.log_of(&path)).unwrap();
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines[0], format!("{{\"path\":\"{}\"}}", path.display()));
+        assert!(lines[1].starts_with("{\"t\":5,\"h\":") && lines[1].ends_with(",\"l\":\"label\"}"));
+        assert!(lines[2].starts_with("{\"t\":6,\"h\":") && !lines[2].contains("\"l\""));
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
