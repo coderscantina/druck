@@ -614,8 +614,11 @@ impl Gate {
         self.preview.update(cx, |preview, cx| preview.zoom_step(-1, cx));
         self.sleep(Duration::from_millis(300), cx).await;
         let contact = self.preview.read_with(cx, |preview, _| preview.is_contact_sheet());
-        let middle = self.preview.read_with(cx, |preview, _| preview.middle_of_view());
-        self.click(middle, cx);
+        let Some(page) = self.preview.read_with(cx, |preview, _| preview.middle_of_a_page()) else {
+            eprintln!("gate: no page on the contact sheet to click");
+            return;
+        };
+        self.click(page, cx);
         self.sleep(Duration::from_millis(300), cx).await;
         let spread_again = self.preview.read_with(cx, |preview, _| !preview.is_contact_sheet());
         eprintln!(

@@ -266,7 +266,7 @@ crate::strings! {
         StartOn => ("Start on", "Beginnt auf"),
         BreakNone => ("Any page", "Jeder Seite"),
         BreakPage => ("New page", "Neuer Seite"),
-        BreakRecto => ("Odd page", "Ungerader"),
+        BreakRecto => ("Odd page", "Ungerade"),
         Sink => ("Sink", "Absenkung"),
         DropCap => ("Drop capital, lines", "Initiale, Zeilen"),
         LeadIn => ("Lead-in, words", "Kapitälchen, Wörter"),

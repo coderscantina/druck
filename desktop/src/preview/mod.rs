@@ -556,13 +556,16 @@ impl PreviewView {
         Some(point(px(self.origin.0 + x), px(self.origin.1 + y)))
     }
 
-    /// The window position of the middle of the view. For scripted runs.
+    /// The window position of the centre of the page in the middle of the view, never the gutter between two. For
+    /// scripted runs.
     #[cfg(any(debug_assertions, feature = "measure"))]
-    pub fn middle_of_view(&self) -> gpui::Point<Pixels> {
-        point(
-            px(self.origin.0 + self.view.0 / 2.0),
-            px(self.origin.1 + self.view.1 / 2.0),
-        )
+    pub fn middle_of_a_page(&self) -> Option<gpui::Point<Pixels>> {
+        let sheets = self.sheets(self.current_zoom)?;
+        let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
+        let (width, height) = sheets.size(page);
+        let x = sheets.left(page, self.view.0, self.scroll.0) + width / 2.0;
+        let y = sheets.top(page) - self.scroll.1 + height / 2.0;
+        Some(point(px(self.origin.0 + x), px(self.origin.1 + y)))
     }
 
     /// The page the slip is on. For scripted runs.

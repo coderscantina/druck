@@ -133,10 +133,33 @@ pub fn keys_of(action: &dyn Action, cx: &App) -> Option<String> {
         binding
             .keystrokes()
             .iter()
-            .map(|keystroke| keystroke.display(os).to_string())
+            .map(|keystroke| {
+                let shown = keystroke.display(os).to_string();
+                // gpui spells out the keys it has no symbol for, as in "⌘enter".
+                match (os, mac_symbol(keystroke.key())) {
+                    (gpui::OperatingSystem::Mac, Some(symbol)) => {
+                        format!("{}{symbol}", shown.strip_suffix(keystroke.key()).unwrap_or(&shown))
+                    }
+                    _ => shown,
+                }
+            })
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+/// The symbol macOS menus show for a key gpui writes as a word.
+fn mac_symbol(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "enter" => "\u{21a9}",
+        "delete" => "\u{2326}",
+        "home" => "\u{2196}",
+        "end" => "\u{2198}",
+        "pageup" => "\u{21de}",
+        "pagedown" => "\u{21df}",
+        "space" => "\u{2423}",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
