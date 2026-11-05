@@ -95,17 +95,17 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
-### Third review note
+### Fourth review note
 
-On 2026-11-05 the third review's findings F1 to F23 went in, with the owner's decisions on F6, F18, and the typing gate's measure. The choices are in [decisions](DECISIONS.md#2026-11-05-third-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-review-3-2026-11-05` beside the repo.
+On 2026-11-05 the fourth review's findings went in, with the owner's decisions on F3, F9, F12, F13's markers, F14's Commit colour, and F16. The choices are in [decisions](DECISIONS.md#2026-11-05-fourth-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-review-4-2026-11-05` beside the repo.
 
-Typing **meets the target by the gate's new measure**, key handler to paint: 11.4 ms median, 18.7 ms p95, 360 keys, on a temp copy of `buch-1-ttp404` made a project, release with fat LTO and `--features measure`, `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25 DRUCK_GATE_THEME_EDITS=0`, load about 2.5. Not judged: from when a key was due, 15.9 ms median, and the timer's lateness 3.0 ms median.
+Typing **meets the target**, key handler to paint: 11.2 ms median, 18.3 ms p95, 360 keys, on a temp copy of `buch-1-ttp404` made a project through the launch card, release with fat LTO and `--features measure`, `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25 DRUCK_GATE_THEME_EDITS=0`, load about 5. Not judged: from when a key was due, 15.1 ms median. `DRUCK_GATE_SLIP=5`: a click on a line opens the slip, and a click on the contact sheet goes back to a spread.
 
-Evidence by captures on temp copies, keys by PID, with a sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`: new book, article, and paper through `DRUCK_NEW_PROJECT`, a real `git merge` with See both and Keep mine through `DRUCK_VERSIONS_RUN`, a branch made and switched to, Merge asking, moved notes in the commit card, a passage restore reading "The same as now", Tab and Escape in the question card, Page Down at Fit, the contact sheet, and the status line at 720 and 900 px.
+Evidence by captures on temp copies, keys by PID, with a sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`: the launch card's ring, a new book and a German paper with the caret after the title, no underline, and no warning, a real `git merge` with See both naming "deins" and the branch, the app reopened mid-merge with its foot, `Ctrl+Cmd+T` settling it, the proof list with one page warning alone, "Pages 6–7 of 203 (ii–1)", Write and Publish at 720 by 480 in German, the search card at that size, typing after Escape, a find inside a chapter note, the palette's ⌘↩, "Ungerade", the meta "Author", the Git panel with staged moves and a quiet Commit, and Control+Tab ringing the Write switch first.
 
-Not verified, for want of a pointer: clicks on Switch, Show in Finder, Save to `druck.yaml`, and the Marks switch. The new project dialog, which is the system's, was not captured, since it would write into Documents. The failures F5 shows were not caused for real: a watcher that cannot start and an unwritable recovery copy.
+Not verified: the agent's turn summary (F10) and Send's colour, which need a live CLI turn; "Updated by the pull" and the merge notes, which need a remote; an export's time in ms; the three new saving-line failures, which were not caused for real; and a click unfolding a chapter note, for want of a pointer. Real keystrokes reached a floating window once during captures, as `gate.rs` warns: three letters in a temp copy's chapter and two in the commit card's field, nothing in any original.
 
-Follow-ups: reopening the app mid-merge with See both's markers standing says nothing at the foot. The agent's remembered session, the galley's theme fonts, and `state.json` at quit still only print to stderr.
+Follow-ups: the folded chapter note never unfolded on keyboard focus, which is why F11 took it out of the tab order; why its focus-in did nothing was not found. `editor/mod.rs` is still about 1,860 lines.
 
 ### Merge and typing note
 
