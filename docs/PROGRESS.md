@@ -47,7 +47,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 18: Writing surface. Built and checked on `t3/writing-first-surface`, unmerged. Stays unchecked until the owner has run the input method test, see the resume note.
 - [ ] 19: Publish view.
 - [ ] 20: Writing partner.
-- [ ] 21: Versions.
+- [ ] 21: Versions. Built and checked on `t3/add-versions-history-git`, unmerged. Stays unchecked until the owner has tried a real mouse and signing, and decided whether the 20-minute soak stands in for the hour. See the note in the resume note.
 - [ ] 22: Writer beta, the new gate for a first public release.
 - [ ] 23: Desktop 1.0, replacing 17.
 
@@ -94,6 +94,14 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** when kept copies in `kept/` get cleaned up, whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Milestone 21 note
+
+Local history, the commit card, the timeline, and the Git panel are on branch `t3/add-versions-history-git`, not merged and not pushed. [The decision](DECISIONS.md#2026-11-05-versions) has the choices and the evidence. It also fixes a crash from `47433dd` in the text: a Backspace merging paragraphs at the end of a chapter aborted the app (`023c917`). Any branch with that commit but not the fix has it.
+
+To wire after milestones 19 and 20: `crate::versions::label_history(session, label, cx)` before an agent's turn, `crate::versions::set_unreviewed_changes(|cx| ..., cx)` for the card's warning, and with `let panel = crate::versions::mount(...)` in `app::mount`, `parts.inspector.update(cx, |inspector, _| inspector.mount(Tab::Git, panel.clone().into()))` plus `crate::versions::use_rail_tab(...)`, so `Ctrl+Shift+G` shows the tab in Publish.
+
+Only the owner can check: a real mouse on the strip, a passage, and the buttons; `commit.gpgsign` with a real key; and whether 20 minutes of scripted edits stand in for the milestone's hour.
 
 Milestone 18 is built on branch `t3/writing-first-surface`, on top of `writing-first-direction`, not merged and not pushed. The app is writing-first: Write and Publish, a bare page in the theme's type, a Binder, a palette, one `settings.json` with its window, zoom per mode, and typewriter scrolling and dimming. See [the decisions](DECISIONS.md#2026-11-05-writing-surface).
 
