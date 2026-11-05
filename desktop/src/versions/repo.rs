@@ -57,6 +57,10 @@ pub enum ChangeKind {
     Removed,
     /// Both sides of a merge changed it.
     Unmerged,
+    /// Moved here from [`Change::from`], as Git's rename tracking finds it.
+    Moved,
+    /// Moved elsewhere. The commit takes it out, and lists show only where it went.
+    MovedAway,
 }
 
 /// A file that differs from the last commit.
@@ -68,6 +72,8 @@ pub struct Change {
     pub kind: ChangeKind,
     /// Words added and removed, for a text file.
     pub words: Option<(usize, usize)>,
+    /// Its path in the book before it moved, for [`ChangeKind::Moved`].
+    pub from: Option<String>,
 }
 
 /// One commit, for lists and the timeline.
@@ -146,6 +152,13 @@ pub struct Overview {
     pub remote: Option<String>,
 }
 
+impl Overview {
+    /// The changes a list shows: a file that moved shows once, where it went.
+    pub fn listed(&self) -> impl Iterator<Item = &Change> {
+        (self.changes.iter()).filter(|change| change.kind != ChangeKind::MovedAway)
+    }
+}
+
 pub struct Repo {
     repo: gix::Repository,
     /// The book's folder as the session knows it.
@@ -217,16 +230,30 @@ impl Repo {
 
     /// What `git status` lists for the book's folder, with each file's words against the last commit.
     pub fn changes(&self) -> Result<Vec<Change>> {
+        use gix::status::index_worktree::Item as Worktree;
         let unmerged = self.unmerged_paths()?;
         let mut paths = BTreeSet::new();
+        // Where each moved file came from, by where it is now.
+        let mut moved: HashMap<String, String> = HashMap::new();
         let status = (self.repo.status(gix::progress::Discard)?)
             .untracked_files(gix::status::UntrackedFiles::Files)
-            .index_worktree_rewrites(None)
+            .index_worktree_rewrites(gix::diff::Rewrites::default())
             .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
             .into_iter(None)?;
         for item in status {
-            paths.insert(item?.location().to_str_lossy().into_owned());
+            let item = item?;
+            let location = item.location().to_str_lossy().into_owned();
+            if let gix::status::Item::IndexWorktree(Worktree::Rewrite {
+                source, copy: false, ..
+            }) = &item
+            {
+                let from = source.rela_path().to_str_lossy().into_owned();
+                paths.insert(from.clone());
+                moved.insert(location.clone(), from);
+            }
+            paths.insert(location);
         }
+        let moved_away: HashSet<&String> = moved.values().collect();
         paths.extend(unmerged.iter().cloned());
         let tree = self.head_tree();
         let mut changes = Vec::new();
@@ -250,15 +277,18 @@ impl Repo {
             if same && !unmerged.contains(&rela) {
                 continue;
             }
+            let from = moved.get(&rela);
             let kind = match (unmerged.contains(&rela), &on_disk, in_head) {
                 (true, ..) => ChangeKind::Unmerged,
+                (_, None, _) if moved_away.contains(&rela) => ChangeKind::MovedAway,
                 (_, None, _) => ChangeKind::Removed,
+                (_, _, None) if from.is_some() => ChangeKind::Moved,
                 (_, _, None) => ChangeKind::Added,
                 _ => ChangeKind::Modified,
             };
             let old = tree
                 .as_ref()
-                .and_then(|tree| self.text_in(tree, &rela))
+                .and_then(|tree| self.text_in(tree, from.unwrap_or(&rela)))
                 .unwrap_or_default();
             let words = match &on_disk {
                 Some(bytes) if std::str::from_utf8(bytes).is_err() => None,
@@ -271,6 +301,9 @@ impl Repo {
                 name: name.to_owned(),
                 kind,
                 words,
+                from: (kind == ChangeKind::Moved)
+                    .then(|| from.and_then(|from| from.strip_prefix(&self.scope)).map(str::to_owned))
+                    .flatten(),
             });
         }
         Ok(changes)
@@ -594,7 +627,8 @@ impl Repo {
         Ok(branches)
     }
 
-    /// Makes a branch at the current commit. The current branch stays current.
+    /// Makes a branch at the current commit and makes it the current one. It holds the same commit, so no file changes,
+    /// and unsaved text stays as it is.
     pub fn create_branch(&self, name: &str) -> Result<()> {
         let full = branch_ref(name)?;
         let head = self
@@ -603,8 +637,26 @@ impl Repo {
         if self.repo.try_find_reference(full.as_ref())?.is_some() {
             return Err(Problem::BranchExists(name.to_owned()));
         }
-        self.repo
-            .reference(full, head, PreviousValue::MustNotExist, "branch: Created from HEAD")?;
+        let from = self.repo.head_name()?.map(|name| name.shorten().to_string());
+        self.repo.reference(
+            full.clone(),
+            head,
+            PreviousValue::MustNotExist,
+            "branch: Created from HEAD",
+        )?;
+        self.repo.edit_reference(RefEdit {
+            change: RefChange::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: false,
+                    message: format!("checkout: moving from {} to {name}", from.unwrap_or_default()).into(),
+                },
+                expected: PreviousValue::Any,
+                new: gix::refs::Target::Symbolic(full),
+            },
+            name: FullName::try_from("HEAD")?,
+            deref: false,
+        })?;
         Ok(())
     }
 

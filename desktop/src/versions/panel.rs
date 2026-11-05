@@ -2,7 +2,7 @@
 //! right panel in Write, through [`Slot`], and the view itself mounts as a rail tab in Publish.
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, Focusable as _, ScrollHandle, Subscription, WeakEntity, Window, div};
+use gpui::{Context, Entity, Focusable as _, ScrollHandle, SharedString, Subscription, WeakEntity, Window, div};
 
 use super::repo::{Branch, Overview};
 use super::strings::Key;
@@ -17,8 +17,8 @@ pub struct GitPanel {
     open: bool,
     /// The branch list shows under the picker.
     branches_open: bool,
-    /// The unmerged branch whose Delete asked once already.
-    confirm_delete: Option<String>,
+    /// The branch whose Merge, or whose Delete when it is unmerged, asked once already.
+    asked: Option<(Ask, String)>,
     message: Entity<TextInput>,
     new_branch: Entity<TextInput>,
     scroll: ScrollHandle,
@@ -57,7 +57,7 @@ impl GitPanel {
             view,
             open: false,
             branches_open: false,
-            confirm_delete: None,
+            asked: None,
             message,
             new_branch,
             scroll: ScrollHandle::new(),
@@ -148,7 +148,7 @@ impl GitPanel {
             .cursor_pointer()
             .on_click(cx.listener(|panel, _, _, cx| {
                 panel.branches_open = !panel.branches_open;
-                panel.confirm_delete = None;
+                panel.asked = None;
                 cx.notify();
             }))
             .child(div().flex_1().min_w_0().truncate().child(name))
@@ -161,24 +161,53 @@ impl GitPanel {
             }))
     }
 
+    /// Whether `button` on `branch` asked already: then this click runs it. Otherwise it asks now.
+    fn ask_once(&mut self, button: Ask, branch: &str, cx: &mut Context<Self>) -> bool {
+        if self
+            .asked
+            .as_ref()
+            .is_some_and(|(asked, name)| *asked == button && name == branch)
+        {
+            self.asked = None;
+            return true;
+        }
+        self.asked = Some((button, branch.to_owned()));
+        cx.notify();
+        false
+    }
+
+    /// A branch's row: its name, then Switch, Merge, and Delete. The row itself does nothing on a click.
     fn branch_row(
         &self,
         at: usize,
         branch: &Branch,
+        into: &str,
         tokens: &Tokens,
         can_move: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let name = branch.name.clone();
-        let asked = self.confirm_delete.as_deref() == Some(branch.name.as_str());
-        let switch = branch.name.clone();
-        let merge = branch.name.clone();
-        let delete = branch.name.clone();
+        let asked = |button| {
+            self.asked
+                .as_ref()
+                .is_some_and(|(asked, name)| *asked == button && *name == branch.name)
+        };
+        let (merge_asked, delete_asked) = (asked(Ask::Merge), asked(Ask::Delete));
         let merged = branch.merged;
         let current = branch.current;
+        let act = move |panel: &mut Self, window: &mut Window, cx: &mut Context<Self>, action: Action| {
+            panel.branches_open = false;
+            if let Some(view) = panel.view.upgrade() {
+                view.update(cx, |view, cx| match action {
+                    Action::Switch(branch) => view.switch(branch, window, cx),
+                    Action::Merge(branch) => view.merge_branch(branch, window, cx),
+                    Action::Delete(branch) => view.delete_branch(branch, window, cx),
+                });
+            }
+        };
+        let (switch, merge, delete) = (name.clone(), name.clone(), name.clone());
         div()
             .id(("git-branch-row", at))
-            .button(tokens, name.clone())
             .flex_none()
             .min_h(tokens::VERSIONS_ROW_HEIGHT)
             .px(tokens::SPACE_3)
@@ -187,17 +216,6 @@ impl GitPanel {
             .gap(tokens::SPACE_1)
             .text_size(tokens::TEXT_SMALL)
             .text_color(if current { tokens.text } else { tokens.text_quiet })
-            .when(!current && can_move, |row| {
-                row.cursor_pointer()
-                    .hover(|row| row.bg(tokens.raised))
-                    .on_click(cx.listener(move |panel, _, window, cx| {
-                        panel.branches_open = false;
-                        if let Some(view) = panel.view.upgrade() {
-                            let branch = switch.clone();
-                            view.update(cx, |view, cx| view.switch(branch, window, cx));
-                        }
-                    }))
-            })
             .child(div().flex_1().min_w_0().truncate().child(name))
             .when(current, |row| {
                 row.child(
@@ -208,43 +226,56 @@ impl GitPanel {
                 )
             })
             .when(!current && can_move, |row| {
-                row.child(
-                    ui::button(tokens, ("git-merge", at), crate::t!(Key::Merge)).on_click(cx.listener(
-                        move |panel, _, window, cx| {
-                            panel.branches_open = false;
-                            if let Some(view) = panel.view.upgrade() {
-                                let branch = merge.clone();
-                                view.update(cx, |view, cx| view.merge_branch(branch, window, cx));
+                let merge_label = if merge_asked {
+                    crate::t!(Key::MergeAsk, branch = into).into()
+                } else {
+                    SharedString::from(crate::t!(Key::Merge))
+                };
+                row.child(ui::button(tokens, ("git-switch", at), crate::t!(Key::Switch)).on_click(
+                    cx.listener(move |panel, _, window, cx| act(panel, window, cx, Action::Switch(switch.clone()))),
+                ))
+                .child(
+                    ui::button(tokens, ("git-merge", at), merge_label)
+                        .when(merge_asked, |button| button.text_color(tokens.accent))
+                        .on_click(cx.listener(move |panel, _, window, cx| {
+                            if panel.ask_once(Ask::Merge, &merge, cx) {
+                                act(panel, window, cx, Action::Merge(merge.clone()));
                             }
-                        },
-                    )),
+                        })),
                 )
             })
             .when(!current, |row| {
-                let label = if asked {
+                let label = if delete_asked {
                     crate::t!(Key::DeleteUnmerged)
                 } else {
                     crate::t!(Key::Delete)
                 };
                 row.child(
                     ui::button(tokens, ("git-delete", at), label)
-                        .when(asked, |button| button.text_color(tokens.accent))
+                        .when(delete_asked, |button| button.text_color(tokens.accent))
                         .on_click(cx.listener(move |panel, _, window, cx| {
                             // Git's own rule: a branch whose work is nowhere else asks first.
-                            if !merged && panel.confirm_delete.as_deref() != Some(delete.as_str()) {
-                                panel.confirm_delete = Some(delete.clone());
-                                cx.notify();
-                                return;
-                            }
-                            panel.confirm_delete = None;
-                            if let Some(view) = panel.view.upgrade() {
-                                let branch = delete.clone();
-                                view.update(cx, |view, cx| view.delete_branch(branch, window, cx));
+                            if merged || panel.ask_once(Ask::Delete, &delete, cx) {
+                                panel.asked = None;
+                                act(panel, window, cx, Action::Delete(delete.clone()));
                             }
                         })),
                 )
             })
     }
+}
+
+/// A branch button that asks once before it runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ask {
+    Merge,
+    Delete,
+}
+
+enum Action {
+    Switch(String),
+    Merge(String),
+    Delete(String),
 }
 
 impl Render for GitPanel {
@@ -312,7 +343,7 @@ impl Render for GitPanel {
         let error = read.error().map(str::to_owned);
         let cloud = read.book_folder(cx).as_deref().and_then(repo::cloud_service);
         let can_move = installed && overview.busy.is_none();
-        let rows: Vec<_> = (overview.changes.iter())
+        let rows: Vec<_> = (overview.listed())
             .map(|change| {
                 let words = change_words(change, read.in_conflict(&change.path, cx));
                 ui::change_row(&tokens, read.title_of(&change.path, &change.name, cx), words).into_any_element()
@@ -326,7 +357,10 @@ impl Render for GitPanel {
             .collect();
         let branch_rows: Vec<_> = if self.branches_open {
             (overview.branches.iter().enumerate())
-                .map(|(at, branch)| self.branch_row(at, branch, &tokens, can_move, cx).into_any_element())
+                .map(|(at, branch)| {
+                    self.branch_row(at, branch, &overview.branch, &tokens, can_move, cx)
+                        .into_any_element()
+                })
                 .collect()
         } else {
             Vec::new()

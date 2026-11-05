@@ -598,6 +598,14 @@ impl Session {
     }
 
     /// The title a chapter's row shows.
+    /// The title a chapter of the book takes from its heading, for a file that is one. Other files have none.
+    pub fn chapter_title(&self, path: &Path) -> Option<String> {
+        let chapter = self.chapters.get(&self.chapter_of_file(path)?)?;
+        (chapter.group == Group::Book)
+            .then(|| chapter.outline.title.clone())
+            .flatten()
+    }
+
     pub fn title_of(&self, id: ChapterId) -> String {
         self.chapters
             .get(&id)

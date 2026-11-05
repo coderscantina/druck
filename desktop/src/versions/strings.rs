@@ -36,6 +36,7 @@ crate::strings! {
         WordsSame => ("changed", "geändert"),
         Binary => ("not text", "kein Text"),
         Deleted => ("deleted", "gelöscht"),
+        Moved => ("moved", "verschoben"),
         InConflict => ("in conflict", "im Konflikt"),
 
         FirstCommitQuestion => (
@@ -71,6 +72,8 @@ crate::strings! {
         NoCommits => ("No commits yet.", "Noch keine Commits."),
         NewBranch => ("New branch", "Neuer Branch"),
         Merge => ("Merge", "Merge"),
+        MergeAsk => ("Merge into {branch}?", "In {branch} mergen?"),
+        Switch => ("Switch", "Wechseln"),
         Delete => ("Delete", "Löschen"),
         DeleteUnmerged => ("Not merged. Delete?", "Nicht gemerged. Löschen?"),
         Current => ("current", "aktuell"),

@@ -259,7 +259,7 @@ impl CommitCard {
                     .into_any_element(),
             );
         } else {
-            let rows = overview.changes.iter().map(|change| {
+            let rows = overview.listed().map(|change| {
                 let view = view.read(cx);
                 let title = view.title_of(&change.path, &change.name, cx);
                 ui::change_row(tokens, title, change_words(change, view.in_conflict(&change.path, cx)))
@@ -267,7 +267,7 @@ impl CommitCard {
             });
             let more_below = {
                 let (offset, most) = (self.changes_scroll.offset().y, self.changes_scroll.max_offset().y);
-                overview.changes.len() > tokens::COMMIT_CARD_MAX_ROWS && -offset < most.max(tokens::HAIRLINE)
+                overview.listed().count() > tokens::COMMIT_CARD_MAX_ROWS && -offset < most.max(tokens::HAIRLINE)
             };
             parts.push(
                 div()

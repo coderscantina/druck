@@ -175,6 +175,28 @@ fn changes_match_git_status_and_count_words() {
 }
 
 #[test]
+fn a_moved_file_shows_once_as_moved_and_commits_as_a_rename() {
+    let fixture = fixture("moved");
+    let dir = fixture.root.join("book");
+    repo_at(&dir);
+    fs::create_dir_all(dir.join("archiv")).unwrap();
+    fs::rename(dir.join("manuscript/one.md"), dir.join("archiv/one.md")).unwrap();
+    let mut repo = Repo::open(&dir).unwrap().unwrap();
+    let overview = repo.overview(5).unwrap();
+    let listed: Vec<_> = overview.listed().collect();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind, ChangeKind::Moved);
+    assert_eq!(listed[0].from.as_deref(), Some("manuscript/one.md"));
+    assert_eq!(listed[0].words, Some((0, 0)));
+    repo.commit("Archive", None).unwrap();
+    assert_eq!(
+        git(&dir, &["show", "--name-status", "--format=", "-M", "HEAD"]),
+        "R100\tmanuscript/one.md\tarchiv/one.md"
+    );
+    assert!(clean(&dir));
+}
+
+#[test]
 fn a_book_in_a_bigger_repo_commits_only_its_folder() {
     let fixture = fixture("scope");
     let dir = fixture.root.join("shelf");
@@ -257,8 +279,11 @@ fn branches_made_and_deleted_here_are_what_git_lists() {
     );
     let branches = repo.branches().unwrap();
     assert_eq!(branches.len(), 2);
-    assert!(branches[0].current && branches[1].merged);
-    assert_eq!(git(&dir, &["branch", "--show-current"]), "main");
+    assert!(branches[0].merged && branches[1].current);
+    assert_eq!(git(&dir, &["branch", "--show-current"]), "second-ending");
+    assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    git(&dir, &["switch", "-q", "main"]);
+    let mut repo = Repo::open(&dir).unwrap().unwrap();
     assert!(repo.delete_branch("main").is_err());
     git(
         &dir,

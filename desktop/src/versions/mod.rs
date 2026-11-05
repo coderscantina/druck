@@ -998,9 +998,9 @@ impl Versions {
     }
 
     /// A chapter's name for a list: the book's title for it, or its path.
+    /// How a list names a changed file: a chapter of the book by its title, anything else by its path in the book.
     fn title_of(&self, path: &Path, name: &str, cx: &App) -> String {
-        let session = self.session(cx);
-        (session.chapter_of_file(path)).map_or_else(|| name.to_owned(), |chapter| session.title_of(chapter))
+        (self.session(cx).chapter_title(path)).unwrap_or_else(|| name.to_owned())
     }
 
     fn book_folder(&self, cx: &App) -> Option<PathBuf> {
@@ -1134,8 +1134,10 @@ fn change_words(change: &repo::Change, in_conflict: bool) -> String {
     if in_conflict {
         return crate::t!(Key::InConflict).to_owned();
     }
-    if change.kind == Kind::Removed {
-        return crate::t!(Key::Deleted).to_owned();
+    match (change.kind, change.words) {
+        (Kind::Removed | Kind::MovedAway, _) => return crate::t!(Key::Deleted).to_owned(),
+        (Kind::Moved, Some((0, 0))) => return crate::t!(Key::Moved).to_owned(),
+        _ => {}
     }
     match change.words {
         None => crate::t!(Key::Binary).to_owned(),
