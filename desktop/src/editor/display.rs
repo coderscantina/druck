@@ -109,41 +109,6 @@ impl DisplayLine {
     }
 }
 
-/// The lines of a block as one line, with a space for each line ending, for a paragraph the engine sets as one. Lines
-/// that take no room stay apart, so the block is left as it is if it has any.
-pub fn join_lines(lines: Vec<DisplayLine>) -> Vec<DisplayLine> {
-    if lines.len() < 2 || lines.iter().any(|line| line.text.is_empty() || line.bullet.is_some()) {
-        return lines;
-    }
-    let mut lines = lines.into_iter();
-    let mut joined = lines.next().expect("there are lines");
-    for line in lines {
-        let shift = joined.text.len() + 1;
-        let ending = joined.source.end..line.source.start;
-        joined.segments.push(Segment {
-            display: joined.text.len(),
-            source: ending.start,
-            len: 1,
-            source_len: ending.len().max(1),
-        });
-        joined.text.push(' ');
-        joined.runs.push((1, RunStyle::default()));
-        joined.segments.extend(line.segments.into_iter().map(|segment| Segment {
-            display: segment.display + shift,
-            ..segment
-        }));
-        joined.text.push_str(&line.text);
-        joined.runs.extend(line.runs);
-        joined.chips.extend(
-            line.chips
-                .into_iter()
-                .map(|(range, look)| (range.start + shift..range.end + shift, look)),
-        );
-        joined.source.end = line.source.end;
-    }
-    vec![joined]
-}
-
 /// The syntax of one block, cached between frames.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Syntax {
@@ -464,29 +429,6 @@ fn style_at(at: usize, kind: BlockKind, syntax: &Syntax, marked: Option<&Range<u
     }
     style.marked = marked.is_some_and(|marked| marked.contains(&at));
     style
-}
-
-#[cfg(test)]
-mod join_tests {
-    use super::*;
-
-    #[test]
-    fn joined_lines_show_a_space_for_a_line_ending_and_map_both_ways() {
-        let text = "one *two*\nthree";
-        let syntax = Syntax {
-            spans: crate::source::inline::inline_spans(BlockKind::Paragraph, text),
-            markers: Vec::new(),
-        };
-        let hidden = hidden_ranges(BlockKind::Paragraph, text, &syntax, None, false, false);
-        let lines = display_lines(BlockKind::Paragraph, text, &syntax, &hidden, None, false, &[]);
-        let joined = join_lines(lines);
-        assert_eq!(joined.len(), 1);
-        assert_eq!(joined[0].text, "one two three");
-        assert_eq!(joined[0].source, 0..text.len());
-        let three = text.find("three").expect("in the text");
-        assert_eq!(joined[0].to_display(three), "one two ".len());
-        assert_eq!(joined[0].to_source("one two ".len()), three);
-    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,7 @@
-//! One open document: the three panes, the slots later slices mount into, and the wiring between them.
+//! One open document: its two modes, the slots later work mounts into, and the wiring between the panes.
+//!
+//! The window is in Write or Publish, see [`Mode`]. Write shows the text, with the Binder if the author wants it. Publish
+//! shows the pages and the rail. Both edit the same text, and [`ModeChanged`] tells who cares.
 //!
 //! The session lives in the editor view. Panes hold no document: this module hands them what they show and carries out
 //! what they ask for through [`EditorView::update_session`].
@@ -10,62 +13,73 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyView, Context, Entity, Focusable, MouseButton, PathPromptOptions, StyleRefinement, Subscription, Task, Window,
-    div, px,
+    AnyView, Bounds, Context, Entity, EventEmitter, Focusable, MouseButton, PathPromptOptions, StyleRefinement,
+    Subscription, Task, Window, div, point, px,
 };
 
 use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
-use crate::preview::{BodyStyle, PageClicked, PreviewView, Typeset};
+use crate::preview::{BookType, PageClicked, PreviewView, Typeset};
 use crate::session::{Group, Session};
+use crate::settings;
 use crate::shell::text::Key;
 use crate::sidebar::dialogs::{DialogEvent, SectionDialog};
+use crate::sidebar::ticks::TicksView;
 use crate::sidebar::{SidebarData, SidebarEvent, SidebarView};
 use crate::theme_file::blocks::Target;
 use crate::tokens::{self, Tokens};
 
-/// Below this window width each side of a split is too narrow to write in, so the app opens on Write.
-const SPLIT_MIN_WIDTH: f32 = 1400.;
-/// Keeps the title clear of the window controls and the canvas switch.
-const TITLE_INSET: gpui::Pixels = px(240.);
-/// How long typing must stop before the pages catch up.
+/// How long typing must stop before the pages catch up when they are on screen.
 const REFRESH_PAUSE: Duration = Duration::from_millis(150);
+/// The same in Write, with nothing on screen: a long pause, so Publish opens at once and chips show the engine's numbers.
+const LONG_PAUSE: Duration = Duration::from_millis(2000);
 
-gpui::actions!(workspace, [ShowWrite, ShowPages, ShowSplit, FocusNext, FocusPrevious]);
+gpui::actions!(
+    workspace,
+    [
+        ShowWrite,
+        ShowPublish,
+        NewSection,
+        FocusNext,
+        FocusPrevious,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset
+    ]
+);
 
-/// What the centre pane shows.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Canvas {
+/// What the window is doing: writing, or turning the manuscript into a finished book.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
     Write,
-    Pages,
-    Split,
+    Publish,
 }
 
-impl Canvas {
-    const ALL: [(Self, Key); 3] = [
-        (Self::Write, Key::Write),
-        (Self::Pages, Key::Pages),
-        (Self::Split, Key::Split),
-    ];
+impl Mode {
+    const ALL: [(Self, Key); 2] = [(Self::Write, Key::Write), (Self::Publish, Key::Publish)];
 
+    /// The mode `DRUCK_MODE` names, for screenshots and measurements.
     fn from_env() -> Option<Self> {
-        match crate::gate::var("DRUCK_CANVAS")?.as_str() {
+        match crate::gate::var("DRUCK_MODE")?.as_str() {
             "write" => Some(Self::Write),
-            "pages" => Some(Self::Pages),
-            "split" => Some(Self::Split),
+            "publish" => Some(Self::Publish),
             _ => None,
         }
     }
 }
 
+/// The window went to another mode.
+pub struct ModeChanged(pub Mode);
+
+impl EventEmitter<ModeChanged> for Workspace {}
+
 /// Where a slice mounts a view of its own. See `crate::app::mount`.
 #[derive(Default)]
 pub struct Slots {
-    /// In the title bar, before the canvas switch.
-    pub toolbar: Vec<AnyView>,
-    /// The strip below the canvas, left to right.
+    /// One line over the foot of the text or the pages, left to right. It has no background and takes no room, and a
+    /// view that has nothing to say draws nothing. A view that takes `ml_auto` stands at the right.
     pub footer: Vec<AnyView>,
     /// Layers over the window, last on top. A layer draws nothing while it is closed.
     pub overlays: Vec<AnyView>,
@@ -78,14 +92,12 @@ pub struct Parts {
     pub editor: Entity<EditorView>,
     pub preview: Entity<PreviewView>,
     pub sidebar: Entity<SidebarView>,
+    pub ticks: Entity<TicksView>,
     pub inspector: Entity<InspectorView>,
 }
 
 pub struct Workspace {
-    canvas: Canvas,
-    /// Whether the sidebar and the inspector are shown. The View menu hides them for a wider galley.
-    sidebar_shown: bool,
-    inspector_shown: bool,
+    mode: Mode,
     parts: Parts,
     details: Entity<DetailsPanel>,
     dialog: Entity<SectionDialog>,
@@ -94,8 +106,8 @@ pub struct Workspace {
     refresh: Task<()>,
     /// The revision last asked for, so an edit to a note asks for nothing.
     requested: Option<u64>,
-    /// The body style the galley shows.
-    body: Option<BodyStyle>,
+    /// The theme's type the galley shows.
+    book_type: Option<BookType>,
     /// The content hashes of the font files the toolkit has.
     fonts: HashSet<u64>,
     /// Where the caret went while the pages were behind the text, to show once they catch up.
@@ -124,6 +136,7 @@ impl Workspace {
         let preview = cx.new(|cx| PreviewView::new(kind, asked.clone(), cx));
         let inspector = cx.new(|cx| InspectorView::new(theme, dirs, window, cx));
         let sidebar = cx.new(|cx| SidebarView::new(window, cx));
+        let ticks = cx.new(|_| TicksView::new());
         let model = inspector.read(cx).model().clone();
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
@@ -144,18 +157,25 @@ impl Workspace {
             cx.subscribe(&model, |workspace, _, _: &SpecimenRequested, cx| {
                 workspace.specimen_requested(cx)
             }),
-            cx.subscribe_in(&preview, window, |workspace, _, Typeset(body), window, cx| {
-                workspace.set_body(body, cx);
+            cx.subscribe_in(&preview, window, |workspace, _, Typeset(book_type), window, cx| {
+                workspace.set_type(book_type, cx);
                 workspace.show_caret(cx);
                 workspace.show_fonts(cx);
                 workspace.jump_to_style(window, cx);
+                workspace.ready_pages(window, cx);
             }),
+            cx.observe_global_in::<settings::Store>(window, |_, _, cx| cx.notify()),
             cx.subscribe(&editor, |workspace, _, CaretMoved(offset), cx| {
                 workspace.caret = Some(*offset);
                 workspace.show_caret(cx);
             }),
             cx.subscribe_in(&preview, window, Self::page_clicked),
-            cx.subscribe_in(&sidebar, window, Self::sidebar_event),
+            cx.subscribe_in(&sidebar, window, |workspace, _, event, window, cx| {
+                workspace.sidebar_event(event, window, cx);
+            }),
+            cx.subscribe_in(&ticks, window, |workspace, _, event, window, cx| {
+                workspace.sidebar_event(event, window, cx);
+            }),
             cx.subscribe_in(&details, window, Self::details_event),
             cx.subscribe_in(&dialog, window, Self::dialog_event),
         ];
@@ -163,27 +183,22 @@ impl Workspace {
             editor,
             preview,
             sidebar,
+            ticks,
             inspector,
         };
         let mut slots = Slots::default();
         crate::app::mount(&parts, &mut slots, window, cx);
         slots.overlays.push(dialog.clone().into());
-        let canvas = Canvas::from_env().unwrap_or(if f32::from(window.bounds().size.width) < SPLIT_MIN_WIDTH {
-            Canvas::Write
-        } else {
-            Canvas::Split
-        });
+        let mode = Mode::from_env().unwrap_or(Mode::Write);
         let mut workspace = Self {
-            canvas,
-            sidebar_shown: true,
-            inspector_shown: true,
+            mode,
             parts,
             details,
             dialog,
             slots,
             refresh: Task::ready(()),
             requested: None,
-            body: None,
+            book_type: None,
             fonts: HashSet::new(),
             caret: None,
             theme_setting: None,
@@ -201,7 +216,29 @@ impl Workspace {
                 .update(cx, |preview, cx| preview.set_specimen(true, cx));
         }
         workspace.request_pages(cx);
+        if mode == Mode::Publish {
+            workspace.focus_main(window, cx);
+        }
+        cx.emit(ModeChanged(mode));
+        // For screenshots: `DRUCK_CHAPTER=4` opens that chapter of the book, and `DRUCK_SELECT=word` selects a word in it.
+        if let Some(chapter) = crate::gate::var("DRUCK_CHAPTER").and_then(|chapter| chapter.parse::<usize>().ok()) {
+            let id = workspace.parts.editor.read(cx).session().book().get(chapter).copied();
+            if let Some(id) = id {
+                workspace
+                    .parts
+                    .editor
+                    .update(cx, |editor, cx| editor.show_chapter(id, window, cx));
+            }
+        }
+        if let Some(word) = crate::gate::var("DRUCK_SELECT") {
+            workspace.parts.editor.update(cx, |editor, cx| {
+                if let Some(at) = editor.text().find(&word) {
+                    editor.select_for_screenshot(at..at + word.len(), window, cx);
+                }
+            });
+        }
         crate::gate::start(
+            cx.entity(),
             workspace.parts.editor.clone(),
             workspace.parts.preview.clone(),
             workspace.parts.inspector.clone(),
@@ -211,35 +248,51 @@ impl Workspace {
         workspace
     }
 
-    pub fn sidebar_shown(&self) -> bool {
-        self.sidebar_shown
+    pub fn mode(&self) -> Mode {
+        self.mode
     }
 
-    pub fn inspector_shown(&self) -> bool {
-        self.inspector_shown
-    }
-
-    /// Show a canvas, for the View menu when no pane holds the focus.
-    pub fn show_write(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show(Canvas::Write, window, cx);
-    }
-
-    pub fn show_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show(Canvas::Pages, window, cx);
-    }
-
-    pub fn show_split(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show(Canvas::Split, window, cx);
-    }
-
-    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_shown = !self.sidebar_shown;
+    /// Goes to a mode. Keys go to what is on screen: a hidden pane cannot hold focus. Pages not caught up with the text
+    /// are asked for now, since the author wants them.
+    pub fn show(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
+        let changed = self.mode != mode;
+        self.mode = mode;
+        if mode == Mode::Publish {
+            self.request_if_changed(cx);
+        }
+        self.focus_main(window, cx);
+        if changed {
+            self.ready_pages(window, cx);
+            cx.emit(ModeChanged(mode));
+        }
         cx.notify();
     }
 
-    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
-        self.inspector_shown = !self.inspector_shown;
-        cx.notify();
+    /// Gives the keys to what the mode is about.
+    pub fn focus_main(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.mode {
+            Mode::Write => window.focus(&self.parts.editor.focus_handle(cx), cx),
+            Mode::Publish => window.focus(&self.parts.preview.focus_handle(cx), cx),
+        }
+    }
+
+    /// Opens the dialog for a new section.
+    pub fn new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dialog.update(cx, |dialog, cx| dialog.open_new_section(window, cx));
+    }
+
+    /// While the pages are not on screen, has what Publish would show ready, for a window this size.
+    fn ready_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ahead = (self.mode == Mode::Write).then(|| {
+            let window_size = window.viewport_size();
+            let width = window_size.width - tokens::INSPECTOR_WIDTH - tokens::RAIL_WIDTH;
+            let height = window_size.height - tokens::TITLEBAR_HEIGHT - tokens::SECTION_HEIGHT;
+            Bounds::new(point(px(0.), tokens::TITLEBAR_HEIGHT), gpui::size(width, height))
+        });
+        let scale = window.scale_factor();
+        self.parts
+            .preview
+            .update(cx, |preview, cx| preview.ready_ahead(ahead, scale, cx));
     }
 
     /// Whether anything is not on disk yet.
@@ -265,15 +318,22 @@ impl Workspace {
             problem: session.problem().map(str::to_owned),
         };
         let cover = data.cover.clone();
+        self.parts
+            .ticks
+            .update(cx, |ticks, cx| ticks.set_data(data.clone(), cx));
         self.parts.sidebar.update(cx, |sidebar, cx| sidebar.set_data(data, cx));
         self.details
             .update(cx, |panel, cx| panel.set_details(details, cover, window, cx));
     }
 
-    /// After a pause in typing: titles first, then pages.
+    /// After a pause in typing: titles first, then pages. Every edit starts the pause again.
     fn text_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pause = match self.mode {
+            Mode::Write => LONG_PAUSE,
+            Mode::Publish => REFRESH_PAUSE,
+        };
         self.refresh = cx.spawn_in(window, async move |workspace, cx| {
-            cx.background_executor().timer(REFRESH_PAUSE).await;
+            cx.background_executor().timer(pause).await;
             workspace
                 .update_in(cx, |workspace, window, cx| {
                     workspace.parts.editor.update(cx, |editor, _| editor.refresh_outline());
@@ -331,9 +391,6 @@ impl Workspace {
     fn theme_changed(&mut self, event: &ThemeChanged, cx: &mut Context<Self>) {
         self.jump = style_of(&event.property);
         self.parts.preview.update(cx, |preview, cx| preview.refresh(cx));
-        self.parts
-            .editor
-            .update(cx, |editor, cx| editor.composed_lines_are_stale(cx));
     }
 
     fn specimen_requested(&mut self, cx: &mut Context<Self>) {
@@ -443,25 +500,14 @@ impl Workspace {
             return;
         };
         editor.update(cx, |editor, cx| editor.show_place(id, offset, window, cx));
-        if self.canvas == Canvas::Split {
-            window.focus(&editor.focus_handle(cx), cx);
-        }
     }
 
-    fn sidebar_event(
-        &mut self,
-        _: &Entity<SidebarView>,
-        event: &SidebarEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn sidebar_event(&mut self, event: &SidebarEvent, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.parts.editor.clone();
         match event {
             SidebarEvent::Select(id) => {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
-                if self.canvas != Canvas::Pages {
-                    window.focus(&editor.focus_handle(cx), cx);
-                }
+                self.focus_main(window, cx);
             }
             SidebarEvent::Browse(id) => {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
@@ -485,10 +531,9 @@ impl Workspace {
                 self.dialog
                     .update(cx, |dialog, cx| dialog.open_edit(id, title, removable, window, cx));
             }
-            SidebarEvent::NewSection => {
-                self.dialog.update(cx, |dialog, cx| dialog.open_new_section(window, cx));
-            }
+            SidebarEvent::NewSection => self.new_section(window, cx),
             SidebarEvent::ShowDetails => {
+                self.show(Mode::Publish, window, cx);
                 self.parts
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Details, cx));
@@ -603,12 +648,12 @@ impl Workspace {
         made
     }
 
-    /// Gives the galley the theme's body style when it changed, with its font files if the toolkit lacks them.
-    fn set_body(&mut self, body: &BodyStyle, cx: &mut Context<Self>) {
-        if self.body.as_ref() == Some(body) {
+    /// Gives the galley the theme's type when it changed, with its font files if the toolkit lacks them.
+    fn set_type(&mut self, book_type: &BookType, cx: &mut Context<Self>) {
+        if self.book_type.as_ref() == Some(book_type) {
             return;
         }
-        let new_files: Vec<Cow<'static, [u8]>> = body
+        let new_files: Vec<Cow<'static, [u8]>> = book_type
             .files
             .iter()
             .filter(|file| self.fonts.insert(file.hash()))
@@ -619,29 +664,18 @@ impl Workspace {
         {
             eprintln!("the galley cannot use the theme's font: {error}");
         }
-        self.parts.editor.update(cx, |editor, cx| {
-            editor.set_body(&body.family, body.size, body.line_height, cx)
-        });
-        self.body = Some(body.clone());
+        self.parts
+            .editor
+            .update(cx, |editor, cx| editor.set_type(book_type.clone(), cx));
+        self.book_type = Some(book_type.clone());
     }
 
-    fn show(&mut self, canvas: Canvas, window: &mut Window, cx: &mut Context<Self>) {
-        self.canvas = canvas;
-        // Keys go to what is on screen: a hidden pane cannot hold focus.
-        if canvas == Canvas::Pages {
-            window.focus(&self.parts.preview.focus_handle(cx), cx);
-        } else {
-            window.focus(&self.parts.editor.focus_handle(cx), cx);
-        }
-        cx.notify();
-    }
-
-    fn canvas_switch(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let buttons: Vec<_> = Canvas::ALL
+    fn mode_switch(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let buttons: Vec<_> = Mode::ALL
             .iter()
-            .map(|&(canvas, key)| {
+            .map(|&(mode, key)| {
                 let label = crate::t!(key);
-                let active = canvas == self.canvas;
+                let active = mode == self.mode;
                 div()
                     .id(label)
                     .toggle(tokens, label, active)
@@ -652,16 +686,33 @@ impl Workspace {
                     .when(active, |button| button.bg(tokens.raised))
                     .hover(|button| button.bg(tokens.raised))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |workspace, _, window, cx| workspace.show(canvas, window, cx)))
+                    .on_click(cx.listener(move |workspace, _, window, cx| workspace.show(mode, window, cx)))
                     .child(label)
             })
             .collect();
         div().flex().items_center().gap(px(2.)).children(buttons)
     }
+
+    /// Publish's Export button: the action that moves on, so it has the accent.
+    fn export_button(&self, tokens: &Tokens) -> impl IntoElement + use<> {
+        let label = crate::t!(Key::ExportRun);
+        div()
+            .id("title-export")
+            .button(tokens, label)
+            .px(tokens::SPACE_2)
+            .rounded(tokens::RADIUS)
+            .cursor_pointer()
+            .text_color(tokens.accent)
+            .hover(|button| button.bg(tokens.raised))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::shell::menus::ShowExport), cx))
+            .child(label)
+    }
 }
 
-/// The bar at the window's top, which moves the window. Also used with no document.
-pub fn titlebar(title: String, tokens: &Tokens, end: impl IntoElement) -> impl IntoElement {
+/// The bar at the window's top, which moves the window. It holds the mode switch at its centre and `end` at its right, and
+/// shares the window's surface. Also used with no document.
+pub fn titlebar(tokens: &Tokens, center: impl IntoElement, end: impl IntoElement) -> impl IntoElement {
     div()
         .id("titlebar")
         .flex_none()
@@ -670,9 +721,7 @@ pub fn titlebar(title: String, tokens: &Tokens, end: impl IntoElement) -> impl I
         .flex()
         .items_center()
         .justify_center()
-        .bg(tokens.panel)
-        .border_b_1()
-        .border_color(tokens.divider)
+        .bg(tokens.canvas)
         .text_size(tokens::TEXT_SMALL)
         .text_color(tokens.text_quiet)
         .on_mouse_down(MouseButton::Left, |event, window, _| {
@@ -682,7 +731,7 @@ pub fn titlebar(title: String, tokens: &Tokens, end: impl IntoElement) -> impl I
                 window.start_window_move();
             }
         })
-        .child(div().min_w_0().px(TITLE_INSET).truncate().child(title))
+        .child(center)
         .child(
             div()
                 .absolute()
@@ -700,49 +749,46 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let accessible = window.is_a11y_active();
-        let switch = self.canvas_switch(&tokens, cx);
-        let location = self.parts.editor.read(cx).session().location();
-        // Only the name: three slices' toolbar needs the room, and the window's own title has the whole path.
-        let title = location.file_name().map_or_else(
-            || location.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        );
-        let bar_end = div()
-            .flex()
-            .items_center()
-            .gap(tokens::SPACE_2)
-            .children(self.slots.toolbar.clone())
-            .child(switch);
-        let panes = div()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .when(self.canvas != Canvas::Pages, |panes| {
-                panes.child(self.parts.editor.clone())
+        let switch = self.mode_switch(&tokens, cx);
+        let export = (self.mode == Mode::Publish).then(|| self.export_button(&tokens));
+        let foot = div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(if self.mode == Mode::Publish {
+                tokens::SECTION_HEIGHT
+            } else {
+                px(0.)
             })
-            .when(self.canvas == Canvas::Split, |panes| {
-                panes.child(div().flex_none().w(px(1.)).bg(tokens.divider))
-            })
-            .when(self.canvas != Canvas::Write, |panes| {
-                panes.child(self.parts.preview.clone())
-            });
-        let footer = div()
-            .flex_none()
             .h(tokens::FOOTER_HEIGHT)
             .flex()
             .items_center()
-            .border_t_1()
-            .border_color(tokens.divider)
-            .bg(tokens.panel)
             .children(self.slots.footer.clone());
-        let canvas = div()
+        let binder_on = settings::get(cx).binder;
+        let centre = div()
             .flex_1()
             .min_w_0()
             .flex()
-            .flex_col()
-            .bg(tokens.canvas)
-            .child(panes)
-            .child(footer);
+            .relative()
+            .map(|centre| match self.mode {
+                Mode::Write => centre
+                    .child(self.parts.editor.clone())
+                    .when(!binder_on, |centre| centre.child(self.parts.ticks.clone())),
+                Mode::Publish => centre.child(self.parts.preview.clone()),
+            });
+        let binder = (self.mode == Mode::Write && binder_on).then(|| {
+            // Cached, so a key repaints the galley and not every row beside it. A cached view that is reused reports no
+            // accessibility nodes in gpui, so with assistive technology nothing is.
+            let style = StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full();
+            pane(self.parts.sidebar.clone(), style, accessible)
+        });
+        let rail = (self.mode == Mode::Publish).then(|| {
+            let style = StyleRefinement::default()
+                .flex_none()
+                .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
+                .h_full();
+            pane(self.parts.inspector.clone(), style, accessible)
+        });
         div()
             .size_full()
             .relative()
@@ -751,32 +797,19 @@ impl Render for Workspace {
             .key_context("Workspace")
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
-            .on_action(cx.listener(|workspace, _: &ShowWrite, window, cx| workspace.show(Canvas::Write, window, cx)))
-            .on_action(cx.listener(|workspace, _: &ShowPages, window, cx| workspace.show(Canvas::Pages, window, cx)))
-            .on_action(cx.listener(|workspace, _: &ShowSplit, window, cx| workspace.show(Canvas::Split, window, cx)))
             .on_action(cx.listener(|workspace, _: &Save, _, cx| {
                 workspace.parts.editor.update(cx, |_, cx| cx.emit(SaveRequested));
             }))
-            .child(titlebar(title, &tokens, bar_end))
+            .child(titlebar(&tokens, switch, div().children(export)))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    // Cached, so a key repaints the galley and not every row and field beside it. A cached view that
-                    // is reused reports no accessibility nodes in gpui, so with assistive technology nothing is.
-                    .when(self.sidebar_shown, |row| {
-                        let style = StyleRefinement::default().flex_none().w(tokens::SIDEBAR_WIDTH).h_full();
-                        row.child(pane(self.parts.sidebar.clone(), style, accessible))
-                    })
-                    .child(canvas)
-                    .when(self.inspector_shown, |row| {
-                        let style = StyleRefinement::default()
-                            .flex_none()
-                            .w(tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH)
-                            .h_full();
-                        row.child(pane(self.parts.inspector.clone(), style, accessible))
-                    }),
+                    .bg(tokens.canvas)
+                    .children(binder)
+                    .child(centre.child(foot))
+                    .children(rail),
             )
             .children(self.slots.overlays.clone())
     }

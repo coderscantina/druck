@@ -67,13 +67,14 @@ impl Report {
         counts
     }
 
-    /// The dot each chapter shows: a problem if it has an error or a warning, else a placeholder if one is open.
+    /// The dot each chapter shows: a problem if it has an error, else a placeholder if one is open. A warning shows no
+    /// dot: a page problem waits for Publish.
     pub fn marks(&self) -> HashMap<ChapterId, Mark> {
         let mut marks = HashMap::new();
         for section in &self.sections {
             let Some(chapter) = section.chapter else { continue };
             let kinds = section.entries.iter().map(|entry| entry.kind);
-            let mark = if kinds.clone().any(|kind| kind != Kind::Todo) {
+            let mark = if kinds.clone().any(|kind| kind == Kind::Error) {
                 Mark::Problem
             } else if kinds.clone().any(|kind| kind == Kind::Todo) {
                 Mark::Placeholder
@@ -278,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dot_says_problem_over_placeholder_and_nothing_else() {
+    fn a_dot_says_error_over_placeholder_and_a_page_warning_says_nothing() {
         let (dir, session) = project("marks");
         let book = session.book().to_vec();
         let open = build(&session, &[], &[], &facts_of(&session), "Project");
@@ -290,7 +291,7 @@ mod tests {
             &facts_of(&session),
             "Project",
         );
-        assert_eq!(both.marks(), HashMap::from([(book[0], Mark::Problem)]));
+        assert_eq!(both.marks(), HashMap::from([(book[0], Mark::Placeholder)]));
         assert_eq!(
             both.counts(),
             Counts {

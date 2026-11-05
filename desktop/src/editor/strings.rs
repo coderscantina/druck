@@ -39,14 +39,7 @@ crate::strings! {
         Citation => ("Citation", "Quellenangabe"),
         CrossReference => ("Cross-reference", "Querverweis"),
         NewSection => ("New section", "Neuer Abschnitt"),
-        SourceView => ("Source", "Quelltext"),
-        PrintLines => ("Print lines", "Druckzeilen"),
         AddToWords => ("Add to the project's words", "Zu den Wörtern des Projekts"),
-        NotesTitle => ("NOTES", "NOTIZEN"),
-        NotesEmpty => (
-            "This chapter opens with no comment. A comment at its very start shows here.",
-            "Dieses Kapitel beginnt ohne Kommentar. Ein Kommentar ganz am Anfang erscheint hier."
-        ),
         NotesRefused => (
             "A note cannot hold -->, which would end it.",
             "Eine Notiz kann --> nicht enthalten, das würde sie beenden."

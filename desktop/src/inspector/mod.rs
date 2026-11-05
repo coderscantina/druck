@@ -1,4 +1,4 @@
-//! Right pane: the panel of the active tab, then the tab rail at the window's edge.
+//! Publish's right side: the panel of the active tab, then the tab rail at the window's edge.
 
 pub mod details;
 mod fonts;
@@ -50,21 +50,13 @@ pub enum Tab {
     Fonts,
     Images,
     Details,
-    Notes,
     Diagnostics,
     Export,
     Agent,
 }
 
 impl Tab {
-    const TOP: [Self; 6] = [
-        Self::Selection,
-        Self::Styles,
-        Self::Fonts,
-        Self::Images,
-        Self::Details,
-        Self::Notes,
-    ];
+    const TOP: [Self; 5] = [Self::Selection, Self::Styles, Self::Fonts, Self::Images, Self::Details];
     const BOTTOM: [Self; 3] = [Self::Agent, Self::Diagnostics, Self::Export];
 
     /// The tab `DRUCK_TAB` names, for screenshots.
@@ -83,7 +75,6 @@ impl Tab {
             Self::Fonts => "tab-fonts",
             Self::Images => "tab-images",
             Self::Details => "tab-details",
-            Self::Notes => "tab-notes",
             Self::Diagnostics => "tab-diagnostics",
             Self::Export => "tab-export",
             Self::Agent => "tab-agent",
@@ -97,7 +88,6 @@ impl Tab {
             Self::Fonts => "icons/fonts.svg",
             Self::Images => "icons/images.svg",
             Self::Details => "icons/details.svg",
-            Self::Notes => "icons/notes.svg",
             Self::Diagnostics => "icons/diagnostics.svg",
             Self::Export => "icons/export.svg",
             Self::Agent => "icons/agent.svg",
@@ -111,7 +101,6 @@ impl Tab {
             Self::Fonts => Key::TabFonts,
             Self::Images => Key::TabImages,
             Self::Details => Key::TabDetails,
-            Self::Notes => Key::TabNotes,
             Self::Diagnostics => Key::TabDiagnostics,
             Self::Export => Key::TabExport,
             Self::Agent => Key::TabAgent,
@@ -128,6 +117,8 @@ pub struct InspectorView {
     styles: Entity<StylesPanel>,
     fonts: Entity<FontsPanel>,
     model: Entity<ThemeModel>,
+    /// The theme picker, at the top of the Styles tab.
+    picker: Option<Entity<ThemePicker>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -177,6 +168,7 @@ impl InspectorView {
             styles,
             fonts,
             model,
+            picker: None,
             _subscriptions: subscriptions,
         }
     }
@@ -205,6 +197,14 @@ impl InspectorView {
         };
         if changed {
             cx.notify();
+        }
+    }
+
+    /// Opens the theme picker's menu on the Styles tab.
+    pub fn choose_theme(&mut self, cx: &mut Context<Self>) {
+        self.show(Tab::Styles, cx);
+        if let Some(picker) = &self.picker {
+            picker.update(cx, |picker, cx| picker.open_menu(cx));
         }
     }
 
@@ -241,7 +241,7 @@ impl InspectorView {
             .when(active, |button| button.bg(tokens.raised))
             .hover(|button| button.bg(tokens.raised))
             .child(svg().path(tab.icon()).size(tokens::ICON_SIZE).text_color(if active {
-                tokens.accent
+                tokens.text
             } else {
                 tokens.text_quiet
             }))
@@ -279,6 +279,7 @@ impl Render for InspectorView {
             .bg(tokens.panel)
             .border_l_1()
             .border_color(tokens.divider);
+        let panel = panel.when(self.active == Tab::Styles, |panel| panel.children(self.picker.clone()));
         let panel = if let Some(mounted) = self.panels.get(&self.active) {
             panel.child(mounted.clone())
         } else {
@@ -314,13 +315,13 @@ impl Render for InspectorView {
     }
 }
 
-/// Mounts the theme picker in the title bar and the question about common themes over the window.
+/// Mounts the theme picker at the top of the Styles tab and the question about common themes over the window.
 pub fn mount_theme(parts: &crate::workspace::Parts, slots: &mut crate::workspace::Slots, cx: &mut gpui::App) {
     let model = parts.inspector.read(cx).model().clone();
-    slots.toolbar.push(
-        cx.new(|cx| ThemePicker::new(parts.editor.clone(), parts.preview.clone(), model.clone(), cx))
-            .into(),
-    );
+    let picker = cx.new(|cx| ThemePicker::new(parts.editor.clone(), parts.preview.clone(), model.clone(), cx));
+    parts
+        .inspector
+        .update(cx, |inspector, _| inspector.picker = Some(picker));
     slots
         .overlays
         .push(cx.new(|cx| ForkPrompt::new(model, parts.editor.clone(), cx)).into());

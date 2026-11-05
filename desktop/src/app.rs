@@ -2,23 +2,25 @@
 //!
 //! - `app.rs`: opening the window, the File menu, opening and replacing a document, and [`mount`]. Each later slice
 //!   adds its line to [`mount`] and keeps everything else in its own folder.
-//! - `workspace.rs`: the three panes, the canvas switch, the slots, and the wiring between panes.
+//! - `workspace.rs`: the two modes, the slots, and the wiring between panes.
+//! - `settings/`: `settings.json` and its window. `settings::get` reads a value, and observers of `settings::Store` hear
+//!   a change, by hand or from the window.
+//! - `shell/commands.rs`: the table of commands.
 //! - `session/`: the document, without gpui. Read it through `EditorView::session`, change it through
 //!   `EditorView::update_session`.
 //! - `sidebar/`: identity, contents, the file lists, and its dialogs. Dots go in through `SidebarView::set_marks`.
-//! - `editor/`, `source/`: the galley. `preview/`: the pages. `inspector/`: the tab rail, styles, and details.
+//! - `editor/`, `source/`: the text. `preview/`: the pages. `inspector/`: Publish's tab rail, styles, and details.
 //!
 //! The later slices of [the beta milestone](../../docs/milestones/16-desktop-beta.md):
 //!
 //! - **Persistence** owns `persist/`, with `session/disk.rs` for what the session knows of its files: autosave, the
 //!   watcher, merges, and the recovery copies. Cmd+S asks it for an immediate save through `SaveRequested`.
-//! - **Editor commands** own `editor/`, whose galley draws its own floats, the source toggle in `toolbar`, and the
-//!   `Tab::Notes` panel.
-//! - **Theme core** owns `theme_file/` and new panels on the `Tab::Fonts` tab and a theme picker in `toolbar`.
-//! - **Shell** owns a new `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, sidebar dots, search and word count
-//!   in `footer`, the string tables, and the rest of the menus.
-//! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the inspector rail.
-//! - **Rich blocks** own `editor/rich/`, whose floats the galley draws, and the `Tab::Selection` and `Tab::Images` panels.
+//! - **Editor commands** own `editor/`, whose text draws its own floats and margin notes.
+//! - **Theme core** owns `theme_file/` and the panels on the `Tab::Styles` and `Tab::Fonts` tabs.
+//! - **Shell** owns `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, the Binder's dots, search and the word
+//!   count, the string tables, and the rest of the menus.
+//! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the rail.
+//! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Selection` and `Tab::Images` panels.
 
 use std::path::{Path, PathBuf};
 
@@ -37,7 +39,7 @@ use crate::session::{STARTERS, Session, Starter};
 use crate::shell::text::Key;
 use crate::shell::{self, menus};
 use crate::tokens::{self, Scheme, Tokens};
-use crate::workspace::{Parts, ShowPages, ShowSplit, ShowWrite, Slots, Workspace, titlebar};
+use crate::workspace::{Parts, ShowPublish, ShowWrite, Slots, Workspace, titlebar};
 
 actions!(druck_desktop, [Quit, Open, NewBook, NewReport, NewOffer]);
 
@@ -52,7 +54,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     shell::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
     crate::agent::mount(parts, persist, window, cx);
-    crate::editor::mount(parts, slots, cx);
+    crate::editor::mount(parts, cx);
 }
 
 /// Opens the only window, with a document or with the launch screen. `error` says why a document asked for did not
@@ -73,8 +75,7 @@ pub fn open(
         KeyBinding::new("cmd-o", Open, None),
         KeyBinding::new("cmd-s", Save, None),
         KeyBinding::new("cmd-1", ShowWrite, None),
-        KeyBinding::new("cmd-2", ShowPages, None),
-        KeyBinding::new("cmd-3", ShowSplit, None),
+        KeyBinding::new("cmd-2", ShowPublish, None),
     ]);
     crate::editor::bind_keys(cx);
     crate::persist::bind_keys(cx);
@@ -84,7 +85,6 @@ pub fn open(
         async {}
     })
     .detach();
-    cx.on_window_closed(|cx, _| cx.quit()).detach();
 
     let display = cx.primary_display().map(|display| display.bounds().size);
     let fit = |wanted: f32, available: Option<Pixels>| {
@@ -123,16 +123,30 @@ pub fn open(
         ..Default::default()
     };
     let window = cx.open_window(options, |window, cx| {
-        cx.set_global(Tokens::new(shell::current_scheme(window, cx)));
+        shell::apply_appearance(cx);
         cx.new(|cx| Shell::new(session, error, theme, documents, window, cx))
     });
-    if let Err(error) = window {
-        eprintln!("cannot open a window: {error}");
-        cx.quit();
-        return;
-    }
+    let window = match window {
+        Ok(window) => window.window_id(),
+        Err(error) => {
+            eprintln!("cannot open a window: {error}");
+            cx.quit();
+            return;
+        }
+    };
+    // The settings window can close by itself. This one takes the app with it.
+    cx.on_window_closed(move |cx, closed| {
+        if closed == window {
+            cx.quit();
+        }
+    })
+    .detach();
     if !measuring {
         cx.activate(true);
+    }
+    // `DRUCK_SETTINGS` opens the settings window on a category, for screenshots.
+    if let Some(category) = crate::gate::var("DRUCK_SETTINGS") {
+        crate::settings::window::open(Some(&category), cx);
     }
 }
 
@@ -157,7 +171,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         // Cached panes hold colors of the old appearance, so this repaints them too.
-        cx.observe_window_appearance(window, |_, window, cx| shell::apply_appearance(window, cx))
+        cx.observe_window_appearance(window, |_, _, cx| shell::apply_appearance(cx))
             .detach();
         window.on_window_should_close(cx, |_, cx| {
             shell::save_at_exit(cx);
@@ -412,9 +426,7 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &menus::Recent9, window, cx| shell.open_recent(9, window, cx)))
             .map(|root| match self.workspace.clone() {
                 Some(workspace) => root.child(workspace),
-                None => root
-                    .child(titlebar("Druck".to_owned(), &tokens, div()))
-                    .child(self.launch.clone()),
+                None => root.child(titlebar(&tokens, div(), div())).child(self.launch.clone()),
             })
     }
 }

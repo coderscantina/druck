@@ -1,5 +1,5 @@
 //! Keeping the text safe while others write the same files: atomic autosave, a folder watcher, three-way merges, and a
-//! recovery copy. The small view here runs it and shows the saving state in the footer. What it does is in the modules,
+//! recovery copy. The small view here runs it and shows the saving state at the window's foot when something is wrong. What it does is in the modules,
 //! without gpui: [`atomic`], [`merge`], [`watch`], [`recovery`], and [`sync`].
 //!
 //! Other parts listen for [`FileChange`] on this view to see each file change that came from outside, and call
@@ -122,15 +122,7 @@ pub fn forget_unsaved(location: &Path) {
     }
 }
 
-/// What the footer shows besides conflicts and problems.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Shown {
-    Saved,
-    Edited,
-    Saving,
-}
-
-/// The saving state in the footer, and the owner of everything behind it.
+/// The saving state at the foot of the window, and the owner of everything behind it. Nothing shows while all is well.
 pub struct PersistView {
     editor: Entity<EditorView>,
     inspector: Entity<InspectorView>,
@@ -150,7 +142,6 @@ pub struct PersistView {
     signals: futures::channel::mpsc::UnboundedSender<Signal>,
     watcher: Option<Watcher>,
     theme: Option<PathBuf>,
-    shown: Shown,
     note: Option<SharedString>,
     note_task: Task<()>,
     gone_task: Option<Task<()>>,
@@ -234,7 +225,6 @@ impl PersistView {
             signals,
             watcher: None,
             theme,
-            shown: Shown::Saved,
             note: None,
             note_task: Task::ready(()),
             gone_task: None,
@@ -350,7 +340,6 @@ impl PersistView {
 
     fn edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pacer.edited(Instant::now());
-        self.set_shown(Shown::Edited, cx);
         self.start_pacing(window, cx);
     }
 
@@ -395,10 +384,9 @@ impl PersistView {
         self.sync.forget_save_problems_if_clean(self.session(cx));
         let outgoing = self.editor.update(cx, |editor, _| editor.session_quietly().outgoing());
         if outgoing.is_empty() {
-            self.refresh_shown(cx);
+            cx.notify();
             return;
         }
-        self.set_shown(Shown::Saving, cx);
         let lock = self.write_lock.clone();
         let copies = self.sync.copies().cloned();
         let writes = cx.background_spawn(async move {
@@ -481,7 +469,7 @@ impl PersistView {
             }
             self.edited(window, cx);
         }
-        self.refresh_shown(cx);
+        cx.notify();
         if !self.settling.is_empty() {
             self.write_again = false;
             let closing = self.settle_now(window, cx);
@@ -535,7 +523,7 @@ impl PersistView {
         let closing = self.editor.update(cx, |editor, cx| {
             editor.update_session(|session| sync.write_all(session), window, cx)
         });
-        self.refresh_shown(cx);
+        cx.notify();
         closing
     }
 
@@ -622,7 +610,7 @@ impl PersistView {
         if theme_changed {
             self.inspector.update(cx, |inspector, cx| inspector.reload_theme(cx));
         }
-        self.refresh_shown(cx);
+        cx.notify();
     }
 
     /// While the folder is away: looks for it now and then, and takes up the work when it is back.
@@ -725,25 +713,6 @@ impl PersistView {
         self.update_watched_files(cx);
     }
 
-    fn set_shown(&mut self, shown: Shown, cx: &mut Context<Self>) {
-        if self.shown != shown {
-            self.shown = shown;
-            cx.notify();
-        }
-    }
-
-    fn refresh_shown(&mut self, cx: &mut Context<Self>) {
-        let shown = if self.writing.is_some() {
-            Shown::Saving
-        } else if self.session(cx).is_dirty() {
-            Shown::Edited
-        } else {
-            Shown::Saved
-        };
-        self.set_shown(shown, cx);
-        cx.notify();
-    }
-
     fn button(
         &self,
         id: &'static str,
@@ -780,6 +749,7 @@ impl Render for PersistView {
             .items_center()
             .gap(tokens::SPACE_2)
             .px(tokens::SPACE_3)
+            .bg(tokens.canvas)
             .text_size(tokens::TEXT_SMALL);
         if let Some(path) = self.sync.conflicts().next() {
             let name = session
@@ -826,15 +796,8 @@ impl Render for PersistView {
                 .child(div().min_w_0().truncate().child(note.clone()))
                 .into_any_element();
         }
-        let state = match self.shown {
-            Shown::Saved => crate::t!(Key::Saved),
-            Shown::Edited => crate::t!(Key::Edited),
-            Shown::Saving => crate::t!(Key::Saving),
-        };
-        root.flex_none()
-            .text_color(tokens.text_faint)
-            .child(state)
-            .into_any_element()
+        // All is well, so there is nothing to say.
+        div().into_any_element()
     }
 }
 

@@ -1,5 +1,5 @@
-//! The block gutter: a type icon beside each block, quiet until it is active or hovered, comment markers, and dragging a
-//! block by its icon. It sits inside the sheet, left of the text.
+//! The block gutter: a type icon beside each block, comment markers, and dragging a block by its icon. It stands left of
+//! the text, and is empty at rest and while typing: it shows when the pointer enters the left margin.
 
 use gpui::{Bounds, Context, CursorStyle, Hsla, Pixels, Point, TransformationMatrix, Window, fill, point, px, size};
 
@@ -34,15 +34,8 @@ pub(super) struct BlockGrab {
 #[derive(Clone, Copy)]
 pub(super) struct CommentMarker {
     pub bounds: Bounds<Pixels>,
-    target: MarkerTarget,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MarkerTarget {
-    /// The chapter's notes, which live in the panel.
-    Notes,
     /// The block whose comments it shows or hides.
-    Block(usize),
+    block: usize,
 }
 
 pub(super) fn block_icon(kind: BlockKind, text: &str) -> Option<&'static str> {
@@ -64,12 +57,12 @@ pub(super) fn block_icon(kind: BlockKind, text: &str) -> Option<&'static str> {
 
 impl EditorView {
     /// The comment markers of this frame's blocks. A hidden comment block has no height of its own, so its marker stands
-    /// beside the next block that shows.
+    /// beside the next block that shows. A chapter's notes have none, since they stand in the margin.
     pub(super) fn comment_markers(&mut self, blocks: &[FrameBlock]) -> Vec<CommentMarker> {
         let x = self.column.text_left - MARKER_INSET;
         let leading = notes::leading_region(self.session.active_buffer().text(), &self.blocks);
         let mut markers = Vec::new();
-        let mut waiting: Option<MarkerTarget> = None;
+        let mut waiting: Option<usize> = None;
         let at = |top: Pixels, line_height: Pixels| {
             Bounds::new(
                 point(x, top + (line_height - COMMENT_ICON) * 0.5),
@@ -82,27 +75,25 @@ impl EditorView {
             if block.layout.collapsed {
                 if block.kind == BlockKind::Comment {
                     let in_notes = leading.as_ref().is_some_and(|leading| leading.contains(&range.start));
-                    waiting = waiting.or(Some(if in_notes {
-                        MarkerTarget::Notes
-                    } else {
-                        MarkerTarget::Block(index)
-                    }));
+                    if !in_notes {
+                        waiting = waiting.or(Some(index));
+                    }
                 }
                 continue;
             }
             if self.source {
                 continue;
             }
-            if let Some(target) = waiting.take() {
+            if let Some(block_index) = waiting.take() {
                 markers.push(CommentMarker {
                     bounds: at(block.top, line_height),
-                    target,
+                    block: block_index,
                 });
             }
             if block.kind == BlockKind::Comment {
                 markers.push(CommentMarker {
                     bounds: at(block.top, line_height),
-                    target: MarkerTarget::Block(index),
+                    block: index,
                 });
             }
             let comments = self.slots[index].syntax.as_ref().map_or(Vec::new(), |syntax| {
@@ -124,15 +115,15 @@ impl EditorView {
                     let row = line.row_of(line.display.to_display(comment), false);
                     markers.push(CommentMarker {
                         bounds: at(block.top + line.y + line.line_height * row as f32, line.line_height),
-                        target: MarkerTarget::Block(index),
+                        block: index,
                     });
                 }
             }
         }
-        if let (Some(target), Some(last)) = (waiting, blocks.last()) {
+        if let (Some(block), Some(last)) = (waiting, blocks.last()) {
             markers.push(CommentMarker {
                 bounds: at(last.top, last.layout.first_line_height()),
-                target,
+                block,
             });
         }
         markers
@@ -140,7 +131,8 @@ impl EditorView {
 
     /// Handles a press in the gutter. Returns whether it was one.
     pub(super) fn gutter_mouse_down(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) -> bool {
-        if position.x < self.column.sheet_left || position.x >= self.column.text_left {
+        let gutter_left = self.column.text_left - tokens::GUTTER_WIDTH;
+        if position.x < gutter_left || position.x >= self.column.text_left {
             return false;
         }
         if let Some(marker) = self
@@ -148,14 +140,9 @@ impl EditorView {
             .iter()
             .find(|marker| marker.bounds.dilate(px(3.)).contains(&position))
         {
-            match marker.target {
-                MarkerTarget::Notes => cx.emit(ShowNotes),
-                MarkerTarget::Block(index) => {
-                    let expanded = &mut self.slots[index].expanded;
-                    *expanded = !*expanded;
-                    cx.notify();
-                }
-            }
+            let expanded = &mut self.slots[marker.block].expanded;
+            *expanded = !*expanded;
+            cx.notify();
             return true;
         }
         let Some(block) = self.block_at_y(position.y) else {
@@ -172,10 +159,7 @@ impl EditorView {
         self.grab = Some(BlockGrab {
             block,
             origin: position,
-            anchor: Bounds::new(
-                point(self.column.sheet_left + ICON_INSET, top),
-                size(ICON, tokens::SECTION_HEIGHT),
-            ),
+            anchor: Bounds::new(point(gutter_left + ICON_INSET, top), size(ICON, tokens::SECTION_HEIGHT)),
             dragging: false,
             before: None,
         });
@@ -271,22 +255,23 @@ impl EditorView {
     }
 }
 
-/// The writer asked for the chapter's notes.
-pub struct ShowNotes;
-
-impl gpui::EventEmitter<ShowNotes> for EditorView {}
-
-/// Paints the gutter. Everything shows quietly, as in the mockups, and the active or hovered block's icon in full.
+/// Paints the gutter while the pointer is in the left margin: the hovered block's icon in full ink, the others in the
+/// quiet color. A dragged block's line shows until it lands.
 pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::App) {
-    let column = &frame.column;
-    let x = column.sheet_left + ICON_INSET;
+    if let Some(line) = frame.drop_line {
+        window.paint_quad(fill(line, Tokens::get(cx).accent));
+    }
+    if !frame.gutter_shown {
+        return;
+    }
+    let x = frame.column.text_left - tokens::GUTTER_WIDTH + ICON_INSET;
     for block in &frame.blocks {
         let (Some(icon), false) = (block.icon, block.layout.collapsed) else {
             continue;
         };
         let line_height = block.layout.first_line_height();
         let bounds = Bounds::new(point(x, block.top + (line_height - ICON) * 0.5), size(ICON, ICON));
-        let color: Hsla = if block.active || block.hovered {
+        let color: Hsla = if block.hovered {
             frame.ink
         } else {
             frame.quiet.opacity(0.55)
@@ -306,9 +291,6 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
                 cx,
             )
             .ok();
-    }
-    if let Some(line) = frame.drop_line {
-        window.paint_quad(fill(line, Tokens::get(cx).accent));
     }
 }
 

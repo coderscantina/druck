@@ -1,24 +1,25 @@
-//! A block shaped for the galley, and the geometry questions asked of it. Only blocks the view asks for get shaped.
+//! A block shaped for the text, and the geometry questions asked of it. Only blocks the view asks for get shaped.
 
 use std::ops::Range;
-
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, ShapedLine, SharedString, StrikethroughStyle,
-    TextRun, UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, rgb, size,
+    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, SharedString, StrikethroughStyle, TextRun,
+    UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, size,
 };
 
-use super::composed::{ComposedBlock, Forced};
 use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
 use super::rich::view::shapes::Whole;
+use crate::preview::job::{BookType, Face};
 use crate::source::BlockKind;
+use crate::tokens::{self, Tokens};
 
-/// Logical pixels per point of the theme's sizes. The galley is for reading on screen, larger than the page.
-pub(super) const POINT: f32 = 1.4;
-
-/// The galley's look. The body comes from the theme: the sheet shows document styling, not app chrome.
+/// How the text looks: the theme's type on the app's surface, with colours following the appearance. There is no
+/// justification and no hyphenation, on purpose: Publish shows the real lines.
 pub struct GalleyStyle {
+    /// What the theme says. A stand-in until the first layout has read it.
+    book: BookType,
+    zoom: f32,
     pub body: Font,
     pub mono: Font,
     pub body_size: Pixels,
@@ -32,19 +33,127 @@ pub struct GalleyStyle {
     pub error: Hsla,
 }
 
+/// The type before a layout has read the theme, and for a theme that does not lay out.
+fn stand_in() -> BookType {
+    let face = |size: f32, weight: u16, line_height: f32, before: f32, after: f32| Face {
+        family: "Georgia".to_owned(),
+        size,
+        weight,
+        italic: false,
+        line_height,
+        space_before: before,
+        space_after: after,
+        first_line_indent: 0.,
+    };
+    let body = face(10.7, 400, 1.45, 0., 7.5);
+    BookType {
+        headings: [
+            face(18.2, 700, 1.25, 18., 8.),
+            face(14.4, 700, 1.25, 14., 6.),
+            face(12.3, 700, 1.25, 12., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+            face(10.7, 700, 1.25, 10., 5.),
+        ],
+        quote: body.clone(),
+        list: body.clone(),
+        footnote: face(9.3, 400, 1.45, 0., 3.),
+        code: Face {
+            family: tokens::FONT_MONO.to_owned(),
+            ..face(8.6, 400, 1.4, 0., 7.5)
+        },
+        measure: 330.,
+        files: Vec::new(),
+        body,
+    }
+}
+
+fn font_of(face: &Face) -> Font {
+    Font {
+        weight: FontWeight(f32::from(face.weight)),
+        style: if face.italic {
+            FontStyle::Italic
+        } else {
+            FontStyle::Normal
+        },
+        ..font(SharedString::from(face.family.clone()))
+    }
+}
+
 impl GalleyStyle {
-    pub fn new() -> Self {
-        Self {
-            body: font("Georgia"),
-            mono: font("Menlo"),
-            body_size: px(15.),
-            leading: 1.45,
-            ink: rgb(0x1a1a18).into(),
-            quiet: rgb(0x8d8a84).into(),
-            link: rgb(0x2f5d8a).into(),
-            rule: rgb(0xc9c6c0).into(),
-            code_background: rgb(0xf0eee9).into(),
-            error: rgb(0xb5442c).into(),
+    pub fn new(tokens: &Tokens) -> Self {
+        let book = stand_in();
+        let mut style = Self {
+            zoom: 1.,
+            body: font_of(&book.body),
+            mono: font_of(&book.code),
+            body_size: px(book.body.size * tokens::POINT),
+            leading: book.body.line_height,
+            book,
+            ink: tokens.text.into(),
+            quiet: tokens.text_quiet.into(),
+            link: tokens.link.into(),
+            rule: tokens.divider.into(),
+            code_background: tokens.raised.into(),
+            error: tokens.error.into(),
+        };
+        style.set_colors(tokens);
+        style
+    }
+
+    /// Takes the colours of the appearance.
+    pub fn set_colors(&mut self, tokens: &Tokens) {
+        self.ink = tokens.text.into();
+        self.quiet = tokens.text_quiet.into();
+        self.link = tokens.link.into();
+        self.rule = tokens.divider.into();
+        self.code_background = tokens.raised.into();
+        self.error = tokens.error.into();
+    }
+
+    /// Takes the theme's type.
+    pub fn set_type(&mut self, book: BookType) {
+        self.body = font_of(&book.body);
+        self.mono = font_of(&book.code);
+        self.leading = book.body.line_height;
+        self.book = book;
+        self.body_size = px(self.book.body.size * self.scale());
+    }
+
+    /// Scales the text, which keeps the characters per line.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom;
+        self.body_size = px(self.book.body.size * self.scale());
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Logical pixels per point of the theme's sizes.
+    pub fn scale(&self) -> f32 {
+        tokens::POINT * self.zoom
+    }
+
+    /// The width of the book's prose on the page, at this zoom.
+    pub fn book_measure(&self) -> Pixels {
+        px(self.book.measure * self.scale())
+    }
+
+    /// The width of about this many characters of body text.
+    pub fn width_of_characters(&self, count: u32) -> Pixels {
+        self.estimated_char_width() * count as f32
+    }
+
+    /// The theme's style for a block of this kind, where it has one.
+    fn face(&self, kind: BlockKind) -> &Face {
+        match kind {
+            BlockKind::Heading { level } => &self.book.headings[usize::from(level.clamp(1, 6)) - 1],
+            BlockKind::Quote => &self.book.quote,
+            BlockKind::List => &self.book.list,
+            BlockKind::FootnoteDefinition => &self.book.footnote,
+            BlockKind::Code | BlockKind::Table => &self.book.code,
+            _ => &self.book.body,
         }
     }
 
@@ -63,19 +172,12 @@ impl GalleyStyle {
         LineStyle {
             font: Font {
                 weight,
-                ..self.mono.clone()
+                ..font(tokens::FONT_MONO)
             },
-            size: self.body_size * 0.85,
+            size: self.body_size * tokens::SOURCE_SCALE,
             leading: 1.5,
             color,
         }
-    }
-
-    /// Takes the theme's body font, its size in points, and its line height.
-    pub fn set_body(&mut self, family: &str, size: f32, line_height: f32) {
-        self.body = font(SharedString::from(family.to_owned()));
-        self.body_size = px(size * POINT);
-        self.leading = line_height;
     }
 
     /// The width of a word's worth of body text per character, for estimating blocks not yet shaped.
@@ -83,65 +185,60 @@ impl GalleyStyle {
         self.body_size * 0.47
     }
 
-    fn blank_gap(&self) -> Pixels {
-        self.body_size * 0.7
+    /// The room between two blocks: the larger of what the upper leaves below it and the lower wants above it. Paragraphs
+    /// that neither space nor indent would run together, so they keep a little.
+    pub fn gap_between(&self, upper: Option<BlockKind>, lower: Option<BlockKind>) -> Pixels {
+        let after = upper.map_or(0., |kind| self.face(kind).space_after);
+        let before = lower.map_or(0., |kind| self.face(kind).space_before);
+        let gap = after.max(before);
+        let runs_together = gap == 0. && self.indent_of(lower) == px(0.);
+        if runs_together {
+            self.body_size * 0.7
+        } else {
+            px(gap * self.scale())
+        }
+    }
+
+    /// How far in a paragraph's first line starts when another paragraph comes before it.
+    pub fn indent_of(&self, kind: Option<BlockKind>) -> Pixels {
+        if kind == Some(BlockKind::Paragraph) {
+            px(self.book.body.first_line_indent * self.scale())
+        } else {
+            px(0.)
+        }
     }
 
     pub(super) fn line_style(&self, kind: BlockKind) -> LineStyle {
-        let body = LineStyle {
-            font: self.body.clone(),
-            size: self.body_size,
-            leading: self.leading,
+        let face = self.face(kind);
+        let themed = LineStyle {
+            font: font_of(face),
+            size: px(face.size * self.scale()),
+            leading: face.line_height,
             color: self.ink,
-        };
-        let mono = LineStyle {
-            font: self.mono.clone(),
-            size: self.body_size * 0.8,
-            leading: 1.4,
-            color: self.ink,
-        };
-        let quiet_mono = LineStyle {
-            color: self.quiet,
-            ..mono.clone()
         };
         match kind {
-            BlockKind::Heading { level } => LineStyle {
-                font: Font {
-                    weight: FontWeight::BOLD,
-                    ..self.body.clone()
-                },
-                size: self.body_size
-                    * match level {
-                        1 => 1.7,
-                        2 => 1.35,
-                        3 => 1.15,
-                        _ => 1.0,
-                    },
-                leading: 1.25,
-                color: self.ink,
-            },
-            BlockKind::FootnoteDefinition => LineStyle {
-                size: self.body_size * 0.87,
-                ..body
-            },
-            BlockKind::Paragraph | BlockKind::List | BlockKind::Quote | BlockKind::Blank => body,
-            BlockKind::Code | BlockKind::Table => mono,
             BlockKind::FrontMatter
             | BlockKind::Directive
             | BlockKind::Comment
             | BlockKind::SceneBreak
-            | BlockKind::Raw => quiet_mono,
+            | BlockKind::Raw => LineStyle {
+                font: self.mono.clone(),
+                size: px(self.book.code.size * self.scale()),
+                leading: self.book.code.line_height,
+                color: self.quiet,
+            },
+            _ => themed,
         }
     }
 
-    fn run(&self, base: &LineStyle, len: usize, style: RunStyle) -> TextRun {
+    fn run(&self, base: &LineStyle, len: usize, style: RunStyle, dim: bool) -> TextRun {
         let family = if style.code { &self.mono } else { &base.font };
         let font = Font {
             weight: if style.bold { FontWeight::BOLD } else { base.font.weight },
             style: if style.italic {
                 FontStyle::Italic
             } else {
-                FontStyle::Normal
+                base.font.style
             },
             ..family.clone()
         };
@@ -157,6 +254,7 @@ impl GalleyStyle {
         } else {
             base.color
         };
+        let color = if dim { color.opacity(tokens::DIM_OPACITY) } else { color };
         TextRun {
             len,
             font,
@@ -177,8 +275,7 @@ impl GalleyStyle {
     /// A height for a block not yet shaped. Close enough for scrolling, corrected when it comes into view.
     pub fn estimate_height(&self, kind: BlockKind, text: &str, width: Pixels, source: bool) -> Pixels {
         if kind == BlockKind::Blank && !source {
-            return self
-                .blank_gap()
+            return (self.body_size * 0.7)
                 .max(self.body_size * self.leading * (text.matches('\n').count() as f32 - 1.));
         }
         let style = if source {
@@ -193,6 +290,38 @@ impl GalleyStyle {
             .map(|line| (line.chars().count() as f32 / per_line).ceil().max(1.))
             .sum();
         style.size * style.leading * rows
+    }
+}
+
+/// Where the text stands in the pane: centred at its measure, keeping room for the gutter on its left. Margin notes stand
+/// at its right, and the text moves left for them only if the window is too narrow to hold both, then narrows, and with no
+/// room at all they do not show.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Column {
+    pub viewport: Bounds<Pixels>,
+    pub text_left: Pixels,
+    pub text_width: Pixels,
+    /// Where margin notes stand, when there are any and they fit.
+    pub note_left: Option<Pixels>,
+}
+
+impl Column {
+    pub fn place(viewport: Bounds<Pixels>, measure: Pixels, notes: bool) -> Self {
+        let left = viewport.left() + tokens::GUTTER_WIDTH;
+        let right = viewport.right() - tokens::TEXT_MARGIN_RIGHT;
+        let note_room = tokens::NOTE_GAP + tokens::NOTE_WIDTH;
+        let notes_fit = notes && right - left - note_room >= tokens::TEXT_MIN_WIDTH;
+        let room = right - left - if notes_fit { note_room } else { px(0.) };
+        let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH);
+        let centred = viewport.left() + (viewport.size.width - text_width) * 0.5;
+        let last = right - text_width - if notes_fit { note_room } else { px(0.) };
+        let text_left = centred.min(last).max(left);
+        Self {
+            viewport,
+            text_left,
+            text_width,
+            note_left: notes_fit.then_some(text_left + text_width + tokens::NOTE_GAP),
+        }
     }
 }
 
@@ -220,10 +349,8 @@ pub struct ShapedSourceLine {
     pub bullet: Option<(SharedString, Pixels)>,
     /// Behind each chip on the line, from the block's top and the column's left edge.
     pub chips: Vec<(Bounds<Pixels>, ChipLook)>,
-    /// How far in the first row starts, with the engine's lines.
+    /// How far in the first row starts, for a paragraph the theme indents.
     pub indent: Pixels,
-    /// The rows that end in a hyphen the engine added, with the hyphen to paint.
-    pub hyphens: Option<(Vec<usize>, ShapedLine)>,
 }
 
 impl ShapedSourceLine {
@@ -279,8 +406,11 @@ pub struct BlockLayout {
     pub chips: Vec<Chip>,
     /// A table or figure drawn in place of its lines.
     pub whole: Option<Box<Whole>>,
-    /// The engine's lines it was shaped with.
-    pub composed: Option<Arc<ComposedBlock>>,
+    /// Shaped in the faded colour of a paragraph out of focus.
+    pub dim: bool,
+    /// The room it was shaped with: a separator's gap and a first line's indent.
+    pub gap: Pixels,
+    pub indent: Pixels,
 }
 
 impl BlockLayout {
@@ -312,7 +442,11 @@ pub struct ShapeRequest<'a> {
     pub style: &'a GalleyStyle,
     pub chips: Vec<Chip>,
     pub whole: Option<Box<Whole>>,
-    pub composed: Option<Arc<ComposedBlock>>,
+    pub dim: bool,
+    /// How tall a separator is.
+    pub gap: Pixels,
+    /// How far in the block's first line starts.
+    pub indent: Pixels,
 }
 
 pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
@@ -328,7 +462,9 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         style,
         chips,
         whole,
-        composed,
+        dim,
+        gap,
+        indent,
     } = request;
     let base = if source {
         style.source_line_style(kind)
@@ -351,10 +487,10 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         let mut runs: Vec<TextRun> = display
             .runs
             .iter()
-            .map(|(len, run)| style.run(&base, *len, *run))
+            .map(|(len, run)| style.run(&base, *len, *run, dim))
             .collect();
         if runs.is_empty() {
-            runs.push(style.run(&base, 0, RunStyle::default()));
+            runs.push(style.run(&base, 0, RunStyle::default(), dim));
         }
         let text: SharedString = display.text.clone().into();
         let shape = |wrap_at| {
@@ -365,43 +501,19 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
                 .and_then(|mut lines| lines.pop())
                 .unwrap_or_default()
         };
-        let forced = composed.as_ref().map(|composed| composed.breaks(&display));
-        let mut shaped = if composed.is_some() {
-            shape(None)
-        } else {
-            shape(Some(wrap))
-        };
-        // A paragraph in a custom style has the engine's measure for another size than the galley shows.
-        let forced = forced.filter(|forced| {
-            let fits = rows_fit(&shaped, forced, wrap);
-            if !fits {
-                shaped = shape(Some(wrap));
+        // The toolkit wraps every row alike, so a first row that starts further in is broken here.
+        let first_row_in =
+            (!source && indent > px(0.) && display.source.start == 0 && !display.text.is_empty()).then_some(indent);
+        let shaped = match first_row_in {
+            Some(indent) => {
+                let mut shaped = shape(None);
+                let breaks = breaks_within(&shaped, indent, wrap);
+                indent_rows(&mut shaped, &breaks, indent);
+                shaped
             }
-            fits
-        });
-        let mut indent = px(0.);
-        let mut hyphens = None;
-        if let (Some(composed), Some(forced)) = (&composed, forced.as_ref()) {
-            let starts_block = display.source.start == 0 || display.text.is_empty();
-            indent = if starts_block {
-                px(composed.indent * POINT)
-            } else {
-                px(0.)
-            };
-            let hyphen = forced
-                .iter()
-                .any(|row| row.hyphen)
-                .then(|| hyphen_line(&base, style, window));
-            let hyphen_width = hyphen.as_ref().map_or(px(0.), |line| line.width);
-            force_rows(&mut shaped, forced, indent, wrap, hyphen_width);
-            hyphens = hyphen.map(|line| {
-                let rows = (forced.iter().enumerate())
-                    .filter(|(_, row)| row.hyphen)
-                    .map(|(index, _)| index)
-                    .collect();
-                (rows, line)
-            });
-        }
+            None => shape(Some(wrap)),
+        };
+        let row_indent = first_row_in.unwrap_or(px(0.));
         let rows = rows_of(&shaped);
         let hidden_line = collapsed || display.is_collapsed();
         let skipped = separator || hidden_line;
@@ -409,7 +521,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         let height = if hidden_line {
             px(0.)
         } else if separator {
-            style.blank_gap()
+            gap
         } else {
             line_height * row_count
         };
@@ -417,20 +529,19 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             .bullet
             .clone()
             .map(|text| (SharedString::from(text), unit * display.nesting as f32));
-        let chip_boxes = chip_boxes(&display, &shaped, &rows, x, y, line_height, indent);
+        let chip_boxes = chip_boxes(&display, &shaped, &rows, x, y, line_height, row_indent);
         shaped_lines.push(ShapedSourceLine {
             display,
             shaped,
             rows,
             y,
             x,
-            line_height: if separator { style.blank_gap() } else { line_height },
+            line_height: if separator { gap } else { line_height },
             height,
             skipped,
             bullet,
             chips: chip_boxes,
-            indent,
-            hyphens,
+            indent: row_indent,
         });
         y += height;
     }
@@ -443,47 +554,64 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         collapsed,
         chips,
         whole,
-        composed,
+        dim,
+        gap,
+        indent,
     }
 }
 
-/// The hyphen the engine added at the end of a row, which is painted and is not in the text.
-fn hyphen_line(base: &LineStyle, style: &GalleyStyle, window: &Window) -> ShapedLine {
-    let run = style.run(base, 1, RunStyle::default());
-    window.text_system().shape_line("-".into(), base.size, &[run], None)
+/// Where a line breaks with its first row starting `indent` in: at the last space that fits each row, or inside a word
+/// with no space to break at. A space that runs past the end hangs there, as the toolkit's own wrapping has it.
+fn breaks_within(shaped: &WrappedLine, indent: Pixels, width: Pixels) -> Vec<usize> {
+    let line = &shaped.unwrapped_layout;
+    let bytes = shaped.text.as_bytes();
+    let glyphs: Vec<usize> = line
+        .runs
+        .iter()
+        .flat_map(|run| &run.glyphs)
+        .map(|glyph| glyph.index)
+        .collect();
+    let mut breaks = Vec::new();
+    let mut start = 0;
+    let mut room = width - indent;
+    let mut last_space = None;
+    for (at, index) in glyphs.iter().copied().enumerate() {
+        let is_space = bytes.get(index) == Some(&b' ');
+        let end = glyphs.get(at + 1).copied().unwrap_or(line.len);
+        if !is_space && index > start && line.x_for_index(end) - line.x_for_index(start) > room {
+            let cut = last_space.filter(|space| *space > start).unwrap_or(index);
+            breaks.push(cut);
+            start = cut;
+            room = width;
+            last_space = None;
+        }
+        if is_space {
+            last_space = Some(end);
+        }
+    }
+    breaks
 }
 
-/// Breaks a shaped line where the engine did, and sets each row's left edge and spaces: the first row starts `indent`
-/// in, and one that reaches the measure in the engine's lines reaches `width` here, whatever the toolkit's glyphs measure.
-/// Positions stay rising from row to row, as the caret's lookups expect, and rows are measured from their first glyph.
-fn force_rows(shaped: &mut WrappedLine, forced: &[Forced], indent: Pixels, width: Pixels, hyphen: Pixels) {
-    let text = shaped.text.clone();
+/// Breaks a shaped line at `breaks`, with the first row starting `indent` in. Positions stay rising from row to row, as the
+/// caret's lookups expect, and rows are measured from their first glyph.
+fn indent_rows(shaped: &mut WrappedLine, breaks: &[usize], indent: Pixels) {
     let line = &shaped.unwrapped_layout;
     let mut runs = line.runs.clone();
     let mut boundaries = Vec::new();
     let mut row = 0;
-    let mut shift = indent;
-    let mut step = row_step(line, &text, forced, row, indent, width, hyphen);
-    let mut spaces = px(0.);
     for (run_ix, run) in runs.iter_mut().enumerate() {
         for (glyph_ix, glyph) in run.glyphs.iter_mut().enumerate() {
-            if forced.get(row).is_some_and(|next| glyph.index >= next.at) {
+            if breaks.get(row).is_some_and(|at| glyph.index >= *at) {
                 row += 1;
-                shift += spaces;
-                spaces = px(0.);
-                step = row_step(line, &text, forced, row, px(0.), width, hyphen);
                 boundaries.push(WrapBoundary { run_ix, glyph_ix });
             }
-            glyph.position.x += shift + spaces;
-            if text.as_bytes().get(glyph.index) == Some(&b' ') {
-                spaces += step;
-            }
+            glyph.position.x += indent;
         }
     }
     let layout = WrappedLineLayout {
         unwrapped_layout: Arc::new(LineLayout {
             font_size: line.font_size,
-            width: line.width + shift + spaces,
+            width: line.width + indent,
             ascent: line.ascent,
             descent: line.descent,
             runs,
@@ -493,49 +621,6 @@ fn force_rows(shaped: &mut WrappedLine, forced: &[Forced], indent: Pixels, width
         wrap_width: None,
     };
     **shaped = Arc::new(layout);
-}
-
-/// Whether the rows between `forced` breaks hold in `width`, give or take what a line's spaces can give.
-fn rows_fit(shaped: &WrappedLine, forced: &[Forced], width: Pixels) -> bool {
-    let line = &shaped.unwrapped_layout;
-    let mut start = 0;
-    for end in forced.iter().map(|row| row.at).chain([line.len]) {
-        let natural = line.x_for_index(end) - line.x_for_index(start);
-        if natural > width * (1. + OVERFLOW) {
-            return false;
-        }
-        start = end;
-    }
-    true
-}
-
-/// How much wider than the column a row can be before the engine's breaks are taken to be for another size.
-const OVERFLOW: f32 = 0.10;
-
-/// What each space of a row gains so that it reaches the measure, or nothing if it need not.
-fn row_step(
-    line: &LineLayout,
-    text: &str,
-    forced: &[Forced],
-    row: usize,
-    left: Pixels,
-    width: Pixels,
-    hyphen: Pixels,
-) -> Pixels {
-    let Some(end) = forced.get(row).filter(|end| end.fills) else {
-        return px(0.);
-    };
-    let start = if row == 0 { 0 } else { forced[row - 1].at };
-    let shown = text[start..end.at].trim_end_matches(' ');
-    let spaces = shown.bytes().filter(|byte| *byte == b' ').count();
-    if spaces == 0 {
-        return px(0.);
-    }
-    let natural = line.x_for_index(start + shown.len()) - line.x_for_index(start);
-    let room = width - left - if end.hyphen { hyphen } else { px(0.) };
-    let step = (room - natural) / spaces as f32;
-    // A very different toolkit font should not close the spaces or tear them open.
-    step.clamp(line.font_size * -0.12, line.font_size * 0.5)
 }
 
 /// How far a chip's box stands off its text, and how much of the line it leaves free above and below.
@@ -627,9 +712,10 @@ mod tests {
         wrapped
     }
 
-    fn source_line(text: &str, forced: &[Forced], indent: Pixels, width: Pixels, hyphen: Pixels) -> ShapedSourceLine {
+    fn source_line(text: &str, indent: Pixels, width: Pixels) -> ShapedSourceLine {
         let mut line = shaped(text);
-        force_rows(&mut line, forced, indent, width, hyphen);
+        let breaks = breaks_within(&line, indent, width);
+        indent_rows(&mut line, &breaks, indent);
         let display = display_lines(BlockKind::Paragraph, text, &Syntax::default(), &[], None, false, &[]).remove(0);
         ShapedSourceLine {
             rows: rows_of(&line),
@@ -643,25 +729,19 @@ mod tests {
             bullet: None,
             chips: Vec::new(),
             indent,
-            hyphens: None,
         }
     }
 
-    const CUT: [Forced; 1] = [Forced {
-        at: 9,
-        hyphen: true,
-        fills: true,
-    }];
-
     #[test]
-    fn a_row_ends_where_the_engine_ended_it_and_the_caret_keeps_its_place_on_both_sides() {
-        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(200.), px(10.));
-        assert_eq!(line.rows, [0..9, 9..13]);
-        // At the cut, the upper row's end and the lower row's start are one offset.
-        assert_eq!(line.row_of(9, false), 1);
-        assert_eq!(line.row_of(9, true), 0);
-        assert_eq!(line.x_in_row(9, 1), px(0.));
-        for (at, row) in [(0, 0), (2, 0), (9, 0), (9, 1), (11, 1)] {
+    fn an_indented_first_row_has_less_room_and_the_caret_keeps_its_place_on_both_sides_of_a_break() {
+        // 90 px hold nine letters, or six after a 30 px indent.
+        let line = source_line("aaaa bbbb cccc", px(30.), px(90.));
+        assert_eq!(line.rows, [0..5, 5..14]);
+        assert_eq!(line.x_in_row(0, 0), px(30.));
+        assert_eq!(line.x_in_row(5, 1), px(0.));
+        assert_eq!(line.row_of(5, false), 1);
+        assert_eq!(line.row_of(5, true), 0);
+        for (at, row) in [(0, 0), (2, 0), (5, 0), (5, 1), (9, 1)] {
             assert_eq!(
                 line.display_at_x(row, line.x_in_row(at, row)),
                 at,
@@ -671,16 +751,14 @@ mod tests {
     }
 
     #[test]
-    fn the_first_row_starts_at_its_indent_and_a_row_that_fills_reaches_the_measure() {
-        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(130.), px(10.));
-        assert_eq!(line.x_in_row(0, 0), px(30.));
-        // "aaa bbbb" is 80 px with one space. It has 130 px, less the indent and the hyphen's 10, so the space gains 10.
-        assert_eq!(line.x_in_row(8, 0), px(120.));
+    fn a_word_with_no_space_breaks_where_the_room_ends() {
+        let line = shaped("aaaaaaaaaaaa");
+        assert_eq!(breaks_within(&line, px(20.), px(50.)), [3, 8]);
     }
 
     #[test]
     fn positions_rise_from_row_to_row_so_lookups_stay_ordered() {
-        let line = source_line("aaa bbbb cccc", &CUT, px(30.), px(200.), px(10.));
+        let line = source_line("aaaa bbbb cccc", px(30.), px(90.));
         let glyphs: Vec<_> = line.shaped.unwrapped_layout.runs[0]
             .glyphs
             .iter()
@@ -689,10 +767,31 @@ mod tests {
         assert!(glyphs.windows(2).all(|pair| pair[0] < pair[1]), "{glyphs:?}");
     }
 
+    fn viewport(width: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(0.), px(28.)), size(px(width), px(800.)))
+    }
+
     #[test]
-    fn a_row_too_wide_for_the_column_is_not_forced() {
-        let line = shaped("aaa bbbb cccc");
-        assert!(rows_fit(&line, &CUT, px(90.)));
-        assert!(!rows_fit(&line, &CUT, px(70.)));
+    fn the_text_is_centred_and_notes_do_not_move_it_when_both_fit() {
+        let bare = Column::place(viewport(1400.), px(460.), false);
+        let noted = Column::place(viewport(1400.), px(460.), true);
+        assert_eq!(bare.text_left, px(470.));
+        assert_eq!(bare.text_width, px(460.));
+        assert_eq!(bare.note_left, None);
+        assert_eq!(noted.text_left, bare.text_left);
+        assert_eq!(noted.note_left, Some(px(958.)));
+    }
+
+    #[test]
+    fn a_narrow_window_moves_the_text_for_its_notes_then_narrows_it_then_drops_them() {
+        let moved = Column::place(viewport(860.), px(460.), true);
+        assert!(moved.text_left < px(200.));
+        assert_eq!(moved.text_width, px(460.));
+        let narrowed = Column::place(viewport(600.), px(460.), true);
+        assert_eq!(narrowed.text_left, tokens::GUTTER_WIDTH);
+        assert!(narrowed.text_width < px(460.));
+        assert!(narrowed.note_left.is_some());
+        let dropped = Column::place(viewport(400.), px(460.), true);
+        assert_eq!(dropped.note_left, None);
     }
 }

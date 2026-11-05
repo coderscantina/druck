@@ -1,36 +1,14 @@
-//! What the app remembers between runs: the window's size, the recent documents, and the settings. It lives in the
-//! operating system's app data folder and never in a project. Holds no gpui types.
+//! What the app remembers between runs: the window's size, the recent documents, and each mode's zoom. It lives in the
+//! operating system's app data folder and never in a project. What the author sets is in `settings.json`, see
+//! [`crate::settings`]. Holds no gpui types.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::strings::LanguageSetting;
-use crate::tokens::Scheme;
-
 /// How many recent documents are kept.
 pub const RECENT: usize = 10;
-
-/// Which colors the app uses: the system's or a fixed set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Appearance {
-    #[default]
-    System,
-    Dark,
-    Light,
-}
-
-impl Appearance {
-    /// The fixed scheme, or `None` to follow the system.
-    pub fn scheme(self) -> Option<Scheme> {
-        match self {
-            Self::System => None,
-            Self::Dark => Some(Scheme::Dark),
-            Self::Light => Some(Scheme::Light),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
@@ -38,8 +16,10 @@ pub struct State {
     pub window: Option<(f32, f32)>,
     /// Most recent first.
     pub recent: Vec<PathBuf>,
-    pub appearance: Appearance,
-    pub language: LanguageSetting,
+    /// Write's text zoom, where 1 is 100 percent.
+    pub write_zoom: Option<f32>,
+    /// The pages' zoom. `None` fits them to the pane.
+    pub publish_zoom: Option<f32>,
 }
 
 impl State {
@@ -58,16 +38,7 @@ impl State {
         json!({
             "window": self.window.map(|(width, height)| json!({ "width": width, "height": height })),
             "recent": self.recent.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>(),
-            "appearance": match self.appearance {
-                Appearance::System => "system",
-                Appearance::Dark => "dark",
-                Appearance::Light => "light",
-            },
-            "language": match self.language {
-                LanguageSetting::System => "system",
-                LanguageSetting::English => "english",
-                LanguageSetting::German => "german",
-            },
+            "zoom": { "write": self.write_zoom, "publish": self.publish_zoom },
         })
     }
 
@@ -94,21 +65,15 @@ impl State {
                     .collect()
             })
             .unwrap_or_default();
-        let appearance = match value.get("appearance").and_then(Value::as_str) {
-            Some("dark") => Appearance::Dark,
-            Some("light") => Appearance::Light,
-            _ => Appearance::System,
-        };
-        let language = match value.get("language").and_then(Value::as_str) {
-            Some("english") => LanguageSetting::English,
-            Some("german") => LanguageSetting::German,
-            _ => LanguageSetting::System,
+        let zoom = |mode: &str| {
+            let zoom = value.get("zoom")?.get(mode)?.as_f64()? as f32;
+            (zoom > 0.).then_some(zoom)
         };
         Self {
             window,
             recent,
-            appearance,
-            language,
+            write_zoom: zoom("write"),
+            publish_zoom: zoom("publish"),
         }
     }
 
@@ -171,8 +136,8 @@ mod tests {
         let file = file("round");
         let mut state = State {
             window: Some((1200., 800.)),
-            appearance: Appearance::Dark,
-            language: LanguageSetting::German,
+            write_zoom: Some(1.25),
+            publish_zoom: Some(0.5),
             ..State::default()
         };
         state.remember(Path::new("/books/one"));

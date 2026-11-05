@@ -2,7 +2,7 @@
 name = "druck-desktop"
 version = "0.0.0"
 edition = "2024"
-description = "Native desktop composer and theme editor for Druck"
+description = "Native writing app and book setter for Druck"
 license = "MIT"
 publish = false
 

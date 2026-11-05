@@ -1,0 +1,55 @@
+//! The settings window's strings, in English and German.
+
+crate::strings! {
+    pub enum Key {
+        Title => ("Settings", "Einstellungen"),
+        Search => ("Search settings", "Einstellungen suchen"),
+        EditFile => ("Edit settings.json", "settings.json bearbeiten"),
+        NoMatches => ("No setting matches this.", "Keine Einstellung passt dazu."),
+        Invalid => (
+            "settings.json cannot be used: {problem}. It was left as it is.",
+            "settings.json ist nicht verwendbar: {problem}. Die Datei bleibt, wie sie ist."
+        ),
+
+        CategoryAppearance => ("Appearance", "Darstellung"),
+        CategoryWriting => ("Writing", "Schreiben"),
+        CategoryLanguage => ("Language and spelling", "Sprache"),
+        CategoryKeys => ("Keys", "Tasten"),
+
+        Appearance => ("Appearance", "Erscheinungsbild"),
+        AppearanceHint => ("Follows the system unless you pick one.", "Folgt dem System, wenn du nichts wählst."),
+        AppearanceSystem => ("System", "System"),
+        AppearanceLight => ("Light", "Hell"),
+        AppearanceDark => ("Dark", "Dunkel"),
+        Accent => ("Accent colour", "Akzentfarbe"),
+        AccentHint => (
+            "Caret, selection, marks, and the action that moves on.",
+            "Cursor, Auswahl, Markierungen und die Aktion, die weiterführt."
+        ),
+        AccentBad => ("Use a colour such as #2f8fb8.", "Eine Farbe wie #2f8fb8 verwenden."),
+
+        LineLength => ("Line length", "Zeilenlänge"),
+        LineLengthHint => ("The book's measure, or your own.", "Die Satzbreite des Buchs oder deine eigene."),
+        LineLengthBook => ("Book", "Buch"),
+        LineLengthCount => ("{count} characters", "{count} Zeichen"),
+        Typewriter => ("Typewriter scrolling", "Schreibmaschinen-Scrollen"),
+        TypewriterHint => ("Keeps the current line at the same height.", "Hält die aktuelle Zeile auf gleicher Höhe."),
+        Dim => ("Dim other paragraphs", "Andere Absätze abblenden"),
+        DimHint => ("Keeps only the current paragraph in full ink.", "Nur der aktuelle Absatz bleibt in voller Farbe."),
+        SelectionToolbar => ("Toolbar on selection", "Werkzeugleiste bei Auswahl"),
+        SelectionToolbarHint => (
+            "Marks and lists over selected text. The keys work either way.",
+            "Auszeichnungen und Listen über dem markierten Text. Die Tasten gehen immer."
+        ),
+        Binder => ("Binder", "Binder"),
+        BinderHint => ("A slim contents list on the left, on Cmd+\\.", "Eine schmale Inhaltsliste links, auf Cmd+\\."),
+
+        Language => ("Language", "Sprache"),
+        LanguageHint => ("The app's own words. A book's language is in the book.", "Die Wörter der App. Die Sprache eines Buchs steht im Buch."),
+        LanguageSystem => ("System", "System"),
+        LanguageEnglish => ("English", "English"),
+        LanguageGerman => ("Deutsch", "Deutsch"),
+        Spelling => ("Check spelling", "Rechtschreibung prüfen"),
+        SpellingHint => ("Underlines misspelled words while you write.", "Unterstreicht falsche Wörter beim Schreiben."),
+    }
+}

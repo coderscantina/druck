@@ -1,9 +1,11 @@
-//! Left pane: the document's identity, then its contents list, the files not in the book, notes, and research.
+//! The Binder: the document's identity, then its contents list, the files not in the book, notes, and research. [`ticks`]
+//! is the same contents at the edge of the bare page.
 //!
 //! It holds no document. The workspace gives it [`SidebarData`] and hears [`SidebarEvent`]s.
 
 pub mod dialogs;
 mod strings;
+pub mod ticks;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -19,12 +21,54 @@ use crate::a11y::Control as _;
 use crate::session::{ChapterId, Contents, Row, RowKind};
 use crate::tokens::{self, Tokens};
 
-/// What a dot on a row says. It is derived, never stored: the Shell slice sets these with [`SidebarView::set_marks`].
+/// What a dot on a row says: an error, such as a broken reference or citation, or an open placeholder. Page problems never
+/// show here. It is derived, never stored: the shell sets these with [`SidebarView::set_marks`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "the Shell slice sets these")]
 pub enum Mark {
     Problem,
     Placeholder,
+}
+
+/// The dot of a mark, with its slot at the end of a row.
+pub(crate) fn mark_dot(tokens: &Tokens, mark: Option<Mark>) -> gpui::Div {
+    let slot = div()
+        .flex_none()
+        .w(tokens::LIST_DOT_WIDTH)
+        .flex()
+        .items_center()
+        .justify_center();
+    match mark {
+        Some(Mark::Problem) => slot.child(div().size(tokens::DOT_SIZE).rounded_full().bg(tokens.accent)),
+        Some(Mark::Placeholder) => slot.child(
+            div()
+                .size(tokens::DOT_SIZE)
+                .rounded_full()
+                .border_1()
+                .border_color(tokens.text_faint),
+        ),
+        None => slot,
+    }
+}
+
+/// The number or icon a row starts with.
+pub(crate) fn row_lead(tokens: &Tokens, row: &Row, plain_file: bool, selected: bool) -> gpui::Div {
+    let color = if selected { tokens.text } else { tokens.text_faint };
+    let lead = div()
+        .flex_none()
+        .w(tokens::LIST_LEAD_WIDTH)
+        .flex()
+        .items_center()
+        .text_color(color);
+    if let Some(number) = row.number {
+        return lead.child(number.to_string());
+    }
+    let icon = match row.kind {
+        _ if plain_file => "icons/file.svg",
+        RowKind::Contents => "icons/contents.svg",
+        RowKind::Unnumbered | RowKind::Numbered => "icons/book.svg",
+        RowKind::Plain => "icons/title.svg",
+    };
+    lead.child(svg().path(icon).size(tokens::ICON_SIZE).text_color(color))
 }
 
 /// What the sidebar shows.
@@ -216,7 +260,6 @@ impl SidebarView {
     }
 
     /// The dots of the rows. A chapter not in the map has none.
-    #[allow(dead_code, reason = "the Shell slice calls this")]
     pub fn set_marks(&mut self, marks: HashMap<ChapterId, Mark>, cx: &mut Context<Self>) {
         self.marks = marks;
         cx.notify();
@@ -244,46 +287,9 @@ impl SidebarView {
             .child(text)
     }
 
-    /// The number or icon a row starts with.
-    fn lead(tokens: &Tokens, row: &Row, plain_file: bool, selected: bool) -> gpui::Div {
-        let lead = div()
-            .flex_none()
-            .w(tokens::LIST_LEAD_WIDTH)
-            .flex()
-            .items_center()
-            .text_color(if selected { tokens.text } else { tokens.text_faint });
-        if let Some(number) = row.number {
-            return lead.child(number.to_string());
-        }
-        let icon = match row.kind {
-            _ if plain_file => "icons/file.svg",
-            RowKind::Contents => "icons/contents.svg",
-            RowKind::Unnumbered | RowKind::Numbered => "icons/book.svg",
-            RowKind::Plain => "icons/title.svg",
-        };
-        let color = if selected { tokens.text } else { tokens.text_faint };
-        lead.child(svg().path(icon).size(tokens::ICON_SIZE).text_color(color))
-    }
-
-    /// The slot at the end of a row. The Shell slice fills it through [`Self::set_marks`].
+    /// The slot at the end of a row.
     fn dot(&self, tokens: &Tokens, id: ChapterId) -> gpui::Div {
-        let slot = div()
-            .flex_none()
-            .w(tokens::LIST_DOT_WIDTH)
-            .flex()
-            .items_center()
-            .justify_center();
-        match self.marks.get(&id) {
-            Some(Mark::Problem) => slot.child(div().size(tokens::DOT_SIZE).rounded_full().bg(tokens.text_quiet)),
-            Some(Mark::Placeholder) => slot.child(
-                div()
-                    .size(tokens::DOT_SIZE)
-                    .rounded_full()
-                    .border_1()
-                    .border_color(tokens.text_faint),
-            ),
-            None => slot,
-        }
+        mark_dot(tokens, self.marks.get(&id).copied())
     }
 
     fn row(&self, row: &Row, plain_file: bool, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
@@ -328,7 +334,7 @@ impl SidebarView {
             .cursor_pointer()
             .text_color(color)
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(SidebarEvent::Select(id))))
-            .child(Self::lead(tokens, row, plain_file, selected))
+            .child(row_lead(tokens, row, plain_file, selected))
             .child(div().flex_1().min_w_0().truncate().child(row.title.clone()))
     }
 

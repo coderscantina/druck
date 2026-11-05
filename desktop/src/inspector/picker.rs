@@ -1,4 +1,4 @@
-//! The theme picker in the title bar: the project's themes and the common ones, a switch for the bundled specimen,
+//! The theme picker at the top of the Styles tab: the project's themes and the common ones, a switch for the bundled specimen,
 //! and create, rename, duplicate, and delete for common themes. Picking writes `theme:` to `druck.yaml` or the front
 //! matter, and the pages and the inspector follow the document from there.
 
@@ -73,6 +73,12 @@ impl ThemePicker {
 
     fn project(&self, cx: &Context<Self>) -> Option<std::path::PathBuf> {
         self.model.read(cx).editor().dirs().project.clone()
+    }
+
+    /// Opens the menu, as a click on the button does.
+    pub fn open_menu(&mut self, cx: &mut Context<Self>) {
+        self.open = true;
+        cx.notify();
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
@@ -355,9 +361,16 @@ impl Render for ThemePicker {
         };
         div()
             .relative()
+            .flex_none()
+            .h(tokens::SECTION_HEIGHT)
+            .px(tokens::SPACE_2)
             .flex()
             .items_center()
+            .justify_between()
             .gap(tokens::SPACE_2)
+            .border_b_1()
+            .border_color(tokens.divider)
+            .text_size(tokens::TEXT_SMALL)
             .child(
                 button("theme-picker", self.open)
                     .on_click(cx.listener(|picker, _, _, cx| {
@@ -368,6 +381,8 @@ impl Render for ThemePicker {
                         cx.notify();
                     }))
                     .aria_label(format!("{}: {name}", crate::t!(Key::Theme)))
+                    .min_w_0()
+                    .truncate()
                     .child(format!("{}: {name} ▾", crate::t!(Key::Theme))),
             )
             .child(

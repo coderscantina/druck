@@ -1,5 +1,6 @@
-//! The chapter's notes in the inspector: each comment that opens the chapter, with a field that edits its text where it
-//! stands in the buffer, so undo and the bytes around it are the editor's.
+//! The chapter's notes in the right margin: each comment that opens the chapter, with a thin accent line at its left and
+//! a field that edits its text where it stands in the buffer, so undo and the bytes around it are the editor's. They show
+//! only when there are any. Agent notes will stand in the same margin.
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -7,9 +8,9 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, SharedString, Subscription, TextRun,
-    UTF16Selection, Window, WrappedLine, canvas, div, fill, font, point, px, size,
+    App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, TextRun, UTF16Selection, Window,
+    WrappedLine, canvas, div, fill, font, point, px, size,
 };
 
 use super::commands::notes::{Note, leading_notes};
@@ -24,18 +25,17 @@ use crate::source::{Selection, motion};
 use crate::tokens::{self, Tokens};
 
 const FIELD_CONTEXT: &str = "NoteField";
-const LINE_HEIGHT: Pixels = px(19.);
+const LINE_HEIGHT: Pixels = tokens::NOTE_LINE_HEIGHT;
 
-pub struct NotesPanel {
+pub struct MarginNotes {
     editor: Entity<EditorView>,
-    /// What the panel shows, so a key elsewhere in the chapter draws nothing here.
+    /// What the margin shows, so a key elsewhere in the chapter draws nothing here.
     shown: Vec<String>,
     fields: Vec<Entity<NoteField>>,
-    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
-impl NotesPanel {
+impl MarginNotes {
     pub fn new(editor: Entity<EditorView>, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&editor, |panel, _, _: &TextChanged, cx| panel.sync(cx)),
@@ -45,7 +45,6 @@ impl NotesPanel {
             editor,
             shown: Vec::new(),
             fields: Vec::new(),
-            scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         panel.sync(cx);
@@ -71,47 +70,29 @@ impl NotesPanel {
     }
 }
 
-impl Render for NotesPanel {
+impl Render for MarginNotes {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
-        let header = div()
-            .flex_none()
-            .h(tokens::SECTION_HEIGHT)
-            .px(tokens::SPACE_3)
-            .flex()
-            .items_center()
-            .border_b_1()
-            .border_color(tokens.divider)
-            .text_size(tokens::TEXT_SMALL)
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(tokens.text_quiet)
-            .child(crate::t!(Key::NotesTitle));
-        let body = div()
-            .id("notes")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll)
-            .p(tokens::SPACE_3)
+        let notes = self.fields.iter().map(|field| {
+            div()
+                .pl(tokens::SPACE_2)
+                .border_l_1()
+                .border_color(tokens.accent)
+                .child(field.clone())
+        });
+        div()
+            .w(tokens::NOTE_WIDTH)
             .flex()
             .flex_col()
             .gap(tokens::SPACE_3)
-            .when(self.fields.is_empty(), |body| {
-                body.child(
-                    div()
-                        .text_size(tokens::TEXT_SMALL)
-                        .text_color(tokens.text_faint)
-                        .child(crate::t!(Key::NotesEmpty)),
-                )
-            })
-            .children(self.fields.iter().cloned());
-        div().size_full().flex().flex_col().child(header).child(body)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .children(notes)
     }
 }
 
-/// The width text wraps at in the panel.
+/// The width text wraps at in the margin.
 fn text_width() -> Pixels {
-    tokens::INSPECTOR_WIDTH - tokens::SPACE_3 * 2. - tokens::SPACE_2 * 2. - px(2.)
+    tokens::NOTE_WIDTH - tokens::SPACE_2 - px(1.)
 }
 
 /// One note, edited in place. Offsets are into the note's shown text.
@@ -133,7 +114,7 @@ impl NoteField {
         Self {
             editor,
             index,
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             selection: Selection::default(),
             marked: None,
             refused: false,
@@ -257,6 +238,7 @@ impl NoteField {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         window.focus(&self.focus, cx);
         let offset = self.offset_at(event.position);
         self.selection = Selection::caret(offset);
@@ -315,7 +297,7 @@ impl Render for NoteField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let text = self.shown(cx);
-        let color = tokens.text;
+        let color = tokens.text_quiet;
         let run = TextRun {
             len: text.len(),
             font: font(tokens::FONT_UI),
@@ -327,7 +309,7 @@ impl Render for NoteField {
         let shared: SharedString = text.clone().into();
         let shaped = window
             .text_system()
-            .shape_text(shared, tokens::TEXT_BODY, &[run], Some(text_width()), None)
+            .shape_text(shared, tokens::TEXT_SMALL + px(1.), &[run], Some(text_width()), None)
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         self.lines = Rc::new(shaped);
@@ -442,12 +424,13 @@ impl Render for NoteField {
                     this.drag_anchor = None;
                 }),
             )
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    let text = this.editor.read(cx).focus_handle(cx);
+                    window.focus(&text, cx);
+                }
+            }))
             .cursor_text()
-            .p(tokens::SPACE_2)
-            .rounded(tokens::RADIUS)
-            .border_1()
-            .border_color(if focused { tokens.accent } else { tokens.divider })
-            .bg(tokens.canvas)
             .child(surface);
         div()
             .flex()

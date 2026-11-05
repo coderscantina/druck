@@ -24,8 +24,6 @@ const CELL_Y: Pixels = px(4.);
 const CAPTION_GAP: Pixels = px(6.);
 /// The tallest a figure shows, as a share of the column's width.
 const MAX_ASPECT: f32 = 0.75;
-/// Logical pixels per point, as the galley's text has it.
-const POINT: f32 = 1.4;
 
 pub struct GridCell {
     layout: BlockLayout,
@@ -177,6 +175,7 @@ impl EditorView {
         width: Pixels,
         bold: bool,
         look: Option<ChipLook>,
+        dim: bool,
         window: &Window,
     ) -> BlockLayout {
         let kind = BlockKind::FootnoteDefinition;
@@ -195,7 +194,6 @@ impl EditorView {
         }
         shape_block(
             ShapeRequest {
-                composed: None,
                 kind,
                 lines,
                 separator: false,
@@ -207,20 +205,23 @@ impl EditorView {
                 style: &self.style,
                 chips,
                 whole: None,
+                dim,
+                gap: px(0.),
+                indent: px(0.),
             },
             window,
         )
     }
 
     /// Shapes a table or figure for the current width.
-    pub(in crate::editor) fn shape_atom(&mut self, atom: &Atom, window: &Window) -> Whole {
+    pub(in crate::editor) fn shape_atom(&mut self, atom: &Atom, dim: bool, window: &Window) -> Whole {
         match &atom.kind {
-            AtomKind::Table(Ok(grid)) => Whole::Grid(self.shape_grid(grid.clone(), window)),
-            _ => Whole::Figure(self.shape_figure(atom, window)),
+            AtomKind::Table(Ok(grid)) => Whole::Grid(self.shape_grid(grid.clone(), dim, window)),
+            _ => Whole::Figure(self.shape_figure(atom, dim, window)),
         }
     }
 
-    fn shape_grid(&self, grid: Rc<Grid>, window: &Window) -> GridShape {
+    fn shape_grid(&self, grid: Rc<Grid>, dim: bool, window: &Window) -> GridShape {
         let width = self.column.text_width;
         let mut weights = vec![4usize; grid.columns];
         for row in &grid.rows {
@@ -246,8 +247,8 @@ impl EditorView {
                 Some(at)
             })
             .collect();
-        let caption =
-            (!grid.caption.text.is_empty()).then(|| self.shape_inline(&grid.caption.text, width, false, None, window));
+        let caption = (!grid.caption.text.is_empty())
+            .then(|| self.shape_inline(&grid.caption.text, width, false, None, dim, window));
         let top = caption.as_ref().map_or(px(0.), |caption| caption.height + CAPTION_GAP);
         let mut y = top;
         let mut rows = Vec::with_capacity(grid.rows.len());
@@ -262,7 +263,7 @@ impl EditorView {
                     .copied()
                     .fold(px(0.), |a, b| a + b);
                 let room = (covered - CELL_X * 2.).max(px(16.));
-                let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, window);
+                let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, dim, window);
                 let align = grid.aligns.get(column).copied().unwrap_or_default();
                 if matches!(align, Align::Center | Align::Right) {
                     for line in &mut layout.lines {
@@ -296,7 +297,7 @@ impl EditorView {
         }
     }
 
-    fn shape_figure(&mut self, atom: &Atom, window: &Window) -> FigureShape {
+    fn shape_figure(&mut self, atom: &Atom, dim: bool, window: &Window) -> FigureShape {
         let AtomKind::Figure(figure) = &atom.kind else {
             unreachable!("a table is shaped as a grid");
         };
@@ -308,7 +309,7 @@ impl EditorView {
         let found = self.rich.image_size(&file);
         let (image, problem) = match found {
             Ok((natural_width, natural_height)) if natural_width > 0. && natural_height > 0. => {
-                let scale = (POINT)
+                let scale = (self.style.scale())
                     .min(f32::from(width) / natural_width)
                     .min(f32::from(width) * MAX_ASPECT / natural_height);
                 (size(px(natural_width * scale), px(natural_height * scale)), None)
@@ -324,9 +325,10 @@ impl EditorView {
             }
         };
         let problem = problem
-            .map(|message| self.shape_inline(&message, width - CELL_X * 2., false, Some(ChipLook::Error), window));
+            .map(|message| self.shape_inline(&message, width - CELL_X * 2., false, Some(ChipLook::Error), dim, window));
         let caption_text = figure.caption(&text);
-        let caption = (!caption_text.is_empty()).then(|| self.shape_inline(caption_text, width, false, None, window));
+        let caption =
+            (!caption_text.is_empty()).then(|| self.shape_inline(caption_text, width, false, None, dim, window));
         let height = image.height + caption.as_ref().map_or(px(0.), |caption| caption.height + CAPTION_GAP);
         FigureShape {
             source: atom.clone(),

@@ -9,10 +9,9 @@ use super::text::Key;
 use crate::app::{NewBook, NewOffer, NewReport, Open, Quit};
 use crate::editor::{
     Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
-    ShowSpelling, TogglePrintLines, ToggleSpelling, Undo,
+    ShowSpelling, ToggleSource, Undo,
 };
-use crate::preview::{ZoomIn, ZoomOut, ZoomToFit};
-use crate::workspace::{FocusNext, FocusPrevious, ShowPages, ShowSplit, ShowWrite};
+use crate::workspace::{FocusNext, FocusPrevious, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
 actions!(
     shell,
@@ -29,13 +28,16 @@ actions!(
         ShowFonts,
         ShowImages,
         ShowDetails,
-        ShowNotes,
         ShowAgent,
+        ChooseTheme,
         FocusEditor,
         CloseDocument,
-        ToggleSidebar,
-        FocusSidebar,
-        ToggleInspector,
+        ToggleBinder,
+        FocusBinder,
+        ToggleSpelling,
+        ToggleTypewriter,
+        ToggleDim,
+        ToggleSelectionToolbar,
         About,
         HideApp,
         HideOthers,
@@ -57,8 +59,7 @@ actions!(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MenuState {
     pub recent: Vec<PathBuf>,
-    pub sidebar_shown: bool,
-    pub inspector_shown: bool,
+    pub binder_shown: bool,
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -71,21 +72,23 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-f", FindInProject, None),
         KeyBinding::new("cmd-e", ShowExport, None),
         KeyBinding::new("cmd-shift-d", ShowDiagnostics, None),
-        KeyBinding::new("cmd-alt-s", ToggleSidebar, None),
-        KeyBinding::new("cmd-alt-1", FocusSidebar, None),
+        KeyBinding::new("cmd-\\", ToggleBinder, None),
+        KeyBinding::new("cmd-alt-1", FocusBinder, None),
         KeyBinding::new("cmd-alt-0", FocusEditor, None),
         KeyBinding::new("ctrl-cmd-1", ShowSelection, None),
         KeyBinding::new("ctrl-cmd-2", ShowStyles, None),
         KeyBinding::new("ctrl-cmd-3", ShowFonts, None),
         KeyBinding::new("ctrl-cmd-4", ShowImages, None),
         KeyBinding::new("ctrl-cmd-5", ShowDetails, None),
-        KeyBinding::new("ctrl-cmd-6", ShowNotes, None),
-        KeyBinding::new("ctrl-cmd-7", ShowAgent, None),
+        KeyBinding::new("ctrl-cmd-6", ShowAgent, None),
+        KeyBinding::new("cmd-=", ZoomIn, None),
+        KeyBinding::new("cmd-+", ZoomIn, None),
+        KeyBinding::new("cmd--", ZoomOut, None),
+        KeyBinding::new("cmd-0", ZoomReset, None),
         KeyBinding::new("tab", FocusNext, Some("Workspace")),
         KeyBinding::new("shift-tab", FocusPrevious, Some("Workspace")),
         KeyBinding::new("ctrl-tab", FocusNext, Some("Workspace")),
         KeyBinding::new("ctrl-shift-tab", FocusPrevious, Some("Workspace")),
-        KeyBinding::new("cmd-alt-i", ToggleInspector, None),
         KeyBinding::new("cmd-h", HideApp, None),
         KeyBinding::new("cmd-alt-h", HideOthers, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),
@@ -100,7 +103,7 @@ pub fn recent_name(path: &Path) -> String {
     )
 }
 
-fn recent_action(index: usize) -> Box<dyn gpui::Action> {
+pub fn recent_action(index: usize) -> Box<dyn gpui::Action> {
     match index {
         0 => Box::new(Recent0),
         1 => Box::new(Recent1),
@@ -183,20 +186,19 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         ]),
         Menu::new(crate::t!(Key::MenuView)).items([
             item(Key::ViewWrite, ShowWrite),
-            item(Key::ViewPages, ShowPages),
-            item(Key::ViewSplit, ShowSplit),
-            item(Key::ViewPrintLines, TogglePrintLines),
+            item(Key::ViewPublish, ShowPublish),
+            item(Key::SourceView, ToggleSource),
             MenuItem::separator(),
             item(Key::ZoomIn, ZoomIn),
             item(Key::ZoomOut, ZoomOut),
-            item(Key::ZoomFit, ZoomToFit),
+            item(Key::ZoomReset, ZoomReset),
             MenuItem::separator(),
-            if state.sidebar_shown {
-                item(Key::HideSidebar, ToggleSidebar)
+            if state.binder_shown {
+                item(Key::HideBinder, ToggleBinder)
             } else {
-                item(Key::ShowSidebar, ToggleSidebar)
+                item(Key::ToggleBinder, ToggleBinder)
             },
-            item(Key::FocusSidebar, FocusSidebar),
+            item(Key::FocusBinder, FocusBinder),
             item(Key::FocusEditor, FocusEditor),
             MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items([
                 item(Key::ShowSelection, ShowSelection),
@@ -204,16 +206,10 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
                 item(Key::ShowFonts, ShowFonts),
                 item(Key::ShowImages, ShowImages),
                 item(Key::ShowDetails, ShowDetails),
-                item(Key::ShowNotes, ShowNotes),
                 item(Key::ShowAgent, ShowAgent),
                 item(Key::ShowDiagnostics, ShowDiagnostics),
                 item(Key::ExportItem, ShowExport),
             ])),
-            if state.inspector_shown {
-                item(Key::HideInspector, ToggleInspector)
-            } else {
-                item(Key::ShowInspector, ToggleInspector)
-            },
         ]),
         Menu::new(crate::t!(Key::MenuInsert)).items([
             item(Key::InsertFootnote, InsertFootnote),

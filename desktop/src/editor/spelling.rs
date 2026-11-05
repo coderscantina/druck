@@ -2,7 +2,9 @@
 //! suggestions. The check itself runs off the main thread behind [`crate::spell::Checker`], only when the writer pauses,
 //! for the blocks on screen.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -12,12 +14,18 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{Context, Task, Window};
 
 use super::EditorView;
-use super::composed::key;
 use super::float::Float;
 use crate::source::inline::{SpanKind, inline_spans, line_markers};
 use crate::source::{BlockKind, Selection};
 use crate::spell::words::WordList;
 use crate::spell::{self, Checker};
+
+/// A block's text as a key, so an answer stays good for any block that did not change.
+fn key(text: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
 
 /// How long after the last key the blocks on screen are checked.
 const PAUSE: Duration = Duration::from_millis(500);
@@ -186,11 +194,6 @@ impl EditorView {
         } else {
             language.clone()
         }
-    }
-
-    pub fn toggle_spelling(&mut self, cx: &mut Context<Self>) {
-        self.spelling.on = !self.spelling.on;
-        cx.notify();
     }
 
     /// Waits out the pause again. The only thing that happens on a key.

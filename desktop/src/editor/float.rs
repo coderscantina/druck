@@ -13,6 +13,7 @@ use gpui::{
 use super::commands::Command;
 use super::commands::convert::{self, BlockType, TARGETS};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
+use super::commands::notes;
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
 use super::place::{self, Rect};
 use super::rich::view::RichFloat;
@@ -150,7 +151,7 @@ impl Render for Tip {
     }
 }
 
-pub(super) fn tooltip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+pub(crate) fn tooltip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = SharedString::from(text);
     move |_, cx| cx.new(|_| Tip(text.clone())).into()
 }
@@ -343,6 +344,9 @@ impl EditorView {
 
     /// Whether the toolbar shows: a settled selection holding text it can mark.
     fn toolbar_wanted(&mut self) -> bool {
+        if !self.writing.toolbar {
+            return false;
+        }
         !self.selection.is_empty()
             && self.drag.is_none()
             && self.marked.is_none()
@@ -794,6 +798,16 @@ impl EditorView {
             .shadow_md()
             .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| this.close_float(cx)))
             .children(rows)
+    }
+
+    /// The chapter's notes for this frame, beside the chapter's first text while that is on screen.
+    pub(super) fn margin_element(&self) -> Option<(AnyElement, Point<Pixels>)> {
+        let left = self.column.note_left?;
+        let margin = self.margin.clone()?;
+        let region = notes::leading_region(self.text(), &self.blocks)?;
+        let first = self.blocks.index_at(region.start);
+        let (_, top) = self.visible.iter().find(|(index, _)| *index >= first)?;
+        Some((margin.into_any_element(), point(left, *top)))
     }
 
     // The frame's floats

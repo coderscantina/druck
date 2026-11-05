@@ -1,23 +1,85 @@
-//! The footer strip's word count: the open chapter and the whole book.
+//! The word count at the bottom right of the bare page: the open chapter of the whole book, faint, with a thin space
+//! between thousands. It hides while typing. A change of zoom shows its value there for a moment.
+
+use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{Context, Window, div};
+use gpui::{Context, Task, Window, div};
 
 use super::text::Key;
 use crate::tokens::{self, Tokens};
 
-#[derive(Default)]
+/// How long after the last key the count comes back.
+const TYPING_PAUSE: Duration = Duration::from_millis(1200);
+/// How long a zoom value shows.
+const ZOOM_TIME: Duration = Duration::from_millis(1200);
+
 pub struct Footer {
     chapter: Option<usize>,
     book: Option<usize>,
+    /// Only Write has it.
+    shown: bool,
+    typing: bool,
+    typing_pause: Task<()>,
+    zoom: Option<u32>,
+    zoom_pause: Task<()>,
 }
 
 impl Footer {
+    pub fn new() -> Self {
+        Self {
+            chapter: None,
+            book: None,
+            shown: true,
+            typing: false,
+            typing_pause: Task::ready(()),
+            zoom: None,
+            zoom_pause: Task::ready(()),
+        }
+    }
+
     pub fn set(&mut self, chapter: Option<usize>, book: Option<usize>, cx: &mut Context<Self>) {
         if (self.chapter, self.book) != (chapter, book) {
             (self.chapter, self.book) = (chapter, book);
             cx.notify();
         }
+    }
+
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.shown = shown;
+        cx.notify();
+    }
+
+    /// A key was typed. Does nothing else on a key, once the count has gone.
+    pub fn typed(&mut self, cx: &mut Context<Self>) {
+        if !self.typing {
+            self.typing = true;
+            cx.notify();
+        }
+        self.typing_pause = cx.spawn(async move |footer, cx| {
+            cx.background_executor().timer(TYPING_PAUSE).await;
+            footer
+                .update(cx, |footer, cx| {
+                    footer.typing = false;
+                    cx.notify();
+                })
+                .ok();
+        });
+    }
+
+    /// Shows a zoom level for a moment, as a percentage.
+    pub fn show_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        self.zoom = Some((zoom * 100.).round() as u32);
+        cx.notify();
+        self.zoom_pause = cx.spawn(async move |footer, cx| {
+            cx.background_executor().timer(ZOOM_TIME).await;
+            footer
+                .update(cx, |footer, cx| {
+                    footer.zoom = None;
+                    cx.notify();
+                })
+                .ok();
+        });
     }
 }
 
@@ -37,20 +99,26 @@ fn grouped(number: usize) -> String {
 impl Render for Footer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
-        let text = match (self.chapter, self.book) {
+        let count = match (self.chapter, self.book) {
             (Some(chapter), Some(book)) => {
                 crate::t!(Key::WordsFooter, chapter = grouped(chapter), book = grouped(book))
             }
             (Some(chapter), None) => crate::t!(Key::WordsChapterOnly, chapter = grouped(chapter)),
             _ => String::new(),
         };
-        // Takes only what it needs: a conflict in the same strip needs the room for its sentence.
+        let text = match self.zoom {
+            Some(zoom) => format!("{zoom}\u{202f}%"),
+            None if self.shown && !self.typing => count,
+            None => String::new(),
+        };
+        // Takes only what it needs: a conflict in the same line needs the room for its sentence.
         div()
             .flex_none()
             .ml_auto()
             .px(tokens::SPACE_3)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_faint)
+            .when(!text.is_empty(), |count| count.bg(tokens.canvas))
             .child(text)
     }
 }

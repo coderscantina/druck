@@ -2,9 +2,6 @@
 
 crate::strings! {
     pub enum Key {
-        Saved => ("Saved", "Gesichert"),
-        Edited => ("Edited", "Bearbeitet"),
-        Saving => ("Saving\u{2026}", "Wird gesichert\u{2026}"),
         CannotSave => ("Cannot save", "Sichern nicht möglich"),
         KeptInMemory => (
             "Your text is safe here and will be saved when it can be.",

@@ -5,8 +5,7 @@ crate::strings! {
     pub enum Key {
         // Window and canvas
         Write => ("Write", "Schreiben"),
-        Pages => ("Pages", "Seiten"),
-        Split => ("Split", "Geteilt"),
+        Publish => ("Publish", "Publizieren"),
         CannotSaveBeforeOpening => (
             "Your changes could not be saved. Open another document anyway?",
             "Die Änderungen konnten nicht gesichert werden. Trotzdem ein anderes Dokument öffnen?"
@@ -55,9 +54,25 @@ crate::strings! {
         FindNext => ("Find Next", "Weitersuchen"),
         FindPrevious => ("Find Previous", "Rückwärts suchen"),
         ViewWrite => ("Write", "Schreiben"),
-        ViewPages => ("Pages", "Seiten"),
-        ViewSplit => ("Split", "Geteilte Ansicht"),
-        ViewPrintLines => ("Print Lines", "Druckzeilen"),
+        ViewPublish => ("Publish", "Publizieren"),
+        SourceView => ("Source View", "Quelltext"),
+        NewSection => ("New Section\u{2026}", "Neuer Abschnitt\u{2026}"),
+        ChooseTheme => ("Choose Theme\u{2026}", "Theme wählen\u{2026}"),
+        EditAtCaret => ("Edit What the Caret Is On", "Bearbeiten, was am Cursor steht"),
+        Bold => ("Bold", "Fett"),
+        Italic => ("Italic", "Kursiv"),
+        Underline => ("Underline", "Unterstrichen"),
+        Strike => ("Strikethrough", "Durchgestrichen"),
+        Superscript => ("Superscript", "Hochgestellt"),
+        Subscript => ("Subscript", "Tiefgestellt"),
+        SmallCaps => ("Small Capitals", "Kapitälchen"),
+        Quote => ("Quotation", "Zitat"),
+        Bullets => ("Bulleted List", "Aufzählung"),
+        Numbers => ("Numbered List", "Nummerierte Liste"),
+        Link => ("Link\u{2026}", "Link\u{2026}"),
+        Typewriter => ("Typewriter Scrolling", "Schreibmaschinen-Scrollen"),
+        DimParagraphs => ("Dim Other Paragraphs", "Andere Absätze abblenden"),
+        SelectionToolbar => ("Toolbar on Selection", "Werkzeugleiste bei Auswahl"),
         FocusEditor => ("Go to the Text", "Zum Text"),
         Inspector => ("Inspector Tab", "Inspektor-Reiter"),
         ShowSelection => ("Selection", "Auswahl"),
@@ -65,7 +80,6 @@ crate::strings! {
         ShowFonts => ("Fonts", "Schriften"),
         ShowImages => ("Images", "Bilder"),
         ShowDetails => ("Details", "Angaben"),
-        ShowNotes => ("Notes", "Notizen"),
         ShowAgent => ("Agent", "Agent"),
         MenuInsert => ("Insert", "Einfügen"),
         InsertFootnote => ("Footnote", "Fußnote"),
@@ -77,23 +91,18 @@ crate::strings! {
         CheckSpelling => ("Check Spelling While Typing", "Rechtschreibung prüfen"),
         ZoomIn => ("Zoom In", "Vergrößern"),
         ZoomOut => ("Zoom Out", "Verkleinern"),
-        ZoomFit => ("Fit to Width", "An Breite anpassen"),
-        HideSidebar => ("Hide Sidebar", "Seitenleiste ausblenden"),
-        ShowSidebar => ("Show Sidebar", "Seitenleiste einblenden"),
+        ZoomReset => ("Reset Zoom", "Zoom zurücksetzen"),
+        ToggleBinder => ("Binder", "Binder"),
+        HideBinder => ("Hide Binder", "Binder ausblenden"),
         ShowDiagnostics => ("Show Diagnostics", "Diagnose einblenden"),
-        FocusSidebar => ("Focus Sidebar", "Seitenleiste aktivieren"),
-        HideInspector => ("Hide Inspector", "Inspektor ausblenden"),
-        ShowInspector => ("Show Inspector", "Inspektor einblenden"),
+        FocusBinder => ("Go to the Binder", "Zum Binder"),
         Minimize => ("Minimize", "Im Dock ablegen"),
         WindowZoom => ("Zoom", "Zoomen"),
         HelpWeb => ("Druck Documentation", "Druck-Dokumentation"),
 
         // Footer
-        WordsFooter => (
-            "{chapter} words in this chapter \u{b7} {book} in the book",
-            "{chapter} Wörter im Kapitel \u{b7} {book} im Buch"
-        ),
-        WordsChapterOnly => ("{chapter} words in this chapter", "{chapter} Wörter im Kapitel"),
+        WordsFooter => ("{chapter} of {book} words", "{chapter} von {book} Wörtern"),
+        WordsChapterOnly => ("{chapter} words", "{chapter} Wörter"),
 
         // Diagnostics
         DiagnosticsTitle => ("DIAGNOSTICS", "DIAGNOSE"),
@@ -173,16 +182,5 @@ crate::strings! {
         // Find bar
         FindPlaceholder => ("Find in chapter", "Im Kapitel suchen"),
         FindPosition => ("{current} of {total}", "{current} von {total}"),
-
-        // Settings
-        SettingsTitle => ("Settings", "Einstellungen"),
-        Appearance => ("Appearance", "Erscheinungsbild"),
-        AppearanceSystem => ("Automatic", "Automatisch"),
-        AppearanceDark => ("Dark", "Dunkel"),
-        AppearanceLight => ("Light", "Hell"),
-        Language => ("Language", "Sprache"),
-        LanguageSystem => ("System", "Systemsprache"),
-        LanguageEnglish => ("English", "English"),
-        LanguageGerman => ("Deutsch", "Deutsch")
     }
 }

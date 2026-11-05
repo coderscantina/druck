@@ -381,7 +381,7 @@ impl Render for PromptInput {
             .rounded(tokens::RADIUS)
             .border_1()
             .border_color(tokens.divider)
-            .bg(tokens.canvas)
+            .bg(tokens.field)
             .child(PromptText {
                 input: cx.entity(),
                 placeholder: self.placeholder.clone(),

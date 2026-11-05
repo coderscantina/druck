@@ -200,7 +200,7 @@ pub fn menu(tokens: &Tokens, items: Vec<Stateful<Div>>) -> Stateful<Div> {
         .rounded(tokens::RADIUS)
         .border_1()
         .border_color(tokens.divider)
-        .bg(tokens.canvas)
+        .bg(tokens.field)
         .flex()
         .flex_col()
         .children(items)

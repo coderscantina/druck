@@ -1,11 +1,11 @@
-//! The galley element: paints the sheet, the visible blocks, the selection, the caret, the block gutter, and the
+//! The text element: paints the visible blocks on the app's surface, the selection, the caret, the block gutter, and the
 //! scrollbar, and hands what floats over them to [`super::float`].
 
 use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
+    AnyElement, App, AvailableSpace, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels,
     Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
 };
@@ -13,10 +13,10 @@ use gpui::{
 use super::display::ChipLook;
 use super::float::prepaint_float;
 use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
-use super::layout::BlockLayout;
-use super::{Column, EditorView, SHEET_PADDING_Y, Scrollbar};
+use super::layout::{BlockLayout, Column};
+use super::{EditorView, Scrollbar};
 use crate::source::BlockKind;
-use crate::tokens::Tokens;
+use crate::tokens::{self, Tokens};
 
 pub struct Galley {
     view: Entity<EditorView>,
@@ -35,7 +35,6 @@ pub(super) struct FrameBlock {
     pub kind: BlockKind,
     pub top: Pixels,
     pub layout: Rc<BlockLayout>,
-    pub active: bool,
     pub hovered: bool,
     pub icon: Option<&'static str>,
 }
@@ -43,7 +42,6 @@ pub(super) struct FrameBlock {
 pub struct Frame {
     pub(super) column: Column,
     pub(super) blocks: Vec<FrameBlock>,
-    sheet: Bounds<Pixels>,
     selection: Vec<Bounds<Pixels>>,
     marks: Vec<Bounds<Pixels>>,
     /// Misspelled words, from the rectangles a selection of them would have.
@@ -53,11 +51,15 @@ pub struct Frame {
     gutter_hitbox: Hitbox,
     pub(super) markers: Vec<CommentMarker>,
     pub(super) drop_line: Option<Bounds<Pixels>>,
+    /// The pointer is in the left margin, so the gutter shows.
+    pub(super) gutter_shown: bool,
     scrollbar: Option<Scrollbar>,
     scrollbar_strong: bool,
     floats: Vec<AnyElement>,
-    /// The images of visible figures, drawn inside the galley.
+    /// The images of visible figures, drawn inside the text's bounds.
     images: Vec<AnyElement>,
+    /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
+    margin: Option<AnyElement>,
     source: bool,
     pub(super) ink: Hsla,
     pub(super) quiet: Hsla,
@@ -112,10 +114,9 @@ impl Element for Galley {
         window: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        let (mut frame, floats) = self.view.update(cx, |view, cx| {
+        let (mut frame, floats, margin) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
             view.set_viewport(bounds);
-            view.compose_if_resized(window, cx);
             if view.autoscroll {
                 view.autoscroll = false;
                 view.scroll_to_caret(window);
@@ -123,20 +124,18 @@ impl Element for Galley {
             view.lay_out_visible(window);
             view.spelling_wanted(window, cx);
             view.update_scrollbar();
+            let gutter_left = view.column.text_left - tokens::GUTTER_WIDTH;
             let gutter_hitbox = window.insert_hitbox(
                 Bounds::new(
-                    point(view.column.sheet_left, bounds.top()),
-                    size(view.column.text_left - view.column.sheet_left, bounds.size.height),
+                    point(gutter_left, bounds.top()),
+                    size(tokens::GUTTER_WIDTH, bounds.size.height),
                 ),
                 HitboxBehavior::Normal,
             );
             let hitbox = window.insert_hitbox(
                 Bounds::new(
                     point(view.column.text_left, bounds.top()),
-                    size(
-                        view.column.sheet_left + view.column.sheet_width - view.column.text_left,
-                        bounds.size.height,
-                    ),
+                    size(bounds.right() - view.column.text_left, bounds.size.height),
                 ),
                 HitboxBehavior::Normal,
             );
@@ -144,9 +143,16 @@ impl Element for Galley {
             let selection = frame.selection.clone();
             let caret = frame.caret.or_else(|| view.caret_bounds(window));
             let floats = view.floats(&selection, caret, window, cx);
-            (frame, floats)
+            let margin = view.margin_element();
+            (frame, floats, margin)
         });
         frame.images = self.prepaint_images(&frame, bounds, window, cx);
+        frame.margin = margin.map(|(mut element, origin)| {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
+            });
+            element
+        });
         frame.floats = floats
             .into_iter()
             .map(|(element, origin)| prepaint_float(element, origin, window, cx))
@@ -176,15 +182,14 @@ impl Element for Galley {
             window.set_window_cursor_style(CursorStyle::ClosedHand);
         }
 
-        let tokens = Tokens::get(cx);
-        let sheet_color = tokens.sheet;
-        let selection_color = Hsla::from(tokens.accent).opacity(0.25);
-        let thumb_color = Hsla::from(tokens.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
-        let mark_color = Hsla::from(tokens.added).opacity(0.2);
-        let misspelled_color = Hsla::from(tokens.accent).opacity(0.6);
+        let colors = Tokens::get(cx);
+        let accent = colors.accent;
+        let selection_color = Hsla::from(accent).opacity(0.25);
+        let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong { 0.8 } else { 0.4 });
+        let mark_color = Hsla::from(colors.added).opacity(0.2);
+        let misspelled_color = Hsla::from(accent).opacity(0.6);
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            window.paint_quad(fill(frame.sheet, sheet_color));
             for block in &frame.blocks {
                 paint_block_background(block, frame, window);
             }
@@ -207,6 +212,9 @@ impl Element for Galley {
             for image in &mut frame.images {
                 image.paint(window, cx);
             }
+            if let Some(margin) = &mut frame.margin {
+                margin.paint(window, cx);
+            }
             paint_gutter(frame, window, cx);
             if let Some(bar) = frame.scrollbar {
                 window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(px(3.)));
@@ -215,7 +223,7 @@ impl Element for Galley {
                 && caret_on
                 && let Some(caret) = frame.caret
             {
-                window.paint_quad(fill(caret, frame.ink));
+                window.paint_quad(fill(caret, accent));
             }
         });
 
@@ -343,17 +351,6 @@ pub(super) fn paint_lines(
         line.shaped
             .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
             .ok();
-        if let Some((rows, hyphen)) = &line.hyphens {
-            for row in rows {
-                let at = point(
-                    origin.x + line.x_in_row(line.rows[*row].end, *row),
-                    origin.y + line.line_height * *row as f32,
-                );
-                hyphen
-                    .paint(at, line.line_height, TextAlign::Left, None, window, cx)
-                    .ok();
-            }
-        }
     }
 }
 
@@ -361,8 +358,6 @@ impl EditorView {
     /// Everything paint needs, gathered while the view is mutably at hand.
     fn frame(&mut self, hitbox: Hitbox, gutter_hitbox: Hitbox, window: &Window) -> Frame {
         let column = self.column;
-        let viewport = column.viewport;
-        let active = self.blocks.index_at(self.selection.head);
         let mut blocks = Vec::with_capacity(self.visible.len());
         for (index, top) in self.visible.clone() {
             let block = self.blocks.as_slice()[index].clone();
@@ -387,28 +382,10 @@ impl EditorView {
                 kind: block.kind,
                 top,
                 layout: self.layout_block(index, window),
-                active: index == active,
                 hovered: self.hovered == Some(index),
                 icon,
             });
         }
-        let starts_here = self.visible.first().is_some_and(|(index, _)| *index == 0);
-        let ends_here = self
-            .visible
-            .last()
-            .is_some_and(|(index, _)| *index + 1 == self.blocks.as_slice().len());
-        let sheet_top = match (starts_here, blocks.first()) {
-            (true, Some(first)) => (first.top - SHEET_PADDING_Y).max(viewport.top()),
-            _ => viewport.top(),
-        };
-        let sheet_bottom = match (ends_here, blocks.last()) {
-            (true, Some(last)) => (last.top + last.layout.height + SHEET_PADDING_Y).min(viewport.bottom()),
-            _ => viewport.bottom(),
-        };
-        let sheet = Bounds::new(
-            point(column.sheet_left, sheet_top),
-            size(column.sheet_width, sheet_bottom - sheet_top),
-        );
         let selection = self.range_rectangles(self.selection.range(), &blocks);
         let marks = self
             .marks
@@ -429,7 +406,6 @@ impl EditorView {
         Frame {
             column,
             blocks,
-            sheet,
             selection,
             marks,
             misspelled,
@@ -438,10 +414,12 @@ impl EditorView {
             gutter_hitbox,
             markers: self.markers.clone(),
             drop_line: self.drop_line(),
+            gutter_shown: self.gutter_shown || self.grab.is_some(),
             scrollbar: self.scrollbar,
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             floats: Vec::new(),
             images: Vec::new(),
+            margin: None,
             source: self.source,
             ink: self.style.ink,
             quiet: self.style.quiet,

@@ -3,10 +3,9 @@
 //! as a measurement does, floating without focus, for screenshots.
 //!
 //! Types into the middle of the open document on a timer, through the same input path as the keyboard, while pages
-//! refresh in the background, then prints typing latency, pause to painted pages, theme edit to updated pages, and
-//! memory over many refreshes, and quits. `DRUCK_GATE_THEME_EDITS=0` skips the theme edits, for a read-only theme.
-//! `DRUCK_GATE_PRINT=1` measures with the print-composer lines on. `DRUCK_SOAK_MEMORY=1` only reports, for a run driven from
-//! outside.
+//! refresh in the background, then prints typing latency, pause to ready pages, how fast Publish opens, theme edit to updated
+//! pages, and memory over many refreshes, and quits. `DRUCK_GATE_THEME_EDITS=0` skips the theme edits, for a read-only
+//! theme. `DRUCK_SOAK_MEMORY=1` only reports, for a run driven from outside.
 //!
 //! Times run from when a key was due, so they include any wait for the main thread, to the end of the first paint
 //! showing it. Presenting takes one more frame at most. `DRUCK_GATE_REFRESHES` sets the memory run's length.
@@ -19,6 +18,7 @@ use gpui::{AnyWindowHandle, App, AsyncApp, Entity, EntityInputHandler};
 use crate::editor::EditorView;
 use crate::inspector::InspectorView;
 use crate::preview::{PreviewView, memory};
+use crate::workspace::{Mode, Workspace};
 
 /// Bursts of typing at about 130 words a minute, with pauses that let a refresh start.
 const BURSTS: usize = 60;
@@ -28,6 +28,7 @@ const KEY_INTERVAL: Duration = Duration::from_millis(90);
 const BETWEEN_BURSTS: Duration = Duration::from_millis(300);
 const PAUSE_SAMPLES: usize = 30;
 const THEME_SAMPLES: usize = 12;
+const OPEN_SAMPLES: usize = 12;
 const REFRESHES: usize = 200;
 const POLL: Duration = Duration::from_millis(1);
 /// Longer than any layout should take, so a stuck run reports rather than hangs.
@@ -35,6 +36,7 @@ const GIVE_UP: Duration = Duration::from_secs(10);
 const MARK: &str = "QQQ";
 
 struct Gate {
+    workspace: Entity<Workspace>,
     editor: Entity<EditorView>,
     preview: Entity<PreviewView>,
     inspector: Entity<InspectorView>,
@@ -54,6 +56,7 @@ pub fn var(name: &str) -> Option<String> {
 }
 
 pub fn start(
+    workspace: Entity<Workspace>,
     editor: Entity<EditorView>,
     preview: Entity<PreviewView>,
     inspector: Entity<InspectorView>,
@@ -68,6 +71,7 @@ pub fn start(
         return;
     }
     let gate = Gate {
+        workspace,
         editor,
         preview,
         inspector,
@@ -96,7 +100,7 @@ fn soak(editor: Entity<EditorView>, preview: Entity<PreviewView>, cx: &mut App) 
                 revision = now;
                 changed = Some(Instant::now());
             }
-            let painted = preview.read_with(cx, |preview, _| preview.painted_at());
+            let painted = preview.read_with(cx, |preview, _| preview.ready_at());
             if let (Some(from), Some(painted)) = (changed, painted)
                 && painted > from
             {
@@ -121,12 +125,10 @@ impl Gate {
         self.wait_for_pages(cx).await;
         eprintln!("gate: first pages; {}", memory());
         self.place_caret(cx).await;
-        if var("DRUCK_GATE_PRINT").is_some() {
-            self.print_lines(cx).await;
-        }
         if var("DRUCK_GATE_THEME_ONLY").is_none() {
             self.typing(cx).await;
             self.pause_to_pages(cx).await;
+            self.entering_publish(cx).await;
         }
         if var("DRUCK_GATE_THEME_EDITS").as_deref() != Some("0") {
             self.theme_edits(cx).await;
@@ -138,13 +140,17 @@ impl Gate {
         cx.background_executor().timer(duration).await;
     }
 
-    /// Waits until the newest request's pages are on screen, and returns when that was.
+    /// Waits until the pages of the text as it stands are ready to paint, and returns when that was. The text may still
+    /// be waiting out its pause, so this asks about the text and not the last request.
     async fn wait_for_pages(&self, cx: &mut AsyncApp) -> Instant {
         let start = Instant::now();
         loop {
-            let painted = self.preview.read_with(cx, |preview, _| preview.painted_at());
-            if let Some(painted) = painted {
-                return painted;
+            let revision = self.editor.read_with(cx, |editor, _| editor.revision());
+            let ready = self.preview.read_with(cx, |preview, _| {
+                preview.shows(revision).then(|| preview.ready_at()).flatten()
+            });
+            if let Some(ready) = ready {
+                return ready;
             }
             if start.elapsed() > GIVE_UP {
                 let problem = self
@@ -202,17 +208,6 @@ impl Gate {
         self.sleep(Duration::from_millis(200), cx).await;
     }
 
-    /// Turns on the print-composer lines and waits for the first ones.
-    async fn print_lines(&self, cx: &mut AsyncApp) {
-        let editor = self.editor.clone();
-        self.window
-            .update(cx, |_, window, cx| {
-                editor.update(cx, |editor, cx| editor.toggle_print_lines(window, cx));
-            })
-            .ok();
-        self.sleep(Duration::from_secs(2), cx).await;
-    }
-
     async fn typing(&self, cx: &mut AsyncApp) {
         let mut idle = Vec::new();
         let mut during = Vec::new();
@@ -264,11 +259,10 @@ impl Gate {
         for _ in 0..PAUSE_SAMPLES {
             self.letter(cx);
             let last = Instant::now();
-            self.sleep(Duration::from_millis(200), cx).await;
             quiet.push(self.wait_for_pages(cx).await.saturating_duration_since(last));
             self.settle(cx).await;
         }
-        report("last key to painted pages, nothing running at the key", quiet);
+        report("last key to ready pages, nothing running at the key", quiet);
 
         // The last key lands just after a layout started, whose request then cancels that layout.
         let mut busy = Vec::new();
@@ -279,11 +273,42 @@ impl Gate {
             }
             self.letter(cx);
             let last = Instant::now();
-            self.sleep(Duration::from_millis(200), cx).await;
             busy.push(self.wait_for_pages(cx).await.saturating_duration_since(last));
             self.settle(cx).await;
         }
-        report("last key to painted pages, key just after a layout started", busy);
+        report("last key to ready pages, key just after a layout started", busy);
+    }
+
+    /// From a pause in Write, how long until Publish's first frame with every visible page exact.
+    async fn entering_publish(&self, cx: &mut AsyncApp) {
+        let mut samples = Vec::new();
+        for _ in 0..OPEN_SAMPLES {
+            self.letter(cx);
+            self.settle(cx).await;
+            self.sleep(Duration::from_millis(200), cx).await;
+            let start = Instant::now();
+            self.show(Mode::Publish, cx);
+            loop {
+                let exact = self.preview.read_with(cx, |preview, _| preview.exact_frame());
+                if exact.is_some_and(|frame| frame > start) || start.elapsed() > GIVE_UP {
+                    samples.push(start.elapsed());
+                    break;
+                }
+                self.sleep(POLL, cx).await;
+            }
+            self.show(Mode::Write, cx);
+            self.sleep(Duration::from_millis(100), cx).await;
+        }
+        report("pause in Write to exact pages in Publish", samples);
+    }
+
+    fn show(&self, mode: Mode, cx: &mut AsyncApp) {
+        let workspace = self.workspace.clone();
+        self.window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| workspace.show(mode, window, cx));
+            })
+            .ok();
     }
 
     async fn theme_edits(&self, cx: &mut AsyncApp) {
@@ -300,7 +325,7 @@ impl Gate {
                 .update(cx, |inspector, cx| inspector.set_body_size(&size, cx));
             blocked.push(start.elapsed());
             // The write runs on its own thread, and the pages are requested once it has landed.
-            while start.elapsed() < GIVE_UP && self.preview.read_with(cx, |preview, _| preview.painted_at()).is_some() {
+            while start.elapsed() < GIVE_UP && self.preview.read_with(cx, |preview, _| preview.ready_at()).is_some() {
                 self.sleep(POLL, cx).await;
             }
             pages.push(self.wait_for_pages(cx).await.saturating_duration_since(start));
@@ -320,7 +345,7 @@ impl Gate {
             }
         }
         report("theme edit, window thread busy with the change", blocked);
-        report("theme edit to painted pages", pages);
+        report("theme edit to ready pages", pages);
         report("theme edit to painted galley", galley);
     }
 

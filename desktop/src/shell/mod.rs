@@ -1,5 +1,5 @@
-//! The shell: the diagnostics and export panels, the sidebar's dots, project search and the find bar, the word count,
-//! the string tables, the menus, and settings.
+//! The shell: the diagnostics and export panels, the Binder's dots, project search and the find bar, the word count,
+//! the string tables, the menus, the command table, and what applies the settings.
 //!
 //! Everything without gpui is in plain modules with their own tests: [`report`] groups diagnostics, [`facts`] reads
 //! placeholders and word counts, [`search`] finds and replaces, [`manifest`] splices exports into `druck.yaml`,
@@ -13,6 +13,7 @@
 //! A slice keeps its strings in a `strings.rs` of its own, made with [`strings!`](crate::strings), and reads them with
 //! [`t!`](crate::t). See [`strings`].
 
+pub mod commands;
 pub mod diagnostics;
 pub mod export;
 pub mod export_panel;
@@ -24,7 +25,6 @@ pub mod menus;
 pub mod report;
 pub mod search;
 pub mod search_panel;
-pub mod settings;
 pub mod state;
 pub mod strings;
 pub mod text;
@@ -39,7 +39,10 @@ use druck::Failure;
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
 use druck::input::MANIFEST;
-use gpui::{App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window, prelude::*};
+use gpui::{
+    AnyWindowHandle, App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window,
+    prelude::*,
+};
 
 use self::diagnostics::{DiagnosticsEvent, DiagnosticsPanel};
 use self::export::{Request, Stage, Target};
@@ -49,17 +52,19 @@ use self::footer::Footer;
 use self::menus::MenuState;
 use self::search::{Matcher, Options, Source};
 use self::search_panel::{SearchEvent, SearchPanel, Status};
-use self::settings::{SettingsEvent, SettingsPanel};
 use self::state::State;
-use self::strings::Language;
+use self::strings::LanguageSetting;
 use self::text::Key;
-use crate::editor::{CaretMoved, SessionChanged};
+use crate::editor::{CaretMoved, SessionChanged, TextChanged};
 use crate::inspector::Tab;
 use crate::preview::Laid;
 use crate::session::{ChapterId, Kind};
+use crate::settings;
 use crate::source::EditKind;
-use crate::tokens::{Scheme, Tokens};
-use crate::workspace::{Parts, Slots, Workspace};
+use crate::tokens::{self, Scheme, Tokens};
+use crate::workspace::{
+    Mode, ModeChanged, NewSection, Parts, ShowPublish, ShowWrite, Slots, Workspace, ZoomIn, ZoomOut, ZoomReset,
+};
 
 /// How long typing in the search panel pauses before it searches.
 const SEARCH_PAUSE: Duration = Duration::from_millis(150);
@@ -74,11 +79,13 @@ const EXPORT_STACK: usize = 64 * 1024 * 1024;
 pub struct Prefs {
     state: State,
     file: Option<std::path::PathBuf>,
-    /// An appearance the command line fixed, until a choice in settings replaces it.
+    /// An appearance the command line fixed, until the settings choose another.
     forced: Option<Scheme>,
     menu: MenuState,
     /// The window's size as last drawn, written with the rest at quit.
     window: Option<(f32, f32)>,
+    /// The settings' language and appearance as last applied, to tell what changed.
+    applied: (LanguageSetting, settings::Appearance),
     /// A measurement run leaves the owner's saved state alone.
     persist: bool,
 }
@@ -86,33 +93,44 @@ pub struct Prefs {
 impl Global for Prefs {}
 
 impl Prefs {
-    /// The fixed scheme, or `None` to follow the system.
-    pub fn scheme(&self) -> Option<Scheme> {
-        self.forced.or(self.state.appearance.scheme())
-    }
-
     pub fn window_size(&self) -> Option<(f32, f32)> {
         self.state.window
     }
+
+    /// Write's zoom from the last run.
+    pub fn write_zoom(&self) -> Option<f32> {
+        self.state.write_zoom
+    }
+
+    /// The pages' zoom from the last run, or `None` to fit them.
+    pub fn publish_zoom(&self) -> Option<f32> {
+        self.state.publish_zoom
+    }
 }
 
-/// Loads what was saved and sets the language. `forced` is an appearance from the command line.
+/// Loads the settings and what was saved, and sets the language. `forced` is an appearance from the command line.
 pub fn init(forced: Option<Scheme>, cx: &mut App) {
+    settings::init(cx);
     let file = state::state_file();
     let state = file.as_deref().map(State::load).unwrap_or_default();
-    strings::set_language(state.language.resolve());
+    let applied = {
+        let settings = settings::get(cx);
+        (settings.language, settings.appearance)
+    };
+    strings::set_language(applied.0.resolve());
     cx.set_global(Prefs {
         state,
         file,
         forced,
         menu: MenuState {
-            sidebar_shown: true,
-            inspector_shown: true,
+            binder_shown: settings::get(cx).binder,
             ..MenuState::default()
         },
         window: None,
+        applied,
         persist: crate::gate::var("DRUCK_GATE").is_none(),
     });
+    cx.observe_global::<settings::Store>(settings_changed).detach();
 }
 
 pub fn prefs(cx: &App) -> &Prefs {
@@ -142,6 +160,43 @@ pub fn save_at_exit(cx: &mut App) {
     save_prefs(cx);
 }
 
+/// Sets the tokens from the settings and the system, and repaints every window, including cached panes.
+pub fn apply_appearance(cx: &mut App) {
+    let settings = settings::get(cx);
+    let scheme = cx
+        .global::<Prefs>()
+        .forced
+        .or(settings.appearance.scheme())
+        .unwrap_or_else(|| cx.window_appearance().into());
+    let tokens = Tokens::new(scheme, settings.accent);
+    cx.set_global(tokens);
+    cx.refresh_windows();
+}
+
+/// Applies what the settings changed that is not the text's own: language, appearance, and accent. The text and the
+/// panels observe the settings for the rest.
+fn settings_changed(cx: &mut App) {
+    let (language, appearance, binder) = {
+        let settings = settings::get(cx);
+        (settings.language, settings.appearance, settings.binder)
+    };
+    let prefs = cx.global_mut::<Prefs>();
+    let was = prefs.applied;
+    prefs.applied = (language, appearance);
+    if appearance != was.1 {
+        prefs.forced = None;
+    }
+    let binder_changed = prefs.menu.binder_shown != binder;
+    prefs.menu.binder_shown = binder;
+    apply_appearance(cx);
+    if language != was.0 {
+        strings::set_language(language.resolve());
+    }
+    if language != was.0 || binder_changed {
+        refresh_menus(cx);
+    }
+}
+
 /// Adds a document to the recent list, in the app and in the dock.
 pub fn document_opened(path: &Path, cx: &mut App) {
     cx.global_mut::<Prefs>().state.remember(path);
@@ -153,6 +208,11 @@ pub fn document_opened(path: &Path, cx: &mut App) {
 /// Opens the recent document at `index` of the menu, by the path it lists.
 pub fn recent(index: usize, cx: &App) -> Option<std::path::PathBuf> {
     existing(&cx.global::<Prefs>().state.recent).into_iter().nth(index)
+}
+
+/// The recent documents that still exist, in the menu's order.
+pub fn recent_documents(cx: &App) -> Vec<std::path::PathBuf> {
+    existing(&cx.global::<Prefs>().state.recent)
 }
 
 fn existing(paths: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
@@ -169,31 +229,20 @@ pub fn refresh_menus(cx: &mut App) {
     cx.set_menus(menus::build(&state));
 }
 
-/// The scheme the tokens use: the fixed one, or the window's own.
-pub fn current_scheme(window: &Window, cx: &App) -> Scheme {
-    prefs(cx).scheme().unwrap_or_else(|| window.appearance().into())
-}
-
-/// Sets the colors from the preference and the system, and repaints, including cached panes.
-pub fn apply_appearance(window: &mut Window, cx: &mut App) {
-    cx.set_global(Tokens::new(current_scheme(window, cx)));
-    window.refresh();
-}
-
 // Reaching the document from actions
 
-/// The hub of the document in the window, for the actions that have no view of their own to land on.
-struct Current(WeakEntity<Hub>);
+/// The hub of the document, and the window it is in, for the actions that have no view of their own to land on.
+struct Current(WeakEntity<Hub>, AnyWindowHandle);
 
 impl Global for Current {}
 
 /// Runs `work` on the hub once the action that asked for it has finished, since the window is busy until then.
 fn with_hub(cx: &mut App, work: impl FnOnce(&mut Hub, &mut Window, &mut Context<Hub>) + 'static) {
     cx.defer(move |cx| {
-        let Some(hub) = cx.try_global::<Current>().and_then(|current| current.0.upgrade()) else {
-            return;
-        };
-        let Some(window) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
+        let Some((hub, window)) = cx
+            .try_global::<Current>()
+            .and_then(|current| Some((current.0.upgrade()?, current.1)))
+        else {
             return;
         };
         window
@@ -217,44 +266,48 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::FindNext, cx| with_hub(cx, |hub, window, cx| hub.step_find(false, window, cx)));
     cx.on_action(|_: &menus::FindPrevious, cx| with_hub(cx, |hub, window, cx| hub.step_find(true, window, cx)));
     cx.on_action(|_: &menus::FindInProject, cx| with_hub(cx, Hub::search_project));
-    cx.on_action(|_: &menus::ShowSettings, cx| {
-        with_hub(cx, |hub, window, cx| {
-            hub.settings.update(cx, |s, cx| s.open(window, cx))
-        })
-    });
+    cx.on_action(|_: &menus::ShowSettings, cx| settings::window::open(None, cx));
     cx.on_action(|_: &menus::ShowExport, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Export, w, cx)));
     cx.on_action(|_: &menus::ShowSelection, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Selection, w, cx)));
     cx.on_action(|_: &menus::ShowStyles, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Styles, w, cx)));
+    cx.on_action(|_: &menus::ChooseTheme, cx| with_hub(cx, Hub::choose_theme));
     cx.on_action(|_: &menus::ShowFonts, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Fonts, w, cx)));
     cx.on_action(|_: &menus::ShowImages, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Images, w, cx)));
     cx.on_action(|_: &menus::ShowDetails, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Details, w, cx)));
-    cx.on_action(|_: &menus::ShowNotes, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Notes, w, cx)));
     cx.on_action(|_: &menus::ShowAgent, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Agent, w, cx)));
     cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
         with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Diagnostics, w, cx));
     });
-    cx.on_action(|_: &menus::ToggleSidebar, cx| with_hub(cx, Hub::toggle_sidebar));
-    cx.on_action(|_: &menus::FocusSidebar, cx| with_hub(cx, Hub::focus_sidebar));
-    cx.on_action(|_: &menus::ToggleInspector, cx| with_hub(cx, Hub::toggle_inspector));
-    cx.on_action(|_: &crate::workspace::ShowWrite, cx| {
+    cx.on_action(|_: &menus::ToggleBinder, cx| {
+        settings::change(cx, |settings| settings.binder = !settings.binder);
+        with_hub(cx, Hub::binder_toggled);
+    });
+    cx.on_action(|_: &menus::FocusBinder, cx| with_hub(cx, Hub::focus_binder));
+    cx.on_action(|_: &menus::ToggleSpelling, cx| settings::change(cx, |s| s.spelling = !s.spelling));
+    cx.on_action(|_: &menus::ToggleTypewriter, cx| settings::change(cx, |s| s.typewriter = !s.typewriter));
+    cx.on_action(|_: &menus::ToggleDim, cx| settings::change(cx, |s| s.dim_paragraphs = !s.dim_paragraphs));
+    cx.on_action(|_: &menus::ToggleSelectionToolbar, cx| {
+        settings::change(cx, |s| s.selection_toolbar = !s.selection_toolbar);
+    });
+    cx.on_action(|_: &ShowWrite, cx| {
         with_hub(cx, |hub, window, cx| {
-            hub.with_workspace(cx, |w, cx| w.show_write(window, cx))
+            hub.with_workspace(cx, |w, cx| w.show(Mode::Write, window, cx))
         });
     });
-    cx.on_action(|_: &crate::workspace::ShowPages, cx| {
+    cx.on_action(|_: &ShowPublish, cx| {
         with_hub(cx, |hub, window, cx| {
-            hub.with_workspace(cx, |w, cx| w.show_pages(window, cx))
+            hub.with_workspace(cx, |w, cx| w.show(Mode::Publish, window, cx))
         });
     });
-    cx.on_action(|_: &crate::workspace::ShowSplit, cx| {
+    cx.on_action(|_: &NewSection, cx| {
         with_hub(cx, |hub, window, cx| {
-            hub.with_workspace(cx, |w, cx| w.show_split(window, cx))
+            hub.with_workspace(cx, |w, cx| w.new_section(window, cx))
         });
     });
-    cx.on_action(|_: &crate::preview::ZoomIn, cx| with_hub(cx, |hub, _, cx| hub.zoom(1, cx)));
-    cx.on_action(|_: &crate::preview::ZoomOut, cx| with_hub(cx, |hub, _, cx| hub.zoom(-1, cx)));
-    cx.on_action(|_: &crate::preview::ZoomToFit, cx| with_hub(cx, |hub, _, cx| hub.zoom(0, cx)));
+    cx.on_action(|_: &ZoomIn, cx| with_hub(cx, |hub, _, cx| hub.zoom(1, cx)));
+    cx.on_action(|_: &ZoomOut, cx| with_hub(cx, |hub, _, cx| hub.zoom(-1, cx)));
+    cx.on_action(|_: &ZoomReset, cx| with_hub(cx, |hub, _, cx| hub.zoom(0, cx)));
     cx.on_action(|_: &menus::About, cx| with_window(cx, about));
     cx.on_action(|_: &menus::HideApp, cx| cx.hide());
     cx.on_action(|_: &menus::HideOthers, cx| cx.hide_other_apps());
@@ -296,18 +349,17 @@ fn about(window: &mut Window, cx: &mut App) {
 /// Mounts the shell's panels, footer, and overlays. The one line `app::mount` calls.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let workspace = cx.entity().downgrade();
-    let hub = cx.new(|cx| Hub::new(parts.clone(), workspace, window, cx));
-    cx.set_global(Current(hub.downgrade()));
-    cx.global_mut::<Prefs>().menu.sidebar_shown = true;
-    cx.global_mut::<Prefs>().menu.inspector_shown = true;
+    let hub = cx.new(|cx| Hub::new(parts.clone(), workspace.clone(), window, cx));
+    cx.set_global(Current(hub.downgrade(), window.window_handle()));
     refresh_menus(cx);
+    let problem_line = cx.new(settings::ProblemLine::new);
+    slots.footer.push(problem_line.into());
     // The workspace keeps the hub alive by holding it as a layer that draws nothing.
     slots.overlays.push(hub.clone().into());
     let hub = hub.read(cx);
     slots.footer.push(hub.footer.clone().into());
     slots.overlays.push(hub.search.clone().into());
     slots.overlays.push(hub.find.clone().into());
-    slots.overlays.push(hub.settings.clone().into());
 }
 
 // The hub
@@ -327,7 +379,6 @@ pub struct Hub {
     export: Entity<ExportPanel>,
     search: Entity<SearchPanel>,
     find: Entity<FindBar>,
-    settings: Entity<SettingsPanel>,
     footer: Entity<Footer>,
     facts: facts::Cache,
     facts_task: Task<()>,
@@ -352,12 +403,7 @@ impl Hub {
         let export = cx.new(|cx| ExportPanel::new(window, cx));
         let search = cx.new(|cx| SearchPanel::new(window, cx));
         let find = cx.new(|cx| FindBar::new(window, cx));
-        let (appearance, language) = {
-            let prefs = cx.global::<Prefs>();
-            (prefs.state.appearance, prefs.state.language)
-        };
-        let settings = cx.new(|cx| SettingsPanel::new(appearance, language, cx));
-        let footer = cx.new(|_| Footer::default());
+        let footer = cx.new(|_| Footer::new());
         parts.inspector.update(cx, |inspector, _| {
             inspector.mount(Tab::Diagnostics, diagnostics.clone().into());
             inspector.mount(Tab::Export, export.clone().into());
@@ -370,11 +416,14 @@ impl Hub {
                 hub.session_changed(window, cx);
             }),
             cx.subscribe(&parts.editor, |hub, _, CaretMoved(offset), _| hub.caret = *offset),
+            cx.subscribe(&parts.editor, |hub, _, _: &TextChanged, cx| {
+                hub.footer.update(cx, |footer, cx| footer.typed(cx));
+            }),
+            cx.observe_global_in::<settings::Store>(window, |hub, window, cx| hub.settings_changed(window, cx)),
             cx.subscribe_in(&diagnostics, window, Self::diagnostics_event),
             cx.subscribe_in(&export, window, Self::export_event),
             cx.subscribe_in(&search, window, Self::search_event),
             cx.subscribe_in(&find, window, Self::find_event),
-            cx.subscribe_in(&settings, window, Self::settings_event),
         ];
         let mut hub = Self {
             parts,
@@ -383,7 +432,6 @@ impl Hub {
             export,
             search,
             find,
-            settings,
             footer,
             facts: facts::Cache::default(),
             facts_task: Task::ready(()),
@@ -399,6 +447,14 @@ impl Hub {
         };
         hub.refresh_export(window, cx);
         hub.refresh_facts(cx);
+        if let Some(workspace) = hub.workspace.upgrade() {
+            hub._subscriptions
+                .push(cx.subscribe(&workspace, |hub, _, ModeChanged(mode), cx| {
+                    let write = *mode == Mode::Write;
+                    hub.footer.update(cx, |footer, cx| footer.set_shown(write, cx));
+                }));
+        }
+        hub.restore_zoom(cx);
         hub
     }
 
@@ -451,6 +507,9 @@ impl Hub {
         self.diagnostics.update(cx, |panel, cx| panel.set(&report, notice, cx));
         if marks != self.marks {
             self.marks.clone_from(&marks);
+            self.parts
+                .ticks
+                .update(cx, |ticks, cx| ticks.set_marks(marks.clone(), cx));
             self.parts
                 .sidebar
                 .update(cx, |sidebar, cx| sidebar.set_marks(marks, cx));
@@ -533,13 +592,17 @@ impl Hub {
 
     // Export
 
-    fn show_tab(&mut self, tab: Tab, _: &mut Window, cx: &mut Context<Self>) {
-        self.with_workspace(cx, |workspace, cx| {
-            if !workspace.inspector_shown() {
-                workspace.toggle_inspector(cx);
-            }
-        });
+    /// Goes to Publish, where the rail is, and shows a tab of it.
+    fn show_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Publish, window, cx));
         self.parts.inspector.update(cx, |inspector, cx| inspector.show(tab, cx));
+    }
+
+    fn choose_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Publish, window, cx));
+        self.parts
+            .inspector
+            .update(cx, |inspector, cx| inspector.choose_theme(cx));
     }
 
     /// Reads the exports from the manifest as it is on disk, which every change to it writes at once.
@@ -908,94 +971,109 @@ impl Hub {
 
     // Settings, zoom, and what the menus toggle
 
-    fn settings_event(
-        &mut self,
-        _: &Entity<SettingsPanel>,
-        event: &SettingsEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            SettingsEvent::Appearance(appearance) => {
-                let prefs = cx.global_mut::<Prefs>();
-                prefs.state.appearance = *appearance;
-                prefs.forced = None;
-                save_prefs(cx);
-                apply_appearance(window, cx);
-            }
-            SettingsEvent::Language(setting) => {
-                cx.global_mut::<Prefs>().state.language = *setting;
-                save_prefs(cx);
-                self.apply_language(setting.resolve(), window, cx);
-            }
-        }
-        let prefs = cx.global::<Prefs>();
-        let (appearance, language) = (prefs.state.appearance, prefs.state.language);
-        self.settings
-            .update(cx, |panel, cx| panel.set(appearance, language, cx));
-    }
-
-    /// Sets the language, and has everything that reads strings read them again.
-    fn apply_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
-        strings::set_language(language);
-        refresh_menus(cx);
+    /// Has everything that reads strings read them again, if the language changed.
+    fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.search.update(cx, |panel, cx| panel.refresh_text(cx));
         self.find.update(cx, |bar, cx| bar.refresh_text(cx));
         self.export.update(cx, |panel, cx| panel.refresh_text(cx));
         self.refresh_report(cx);
         self.update_footer(cx);
-        window.refresh();
     }
 
-    fn zoom(&mut self, direction: isize, cx: &mut Context<Self>) {
-        self.parts.preview.update(cx, |preview, cx| {
-            if direction == 0 {
-                preview.zoom_to_fit(cx);
-            } else {
-                preview.zoom_by(direction, cx);
-            }
-        });
-    }
-
-    fn toggle_sidebar(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        let mut shown = true;
-        self.with_workspace(cx, |workspace, cx| {
-            workspace.toggle_sidebar(cx);
-            shown = workspace.sidebar_shown();
-        });
-        cx.global_mut::<Prefs>().menu.sidebar_shown = shown;
-        refresh_menus(cx);
-    }
-
-    /// Moves the keys to the sidebar, showing it first if it is hidden.
-    fn focus_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self.parts.editor.read(cx).focus_handle(cx);
-        focus.focus(window, cx);
-    }
-
-    fn focus_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut hidden = false;
-        self.with_workspace(cx, |workspace, _| hidden = !workspace.sidebar_shown());
-        if hidden {
-            self.toggle_sidebar(window, cx);
+    /// Takes each mode's zoom from the last run.
+    fn restore_zoom(&mut self, cx: &mut Context<Self>) {
+        let (write, publish) = {
+            let prefs = prefs(cx);
+            (prefs.write_zoom(), prefs.publish_zoom())
+        };
+        if let Some(zoom) = write {
+            self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
         }
+        self.parts
+            .preview
+            .update(cx, |preview, cx| preview.set_zoom(publish, cx));
+    }
+
+    /// Zooms what the mode on screen shows, and keeps it for the next run. `direction` is a step up or down, or 0 for back
+    /// to the start.
+    fn zoom(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let mut mode = Mode::Write;
+        self.with_workspace(cx, |workspace, _| mode = workspace.mode());
+        match mode {
+            Mode::Write => {
+                let now = self.parts.editor.read(cx).zoom();
+                let zoom = next_write_zoom(now, direction);
+                self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
+                cx.global_mut::<Prefs>().state.write_zoom = (zoom != 1.).then_some(zoom);
+                self.footer.update(cx, |footer, cx| footer.show_zoom(zoom, cx));
+            }
+            Mode::Publish => {
+                self.parts.preview.update(cx, |preview, cx| {
+                    if direction == 0 {
+                        preview.zoom_to_fit(cx);
+                    } else {
+                        preview.zoom_step(direction, cx);
+                    }
+                });
+                cx.global_mut::<Prefs>().state.publish_zoom = self.parts.preview.read(cx).zoom();
+            }
+        }
+    }
+
+    /// Moves the keys back to the text when the Binder that had them went away.
+    fn binder_toggled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !settings::get(cx).binder
+            && self
+                .parts
+                .sidebar
+                .read(cx)
+                .focus_handle(cx)
+                .contains_focused(window, cx)
+        {
+            self.focus_editor(window, cx);
+        }
+    }
+
+    fn focus_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Write, window, cx));
+    }
+
+    /// Moves the keys to the Binder, going to Write and showing it first if need be.
+    fn focus_binder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Write, window, cx));
+        settings::change(cx, |settings| settings.binder = true);
         let focus = self.parts.sidebar.read(cx).focus_handle(cx);
         focus.focus(window, cx);
     }
+}
 
-    fn toggle_inspector(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        let mut shown = true;
-        self.with_workspace(cx, |workspace, cx| {
-            workspace.toggle_inspector(cx);
-            shown = workspace.inspector_shown();
-        });
-        cx.global_mut::<Prefs>().menu.inspector_shown = shown;
-        refresh_menus(cx);
-    }
+/// The next of Write's zoom steps up or down from `now`, or 100 percent for a `direction` of 0.
+fn next_write_zoom(now: f32, direction: isize) -> f32 {
+    let steps = tokens::WRITE_ZOOMS;
+    let found = match direction {
+        0 => Some(&1.),
+        up if up > 0 => steps.iter().find(|step| **step > now * 1.01),
+        _ => steps.iter().rev().find(|step| **step < now * 0.99),
+    };
+    found.copied().unwrap_or(now)
 }
 
 impl Render for Hub {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_write_zoom;
+
+    #[test]
+    fn write_zoom_steps_stop_at_the_ends_and_zero_goes_back() {
+        assert_eq!(next_write_zoom(1., 1), 1.1);
+        assert_eq!(next_write_zoom(1.1, -1), 1.);
+        assert_eq!(next_write_zoom(2., 1), 2.);
+        assert_eq!(next_write_zoom(0.8, -1), 0.8);
+        assert_eq!(next_write_zoom(1.5, 0), 1.);
     }
 }

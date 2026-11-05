@@ -1,6 +1,7 @@
-//! Centre pane, pages side: the engine's pages painted natively, never through PDF.
+//! Publish's pages: the engine's pages painted natively, never through PDF.
 //!
 //! The workspace calls [`PreviewView::request`] with the session's joined text and hears [`Typeset`] when pages change.
+//! In Write they are not on screen, and [`PreviewView::ready_ahead`] keeps what Publish would show ready to paint.
 
 mod bench;
 mod cache;
@@ -30,7 +31,7 @@ use self::bench::Bench;
 pub use self::bench::memory;
 use self::cache::{PageCache, PageKey};
 pub use self::fonts::FontUse;
-pub use self::job::BodyStyle;
+pub use self::job::BookType;
 use self::job::{Job, Layout, Scheduler, Started, Typesetter};
 use self::raster::pixel_size;
 use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
@@ -39,7 +40,7 @@ use crate::session::{Joined, Kind};
 use crate::theme_file::blocks::{self, Target};
 use crate::tokens::{self, Tokens};
 
-actions!(preview, [ZoomIn, ZoomOut, ZoomToFit, NextScreen, PreviousScreen]);
+actions!(preview, [NextScreen, PreviousScreen]);
 
 /// The bundled specimen: every element of a document, to see a theme on.
 use crate::theme_file::SPECIMEN;
@@ -56,8 +57,6 @@ const CACHE_BYTES: usize = 128 * 1024 * 1024;
 const RASTER_THREADS: usize = 3;
 /// Pages rasterized beyond each end of the view, so normal scrolling shows finished pages.
 const PREFETCH_PAGES: usize = 2;
-/// The line that shows the editor's caret on a page.
-const CARET_WIDTH: Pixels = px(2.);
 
 /// How large sheets are drawn.
 #[derive(Clone, Copy, PartialEq)]
@@ -70,12 +69,12 @@ enum Zoom {
 struct Placed {
     bounds: Bounds<Pixels>,
     image: Option<Arc<RenderImage>>,
-    /// Where the editor's caret is on this sheet, in window pixels.
-    caret: Option<Bounds<Pixels>>,
+    /// Rastered for this zoom and these pages, not an older image standing in.
+    exact: bool,
 }
 
-/// New pages were published, with the body style they were set in.
-pub struct Typeset(pub BodyStyle);
+/// New pages were published, with the theme's type they were set in.
+pub struct Typeset(pub BookType);
 
 impl EventEmitter<Typeset> for PreviewView {}
 
@@ -91,15 +90,6 @@ pub struct PageClicked {
 }
 
 impl EventEmitter<PageClicked> for PreviewView {}
-
-/// A line on a sheet, in the page's points, that shows the editor's caret.
-#[derive(Clone, Copy)]
-struct CaretMark {
-    page: usize,
-    x: f32,
-    y: f32,
-    height: f32,
-}
 
 pub struct PreviewView {
     focus: FocusHandle,
@@ -134,17 +124,17 @@ pub struct PreviewView {
     revision: Option<u64>,
     /// Where the canvas of pages is in the window.
     origin: (f32, f32),
-    caret: Option<CaretMark>,
-    /// The newest request whose visible pages were all exact in a frame, and when.
-    painted: (u64, Instant),
+    /// The newest request whose visible pages were all exact, and when.
+    ready: (u64, Instant),
+    /// The last frame in which every visible page was exact.
+    exact_frame: Option<Instant>,
+    /// While the pages are not on screen: the place and scale they would paint at, to raster for.
+    ahead: Option<(Bounds<Pixels>, f32)>,
 }
 
 pub fn bind_keys(cx: &mut App) {
     let context = Some("Preview");
     cx.bind_keys([
-        KeyBinding::new("cmd-=", ZoomIn, context),
-        KeyBinding::new("cmd--", ZoomOut, context),
-        KeyBinding::new("cmd-0", ZoomToFit, context),
         KeyBinding::new("pagedown", NextScreen, context),
         KeyBinding::new("pageup", PreviousScreen, context),
     ]);
@@ -181,8 +171,9 @@ impl PreviewView {
             published: 0,
             revision: None,
             origin: (0.0, 0.0),
-            caret: None,
-            painted: (0, Instant::now()),
+            ready: (0, Instant::now()),
+            exact_frame: None,
+            ahead: None,
         };
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
             view.zoom = Zoom::Fixed(fixed);
@@ -284,7 +275,7 @@ impl PreviewView {
         self.revision == Some(revision)
     }
 
-    /// Marks the text written at byte `offset` of `file`, and scrolls to it if it is off screen.
+    /// Scrolls to the text written at byte `offset` of `file`, if it is off screen.
     pub fn show_source(&mut self, file: &Path, offset: usize, cx: &mut Context<Self>) {
         let chapter = self.layout.as_ref().and_then(|layout| {
             let chapters = layout.laid.source_map()?.chapters();
@@ -301,12 +292,6 @@ impl PreviewView {
             return;
         };
         let (y, height) = (located.rect.y.0 as f32, located.rect.height.0 as f32);
-        self.caret = Some(CaretMark {
-            page: located.page,
-            x: located.rect.x.0 as f32,
-            y,
-            height,
-        });
         if let Some(sheets) = self.sheets(self.current_zoom) {
             self.scroll.1 = sheets.scroll_to_show(located.page, (y, y + height), self.view.1, self.scroll.1);
         }
@@ -343,9 +328,27 @@ impl PreviewView {
         self.scheduler.is_running()
     }
 
-    /// The moment the pages of the newest request were first on screen, if they have been.
-    pub fn painted_at(&self) -> Option<Instant> {
-        (self.painted.0 == self.scheduler.latest()).then_some(self.painted.1)
+    /// The moment the pages of the newest request were first ready to paint, if they have been.
+    pub fn ready_at(&self) -> Option<Instant> {
+        (self.ready.0 == self.scheduler.latest()).then_some(self.ready.1)
+    }
+
+    /// The last frame that showed every visible page exact.
+    pub fn exact_frame(&self) -> Option<Instant> {
+        self.exact_frame
+    }
+
+    /// Keeps rastering what would show at `ahead` while the pages are not on screen, so that entering Publish finds them
+    /// finished. `None` once they are on screen.
+    pub fn ready_ahead(&mut self, ahead: Option<Bounds<Pixels>>, scale: f32, cx: &mut Context<Self>) {
+        self.ahead = ahead.map(|bounds| (bounds, scale));
+        self.prepare_ahead(cx);
+    }
+
+    fn prepare_ahead(&mut self, cx: &mut Context<Self>) {
+        if let Some((bounds, scale)) = self.ahead {
+            self.prepare(bounds, scale, cx);
+        }
     }
 
     /// The page a run of text containing `needle` is on, and shows it.
@@ -418,15 +421,15 @@ impl PreviewView {
                 self.published = number;
                 // Offsets in the specimen are not offsets in any chapter.
                 self.revision = (!specimen).then_some(revision);
-                self.caret = None;
                 self.diagnostics.clear();
                 if let Some(bench) = &mut self.bench {
                     bench.published(&layout);
                 }
-                cx.emit(Typeset(layout.body.clone()));
+                let book_type = layout.book_type.clone();
                 // Freeing a whole document's runs takes long enough to drop a frame.
                 let old = self.layout.replace(Arc::new(layout));
                 cx.background_spawn(async move { drop(old) }).detach();
+                cx.emit(Typeset(book_type));
             }
             Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
             Err(Failure::Cancelled) => {}
@@ -438,18 +441,28 @@ impl PreviewView {
         cx.notify();
     }
 
-    /// One zoom level larger for a positive `direction`, smaller for a negative one. For the View menu.
-    pub fn zoom_by(&mut self, direction: isize, cx: &mut Context<Self>) {
-        self.zoom_step(direction, cx);
+    /// The zoom to keep between runs. `None` fits the pages to the pane.
+    pub fn zoom(&self) -> Option<f32> {
+        match self.zoom {
+            Zoom::FitWidth => None,
+            Zoom::Fixed(zoom) => Some(zoom),
+        }
     }
 
-    /// Fits the sheets to the width of the pane. For the View menu.
-    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
-        self.zoom = Zoom::FitWidth;
+    /// Sets the zoom from a past run. `None` fits the pages to the pane.
+    pub fn set_zoom(&mut self, zoom: Option<f32>, cx: &mut Context<Self>) {
+        self.zoom = zoom.map_or(Zoom::FitWidth, Zoom::Fixed);
+        self.prepare_ahead(cx);
         cx.notify();
     }
 
-    fn zoom_step(&mut self, direction: isize, cx: &mut Context<Self>) {
+    /// Fits the sheets to the width of the pane.
+    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
+        self.set_zoom(None, cx);
+    }
+
+    /// One zoom level larger for a positive `direction`, smaller for a negative one.
+    pub fn zoom_step(&mut self, direction: isize, cx: &mut Context<Self>) {
         let current = self.current_zoom;
         let next = if direction > 0 {
             ZOOMS.iter().find(|zoom| **zoom > current * 1.01)
@@ -457,8 +470,7 @@ impl PreviewView {
             ZOOMS.iter().rev().find(|zoom| **zoom < current * 0.99)
         };
         if let Some(next) = next {
-            self.zoom = Zoom::Fixed(*next);
-            cx.notify();
+            self.set_zoom(Some(*next), cx);
         }
     }
 
@@ -468,8 +480,8 @@ impl PreviewView {
         Some(Sheets::new(pages, zoom, f32::from(tokens::SPACE_4)))
     }
 
-    /// The zoom in effect for a view `width` pixels wide.
-    fn resolve_zoom(&self, width: f32) -> f32 {
+    /// The zoom in effect for a view this large. Fitting shows a whole page.
+    fn resolve_zoom(&self, (width, height): (f32, f32)) -> f32 {
         if let Zoom::Fixed(zoom) = self.zoom {
             return zoom;
         }
@@ -478,10 +490,13 @@ impl PreviewView {
         };
         let margins = 2.0 * f32::from(tokens::SPACE_4);
         let widest = unit.width() - margins;
-        ((width - margins) / widest).clamp(ZOOMS[0] / 2.0, ZOOMS[ZOOMS.len() - 1])
+        let tallest = (0..unit.len()).map(|page| unit.size(page).1).fold(1.0, f32::max);
+        ((width - margins) / widest)
+            .min((height - margins) / tallest)
+            .clamp(ZOOMS[0] / 2.0, ZOOMS[ZOOMS.len() - 1])
     }
 
-    /// Places the visible sheets and starts rasterizing what they lack. Only these pages cost anything.
+    /// A frame on screen: frees what the atlas no longer needs, and places the sheets.
     fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> Vec<Placed> {
         if let Some(bench) = &mut self.bench {
             bench.frame_started();
@@ -489,15 +504,29 @@ impl PreviewView {
         for image in self.dropped.drain(..) {
             window.drop_image(image).ok();
         }
+        let (placed, all_exact) = self.prepare(bounds, window.scale_factor(), cx);
+        if all_exact {
+            self.exact_frame = Some(Instant::now());
+        }
+        if self.bench.is_some() {
+            let waiting = placed.len() - placed.iter().filter(|sheet| sheet.exact).count();
+            let height = self.sheets(self.current_zoom).map_or(0.0, |sheets| sheets.height());
+            bench::frame(self, all_exact, waiting, height, window, cx);
+        }
+        placed
+    }
+
+    /// Places the visible sheets and starts rasterizing what they lack, and says whether every one is exact. Only these
+    /// pages cost anything.
+    fn prepare(&mut self, bounds: Bounds<Pixels>, device_scale: f32, cx: &mut Context<Self>) -> (Vec<Placed>, bool) {
         self.view = (f32::from(bounds.size.width), f32::from(bounds.size.height));
         self.origin = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
-        let device_scale = window.scale_factor();
-        let zoom = self.resolve_zoom(self.view.0);
+        let zoom = self.resolve_zoom(self.view);
         let Some(layout) = self.layout.clone() else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         let Some(sheets) = self.sheets(zoom) else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         if zoom != self.current_zoom {
             if let Some(old) = self.sheets(self.current_zoom) {
@@ -547,44 +576,23 @@ impl PreviewView {
             let top = sheets.top(page) - self.scroll.1;
             // Whole device pixels, so an image at full resolution maps one to one.
             let snap = |length: f32| (length * device_scale).round() / device_scale;
-            let image = match self.cache.get(key(page), page) {
-                Some(image) => {
-                    exact += 1;
-                    Some(image)
-                }
-                None => self.cache.stale(page),
-            };
+            let found = self.cache.get(key(page), page);
+            let exact_here = found.is_some();
+            exact += usize::from(exact_here);
             placed.push(Placed {
                 bounds: Bounds::new(
                     point(bounds.origin.x + px(snap(centred)), bounds.origin.y + px(snap(top))),
                     size(px(snap(width)), px(snap(height))),
                 ),
-                image,
-                caret: self.caret.filter(|mark| mark.page == page).map(|mark| {
-                    Bounds::new(
-                        point(
-                            bounds.origin.x + px(snap(centred + mark.x * zoom)),
-                            bounds.origin.y + px(snap(top + mark.y * zoom)),
-                        ),
-                        size(CARET_WIDTH, px(mark.height * zoom)),
-                    )
-                }),
+                image: found.or_else(|| self.cache.stale(page)),
+                exact: exact_here,
             });
         }
-        if exact == visible.len() && self.published > self.painted.0 && self.published == self.scheduler.latest() {
-            self.painted = (self.published, Instant::now());
+        let all_exact = exact == visible.len();
+        if all_exact && self.published > self.ready.0 && self.published == self.scheduler.latest() {
+            self.ready = (self.published, Instant::now());
         }
-        if self.bench.is_some() {
-            bench::frame(
-                self,
-                exact == visible.len(),
-                visible.len() - exact,
-                sheets.height(),
-                window,
-                cx,
-            );
-        }
-        placed
+        (placed, all_exact)
     }
 
     fn start_raster(
@@ -606,6 +614,7 @@ impl PreviewView {
                 view.rastering.remove(&key);
                 let evicted = view.cache.insert(key, page, image, bytes);
                 view.dropped.extend(evicted);
+                view.prepare_ahead(cx);
                 cx.notify();
             })
             .ok();
@@ -659,21 +668,23 @@ impl Render for PreviewView {
         let tokens = Tokens::get(cx);
         let this = cx.entity();
         let painted = this.clone();
-        let caret_color = tokens.accent;
+        let edge = tokens.divider;
         let pages = canvas(
             move |bounds, window, cx| this.update(cx, |view, cx| view.frame(bounds, window, cx)),
             move |bounds, placed, window, cx| {
                 window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
                     for sheet in placed {
+                        window.paint_quad(gpui::outline(
+                            sheet.bounds.dilate(px(1.)),
+                            edge,
+                            gpui::BorderStyle::Solid,
+                        ));
                         window.paint_quad(fill(sheet.bounds, gpui::white()));
                         if let Some(image) = sheet.image {
                             let corners = gpui::Corners::default();
                             window
                                 .paint_image(sheet.bounds, sheet.bounds, corners, image, 0, false)
                                 .ok();
-                        }
-                        if let Some(caret) = sheet.caret {
-                            window.paint_quad(fill(caret, caret_color));
                         }
                     }
                 });
@@ -710,7 +721,7 @@ impl Render for PreviewView {
         div()
             .id("preview")
             .role(gpui::Role::Group)
-            .aria_label(crate::t!(crate::shell::text::Key::Pages))
+            .aria_label(crate::t!(crate::shell::text::Key::Publish))
             .key_context("Preview")
             .track_focus(&self.focus)
             .flex_1()
@@ -725,9 +736,6 @@ impl Render for PreviewView {
                 }),
             )
             .on_scroll(cx.listener(Self::on_scroll))
-            .on_action(cx.listener(|view, _: &ZoomIn, _, cx| view.zoom_step(1, cx)))
-            .on_action(cx.listener(|view, _: &ZoomOut, _, cx| view.zoom_step(-1, cx)))
-            .on_action(cx.listener(|view, _: &ZoomToFit, _, cx| view.zoom_to_fit(cx)))
             .on_action(cx.listener(|view, _: &NextScreen, _, cx| {
                 view.scroll.1 += view.view.1 * 0.9;
                 cx.notify();

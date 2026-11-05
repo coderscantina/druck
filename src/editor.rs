@@ -29,7 +29,7 @@ pub mod theme_path {
 pub mod resolved_config {
     pub use crate::config::front_matter::{FrontMatter, split as split_front_matter};
     pub use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
-    pub use crate::config::resolved::Config;
+    pub use crate::config::resolved::{Config, Style};
     pub use crate::config::source::InputSource;
     pub use crate::config::theme::{FontStyle, Weight};
     /// The session reads `druck.yaml` and front matter as the engine does, so the app has no second YAML reader.

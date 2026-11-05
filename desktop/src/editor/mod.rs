@@ -1,22 +1,20 @@
-//! Centre pane, writing side: one chapter as a galley on a sheet. The buffer holds the Markdown, every change is an
+//! Write's text: one chapter in the theme's type on the app's surface. The buffer holds the Markdown, every change is an
 //! edit to it, and what shows is derived from it: blocks, hidden markers, and shaped lines, only for what is on screen.
 //!
 //! [`commands`] writes what the toolbar, slash menu, and gutter ask for, without gpui. [`float`] and [`gutter`] are their
-//! views, [`notes_panel`] the chapter's notes in the inspector, and [`source_toggle`] the source view's button. [`rich`] holds
-//! the footnotes, citations, tables, and images, with their floats and the Selection and Images tabs.
+//! views, and [`margin`] the chapter's notes in the right margin. [`rich`] holds the footnotes, citations, tables, and
+//! images, with their floats and the Selection and Images tabs.
 
 mod commands;
-mod composed;
 mod display;
 mod element;
 mod float;
 mod gutter;
 mod layout;
-mod notes_panel;
+mod margin;
 mod place;
 pub(crate) mod rich;
 mod scrollbar;
-mod source_toggle;
 mod spelling;
 mod strings;
 mod trace;
@@ -29,45 +27,35 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
+    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
     KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString,
     Subscription, Task, UTF16Selection, Window, actions, div, point, px, size,
 };
 
-use crate::inspector::Tab;
+use crate::preview::BookType;
 use crate::session::{ChapterId, ChapterView, Session};
+use crate::settings::{self, LineLength};
 use crate::source::inline::{inline_spans, line_markers};
 use crate::source::{BlockKind, Blocks, Edit, EditKind, Selection, motion, typing};
 use crate::tokens::{self, Tokens};
-use crate::workspace::{Parts, Slots, Workspace};
+use crate::workspace::{Parts, Workspace};
 use commands::convert::BlockType;
 use commands::marks::Mark;
 use commands::notes;
 use display::{Syntax, display_lines, hidden_ranges};
 use element::Galley;
 use float::Float;
-use gutter::{BlockGrab, CommentMarker, ShowNotes};
-use layout::{BlockLayout, GalleyStyle, ShapeRequest, shape_block};
-use notes_panel::NotesPanel;
-use source_toggle::{PrintToggle, SourceToggle};
+pub(crate) use float::tooltip;
+use gutter::{BlockGrab, CommentMarker};
+use layout::{BlockLayout, Column, GalleyStyle, ShapeRequest, shape_block};
+use margin::MarginNotes;
 use trace::Trace;
 
-/// Mounts what this slice shows outside the galley: the source toggle and the notes panel.
-pub fn mount(parts: &Parts, slots: &mut Slots, cx: &mut Context<Workspace>) {
+/// Mounts what this slice shows beside the text: the chapter's notes, and the rich blocks' tabs.
+pub fn mount(parts: &Parts, cx: &mut Context<Workspace>) {
     let editor = parts.editor.clone();
-    slots
-        .toolbar
-        .push(cx.new(|cx| SourceToggle::new(editor.clone(), cx)).into());
-    slots
-        .toolbar
-        .push(cx.new(|cx| PrintToggle::new(editor.clone(), cx)).into());
-    let notes = cx.new(|cx| NotesPanel::new(editor.clone(), cx));
-    let inspector = parts.inspector.clone();
-    inspector.update(cx, |inspector, _| inspector.mount(Tab::Notes, notes.into()));
-    cx.subscribe(&editor, move |_, _, _: &ShowNotes, cx| {
-        inspector.update(cx, |inspector, cx| inspector.show(Tab::Notes, cx));
-    })
-    .detach();
+    let notes = cx.new(|cx| MarginNotes::new(editor.clone(), cx));
+    editor.update(cx, |editor, _| editor.margin = Some(notes));
     rich::view::mount(parts, cx);
 }
 
@@ -123,9 +111,8 @@ actions!(
         ToggleBullets,
         ToggleNumbers,
         OpenLink,
+        ToggleSmallCaps,
         ToggleSource,
-        TogglePrintLines,
-        ToggleSpelling,
         ShowSpelling,
         Cancel,
         InsertFootnote,
@@ -206,7 +193,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-7", ToggleNumbers, context),
         KeyBinding::new("cmd-k", OpenLink, context),
         KeyBinding::new("cmd-/", ToggleSource, context),
-        KeyBinding::new("cmd-alt-l", TogglePrintLines, context),
         KeyBinding::new("cmd-;", ShowSpelling, context),
         KeyBinding::new("escape", Cancel, context),
         KeyBinding::new("cmd-alt-f", InsertFootnote, context),
@@ -264,18 +250,6 @@ struct Slot {
     expanded: bool,
 }
 
-/// The text column inside the pane.
-#[derive(Clone, Copy, Default)]
-struct Column {
-    viewport: Bounds<Pixels>,
-    /// The widest the text can be here, which the engine's lines may keep it under.
-    room: Pixels,
-    sheet_left: Pixels,
-    sheet_width: Pixels,
-    text_left: Pixels,
-    text_width: Pixels,
-}
-
 /// A mouse selection in progress. `unit` is what a double or triple click started with, which a drag extends by.
 #[derive(Clone)]
 struct Drag {
@@ -320,11 +294,6 @@ impl EventEmitter<CaretMoved> for EditorView {}
 pub struct SessionChanged;
 
 impl EventEmitter<SessionChanged> for EditorView {}
-
-/// The active chapter's source view went on or off.
-pub struct SourceViewChanged;
-
-impl EventEmitter<SourceViewChanged> for EditorView {}
 
 /// A person asked for the text to be on disk now.
 pub struct SaveRequested;
@@ -393,8 +362,14 @@ pub struct EditorView {
     rich_pause: Task<()>,
     /// Reads the engine's text for chips, off the main thread.
     rich_labels: Task<()>,
-    /// The print-composer lines. See [`composed`].
-    print: composed::PrintLines,
+    /// The settings that shape the text, kept here so a layout needs no `App`.
+    writing: Writing,
+    /// The chapter's notes in the right margin.
+    margin: Option<Entity<MarginNotes>>,
+    /// The pointer is in the left margin.
+    gutter_shown: bool,
+    /// The caret last moved by a key, which typewriter scrolling follows. A click leaves the text where it is.
+    caret_by_keys: bool,
     /// Misspelled words. See [`spelling`].
     spelling: spelling::Spelling,
     /// The newest revision and body style painted, and when each first was.
@@ -403,22 +378,38 @@ pub struct EditorView {
     style_generation: u64,
 }
 
-const TOP_MARGIN: Pixels = px(16.);
-const SHEET_PADDING_Y: Pixels = px(36.);
-const SHEET_PADDING_RIGHT: Pixels = px(36.);
-const MAX_SHEET_WIDTH: Pixels = px(720.);
-const MIN_SHEET_WIDTH: Pixels = px(200.);
 const CARET_MARGIN: Pixels = px(24.);
 const BLINK: Duration = Duration::from_millis(530);
 /// How often a drag scrolls while the pointer stands outside the galley, and how fast for each pixel it is out.
 const DRAG_SCROLL_TICK: Duration = Duration::from_millis(16);
 const DRAG_SCROLL_SPEED: f32 = 0.35;
 const DRAG_SCROLL_MAX: Pixels = px(60.);
-/// A chapter's first view: its top, with the sheet's margin above it.
+/// A chapter's first view: its top, with its margin above it.
 const START_OF_CHAPTER: Anchor = Anchor {
     block: 0,
-    offset: px(0. - 16. - 36.),
+    offset: tokens::TEXT_START,
 };
+
+/// What the settings say about the text.
+#[derive(Clone, Copy, PartialEq)]
+struct Writing {
+    line_length: LineLength,
+    typewriter: bool,
+    dim: bool,
+    toolbar: bool,
+}
+
+impl Writing {
+    fn of(cx: &App) -> Self {
+        let settings = settings::get(cx);
+        Self {
+            line_length: settings.line_length,
+            typewriter: settings.typewriter,
+            dim: settings.dim_paragraphs,
+            toolbar: settings.selection_toolbar,
+        }
+    }
+}
 
 impl EditorView {
     /// Shows the session's active chapter.
@@ -437,6 +428,8 @@ impl EditorView {
                 cx.notify();
             }),
             cx.observe_window_activation(window, |view, window, cx| view.restart_blink(window, cx)),
+            cx.observe_global::<Tokens>(|view, cx| view.colors_changed(cx)),
+            cx.observe_global::<settings::Store>(|view, cx| view.settings_changed(cx)),
         ];
         let status = session
             .active_chapter()
@@ -446,7 +439,7 @@ impl EditorView {
         let mut view = Self {
             focus,
             status,
-            style: GalleyStyle::new(),
+            style: GalleyStyle::new(Tokens::get(cx)),
             slots: vec![Slot::default(); blocks.as_slice().len()],
             session,
             blocks,
@@ -481,7 +474,10 @@ impl EditorView {
             rich: rich::Rich::default(),
             rich_pause: Task::ready(()),
             rich_labels: Task::ready(()),
-            print: composed::PrintLines::default(),
+            writing: Writing::of(cx),
+            margin: None,
+            gutter_shown: crate::gate::var("DRUCK_GUTTER").is_some(),
+            caret_by_keys: false,
             spelling: spelling::Spelling::new(cx, &spelling_folder),
             painted_revision: (0, Instant::now()),
             painted_style: (0, Instant::now()),
@@ -691,12 +687,70 @@ impl EditorView {
         self.toolbar_dismissed = true;
     }
 
-    /// Sets the galley's body from the theme. Every block is shaped again as it comes into view.
-    pub fn set_body(&mut self, family: &str, size: f32, line_height: f32, cx: &mut Context<Self>) {
-        self.style.set_body(family, size, line_height);
+    /// Selects `range` as a person would, with the toolbar showing. For screenshots.
+    pub fn select_for_screenshot(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let selection = Selection {
+            anchor: range.start,
+            head: range.end,
+        };
+        self.set_selection(selection, false, window, cx);
+    }
+
+    /// Sets the text's type from the theme. Every block is shaped again as it comes into view.
+    pub fn set_type(&mut self, book_type: BookType, cx: &mut Context<Self>) {
+        self.style.set_type(book_type);
         self.style_generation += 1;
         self.forget_shapes();
+        self.autoscroll = true;
         cx.notify();
+    }
+
+    /// The text's zoom, where 1 is 100 percent.
+    pub fn zoom(&self) -> f32 {
+        self.style.zoom()
+    }
+
+    /// Scales the text. The characters per line stay.
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
+        self.style.set_zoom(zoom);
+        self.forget_shapes();
+        self.autoscroll = true;
+        cx.notify();
+    }
+
+    fn colors_changed(&mut self, cx: &mut Context<Self>) {
+        self.style.set_colors(Tokens::get(cx));
+        self.forget_shapes();
+        cx.notify();
+    }
+
+    fn settings_changed(&mut self, cx: &mut Context<Self>) {
+        let writing = Writing::of(cx);
+        self.spelling.on = settings::get(cx).spelling;
+        if writing != self.writing {
+            self.writing = writing;
+            for slot in &mut self.slots {
+                slot.estimate.set(None);
+            }
+            self.autoscroll = true;
+        }
+        cx.notify();
+    }
+
+    /// Whether a block is out of focus: dimming is on, and the selection does not touch it.
+    fn is_dimmed(&self, index: usize) -> bool {
+        self.writing.dim && !self.source && {
+            let range = self.selection.range();
+            !(self.blocks.index_at(range.start)..=self.blocks.index_at(range.end)).contains(&index)
+        }
+    }
+
+    /// The width lines wrap at: the book's measure, or the author's own length.
+    fn measure(&self) -> Pixels {
+        match self.writing.line_length {
+            LineLength::Book => self.style.book_measure(),
+            LineLength::Characters(count) => self.style.width_of_characters(count),
+        }
     }
 
     /// Every block is shaped and estimated again as it comes into view.
@@ -705,11 +759,6 @@ impl EditorView {
             slot.layout = None;
             slot.estimate.set(None);
         }
-    }
-
-    /// Whether the active chapter shows its source.
-    pub fn shows_source(&self) -> bool {
-        self.source
     }
 
     /// Shows the active chapter's plain Markdown, or its galley again. Buffer, caret, and undo stay the same.
@@ -727,7 +776,6 @@ impl EditorView {
         self.float = Float::None;
         self.autoscroll = true;
         window.invalidate_character_coordinates();
-        cx.emit(SourceViewChanged);
         cx.notify();
     }
 
@@ -883,12 +931,12 @@ impl EditorView {
             self.float = Float::None;
         }
         self.marked = marked;
+        self.gutter_shown = false;
+        self.caret_by_keys = true;
         self.set_selection(after, false, window, cx);
-        self.print.typing = self.print.on;
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
         self.schedule_rich(window, cx);
-        self.schedule_composer(window, cx);
         self.restart_spelling(window, cx);
         cx.emit(TextChanged);
     }
@@ -919,9 +967,6 @@ impl EditorView {
     fn set_selection(&mut self, selection: Selection, upstream: bool, window: &mut Window, cx: &mut Context<Self>) {
         if selection.head != self.selection.head {
             cx.emit(CaretMoved(selection.head));
-        }
-        if self.print.typing && self.blocks.index_at(selection.head) != self.blocks.index_at(self.selection.head) {
-            self.print.typing = false;
         }
         self.selection = selection;
         self.upstream = upstream;
@@ -1078,6 +1123,7 @@ impl EditorView {
 
     fn move_caret(&mut self, motion_kind: Motion, extend: bool, window: &mut Window, cx: &mut Context<Self>) {
         let started = self.trace.input();
+        self.caret_by_keys = true;
         let text = self.session.active_buffer().text();
         let head = self.selection.head;
         let range = self.selection.range();
@@ -1212,6 +1258,7 @@ impl EditorView {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         self.pointer = event.position;
+        self.caret_by_keys = false;
         self.commit_rich_float(window, cx);
         self.close_float(cx);
         if self.scrollbar_mouse_down(event.position, cx) || self.gutter_mouse_down(event.position, cx) {
@@ -1255,6 +1302,12 @@ impl EditorView {
         };
         if hovered != self.hovered {
             self.hovered = hovered;
+            cx.notify();
+        }
+        let in_margin =
+            crate::gate::var("DRUCK_GUTTER").is_some() || (inside && event.position.x < self.column.text_left);
+        if in_margin != self.gutter_shown {
+            self.gutter_shown = in_margin;
             cx.notify();
         }
         let over_thumb = self.scrollbar.is_some_and(|bar| bar.track.contains(&event.position));
@@ -1416,7 +1469,7 @@ impl EditorView {
         let viewport = f32::from(bar.track.size.height);
         let top = f32::from(position.y - bar.track.top() - grab);
         let scrolled = scrollbar::scrolled_at(top, f32::from(bar.thumb.size.height), content, viewport, viewport);
-        let lead = f32::from(TOP_MARGIN + SHEET_PADDING_Y);
+        let lead = f32::from(tokens::TEXT_MARGIN_Y);
         self.scroll = if scrolled < lead {
             Anchor {
                 block: 0,
@@ -1435,9 +1488,9 @@ impl EditorView {
         cx.notify();
     }
 
-    /// The height of the whole chapter on its sheet, with estimates for what is not shaped yet.
+    /// The height of the whole chapter with its margins, with estimates for what is not shaped yet.
     fn content_height(&self) -> f32 {
-        let lead = f32::from(TOP_MARGIN + SHEET_PADDING_Y) * 2.;
+        let lead = f32::from(tokens::TEXT_MARGIN_Y) * 2.;
         lead + (0..self.blocks.as_slice().len())
             .map(|index| f32::from(self.block_height(index)))
             .sum::<f32>()
@@ -1450,7 +1503,7 @@ impl EditorView {
         let above: f32 = (0..self.scroll.block)
             .map(|index| f32::from(self.block_height(index)))
             .sum();
-        let scrolled = above + f32::from(self.scroll.offset + TOP_MARGIN + SHEET_PADDING_Y);
+        let scrolled = above + f32::from(self.scroll.offset + tokens::TEXT_MARGIN_Y);
         let height = f32::from(viewport.size.height);
         let track = Bounds::new(
             point(viewport.right() - tokens::SCROLLBAR_WIDTH, viewport.top()),
@@ -1640,18 +1693,30 @@ impl EditorView {
                 .map(|at| at - block.range.start);
             self.rich.chips(block_text, &syntax.spans, caret)
         };
-        let typed_here = self.print.typing && self.blocks.index_at(self.selection.head) == index;
-        let composed = (composed::composes(block.kind)
-            && !self.source
-            && !collapsed
-            && whole_atom.is_none()
-            && marked.is_none()
-            && !typed_here)
-            .then(|| self.print.lines_of(block_text, self.composer_measure()))
-            .flatten();
+        let dim = self.is_dimmed(index);
+        let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
+        let list = self.blocks.as_slice();
+        let gap = if separator {
+            let upper = index.checked_sub(1).map(|upper| list[upper].kind);
+            let lower = list.get(index + 1).map(|lower| lower.kind);
+            self.style.gap_between(upper, lower)
+        } else {
+            px(0.)
+        };
+        // A paragraph that continues another starts further in if the theme says so, as on the page.
+        let continues = index.checked_sub(2).is_some_and(|before| {
+            list[before].kind == BlockKind::Paragraph && list[index - 1].kind == BlockKind::Blank
+        });
+        let indent = if continues && !self.source {
+            self.style.indent_of(Some(block.kind))
+        } else {
+            px(0.)
+        };
         if let Some(layout) = &self.slots[index].layout
             && layout.width == width
-            && layout.composed == composed
+            && layout.dim == dim
+            && layout.gap == gap
+            && layout.indent == indent
             && layout.hidden == hidden
             && layout.marked == marked
             && layout.collapsed == collapsed
@@ -1669,13 +1734,9 @@ impl EditorView {
             trailing_line,
             &chips,
         );
-        let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
-        let whole = whole_atom.as_ref().map(|atom| Box::new(self.shape_atom(atom, window)));
-        let lines = if composed.is_some() && block.kind == BlockKind::Paragraph {
-            display::join_lines(lines)
-        } else {
-            lines
-        };
+        let whole = whole_atom
+            .as_ref()
+            .map(|atom| Box::new(self.shape_atom(atom, dim, window)));
         let layout = Rc::new(shape_block(
             ShapeRequest {
                 kind: block.kind,
@@ -1689,7 +1750,9 @@ impl EditorView {
                 style: &self.style,
                 chips,
                 whole,
-                composed,
+                dim,
+                gap,
+                indent,
             },
             window,
         ));
@@ -1702,13 +1765,22 @@ impl EditorView {
         self.normalize_scroll();
     }
 
+    /// How far above the chapter's first line the view can go. Typewriter scrolling keeps the first line at its height.
+    fn top_limit(&self) -> Pixels {
+        if self.writing.typewriter {
+            self.column.viewport.size.height * tokens::TYPEWRITER_AT
+        } else {
+            tokens::TEXT_MARGIN_Y
+        }
+    }
+
     fn normalize_scroll(&mut self) {
         while self.scroll.offset < px(0.) && self.scroll.block > 0 {
             self.scroll.block -= 1;
             self.scroll.offset += self.block_height(self.scroll.block);
         }
         if self.scroll.block == 0 {
-            self.scroll.offset = self.scroll.offset.max(px(0.) - TOP_MARGIN - SHEET_PADDING_Y);
+            self.scroll.offset = self.scroll.offset.max(px(0.) - self.top_limit());
         }
         let last = self.blocks.as_slice().len() - 1;
         while self.scroll.block < last && self.scroll.offset >= self.block_height(self.scroll.block) {
@@ -1718,36 +1790,26 @@ impl EditorView {
     }
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
-        let room = bounds.size.width - tokens::SPACE_3 - tokens::SCROLLBAR_WIDTH;
-        let widest = room.min(MAX_SHEET_WIDTH).max(MIN_SHEET_WIDTH);
-        let text_room = widest - tokens::GUTTER_WIDTH - SHEET_PADDING_RIGHT;
-        // The engine's lines keep to the page's measure, so they break as the page does where there is room.
-        let text_width = match self.print.page_measure {
-            Some(page) if self.print.on && !self.source => text_room.min(px(page * layout::POINT)),
-            _ => text_room,
-        };
-        let sheet_width = text_width + tokens::GUTTER_WIDTH + SHEET_PADDING_RIGHT;
-        let slack = (room - sheet_width).max(px(0.));
-        let sheet_left = bounds.left() + tokens::SPACE_3 + slack * 0.5;
-        if text_width != self.column.text_width {
+        let notes = !self.source && !notes::leading_notes(self.text(), &self.blocks).is_empty();
+        let column = Column::place(bounds, self.measure(), notes);
+        if column.text_width != self.column.text_width {
             for slot in &self.slots {
                 slot.estimate.set(None);
             }
         }
-        self.column = Column {
-            viewport: bounds,
-            room: text_room,
-            sheet_left,
-            sheet_width,
-            text_left: sheet_left + tokens::GUTTER_WIDTH,
-            text_width,
-        };
+        self.column = column;
     }
 
-    /// Finds and shapes the blocks on screen, moving the scroll position back if it ran past the end.
+    /// Finds and shapes the blocks on screen, moving the scroll position back if it ran past the end. With typewriter
+    /// scrolling the last line may rise to the caret's height, and no further.
     fn lay_out_visible(&mut self, window: &Window) {
         let viewport = self.column.viewport;
         let block_count = self.blocks.as_slice().len();
+        let limit = if self.writing.typewriter {
+            viewport.top() + viewport.size.height * tokens::TYPEWRITER_AT + tokens::TEXT_MARGIN_Y
+        } else {
+            viewport.bottom()
+        };
         let mut retried = false;
         loop {
             self.visible.clear();
@@ -1759,13 +1821,13 @@ impl EditorView {
                 y += layout.height;
                 index += 1;
             }
-            let end = y + SHEET_PADDING_Y + TOP_MARGIN;
-            let past_end = index == block_count && end < viewport.bottom();
-            let scrolled = self.scroll.block > 0 || self.scroll.offset > px(0.) - TOP_MARGIN - SHEET_PADDING_Y;
+            let end = y + tokens::TEXT_MARGIN_Y;
+            let past_end = index == block_count && end < limit;
+            let scrolled = self.scroll.block > 0 || self.scroll.offset > px(0.) - tokens::TEXT_MARGIN_Y;
             if !past_end || !scrolled || retried {
                 return;
             }
-            self.scroll_by(end - viewport.bottom());
+            self.scroll_by(end - limit);
             retried = true;
         }
     }
@@ -1790,6 +1852,16 @@ impl EditorView {
         let caret_bottom = caret_top + line.line_height;
         let height = self.column.viewport.size.height;
 
+        if self.writing.typewriter && self.caret_by_keys {
+            let at = height * tokens::TYPEWRITER_AT;
+            self.scroll = Anchor {
+                block: here.block,
+                offset: caret_top + line.line_height * 0.5 - at,
+            };
+            self.shape_back_from(here.block, at, window);
+            self.normalize_scroll();
+            return;
+        }
         let is_above =
             here.block < self.scroll.block || (here.block == self.scroll.block && caret_top < self.scroll.offset);
         if is_above {
@@ -1900,7 +1972,7 @@ impl EditorView {
             self.column.text_left + line.x + line.x_in_row(here.display, here.row),
             top + line.y + line.line_height * here.row as f32,
         );
-        Some(Bounds::new(origin, size(px(1.5), line.line_height)))
+        Some(Bounds::new(origin, size(tokens::CARET_WIDTH, line.line_height)))
     }
 }
 
@@ -1936,17 +2008,18 @@ impl Render for EditorView {
         if self.menu_is_open() {
             context.add(MENU_CONTEXT);
         }
-        let header = div()
-            .flex_none()
-            .h(tokens::SECTION_HEIGHT)
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(tokens::SPACE_2)
-            .text_size(tokens::TEXT_SMALL)
-            .text_color(tokens.text_faint)
-            .children(self.session.active_chapter().heading().map(str::to_owned))
-            .child(self.status.clone());
+        // Only why the chapter cannot be read. The text is nearly all there is.
+        let header = (!self.status.is_empty()).then(|| {
+            div()
+                .flex_none()
+                .h(tokens::SECTION_HEIGHT)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(tokens::TEXT_SMALL)
+                .text_color(tokens.text_faint)
+                .child(self.status.clone())
+        });
         let chapter = self.session.active_chapter().heading().unwrap_or_default().to_owned();
         let shown = self.a11y_lines();
         let selection = self.selection;
@@ -2000,9 +2073,10 @@ impl Render for EditorView {
                 cx.listener(|this, _: &ToggleNumbers, window, cx| this.toggle_block(BlockType::Numbers, window, cx)),
             )
             .on_action(cx.listener(|this, _: &OpenLink, window, cx| this.open_link(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleSmallCaps, window, cx| this.toggle_mark(Mark::SmallCaps, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleSource, window, cx| this.toggle_source(window, cx)))
-            .on_action(cx.listener(|this, _: &TogglePrintLines, window, cx| this.toggle_print_lines(window, cx)))
-            .on_action(cx.listener(|this, _: &ToggleSpelling, _, cx| this.toggle_spelling(cx)))
             .on_action(cx.listener(|this, _: &ShowSpelling, window, cx| this.show_spelling(window, cx)))
             .on_action(cx.listener(|this, _: &InsertFootnote, window, cx| this.insert_footnote(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertCitation, window, cx| this.open_citation_picker(None, window, cx)))
@@ -2031,7 +2105,7 @@ impl Render for EditorView {
             PageUp => PageUp, SelectPageUp,
             PageDown => PageDown, SelectPageDown,
         )
-        .child(header)
+        .children(header)
         .child(Galley::new(cx.entity()))
     }
 }

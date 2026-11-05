@@ -187,6 +187,7 @@ pub struct TextInput {
     prose: bool,
     /// Enter keeps the focus here, for a field that is used again and again, such as the find bar's.
     keep_focus: bool,
+    arrows_to_parent: bool,
     /// Shown in the quiet color while the field is empty.
     placeholder: SharedString,
     label: SharedString,
@@ -249,6 +250,7 @@ impl TextInput {
             multiline,
             prose: false,
             keep_focus: false,
+            arrows_to_parent: false,
             placeholder: SharedString::default(),
             label: SharedString::default(),
             focus,
@@ -267,6 +269,12 @@ impl TextInput {
     }
 
     /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
+    /// Up and Down go to what holds the field, such as a list it filters.
+    pub fn arrows_to_parent(mut self) -> Self {
+        self.arrows_to_parent = true;
+        self
+    }
+
     pub fn keep_focus_on_enter(mut self) -> Self {
         self.keep_focus = true;
         self
@@ -1077,8 +1085,20 @@ impl Render for TextInput {
             .track_focus(&self.focus)
             .on_action(cx.listener(|input, _: &Left, _, cx| input.move_to(Motion::Left, false, cx)))
             .on_action(cx.listener(|input, _: &Right, _, cx| input.move_to(Motion::Right, false, cx)))
-            .on_action(cx.listener(|input, _: &Up, _, cx| input.move_to(Motion::Up, false, cx)))
-            .on_action(cx.listener(|input, _: &Down, _, cx| input.move_to(Motion::Down, false, cx)))
+            .on_action(cx.listener(|input, _: &Up, _, cx| {
+                if input.arrows_to_parent {
+                    cx.propagate();
+                } else {
+                    input.move_to(Motion::Up, false, cx);
+                }
+            }))
+            .on_action(cx.listener(|input, _: &Down, _, cx| {
+                if input.arrows_to_parent {
+                    cx.propagate();
+                } else {
+                    input.move_to(Motion::Down, false, cx);
+                }
+            }))
             .on_action(cx.listener(|input, _: &WordLeft, _, cx| input.move_to(Motion::WordLeft, false, cx)))
             .on_action(cx.listener(|input, _: &WordRight, _, cx| input.move_to(Motion::WordRight, false, cx)))
             .on_action(cx.listener(|input, _: &LineStart, _, cx| input.move_to(Motion::LineStart, false, cx)))
@@ -1143,7 +1163,7 @@ impl Render for TextInput {
             .rounded(tokens::RADIUS)
             .border_1()
             .border_color(if focused { tokens.accent } else { tokens.divider })
-            .bg(tokens.canvas);
+            .bg(tokens.field);
         if multiline {
             field
                 .py(tokens::SPACE_2)

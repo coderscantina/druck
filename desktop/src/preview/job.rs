@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::resolved_config::{self, Config, FontStyle, Weight};
+use druck::editor::resolved_config::{self, Config, FontStyle, Style, Weight};
 use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Renderer};
@@ -88,50 +88,90 @@ pub struct Layout {
     pub fingerprints: Vec<u64>,
     /// Configuration and typesetting warnings.
     pub warnings: Vec<Diagnostic>,
-    pub body: BodyStyle,
+    pub book_type: BookType,
     /// The font families the styles use, for the Fonts tab.
     pub fonts: Vec<FontUse>,
     pub timing: Timing,
 }
 
-/// What the galley needs of the theme's body style, resolved by the engine.
-#[derive(Clone, PartialEq)]
-pub struct BodyStyle {
+/// What Write shows of one of the theme's block styles, resolved by the engine. Colours are not here: they follow the
+/// appearance.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Face {
     /// The family's name in its font files, which is how the toolkit finds it.
     pub family: String,
-    /// The font files of the family's regular, bold, and italic faces.
-    pub files: Vec<Bytes>,
     pub size: f32,
+    pub weight: u16,
+    pub italic: bool,
     pub line_height: f32,
+    pub space_before: f32,
+    pub space_after: f32,
+    pub first_line_indent: f32,
 }
 
-impl BodyStyle {
+/// The theme's type for Write: fonts, sizes, weights, spacing, and hierarchy, with the book's measure.
+#[derive(Clone, PartialEq)]
+pub struct BookType {
+    pub body: Face,
+    pub headings: [Face; 6],
+    pub quote: Face,
+    pub list: Face,
+    pub footnote: Face,
+    pub code: Face,
+    /// The width of the book's prose on the page, in points.
+    pub measure: f32,
+    /// The font files of every face above, for the toolkit.
+    pub files: Vec<Bytes>,
+}
+
+impl BookType {
     fn of(config: &Config, laid: &druck::output::Layout) -> Self {
-        let style = &config.styles.body;
         let mut files: Vec<Bytes> = Vec::new();
-        let mut family = String::new();
-        for (weight, font_style) in [
-            (style.weight, style.style),
-            (Weight::BOLD, FontStyle::Normal),
-            (style.weight, FontStyle::Italic),
-            (Weight::BOLD, FontStyle::Italic),
-        ] {
-            let italic = font_style == FontStyle::Italic;
-            let face = laid
-                .font(&style.font, weight.get(), italic)
-                .expect("the body font is loaded");
-            if family.is_empty() {
-                family = family_name(face.data(), face.index()).unwrap_or_else(|| style.font.clone());
+        let mut face = |style: &Style| {
+            let found = laid.font(&style.font, style.weight.get(), style.style == FontStyle::Italic);
+            // Bold and italic within a line come from the same family.
+            for (weight, italic) in [(Weight::BOLD, false), (style.weight, true), (Weight::BOLD, true)] {
+                if let Some(other) = laid.font(&style.font, weight.get(), italic)
+                    && !files.contains(other.data())
+                {
+                    files.push(other.data().clone());
+                }
             }
-            if !files.contains(face.data()) {
-                files.push(face.data().clone());
+            if let Some(found) = found
+                && !files.contains(found.data())
+            {
+                files.push(found.data().clone());
             }
-        }
+            Face {
+                family: found
+                    .and_then(|found| family_name(found.data(), found.index()))
+                    .unwrap_or_else(|| style.font.clone()),
+                size: style.size.0 as f32,
+                weight: style.weight.get(),
+                italic: style.style == FontStyle::Italic,
+                line_height: style.line_height as f32,
+                space_before: style.space_before.0 as f32,
+                space_after: style.space_after.0 as f32,
+                first_line_indent: style.first_line_indent.0 as f32,
+            }
+        };
+        let styles = &config.styles;
         Self {
-            family,
+            body: face(&styles.body),
+            headings: [
+                face(&styles.heading_1),
+                face(&styles.heading_2),
+                face(&styles.heading_3),
+                face(&styles.heading_4),
+                face(&styles.heading_5),
+                face(&styles.heading_6),
+            ],
+            quote: face(&styles.quote),
+            list: face(&styles.list),
+            footnote: face(&styles.footnote),
+            code: face(&styles.code_block),
+            measure: config.page.prose_width.0 as f32,
             files,
-            size: style.size.0 as f32,
-            line_height: style.line_height as f32,
         }
     }
 }
@@ -214,32 +254,6 @@ impl Typesetter {
         })
     }
 
-    /// The engine's lines for the document as `joined` has it, at the page's measure or at `room` points if that is
-    /// less, with the page's measure.
-    pub fn composed(
-        &self,
-        joined: Joined,
-        room: f64,
-        cancel: &Cancel,
-    ) -> Option<(druck::editor::composer::SetLines, f64, f64)> {
-        std::thread::scope(|scope| {
-            std::thread::Builder::new()
-                .name("druck-composer".into())
-                .stack_size(LAYOUT_STACK)
-                .spawn_scoped(scope, || {
-                    let (input, _) = self.input(joined).ok()?;
-                    let configured = self.renderer.job(&self.resolver, &input, cancel).configure().ok()?;
-                    let page = druck::editor::composer::page_measure(&configured);
-                    let measure = page.min(room);
-                    let lines = druck::editor::composer::lines(&configured, measure).ok()?;
-                    Some((lines, measure, page))
-                })
-                .expect("the system starts a thread")
-                .join()
-                .unwrap_or(None)
-        })
-    }
-
     fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;
@@ -258,7 +272,7 @@ impl Typesetter {
         let fingerprints_from = Instant::now();
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
-            body: BodyStyle::of(config, &laid),
+            book_type: BookType::of(config, &laid),
             fonts: fonts_in_use(config, &laid),
             laid,
             painter,
@@ -418,9 +432,12 @@ mod tests {
             panic!("typesets")
         };
         std::fs::remove_dir_all(&dir).expect("temporary folder");
-        assert_eq!((layout.body.size, layout.body.line_height), (13.0, 1.5));
-        assert_eq!(layout.body.family, "Libertinus Serif");
-        assert!(!layout.body.files.is_empty());
+        assert_eq!(
+            (layout.book_type.body.size, layout.book_type.body.line_height),
+            (13.0, 1.5)
+        );
+        assert_eq!(layout.book_type.body.family, "Libertinus Serif");
+        assert!(!layout.book_type.files.is_empty());
     }
 
     #[test]

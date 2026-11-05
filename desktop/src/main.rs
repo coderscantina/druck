@@ -1,4 +1,4 @@
-//! Druck desktop: a native composer and theme editor on the same engine as the CLI.
+//! Druck desktop: a native writing app and book setter on the same engine as the CLI.
 
 mod a11y;
 mod agent;
@@ -12,6 +12,7 @@ mod open_urls;
 mod persist;
 mod preview;
 mod session;
+mod settings;
 mod shell;
 mod sidebar;
 mod source;
