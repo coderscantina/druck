@@ -95,6 +95,19 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Merge and typing note
+
+On 2026-11-05 an outside or agent change and the author's unsaved edits in the same sentence became a conflict, see [sentences in a merge](DECISIONS.md#2026-11-05-sentences-in-a-merge). Edits in different sentences of a paragraph still merge, Git's conflicts still never merge, and an agent change stays under review. `cargo test -p druck-desktop` passed 685 with 1 ignored.
+
+Typing time was measured, not guessed, on a temp copy of the book made a project through `adopt::make_project`, with the shipping profile (fat LTO) and `--features measure`, on the M1 Pro with two 60 Hz displays. The gate's typing median was 16.2, 16.6, 15.8, 15.7, and 15.8 ms, p95 30 to 32 ms, at loads of 3.0, 2.8, 2.4, 2.0, and 5.9. The app's part is small:
+
+- **CPU per key is about 3 ms.** `xctrace` Time Profiler over 45 s of the gate's typing: the main thread was busy 1,322 ms, 2.9 percent, and drawing frames took 781 ms of that. `DRUCK_TRACE`: the handler 0.06 ms median, the text's prepaint 0.83 ms, its paint 0.14 ms. Shaping the edited paragraph is most of the prepaint.
+- **The rest is waiting.** From the key's handler to the end of paint is 11.2 to 11.6 ms median and 18.7 to 19.7 ms p95 over three runs. Of that, about 10.2 ms median and 17.5 ms p95 come before the text's prepaint: the wait for the display link, half a 16.7 ms frame on average, and about 2 ms of rendering the rest of the window. No key missed a frame.
+- **The gate's own timer adds 2.4 to 3.3 ms median and 17 to 18 ms p95.** Its "key timer lateness" is measured from when a key was due to when its task ran. The main thread was idle 97 percent of the time, so this is not app work in the way. It is most likely the system coalescing timers for an app that is not frontmost, which was not verified. A real keystroke does not go through that timer.
+- **The contents card was drawn in every frame of the profiled run,** about 200 ms of the 1,322 ms, likely because the pointer rested over the floating window's left edge. That is the environment, not typing.
+
+So there is no real and cheap fix left that would move the median: all of the app's work together is about 3 ms. No code was changed for typing. The proposal is that the gate measure from when the key's handler runs to the end of the first paint that shows it, as `DRUCK_TRACE`'s `input_to_paint_us` does, and report the timer's lateness on its own as it already does. Measured that way the median is 11.5 ms against the 16 ms target. Its floor at 60 Hz is half a frame plus the work, and its p95 cannot go below one frame, 16.7 ms. The target was not changed.
+
 ### Second review note
 
 On 2026-11-05 the second review's findings F1 to F25 went in, with the owner's decisions on F1, F6, and the cost display. The choices are in [decisions](DECISIONS.md#2026-11-05-second-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-2026-11-05` beside the repo.
@@ -105,7 +118,7 @@ Typing is **not under 16 ms median today, and this change did not cause that.** 
 
 Commands: `cargo test -p druck-desktop` 682 passed, 1 ignored. `cargo test` 444 unit tests and the acceptance, CLI, parity, public API, and doc tests passed, and `cargo test --test parity` passed, without `DRUCK_BOOK`. `cargo clippy -p druck-desktop --all-targets -- -D warnings`, the same with `--features measure`, root `cargo clippy --all-targets -- -D warnings`, `cargo check -p druck-desktop --release` with no warnings, and `cargo fmt --all --check` are clean. `python3 scripts/notices.py --check` and `--desktop --check` pass.
 
-Not verified, for want of a pointer: clicks on the new buttons (Book details, Proof, Save to `druck.yaml`, the Bibliography links), and the fade while scrolling the commit list. Not run: German captures of the new lines, and Windows and Linux for the data folder. The state where the panel shows nothing before a fetch returns passes too quickly on a local remote to capture; the state after it, "1 behind", was. Open for the owner: outside and agent changes still merge by words, see the decision.
+Not verified, for want of a pointer: clicks on the new buttons (Book details, Proof, Save to `druck.yaml`, the Bibliography links), and the fade while scrolling the commit list. Not run: German captures of the new lines, and Windows and Linux for the data folder. The state where the panel shows nothing before a fetch returns passes too quickly on a local remote to capture; the state after it, "1 behind", was.
 
 ### Review findings note
 
