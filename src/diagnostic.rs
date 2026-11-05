@@ -75,6 +75,8 @@ pub enum Code {
     MissingCitation { file: PathBuf, key: String },
     /// `{.name}` names no custom style. `known` is what the theme has.
     UnknownStyle { name: String, known: Vec<String> },
+    /// A file a property names is not there. `property` is the dotted path, and `file` the absolute path looked at.
+    ResourceNotFound { property: String, file: PathBuf },
 }
 
 /// The input a diagnostic concerns.

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::cancel::Cancel;
-use crate::diagnostic::{Diagnostic, Origin, Resource, Severity, Source};
+use crate::diagnostic::{Code, Diagnostic, Origin, Resource, Severity, Source};
 use crate::input::{Date, DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use crate::renderer::{Failure, LayoutOptions, Renderer};
 use crate::resource::{MemoryResolver, Resolver};
@@ -138,6 +138,13 @@ fn a_missing_font_names_the_resource_with_its_origin() {
     };
     assert_eq!(errors[0].resource.as_ref(), Some(&resource));
     assert_eq!(errors[0].property.as_deref(), Some("fonts.Body.regular"));
+    assert_eq!(
+        errors[0].code,
+        Some(Code::ResourceNotFound {
+            property: "fonts.Body.regular".to_owned(),
+            file: book().join("body.otf"),
+        })
+    );
     let from = |base: &str| errors[0].display_from(Path::new(base)).to_string();
     let expected = "error: fonts.Body.regular: resource not found: \"body.otf\" relative to the theme in";
     assert_eq!(from("/work/book"), format!("{expected} ."));

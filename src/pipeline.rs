@@ -13,7 +13,7 @@ use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::Config;
 use crate::config::source::{InputSource, Origin, Resource, normalize};
 use crate::date::Date;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::image::Image;
 use crate::input::{Input, ThemeDirs, ThemeSelection};
 use crate::renderer::{Failure, Renderer};
@@ -177,15 +177,19 @@ pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel)
         match resolver.read(&resource.origin, &resource.path) {
             Ok(data) => files.insert(resource.clone(), data),
             Err(e) => {
+                let not_found = matches!(e, ResolveError::NotFound(_));
                 let message = match e {
                     ResolveError::NotFound(_) => format!("resource not found: {resource}"),
                     e => format!("cannot read {resource}: {e}"),
                 };
-                errors.push(
-                    Diagnostic::new(None, message)
-                        .property(Some(property))
-                        .resource(resource),
-                );
+                let mut diagnostic = Diagnostic::new(None, message);
+                if let (true, Some(file)) = (not_found, resource.file()) {
+                    diagnostic = diagnostic.coded(Code::ResourceNotFound {
+                        property: property.clone(),
+                        file,
+                    });
+                }
+                errors.push(diagnostic.property(Some(property)).resource(resource));
             }
         }
     }

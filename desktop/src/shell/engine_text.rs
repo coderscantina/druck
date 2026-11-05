@@ -62,6 +62,10 @@ crate::strings! {
             "unknown style \"{name}\"; the theme defines no custom styles",
             "unbekannter Stil \"{name}\"; das Thema hat keine eigenen Stile"
         ),
+        ResourceNotFound => (
+            "{property}: the file {file} is not there",
+            "{property}: die Datei {file} gibt es nicht"
+        ),
         UnknownStyleOf => (
             "unknown style \"{name}\"; the theme's custom styles are {known}",
             "unbekannter Stil \"{name}\"; die eigenen Stile des Themas sind {known}"
@@ -127,6 +131,9 @@ pub fn message(diagnostic: &Diagnostic) -> String {
         Code::UndefinedFootnote { label } => crate::t!(Key::UndefinedFootnote, label = label),
         Code::NoBibliography => crate::t!(Key::NoBibliography).to_owned(),
         Code::MissingCitation { file, key } => crate::t!(Key::MissingCitation, file = file.display(), key = key),
+        Code::ResourceNotFound { property, file } => {
+            crate::t!(Key::ResourceNotFound, property = property, file = file.display())
+        }
         Code::UnknownStyle { name, known } if known.is_empty() => crate::t!(Key::UnknownStyle, name = name),
         Code::UnknownStyle { name, known } => {
             crate::t!(Key::UnknownStyleOf, name = name, known = known.join(", "))
