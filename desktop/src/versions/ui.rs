@@ -129,21 +129,6 @@ fn split_lead(title: &str) -> (Option<&str>, &str) {
     if symbol { (Some(first), rest) } else { (None, title) }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_leading_symbol_stands_apart_from_the_title() {
-        assert_eq!(
-            split_lead("\u{270f}\u{fe0f} Michael's own pass"),
-            (Some("\u{270f}\u{fe0f}"), "Michael's own pass")
-        );
-        assert_eq!(split_lead("Add a sentence"), (None, "Add a sentence"));
-        assert_eq!(split_lead("Über den Autor"), (None, "Über den Autor"));
-    }
-}
-
 /// A line of text that says something is off, or what to do next, in the accent colour.
 pub fn accent_line(tokens: &Tokens, text: impl Into<SharedString>) -> gpui::Div {
     div()
@@ -164,4 +149,19 @@ pub fn quiet_line(tokens: &Tokens, text: impl Into<SharedString>) -> gpui::Div {
         .text_size(tokens::TEXT_SMALL)
         .text_color(tokens.text_quiet)
         .child(text.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_leading_symbol_stands_apart_from_the_title() {
+        assert_eq!(
+            split_lead("\u{270f}\u{fe0f} Michael's own pass"),
+            (Some("\u{270f}\u{fe0f}"), "Michael's own pass")
+        );
+        assert_eq!(split_lead("Add a sentence"), (None, "Add a sentence"));
+        assert_eq!(split_lead("Über den Autor"), (None, "Über den Autor"));
+    }
 }

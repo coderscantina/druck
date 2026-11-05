@@ -15,10 +15,13 @@ pub mod fonts;
 pub(crate) mod job;
 pub mod proof;
 mod raster;
+mod scheduling;
 mod sheets;
 pub mod slip;
 pub mod slip_control;
+mod status;
 mod strings;
+mod zoom;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -49,9 +52,11 @@ pub use self::job::BookType;
 use self::job::{Job, Layout, Scheduler, Started, Typesetter};
 use self::proof::{BlockAt, Mark, Marks, Problem};
 use self::raster::pixel_size;
+pub use self::scheduling::Ahead;
 use self::sheets::{Arrangement, Sheets, clamp_scroll};
 use self::slip::ProofSlip;
 use self::strings::Key;
+use self::zoom::Zoom;
 use crate::a11y::Control as _;
 use crate::session::{Joined, Kind};
 use crate::theme_file::blocks::{self, Target};
@@ -64,13 +69,6 @@ use crate::theme_file::SPECIMEN;
 /// Where the specimen pretends to be, beside the document, so relative paths in a theme resolve as for the document.
 const SPECIMEN_FILE: &str = "specimen.md";
 
-/// Zoom levels above fit, as logical pixels per point.
-const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-/// Zoom levels below fit, which show a contact sheet. Small enough that it reads as one, whatever the window.
-const CONTACT_ZOOMS: [f32; 4] = [0.14, 0.2, 0.3, 0.45];
-/// Fit follows the view below every fixed level, so a narrow window shows a whole spread. This only keeps a sliver of a
-/// view from asking for sheets of no size.
-const SMALLEST_FIT: f32 = 0.02;
 /// Sharper than this costs too much memory per page; higher zoom enlarges these pixels.
 const MAX_RESOLUTION: f32 = 4.0;
 /// Rasterized pages kept in memory. Painted ones also have a copy in the GPU atlas.
@@ -79,35 +77,6 @@ const CACHE_BYTES: usize = 128 * 1024 * 1024;
 const RASTER_THREADS: usize = 3;
 /// Pages rasterized beyond each end of the view, so normal scrolling shows finished pages.
 const PREFETCH_PAGES: usize = 2;
-
-/// How large sheets are drawn.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Zoom {
-    /// A whole spread fills the view.
-    Fit,
-    Fixed(f32),
-}
-
-/// The next step of the one zoom scale from `now`, which is `current` pixels per point, where a spread fits at `fit`:
-/// contact sheets below fit, then fit, then larger. `None` at either end.
-fn next_zoom(now: Zoom, current: f32, fit: f32, direction: isize) -> Option<Zoom> {
-    let below_fit = CONTACT_ZOOMS.iter().copied().filter(|zoom| *zoom < fit * 0.99);
-    let above_fit = ZOOMS.iter().copied().filter(|zoom| *zoom > fit * 1.01);
-    let levels = below_fit
-        .map(Zoom::Fixed)
-        .chain([Zoom::Fit])
-        .chain(above_fit.map(Zoom::Fixed));
-    let value = |zoom: &Zoom| match zoom {
-        Zoom::Fit => fit,
-        Zoom::Fixed(zoom) => *zoom,
-    };
-    let current = if now == Zoom::Fit { fit } else { current };
-    if direction > 0 {
-        levels.into_iter().find(|zoom| value(zoom) > current * 1.01)
-    } else {
-        levels.into_iter().rev().find(|zoom| value(zoom) < current * 0.99)
-    }
-}
 
 /// Where the proof slip stands.
 struct SlipPlace {
@@ -219,15 +188,6 @@ pub struct PreviewView {
     foot: Vec<AnyView>,
 }
 
-/// Where the pages would paint if they were on screen.
-#[derive(Clone, Copy)]
-pub struct Ahead {
-    pub bounds: Bounds<Pixels>,
-    pub scale: f32,
-    /// The window whose atlas holds what they painted before, which a page evicted meanwhile is freed from.
-    pub window: AnyWindowHandle,
-}
-
 pub fn bind_keys(cx: &mut App) {
     let context = Some("Preview");
     cx.bind_keys([
@@ -296,68 +256,9 @@ impl PreviewView {
         view
     }
 
-    /// Lays out a copy of the document on a background thread and publishes the pages when done. A newer request
-    /// cancels this one.
-    pub fn request(&mut self, joined: Joined, cx: &mut Context<Self>) {
-        #[cfg(any(debug_assertions, feature = "measure"))]
-        if let Some(bench) = &mut self.bench {
-            bench.requested(&joined.text);
-        }
-        self.latest = Some(joined);
-        // The specimen stays as it is while the document changes. A theme edit asks for it again with `refresh`.
-        if !self.specimen || self.layout.is_none() {
-            self.typeset_latest(cx);
-        }
-    }
-
-    /// Typesets again what the pages show, since the theme file changed.
-    pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.typeset_latest(cx);
-    }
-
     /// The font families the pages on screen use.
     pub fn fonts(&self) -> &[FontUse] {
         self.layout.as_ref().map_or(&[], |layout| &layout.fonts)
-    }
-
-    /// Typesets what the pages show: the specimen, or the document as last asked for.
-    fn typeset_latest(&mut self, cx: &mut Context<Self>) {
-        let Some(joined) = self.latest.clone() else {
-            return;
-        };
-        let joined = if self.specimen {
-            Joined::single(SPECIMEN.to_owned(), joined.revision)
-        } else {
-            joined
-        };
-        let job = Job {
-            joined,
-            theme: self.theme.clone(),
-            specimen: self.specimen,
-        };
-        if let Some(started) = self.scheduler.request(job) {
-            self.start_layout(started, cx);
-        }
-    }
-
-    /// Typesets with another theme file, or with the document's own when `None`. The next layout takes it.
-    pub fn set_theme(&mut self, theme: Option<PathBuf>, cx: &mut Context<Self>) {
-        if self.theme != theme {
-            self.theme = theme;
-            self.typeset_latest(cx);
-        }
-    }
-
-    /// Shows the bundled specimen in pages, or the document again.
-    pub fn set_specimen(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.specimen != on {
-            self.specimen = on;
-            self.typeset_latest(cx);
-        }
-    }
-
-    pub fn is_specimen(&self) -> bool {
-        self.specimen
     }
 
     /// Scrolls to the top of a page.
@@ -604,37 +505,6 @@ impl PreviewView {
         proof::first_place(&self.layout.as_ref()?.laid, page)
     }
 
-    /// Whether a layout is running, which the next request would cancel.
-    #[cfg(any(debug_assertions, feature = "measure"))]
-    pub fn is_laying_out(&self) -> bool {
-        self.scheduler.is_running()
-    }
-
-    /// The moment the pages of the newest request were first ready to paint, if they have been.
-    #[cfg(any(debug_assertions, feature = "measure"))]
-    pub fn ready_at(&self) -> Option<Instant> {
-        (self.ready.0 == self.scheduler.latest()).then_some(self.ready.1)
-    }
-
-    /// The last frame that showed every visible page exact.
-    #[cfg(any(debug_assertions, feature = "measure"))]
-    pub fn exact_frame(&self) -> Option<Instant> {
-        self.exact_frame
-    }
-
-    /// Keeps rastering what would show at `ahead` while the pages are not on screen, so that entering Publish finds them
-    /// finished. `None` once they are on screen.
-    pub fn ready_ahead(&mut self, ahead: Option<Ahead>, cx: &mut Context<Self>) {
-        self.ahead = ahead;
-        self.prepare_ahead(cx);
-    }
-
-    fn prepare_ahead(&mut self, cx: &mut Context<Self>) {
-        if let Some(ahead) = self.ahead {
-            self.prepare(ahead.bounds, ahead.scale, cx);
-        }
-    }
-
     /// The page a run of text containing `needle` is on, and shows it.
     #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn show_text(&mut self, needle: &str, cx: &mut Context<Self>) -> Option<usize> {
@@ -663,191 +533,6 @@ impl PreviewView {
     /// What the pages on screen broke, such as typesetting rules.
     pub fn warnings(&self) -> &[Diagnostic] {
         self.layout.as_ref().map_or(&[], |layout| &layout.warnings)
-    }
-
-    fn start_layout(&mut self, (number, job, cancel): Started<Job>, cx: &mut Context<Self>) {
-        let Job {
-            joined,
-            theme,
-            specimen,
-        } = job;
-        let typesetter = if specimen {
-            self.specimen_typesetter.clone()
-        } else {
-            self.typesetter.clone()
-        };
-        let revision = joined.revision;
-        let layout = cx.background_spawn(async move {
-            // A panic is caught inside the run, so this lock is not poisoned, and if it were the typesetter is still whole.
-            let mut typesetter = typesetter.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            typesetter.set_theme(theme);
-            typesetter.run(joined, &cancel)
-        });
-        cx.spawn(async move |this, cx| {
-            let result = layout.await;
-            this.update(cx, |view, cx| {
-                let (publish, next) = view.scheduler.finished(number);
-                if publish {
-                    view.publish(number, revision, specimen, result, cx);
-                }
-                if let Some(next) = next {
-                    view.start_layout(next, cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    fn publish(
-        &mut self,
-        number: u64,
-        revision: u64,
-        specimen: bool,
-        result: Result<Layout, Failure>,
-        cx: &mut Context<Self>,
-    ) {
-        match result {
-            Ok(layout) => {
-                self.published = number;
-                // Offsets in the specimen are not offsets in any chapter.
-                self.revision = (!specimen).then_some(revision);
-                self.diagnostics.clear();
-                #[cfg(any(debug_assertions, feature = "measure"))]
-                if let Some(bench) = &mut self.bench {
-                    bench.published(&layout);
-                }
-                let book_type = layout.book_type.clone();
-                // Freeing a whole document's runs takes long enough to drop a frame.
-                let old = self.layout.replace(Arc::new(layout));
-                cx.background_spawn(async move { drop(old) }).detach();
-                self.mark_problems();
-                cx.emit(Typeset(book_type));
-            }
-            Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
-            Err(Failure::Cancelled) => {}
-        }
-        // The specimen's warnings and errors are about the specimen, not the document the diagnostics list shows.
-        if !specimen {
-            cx.emit(Laid);
-        }
-        cx.notify();
-    }
-
-    /// The zoom to keep between runs. `None` fits the pages to the pane.
-    pub fn zoom(&self) -> Option<f32> {
-        match self.zoom {
-            Zoom::Fit => None,
-            Zoom::Fixed(zoom) => Some(zoom),
-        }
-    }
-
-    /// Sets the zoom from a past run. `None` fits the pages to the pane.
-    pub fn set_zoom(&mut self, zoom: Option<f32>, cx: &mut Context<Self>) {
-        self.zoom = zoom.map_or(Zoom::Fit, Zoom::Fixed);
-        self.prepare_ahead(cx);
-        cx.notify();
-    }
-
-    fn set_zoom_by_author(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
-        self.zoom = zoom;
-        self.prepare_ahead(cx);
-        cx.emit(ZoomChanged);
-        cx.notify();
-    }
-
-    /// Fits a spread to the pane.
-    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
-        self.set_zoom_by_author(Zoom::Fit, cx);
-    }
-
-    /// One step along the zoom scale: larger for a positive `direction`, smaller for a negative one. Past fit it becomes a
-    /// contact sheet.
-    pub fn zoom_step(&mut self, direction: isize, cx: &mut Context<Self>) {
-        if let Some(next) = next_zoom(self.zoom, self.current_zoom, self.fit, direction) {
-            self.set_zoom_by_author(next, cx);
-        }
-    }
-
-    /// Page Down or Up. At fit it moves one row of sheets, so a spread lands whole in the middle. Larger, it moves most
-    /// of a screen.
-    fn page_screen(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let view = self.view.1;
-        let row = (self.zoom == Zoom::Fit)
-            .then(|| self.sheets(self.current_zoom))
-            .flatten()
-            .and_then(|sheets| {
-                let here = sheets.row_pages(sheets.page_at_middle(self.scroll.1, view)?);
-                let next = if forward {
-                    (here.end < sheets.len()).then_some(here.end)
-                } else {
-                    here.start.checked_sub(1)
-                };
-                Some(next.map_or(self.scroll.1, |page| sheets.scroll_to_centre(page, view)))
-            });
-        self.scroll.1 = row.unwrap_or(self.scroll.1 + if forward { view } else { -view } * 0.9);
-        cx.notify();
-    }
-
-    /// Whether the status line holds `parts` in full beside the zoom.
-    fn status_fits(&self, parts: &[&str], window: &Window) -> bool {
-        let width = |text: &str| f32::from(crate::shell::ui::small_text_width(text, window));
-        let words: f32 = parts
-            .iter()
-            .filter(|part| !part.is_empty())
-            .map(|part| width(part))
-            .sum();
-        let percent = format!("{}%", (self.current_zoom * 100.0).round());
-        let zoom = width(&percent)
-            + width(crate::t!(Key::ZoomFit))
-            + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 6. + tokens::HAIR_GAP * 3.)
-            + f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
-        let gaps = f32::from(tokens::SPACE_3) * (parts.len() + 3) as f32;
-        words + zoom + gaps <= self.view.0
-    }
-
-    /// The window's foot line, to show in the status line.
-    pub fn set_foot(&mut self, foot: Vec<AnyView>) {
-        self.foot = foot;
-    }
-
-    fn arrangement(&self, zoom: f32) -> Arrangement {
-        if zoom < self.fit * 0.999 {
-            Arrangement::Contact {
-                view: self.view.0,
-                gutter: f32::from(tokens::SPREAD_GUTTER),
-            }
-        } else {
-            Arrangement::Spreads {
-                gutter: f32::from(tokens::SPREAD_GUTTER),
-            }
-        }
-    }
-
-    fn sheets(&self, zoom: f32) -> Option<Sheets> {
-        let layout = self.layout.as_ref()?;
-        let pages = (layout.laid.pages().iter()).map(|page| (page.width.0 as f32, page.height.0 as f32));
-        let arrangement = self.arrangement(zoom);
-        let gap = match arrangement {
-            Arrangement::Spreads { .. } => tokens::SPACE_4,
-            Arrangement::Contact { .. } => tokens::CONTACT_GAP,
-        };
-        Some(Sheets::new(pages, zoom, f32::from(gap), arrangement))
-    }
-
-    /// The zoom at which a whole spread fills a view this large.
-    fn fit_zoom(&self, (width, height): (f32, f32)) -> f32 {
-        let Some(layout) = self.layout.as_ref() else {
-            return self.fit;
-        };
-        let pages = layout.laid.pages();
-        let widest = pages.iter().map(|page| page.width.0 as f32).fold(1.0, f32::max);
-        let tallest = pages.iter().map(|page| page.height.0 as f32).fold(1.0, f32::max);
-        let margins = 2.0 * f32::from(tokens::SPACE_4);
-        let gutter = f32::from(tokens::SPREAD_GUTTER);
-        ((width - margins - gutter) / (2.0 * widest))
-            .min((height - margins) / tallest)
-            .clamp(SMALLEST_FIT, ZOOMS[ZOOMS.len() - 1])
     }
 
     /// A frame on screen: frees what the atlas no longer needs, and places the sheets.
@@ -1015,45 +700,6 @@ impl PreviewView {
         .detach();
     }
 
-    fn on_scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let delta = event.delta.pixel_delta(tokens::SCROLL_LINE);
-        self.scroll.0 -= f32::from(delta.x);
-        self.scroll.1 -= f32::from(delta.y);
-        cx.notify();
-    }
-
-    fn status(&self) -> String {
-        let Some(layout) = &self.layout else {
-            return if self.diagnostics.is_empty() {
-                crate::t!(Key::NoPagesYet).to_owned()
-            } else {
-                crate::t!(Key::NoPages).to_owned()
-            };
-        };
-        let pages = layout.laid.pages().len();
-        if self.is_contact_sheet() {
-            return match pages {
-                1 => crate::t!(Key::OnePage).to_owned(),
-                pages => crate::t!(Key::PageCount, pages = pages),
-            };
-        }
-        let shown = self.sheets(self.current_zoom).and_then(|sheets| {
-            let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
-            Some(sheets.row_pages(page))
-        });
-        let shown = shown.unwrap_or(self.page..self.page + 1);
-        let shown = shown.start.min(pages - 1)..shown.end.min(pages);
-        let range = if shown.len() > 1 {
-            crate::t!(Key::PagesOf, first = shown.start + 1, last = shown.end, pages = pages)
-        } else {
-            crate::t!(Key::PageOf, page = shown.start + 1, pages = pages)
-        };
-        match printed_labels(&layout.laid, shown) {
-            Some(labels) => format!("{range} ({labels})"),
-            None => range,
-        }
-    }
-
     /// The window rectangles of what is marked on a sheet, with how strong the tint is and whether it is a warning. A
     /// warning shows during a proof pass, and only the one being looked at has a tint. On a page of the one being looked
     /// at, only its marks draw.
@@ -1187,57 +833,6 @@ impl PreviewView {
                 ),
         )
     }
-
-    /// The status line's zoom: smaller, the value, larger, and fit.
-    fn zoom_controls(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let button = |id: &'static str, label: SharedString, aria: &'static str, on: bool| {
-            div()
-                .id(id)
-                .button(tokens, aria)
-                .flex_none()
-                .min_w(tokens::ZOOM_BUTTON)
-                .h(tokens::ZOOM_BUTTON)
-                .px(tokens::SPACE_1)
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(tokens::RADIUS)
-                .cursor_pointer()
-                .text_color(if on { tokens.text } else { tokens.text_quiet })
-                .hover(|button| button.bg(tokens.raised))
-                .child(label)
-        };
-        let percent = format!("{}%", (self.current_zoom * 100.0).round());
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(tokens::HAIR_GAP)
-            .child(
-                button("zoom-out", "\u{2212}".into(), crate::t!(Key::ZoomOut), false)
-                    .on_click(cx.listener(|view, _, _, cx| view.zoom_step(-1, cx))),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .px(tokens::SPACE_1)
-                    .text_color(tokens.text)
-                    .child(percent),
-            )
-            .child(
-                button("zoom-in", "+".into(), crate::t!(Key::ZoomIn), false)
-                    .on_click(cx.listener(|view, _, _, cx| view.zoom_step(1, cx))),
-            )
-            .child(
-                button(
-                    "zoom-fit",
-                    crate::t!(Key::ZoomFit).into(),
-                    crate::t!(Key::ZoomFit),
-                    self.zoom == Zoom::Fit,
-                )
-                .on_click(cx.listener(|view, _, _, cx| view.zoom_to_fit(cx))),
-            )
-    }
 }
 
 /// A diagnostic in the language now set where it has a code, with the engine's own location where it has none.
@@ -1246,27 +841,6 @@ fn in_words(problem: &Diagnostic) -> String {
         crate::shell::engine_text::message(problem)
     } else {
         problem.to_string()
-    }
-}
-
-/// The number printed on a page, if it has one.
-fn printed_label(laid: &druck::output::Layout, page: usize) -> Option<String> {
-    let number = laid.page_numbers().get(page).copied().flatten()?;
-    Some(number.format.format(number.value))
-}
-
-/// The numbers printed on the pages in view, as `iii–iv`, when they say something the pages' places in the file do not.
-fn printed_labels(laid: &druck::output::Layout, pages: std::ops::Range<usize>) -> Option<String> {
-    let labels: Vec<(usize, String)> = pages
-        .filter_map(|page| Some((page, printed_label(laid, page)?)))
-        .collect();
-    if labels.iter().all(|(page, label)| *label == (page + 1).to_string()) {
-        return None;
-    }
-    match labels.as_slice() {
-        [(_, only)] => Some(only.clone()),
-        [(_, first), .., (_, last)] => Some(format!("{first}\u{2013}{last}")),
-        [] => None,
     }
 }
 
@@ -1349,107 +923,8 @@ impl Render for PreviewView {
             },
         )
         .size_full();
-        // With no pages the whole message stands where they would, see `empty_state`.
-        let problem = self.layout.as_ref().and(self.diagnostics.first()).map(|first| {
-            let more = self.diagnostics.len() - 1;
-            let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
-            format!("{}{suffix}", in_words(first))
-        });
         let empty = self.empty_state(&tokens, cx);
-        let warnings = self.problems.iter().filter(|problem| problem.warning).count();
-        let count = self.problems.len() - warnings;
-        let status = self.status();
-        let look_label = (count > 0).then(|| crate::t!(Key::ToLookAt, count = count));
-        let to_look_at = look_label.clone().map(|label| {
-            div()
-                .id("to-look-at")
-                .control(&tokens, Role::Link, SharedString::from(label.clone()))
-                .flex_none()
-                .text_color(tokens.accent)
-                .cursor_pointer()
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
-                .child(label)
-        });
-        let warning_count = (warnings > 0).then(|| {
-            let label = match warnings {
-                1 => crate::t!(Key::OneWarning).to_owned(),
-                warnings => crate::t!(Key::Warnings, count = warnings),
-            };
-            let marks_on = crate::settings::get(cx).warning_marks;
-            let toggle = crate::t!(Key::WarningMarks);
-            // A narrow line drops the word "warnings", then the switch's label, and never cuts the number.
-            let look = look_label.as_deref().unwrap_or_default();
-            let number = warnings.to_string();
-            let (shown, toggle_label) = if self.status_fits(&[&status, look, &label, toggle], window) {
-                (label.clone(), Some(toggle))
-            } else if self.status_fits(&[&status, look, &number, toggle], window) {
-                (number, Some(toggle))
-            } else {
-                (number, None)
-            };
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(tokens::SPACE_1)
-                .child(
-                    div()
-                        .id("warnings")
-                        .control(&tokens, Role::Link, SharedString::from(label.clone()))
-                        .flex_none()
-                        .cursor_pointer()
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
-                        .child(shown),
-                )
-                .child(
-                    div()
-                        .id("warning-marks")
-                        .control(&tokens, Role::Switch, toggle)
-                        .aria_toggled(if marks_on { Toggled::True } else { Toggled::False })
-                        .flex_none()
-                        .h(tokens::ZOOM_BUTTON)
-                        .px(tokens::SPACE_1)
-                        .flex()
-                        .items_center()
-                        .gap(tokens::SPACE_1)
-                        .rounded(tokens::RADIUS)
-                        .cursor_pointer()
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(|_, _, cx| {
-                            crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
-                        })
-                        .child(crate::shell::ui::switch_track(&tokens, marks_on))
-                        .children(toggle_label),
-                )
-        });
-        let strip = div()
-            .flex_none()
-            .h(tokens::SECTION_HEIGHT)
-            .px(tokens::SPACE_3)
-            .flex()
-            .items_center()
-            .gap(tokens::SPACE_3)
-            .border_t_1()
-            .border_color(tokens.divider)
-            .bg(tokens.canvas)
-            .text_size(tokens::TEXT_SMALL)
-            .text_color(tokens.text_quiet)
-            .child(div().flex_none().child(status))
-            .children(to_look_at)
-            .children(warning_count)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .when_some(problem, |slot, problem| {
-                        slot.child(div().min_w_0().truncate().text_color(tokens.accent).child(problem))
-                    })
-                    .children(self.foot.clone()),
-            )
-            .child(self.zoom_controls(&tokens, cx));
+        let strip = self.status_line(&tokens, window, cx);
         let slip = self.slip.read(cx).opened().and(self.slip_place()).map(|place| {
             deferred(
                 anchored()
@@ -1493,35 +968,5 @@ impl Render for PreviewView {
             )
             .child(strip)
             .children(slip)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn one_zoom_scale_runs_from_contact_sheets_through_fit_to_larger() {
-        let step = |now, current, direction| next_zoom(now, current, 1.53, direction);
-        assert_eq!(step(Zoom::Fit, 1.53, -1), Some(Zoom::Fixed(0.45)));
-        assert_eq!(step(Zoom::Fixed(0.45), 0.45, -1), Some(Zoom::Fixed(0.3)));
-        assert_eq!(step(Zoom::Fixed(0.14), 0.14, -1), None);
-        assert_eq!(step(Zoom::Fixed(0.45), 0.45, 1), Some(Zoom::Fit));
-        assert_eq!(step(Zoom::Fit, 1.53, 1), Some(Zoom::Fixed(2.0)));
-        assert_eq!(step(Zoom::Fixed(2.0), 2.0, -1), Some(Zoom::Fit));
-        assert_eq!(step(Zoom::Fixed(3.0), 3.0, 1), None);
-    }
-
-    #[test]
-    fn fit_goes_below_every_fixed_level() {
-        assert_eq!(next_zoom(Zoom::Fit, 0.1, 0.1, -1), None);
-        assert_eq!(next_zoom(Zoom::Fit, 0.1, 0.1, 1), Some(Zoom::Fixed(0.5)));
-    }
-
-    #[test]
-    fn a_level_on_the_wrong_side_of_fit_is_skipped() {
-        // In a small window a spread fits at 0.4, so the largest contact level would be larger than fit.
-        assert_eq!(next_zoom(Zoom::Fit, 0.4, 0.4, -1), Some(Zoom::Fixed(0.3)));
-        assert_eq!(next_zoom(Zoom::Fit, 0.4, 0.4, 1), Some(Zoom::Fixed(0.5)));
     }
 }

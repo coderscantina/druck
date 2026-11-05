@@ -1,0 +1,190 @@
+//! The status line under the pages: which pages show, what is left to look at, the warnings with their Marks switch,
+//! the window's foot line, and the zoom.
+
+use super::*;
+
+impl PreviewView {
+    /// Whether the status line holds `parts` in full beside the zoom.
+    pub(super) fn status_fits(&self, parts: &[&str], window: &Window) -> bool {
+        let width = |text: &str| f32::from(crate::shell::ui::small_text_width(text, window));
+        let words: f32 = parts
+            .iter()
+            .filter(|part| !part.is_empty())
+            .map(|part| width(part))
+            .sum();
+        let percent = format!("{}%", (self.current_zoom * 100.0).round());
+        let zoom = width(&percent)
+            + width(crate::t!(Key::ZoomFit))
+            + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 6. + tokens::HAIR_GAP * 3.)
+            + f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
+        let gaps = f32::from(tokens::SPACE_3) * (parts.len() + 3) as f32;
+        words + zoom + gaps <= self.view.0
+    }
+
+    /// The window's foot line, to show in the status line.
+    pub fn set_foot(&mut self, foot: Vec<AnyView>) {
+        self.foot = foot;
+    }
+
+    pub(super) fn status(&self) -> String {
+        let Some(layout) = &self.layout else {
+            return if self.diagnostics.is_empty() {
+                crate::t!(Key::NoPagesYet).to_owned()
+            } else {
+                crate::t!(Key::NoPages).to_owned()
+            };
+        };
+        let pages = layout.laid.pages().len();
+        if self.is_contact_sheet() {
+            return match pages {
+                1 => crate::t!(Key::OnePage).to_owned(),
+                pages => crate::t!(Key::PageCount, pages = pages),
+            };
+        }
+        let shown = self.sheets(self.current_zoom).and_then(|sheets| {
+            let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
+            Some(sheets.row_pages(page))
+        });
+        let shown = shown.unwrap_or(self.page..self.page + 1);
+        let shown = shown.start.min(pages - 1)..shown.end.min(pages);
+        let range = if shown.len() > 1 {
+            crate::t!(Key::PagesOf, first = shown.start + 1, last = shown.end, pages = pages)
+        } else {
+            crate::t!(Key::PageOf, page = shown.start + 1, pages = pages)
+        };
+        match printed_labels(&layout.laid, shown) {
+            Some(labels) => format!("{range} ({labels})"),
+            None => range,
+        }
+    }
+
+    /// The line itself. A narrow one drops the word "warnings", then the switch's label, and never cuts a number.
+    pub(super) fn status_line(
+        &self,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        // With no pages the whole message stands where they would, see `empty_state`.
+        let problem = self.layout.as_ref().and(self.diagnostics.first()).map(|first| {
+            let more = self.diagnostics.len() - 1;
+            let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
+            format!("{}{suffix}", in_words(first))
+        });
+        let warnings = self.problems.iter().filter(|problem| problem.warning).count();
+        let count = self.problems.len() - warnings;
+        let status = self.status();
+        let look_label = (count > 0).then(|| crate::t!(Key::ToLookAt, count = count));
+        let to_look_at = look_label.clone().map(|label| {
+            div()
+                .id("to-look-at")
+                .control(tokens, Role::Link, SharedString::from(label.clone()))
+                .flex_none()
+                .text_color(tokens.accent)
+                .cursor_pointer()
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
+                .child(label)
+        });
+        let warning_count = (warnings > 0).then(|| {
+            let label = match warnings {
+                1 => crate::t!(Key::OneWarning).to_owned(),
+                warnings => crate::t!(Key::Warnings, count = warnings),
+            };
+            let marks_on = crate::settings::get(cx).warning_marks;
+            let toggle = crate::t!(Key::WarningMarks);
+            // A narrow line drops the word "warnings", then the switch's label, and never cuts the number.
+            let look = look_label.as_deref().unwrap_or_default();
+            let number = warnings.to_string();
+            let (shown, toggle_label) = if self.status_fits(&[&status, look, &label, toggle], window) {
+                (label.clone(), Some(toggle))
+            } else if self.status_fits(&[&status, look, &number, toggle], window) {
+                (number, Some(toggle))
+            } else {
+                (number, None)
+            };
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(tokens::SPACE_1)
+                .child(
+                    div()
+                        .id("warnings")
+                        .control(tokens, Role::Link, SharedString::from(label.clone()))
+                        .flex_none()
+                        .cursor_pointer()
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
+                        .child(shown),
+                )
+                .child(
+                    div()
+                        .id("warning-marks")
+                        .control(tokens, Role::Switch, toggle)
+                        .aria_toggled(if marks_on { Toggled::True } else { Toggled::False })
+                        .flex_none()
+                        .h(tokens::ZOOM_BUTTON)
+                        .px(tokens::SPACE_1)
+                        .flex()
+                        .items_center()
+                        .gap(tokens::SPACE_1)
+                        .rounded(tokens::RADIUS)
+                        .cursor_pointer()
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(|_, _, cx| {
+                            crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
+                        })
+                        .child(crate::shell::ui::switch_track(tokens, marks_on))
+                        .children(toggle_label),
+                )
+        });
+        div()
+            .flex_none()
+            .h(tokens::SECTION_HEIGHT)
+            .px(tokens::SPACE_3)
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_3)
+            .border_t_1()
+            .border_color(tokens.divider)
+            .bg(tokens.canvas)
+            .text_size(tokens::TEXT_SMALL)
+            .text_color(tokens.text_quiet)
+            .child(div().flex_none().child(status))
+            .children(to_look_at)
+            .children(warning_count)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .when_some(problem, |slot, problem| {
+                        slot.child(div().min_w_0().truncate().text_color(tokens.accent).child(problem))
+                    })
+                    .children(self.foot.clone()),
+            )
+            .child(self.zoom_controls(tokens, cx))
+    }
+}
+
+/// The number printed on a page, if it has one.
+pub(super) fn printed_label(laid: &druck::output::Layout, page: usize) -> Option<String> {
+    let number = laid.page_numbers().get(page).copied().flatten()?;
+    Some(number.format.format(number.value))
+}
+
+/// The numbers printed on the pages in view, as `iii–iv`, when they say something the pages' places in the file do not.
+pub(super) fn printed_labels(laid: &druck::output::Layout, pages: std::ops::Range<usize>) -> Option<String> {
+    let labels: Vec<(usize, String)> = pages
+        .filter_map(|page| Some((page, printed_label(laid, page)?)))
+        .collect();
+    if labels.iter().all(|(page, label)| *label == (page + 1).to_string()) {
+        return None;
+    }
+    match labels.as_slice() {
+        [(_, only)] => Some(only.clone()),
+        [(_, first), .., (_, last)] => Some(format!("{first}\u{2013}{last}")),
+        [] => None,
+    }
+}
