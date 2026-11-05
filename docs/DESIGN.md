@@ -78,7 +78,7 @@ The Binder is the old sidebar, 216 px, on `Cmd+\`.
 - A selection shows its text clean, with no markers revealed. Blank gaps between blocks show no selection.
 - The scrollbar is a 6 px thumb in the pane's right edge, faint, and stronger when the pointer is over it.
 - The source view uses one monospace on the same surface with no block backgrounds. Markers, comments, directives, and front matter are in the quiet color, headings bold, and code in the link color.
-- Passages an agent changed show with the removed text struck through on a `removed` tint and the new text on an `added` tint, with small Accept, Reject, and Try again buttons below. When a chapter has any, the foot of the window shows how many, with Accept all and Reject all.
+- Passages an agent changed show with the removed text struck through on a `removed` tint and the new text on an `added` tint, both in the book's type and at 22 percent, with small Accept, Reject, and Try again buttons below, at the text's left. The removed words come first and take a space of their own. When there are any, the foot of the window shows how many in this chapter and elsewhere, with Next if any are elsewhere, then Accept all and Reject all, which act on all of them. Accept has accent text. The tints stay while typing, and nothing moves on a pause.
 - A misspelled word has a 1 px line under it in the accent color at 60 percent, in the text and the source view. It takes no room and leaves as soon as its block is edited, until the next pause. Its menu uses the slash menu's rows: suggestions with a text icon, then a plus icon and the row that adds the word to the project's words. The word stays selected behind the menu.
 
 ## Floats
@@ -140,9 +140,9 @@ The panel lists each named export as a collapsed card: name, then one quiet line
 
 ### Agent
 
-- It has no chrome until enabled. `Cmd+J` with a selection opens a one-line prompt card under the selection, which stays tinted. Without one it opens a chat card, 300 px, at the bottom right, over the text. Closing it keeps the running turn. In Publish, it is also a rail tab.
+- It has no chrome until enabled: no rail tab, menu item, palette command, or key row. `Cmd+J` with a selection opens a one-line prompt card, 420 px, under the selection, which stays tinted, with the Enter sign at its right. Without one it opens a chat card, 300 px and at most 520 px high, at the bottom right, over the text. Closing it keeps the running turn, and the foot then says it is working, with Stop. In Publish, it is also a rail tab, and `Cmd+J` goes there.
 - A waiting tool approval opens the chat card, and an accent dot on the Write switch marks it when the author is elsewhere.
-- Margin notes have a thin accent line at their left, a title in full ink, one quiet line, a suggestion in the theme's font if there is one, then small buttons. Their passage has a thin accent line under it.
+- Margin notes have a thin accent line at their left, a title in full ink, one quiet line, a suggestion in the theme's font if there is one, then small buttons. Their passage has a thin accent line under it. They stand beside their passage, on the surface's colour over a chapter's own long notes. A note whose text is gone stands at the top of the margin, says so, and offers only Dismiss.
 - Replies show as plain text. The author's prompts sit on the raised color. A tool call is one quiet line with its name and target, collapsed until clicked, with a word at its end only when it waits, was denied, or failed.
 - Diffs in approvals use Menlo at the small size, one row per line with the line number, a sign, and the text. Added and removed rows are tinted at 14 percent in the `added` and `removed` colors.
 - Buttons are 22 px high with a thin divider border and quiet text. The choice that lets the work go on has accent text. Nothing is filled and nothing is a pill. Chips are 22 px with a 4 px radius on the raised color, and end in a close icon.
