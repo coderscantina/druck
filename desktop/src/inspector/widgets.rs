@@ -62,21 +62,7 @@ pub fn tag(tokens: &Tokens, text: impl Into<SharedString>, own: bool) -> Div {
         .child(text.into())
 }
 
-/// A small text button in the accent color, like the Reset link.
-pub fn link(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .control(tokens, gpui::Role::Link, label.clone())
-        .flex_none()
-        .text_size(tokens::TEXT_SMALL)
-        .text_color(tokens.accent)
-        .cursor_pointer()
-        .hover(|link| link.opacity(0.8))
-        .child(label)
-}
-
-/// A small text button in the quiet color, for the way back or to another view.
+/// A small text button in the quiet color, for Reset, the way back, or another view.
 pub fn quiet_link(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
     let label = label.into();
     let hover = tokens.text;

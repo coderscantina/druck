@@ -102,12 +102,22 @@ pub fn message(diagnostic: &Diagnostic) -> String {
         Code::PageShort { page, lines } => crate::t!(Key::PageShort, page = page_of(page), lines = decimal(*lines)),
         Code::PageUneven { page, lines } => crate::t!(Key::PageUneven, page = page_of(page), lines = decimal(*lines)),
         Code::ChapterEndShort { page, lines, wanted } => {
-            crate::t!(Key::ChapterEndShort, page = page_of(page), lines = lines_of(*lines), wanted = wanted)
+            crate::t!(
+                Key::ChapterEndShort,
+                page = page_of(page),
+                lines = lines_of(*lines),
+                wanted = wanted
+            )
         }
         Code::OneLinerAtTop { page } => crate::t!(Key::OneLinerAtTop, page = page_of(page)),
         Code::OneLinerAtBottom { page } => crate::t!(Key::OneLinerAtBottom, page = page_of(page)),
         Code::HeadingAtFoot { page, lines, wanted } => {
-            crate::t!(Key::HeadingAtFoot, page = page_of(page), lines = lines_of(*lines), wanted = wanted)
+            crate::t!(
+                Key::HeadingAtFoot,
+                page = page_of(page),
+                lines = lines_of(*lines),
+                wanted = wanted
+            )
         }
         Code::LooseLine { page } => crate::t!(Key::LooseLine, page = page_of(page)),
         Code::TooManyHyphens { page, limit } => crate::t!(Key::TooManyHyphens, page = page_of(page), limit = limit),

@@ -213,7 +213,7 @@ impl ThemePicker {
         if common {
             let toggled = name.clone();
             row = row.child(
-                widgets::link(tokens, id("more"), if expanded { "▴" } else { "⋯" }).on_click(cx.listener(
+                widgets::quiet_link(tokens, id("more"), if expanded { "▴" } else { "⋯" }).on_click(cx.listener(
                     move |picker, _, _, cx| {
                         cx.stop_propagation();
                         picker.expanded = if picker.expanded.as_deref() == Some(toggled.as_str()) {
@@ -235,17 +235,19 @@ impl ThemePicker {
                     .py(tokens::SPACE_1)
                     .flex()
                     .gap(tokens::SPACE_3)
-                    .child(widgets::link(tokens, id("rename"), Key::Rename).on_click(cx.listener(
-                        move |picker, _, window, cx| {
-                            picker.start_naming(Naming::Rename(renamed.clone()), renamed.clone(), window, cx);
-                        },
-                    )))
                     .child(
-                        widgets::link(tokens, id("duplicate"), Key::Duplicate)
+                        widgets::quiet_link(tokens, id("rename"), Key::Rename).on_click(cx.listener(
+                            move |picker, _, window, cx| {
+                                picker.start_naming(Naming::Rename(renamed.clone()), renamed.clone(), window, cx);
+                            },
+                        )),
+                    )
+                    .child(
+                        widgets::quiet_link(tokens, id("duplicate"), Key::Duplicate)
                             .on_click(cx.listener(move |picker, _, window, cx| picker.duplicate(&copied, window, cx))),
                     )
                     .child(
-                        widgets::link(tokens, id("delete"), Key::Delete)
+                        widgets::quiet_link(tokens, id("delete"), Key::Delete)
                             .on_click(cx.listener(move |picker, _, window, cx| picker.delete(&deleted, window, cx))),
                     ),
             );
@@ -298,7 +300,7 @@ impl ThemePicker {
             }
             rows.push(match &self.naming {
                 Some((_, input)) => div().p(tokens::SPACE_2).child(input.clone()).into_any_element(),
-                None => widgets::link(tokens, "theme-new", format!("+ {}", crate::t!(Key::NewCommonTheme)))
+                None => widgets::quiet_link(tokens, "theme-new", format!("+ {}", crate::t!(Key::NewCommonTheme)))
                     .m(tokens::SPACE_2)
                     .on_click(cx.listener(|picker, _, window, cx| {
                         picker.start_naming(Naming::Create, String::new(), window, cx);

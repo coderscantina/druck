@@ -41,7 +41,6 @@ pub struct FontUse {
 }
 
 /// The families the resolved styles use, in order of first use.
-#[allow(dead_code, reason = "wired into the layout by the integrator")]
 pub fn fonts_in_use(config: &Config, laid: &druck::output::Layout) -> Vec<FontUse> {
     let mut named: Vec<(String, String)> = Vec::new();
     let Ok(_) = config.styles.clone().try_map(|key, style| {

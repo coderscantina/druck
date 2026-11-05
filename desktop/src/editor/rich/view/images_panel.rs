@@ -3,7 +3,7 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, FontWeight, ObjectFit, ScrollHandle, SharedString, Subscription, Task, Window, div, img, px, svg,
+    Context, Entity, FontWeight, ObjectFit, ScrollHandle, SharedString, Subscription, Task, Window, div, img, svg,
 };
 
 use crate::a11y::Control as _;
@@ -33,8 +33,6 @@ pub struct ImagesPanel {
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
-
-const THUMB: gpui::Pixels = px(44.);
 
 impl ImagesPanel {
     pub fn new(editor: Entity<EditorView>, cx: &mut Context<Self>) -> Self {
@@ -153,7 +151,7 @@ impl Render for ImagesPanel {
                     .id(("image-row", index))
                     .button(&tokens, row.listed.path.clone())
                     .flex_none()
-                    .min_h(THUMB + tokens::SPACE_2 * 2.)
+                    .min_h(tokens::IMAGE_THUMB + tokens::SPACE_2 * 2.)
                     .px(tokens::SPACE_3)
                     .py(tokens::SPACE_2)
                     .flex()
@@ -172,15 +170,19 @@ impl Render for ImagesPanel {
                     .child(
                         div()
                             .flex_none()
-                            .size(THUMB)
+                            .size(tokens::IMAGE_THUMB)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(px(4.))
+                            .rounded(tokens::CHIP_RADIUS)
                             .overflow_hidden()
                             .bg(tokens.raised)
                             .when(!row.listed.missing, |thumb| {
-                                thumb.child(img(row.listed.file.clone()).size(THUMB).object_fit(ObjectFit::Contain))
+                                thumb.child(
+                                    img(row.listed.file.clone())
+                                        .size(tokens::IMAGE_THUMB)
+                                        .object_fit(ObjectFit::Contain),
+                                )
                             })
                             .when(row.listed.missing, |thumb| {
                                 thumb.child(

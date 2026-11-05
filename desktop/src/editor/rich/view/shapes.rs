@@ -1,6 +1,7 @@
 //! What the galley draws for a table or a figure at rest: shaped cells and rules, or the image with its caption. Shaped
 //! with the block, so it costs nothing until a table's text changes.
 
+use crate::tokens;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -19,9 +20,6 @@ use crate::editor::rich::{Atom, AtomKind, Key};
 use crate::source::BlockKind;
 use crate::source::inline::inline_spans;
 
-const CELL_X: Pixels = px(6.);
-const CELL_Y: Pixels = px(4.);
-const CAPTION_GAP: Pixels = px(6.);
 /// The tallest a figure shows, as a share of the column's width.
 const MAX_ASPECT: f32 = 0.75;
 
@@ -138,7 +136,7 @@ impl GridShape {
         rule(self.top, true, window);
         for (index, row) in self.rows.iter().enumerate() {
             for cell in &row.cells {
-                let (x, y) = (origin.x + cell.x + CELL_X, origin.y + row.y + CELL_Y);
+                let (x, y) = (origin.x + cell.x + tokens::CELL_X, origin.y + row.y + tokens::CELL_Y);
                 paint_lines(&cell.layout, x, y, frame, window, cx);
             }
             rule(row.y + row.height, index == 0 || index + 1 == self.rows.len(), window);
@@ -152,13 +150,20 @@ impl FigureShape {
         if let Some(problem) = &self.problem {
             let bounds = Bounds::new(box_origin, self.image);
             window.paint_quad(fill(bounds, frame.rule.opacity(0.25)).corner_radii(px(4.)));
-            paint_lines(problem, box_origin.x + CELL_X, box_origin.y + CELL_Y, frame, window, cx);
+            paint_lines(
+                problem,
+                box_origin.x + tokens::CELL_X,
+                box_origin.y + tokens::CELL_Y,
+                frame,
+                window,
+                cx,
+            );
         }
         if let Some(caption) = &self.caption {
             paint_lines(
                 caption,
                 origin.x,
-                origin.y + self.image.height + CAPTION_GAP,
+                origin.y + self.image.height + tokens::CAPTION_GAP,
                 frame,
                 window,
                 cx,
@@ -250,7 +255,9 @@ impl EditorView {
             .collect();
         let caption = (!grid.caption.text.is_empty())
             .then(|| self.shape_inline(&grid.caption.text, width, false, None, dim, window));
-        let top = caption.as_ref().map_or(px(0.), |caption| caption.height + CAPTION_GAP);
+        let top = caption
+            .as_ref()
+            .map_or(px(0.), |caption| caption.height + tokens::CAPTION_GAP);
         let mut y = top;
         let mut rows = Vec::with_capacity(grid.rows.len());
         for (index, row) in grid.rows.iter().enumerate() {
@@ -263,7 +270,7 @@ impl EditorView {
                     .iter()
                     .copied()
                     .fold(px(0.), |a, b| a + b);
-                let room = (covered - CELL_X * 2.).max(px(16.));
+                let room = (covered - tokens::CELL_X * 2.).max(px(16.));
                 let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, dim, window);
                 let align = grid.aligns.get(column).copied().unwrap_or_default();
                 if matches!(align, Align::Center | Align::Right) {
@@ -278,7 +285,7 @@ impl EditorView {
                         }
                     }
                 }
-                height = height.max(layout.height + CELL_Y * 2.);
+                height = height.max(layout.height + tokens::CELL_Y * 2.);
                 cells.push(GridCell {
                     layout,
                     x: lefts[column.min(grid.columns - 1)],
@@ -325,12 +332,23 @@ impl EditorView {
                 (size(width, px(48.)), Some(message))
             }
         };
-        let problem = problem
-            .map(|message| self.shape_inline(&message, width - CELL_X * 2., false, Some(ChipLook::Error), dim, window));
+        let problem = problem.map(|message| {
+            self.shape_inline(
+                &message,
+                width - tokens::CELL_X * 2.,
+                false,
+                Some(ChipLook::Error),
+                dim,
+                window,
+            )
+        });
         let caption_text = figure.caption(&text);
         let caption =
             (!caption_text.is_empty()).then(|| self.shape_inline(caption_text, width, false, None, dim, window));
-        let height = image.height + caption.as_ref().map_or(px(0.), |caption| caption.height + CAPTION_GAP);
+        let height = image.height
+            + caption
+                .as_ref()
+                .map_or(px(0.), |caption| caption.height + tokens::CAPTION_GAP);
         FigureShape {
             source: atom.clone(),
             file,

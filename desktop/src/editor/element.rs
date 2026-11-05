@@ -179,12 +179,11 @@ impl Element for Galley {
         });
         // The chapter's opening notes stand in the flow, above its first text.
         frame.margin = margin.map(|(mut element, origin)| {
-            let height = window
-                .with_content_mask(Some(ContentMask { bounds }), |window| {
-                    let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
-                    element.prepaint_at(origin, window, cx);
-                    height
-                });
+            let height = window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
+                element.prepaint_at(origin, window, cx);
+                height
+            });
             self.view.update(cx, |view, cx| view.set_note_room(height, cx));
             element
         });

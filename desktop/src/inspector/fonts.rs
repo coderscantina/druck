@@ -56,7 +56,6 @@ struct Adding {
     face: &'static str,
 }
 
-#[allow(dead_code, reason = "mounted by the integrator")]
 pub struct FontsPanel {
     model: Entity<ThemeModel>,
     families: Vec<Family>,
@@ -66,7 +65,6 @@ pub struct FontsPanel {
     error: Option<String>,
 }
 
-#[allow(dead_code, reason = "mounted by the integrator")]
 impl FontsPanel {
     pub fn new(model: Entity<ThemeModel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();

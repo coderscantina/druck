@@ -163,9 +163,18 @@ mod tests {
             first_meaningful_line([note], "Warum 404 die richtige Antwort ist"),
             Some("Stand: Entwurf von Claude, noch nicht überarbeitet.")
         );
-        assert_eq!(first_meaningful_line(["  \n\n  Eine Zeile"], "Titel"), Some("Eine Zeile"));
-        assert_eq!(first_meaningful_line(["Titel", "Der zweite"], "Titel"), Some("Der zweite"));
-        assert_eq!(first_meaningful_line(["Kapitel 1: Titel"], "Titel"), Some("Kapitel 1: Titel"));
+        assert_eq!(
+            first_meaningful_line(["  \n\n  Eine Zeile"], "Titel"),
+            Some("Eine Zeile")
+        );
+        assert_eq!(
+            first_meaningful_line(["Titel", "Der zweite"], "Titel"),
+            Some("Der zweite")
+        );
+        assert_eq!(
+            first_meaningful_line(["Kapitel 1: Titel"], "Titel"),
+            Some("Kapitel 1: Titel")
+        );
         assert_eq!(
             first_meaningful_line(["Mehr über den Titel"], "Titel"),
             Some("Mehr über den Titel"),

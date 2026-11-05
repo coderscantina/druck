@@ -1,6 +1,11 @@
 //! The spike's gate, measured with everything running. Off unless built with the `measure` feature, or as a debug
 //! build, and run with `DRUCK_GATE=1`. Any other value only opens the window
-//! as a measurement does, floating without focus, for screenshots.
+//! as a measurement does, floating without being given focus, for screenshots.
+//!
+//! The window can still become the key window, by a click or when another app lets go of the keys, and real keystrokes
+//! then land in the open book: gpui's window class answers yes to `canBecomeKeyWindow` for every kind and has no option
+//! for it, and overriding it would mean patching gpui. So run this on a copy of a book, do not type or click while it
+//! runs, and send keys by PID.
 //!
 //! Types into the middle of the open document on a timer, through the same input path as the keyboard, while pages
 //! refresh in the background, then prints typing latency, pause to ready pages, how fast Publish opens, theme edit to updated
@@ -392,6 +397,7 @@ impl Gate {
             if found.is_none() {
                 eprintln!("gate: edit {edit} (page {page}) is on no page: {word}");
             }
+            #[cfg(any(debug_assertions, feature = "measure"))]
             self.close_slip(cx);
             self.sleep(Duration::from_millis(40), cx).await;
         }
@@ -399,6 +405,7 @@ impl Gate {
         report("slip edit, last key to ready pages", to_pages);
         eprintln!("gate: slips that did not open: {lost_opens}");
         self.compare(&expected, "after the edits", cx);
+        #[cfg(any(debug_assertions, feature = "measure"))]
         self.moving_paragraph(cx).await;
         self.compare(&expected, "after the page break came away", cx);
         // Autosave runs after a pause.
@@ -477,16 +484,17 @@ impl Gate {
         eprintln!(
             "gate: zooming out made a contact sheet: {contact}; a click on it went back to a spread: {spread_again}"
         );
+        #[cfg(any(debug_assertions, feature = "measure"))]
         self.close_slip(cx);
         self.sleep(Duration::from_millis(100), cx).await;
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     fn close_slip(&self, cx: &mut AsyncApp) {
         let workspace = self.workspace.clone();
         self.window
             .update(cx, |_, window, cx| {
                 workspace.update(cx, |workspace, cx| {
-                    #[cfg(any(debug_assertions, feature = "measure"))]
                     workspace.close_slip_for_gate(window, cx);
                 });
             })
@@ -516,6 +524,7 @@ impl Gate {
     }
 
     /// A page break before a paragraph moves it to another page: the slip goes with it. Taking it away restores the bytes.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     async fn moving_paragraph(&self, cx: &mut AsyncApp) {
         let Some(_) = self.open_slip(40, cx).await else {
             eprintln!("gate: no paragraph to move");
@@ -527,7 +536,6 @@ impl Gate {
             let workspace = gate.workspace.clone();
             gate.window
                 .update(cx, |_, window, cx| {
-                    #[cfg(any(debug_assertions, feature = "measure"))]
                     workspace.update(cx, |workspace, cx| workspace.toggle_page_break_for_gate(window, cx));
                 })
                 .ok();
@@ -553,6 +561,7 @@ impl Gate {
         toggle(self, cx);
         self.sleep(Duration::from_millis(250), cx).await;
         self.settle(cx).await;
+        #[cfg(any(debug_assertions, feature = "measure"))]
         self.close_slip(cx);
     }
 

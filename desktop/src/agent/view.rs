@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Div, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, StyledText, UnderlineStyle,
-    Window, div, px, svg,
+    Window, div, svg,
 };
 
 use super::approval::{Approval, Preview};
@@ -21,9 +21,6 @@ use crate::a11y::Control as _;
 use crate::editor::review::small_button;
 use crate::tokens::{self, Tokens};
 use crate::workspace::Mode;
-
-/// The tallest a diff in an approval grows before it scrolls.
-const DIFF_HEIGHT: gpui::Pixels = px(180.);
 
 impl Render for AgentView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -109,11 +106,8 @@ impl AgentView {
                     .items_center()
                     .cursor_pointer()
                     .hover(|row| row.bg(tokens.raised))
-                    .text_color(if model == self.model {
-                        tokens.accent
-                    } else {
-                        tokens.text
-                    })
+                    .when(model == self.model, |row| row.bg(tokens.raised))
+                    .text_color(tokens.text)
                     .on_click(cx.listener(move |view, _, _, cx| view.choose_model(model, cx)))
                     .child(label)
             })
@@ -284,7 +278,7 @@ impl AgentView {
     fn tool_row(&self, index: usize, tool: &ToolCall, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let (state, color) = match tool.state {
             ToolState::Running | ToolState::Done => ("", tokens.text_faint),
-            ToolState::Waiting => (crate::t!(Key::ToolWaiting), tokens.accent),
+            ToolState::Waiting => (crate::t!(Key::ToolWaiting), tokens.text),
             ToolState::Failed => (crate::t!(Key::ToolFailed), tokens.removed),
             ToolState::Denied => (crate::t!(Key::ToolDenied), tokens.removed),
         };
@@ -437,7 +431,7 @@ impl AgentView {
         div()
             .flex()
             .flex_col()
-            .gap(px(2.))
+            .gap(tokens::HAIR_GAP)
             .child(
                 div()
                     .flex()
@@ -573,9 +567,9 @@ impl AgentView {
             .items_center()
             .gap(tokens::SPACE_1)
             .pl(tokens::SPACE_2)
-            .pr(px(4.))
-            .h(px(22.))
-            .rounded(px(4.))
+            .pr(tokens::SPACE_1)
+            .h(tokens::SMALL_BUTTON_HEIGHT)
+            .rounded(tokens::CHIP_RADIUS)
             .bg(tokens.raised)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_quiet)
@@ -585,12 +579,12 @@ impl AgentView {
                     .id(("chip-remove", kind as usize))
                     .button(tokens, crate::t!(Key::RemoveChip))
                     .flex_none()
-                    .size(px(16.))
+                    .size(tokens::CHIP_CLOSE)
                     .flex()
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .rounded(px(3.))
+                    .rounded(tokens::BOX_RADIUS)
                     .hover(|button| button.bg(tokens.divider))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.removed.insert(kind);
@@ -599,7 +593,7 @@ impl AgentView {
                     .child(
                         svg()
                             .path("icons/close.svg")
-                            .size(px(10.))
+                            .size(tokens::CHIP_CLOSE_ICON)
                             .text_color(tokens.text_faint),
                     ),
             )
@@ -625,7 +619,7 @@ impl AgentView {
             .p(tokens::SPACE_2)
             .rounded(tokens::RADIUS)
             .border_1()
-            .border_color(tokens.accent)
+            .border_color(tokens.divider)
             .bg(tokens.raised)
             .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
             .when(dirty, |card| card.child(quiet(tokens, crate::t!(Key::UnsavedWarning))))
@@ -815,7 +809,7 @@ fn diff_view(lines: &[DiffLine], tokens: &Tokens) -> impl IntoElement + use<> {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(22.))
+                            .w(tokens::AGENT_LINE_NUMBER)
                             .text_color(tokens.text_faint)
                             .child(number.to_string()),
                     )
@@ -827,9 +821,9 @@ fn diff_view(lines: &[DiffLine], tokens: &Tokens) -> impl IntoElement + use<> {
         .collect();
     div()
         .id("agent-diff")
-        .max_h(DIFF_HEIGHT)
+        .max_h(tokens::AGENT_DIFF_HEIGHT)
         .overflow_y_scroll()
-        .py(px(4.))
+        .py(tokens::AGENT_PARAGRAPH_Y)
         .rounded(tokens::RADIUS)
         .bg(tokens.field)
         .font_family(tokens::FONT_MONO)
@@ -845,8 +839,8 @@ fn markdown_block(block: &Block, tokens: &Tokens) -> AnyElement {
         Block::Heading(level, inline) => div()
             .font_weight(FontWeight::SEMIBOLD)
             .text_size(match level {
-                1 => px(15.),
-                2 => px(14.),
+                1 => tokens::AGENT_HEADING_1,
+                2 => tokens::AGENT_HEADING_2,
                 _ => tokens::TEXT_BODY,
             })
             .child(styled(inline, tokens))
@@ -865,14 +859,14 @@ fn markdown_block(block: &Block, tokens: &Tokens) -> AnyElement {
             .child(
                 div()
                     .flex_none()
-                    .min_w(px(14.))
+                    .min_w(tokens::AGENT_LIST_MARK)
                     .text_color(tokens.text_quiet)
                     .child(marker.clone()),
             )
             .child(div().min_w_0().flex_1().child(styled(text, tokens)))
             .into_any_element(),
         Block::Code(code) => mono_block(tokens, code.clone()).into_any_element(),
-        Block::Rule => div().h(px(1.)).bg(tokens.divider).into_any_element(),
+        Block::Rule => div().h(tokens::HAIRLINE).bg(tokens.divider).into_any_element(),
     }
 }
 
@@ -891,10 +885,10 @@ fn styled(inline: &Inline, tokens: &Tokens) -> StyledText {
                 font_weight: flags.strong.then_some(FontWeight::BOLD),
                 font_style: flags.emphasis.then_some(FontStyle::Italic),
                 background_color: flags.code.then(|| Hsla::from(tokens.raised)),
-                color: flags.link.then(|| Hsla::from(tokens.accent)),
+                color: flags.link.then(|| Hsla::from(tokens.link)),
                 underline: flags.link.then(|| UnderlineStyle {
-                    thickness: px(1.),
-                    color: Some(Hsla::from(tokens.accent)),
+                    thickness: tokens::HAIRLINE,
+                    color: Some(Hsla::from(tokens.link)),
                     wavy: false,
                 }),
                 ..Default::default()

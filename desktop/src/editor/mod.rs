@@ -1683,6 +1683,15 @@ impl EditorView {
         }
     }
 
+    /// How much of the pane stands empty right of the text and whatever is in its margin.
+    pub fn room_beside_text(&self) -> Pixels {
+        let column = &self.column;
+        let end = column
+            .note_left
+            .map_or(column.text_left + column.text_width, |left| left + tokens::NOTE_WIDTH);
+        column.viewport.right() - end
+    }
+
     /// The width the text wraps at.
     pub(crate) fn text_width(&self) -> Pixels {
         self.column.text_width
@@ -1847,8 +1856,7 @@ impl EditorView {
     }
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
-        let notes =
-            !self.advice.is_empty() || (!self.source && self.has_later_comment());
+        let notes = !self.advice.is_empty() || (!self.source && self.has_later_comment());
         let column = Column::place(bounds, self.measure(), notes);
         if column.text_width != self.column.text_width {
             for slot in &self.slots {

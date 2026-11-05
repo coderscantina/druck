@@ -223,6 +223,11 @@ pub fn start_repo(folder: &Path, cx: &mut App) {
     cx.set_global(NewProject(folder.to_owned()));
 }
 
+/// A commit's hash as Git shortens it.
+fn short_hash(hash: &str) -> &str {
+    hash.get(..7).unwrap_or(hash)
+}
+
 fn files_with_text(session: &Session) -> Vec<(PathBuf, String)> {
     (session.files().into_iter())
         .filter_map(|path| session.file_text(&path).map(|text| (path, text)))
@@ -719,22 +724,24 @@ impl Versions {
             let new_upstream = view.new_upstream();
             let job = move || {
                 let mut repo = open_repo(&book)?;
-                repo.commit(&message, git.as_deref())
+                let hash = repo
+                    .commit(&message, git.as_deref())
                     .map_err(|problem| describe(&problem))?;
                 if push && let Some(git) = &git {
                     let target = new_upstream
                         .as_ref()
                         .map(|(remote, branch)| (remote.as_str(), branch.as_str()));
                     if let Err(reason) = git.push(&book, target) {
-                        return Ok(Some(crate::t!(Key::PushFailed, reason = reason)));
+                        return Ok((hash, Some(crate::t!(Key::PushFailed, reason = reason))));
                     }
                 }
-                Ok(None)
+                Ok((hash, None))
             };
-            let done: Done<Option<String>> = Box::new(|view, result, window, cx| match result {
-                Ok(problem) => {
+            let done: Done<(String, Option<String>)> = Box::new(|view, result, window, cx| match result {
+                Ok((hash, problem)) => {
                     view.error = problem;
                     view.awaiting_merge = false;
+                    view.show_note(crate::t!(Key::Committed, hash = short_hash(&hash)), window, cx);
                     view.card
                         .update(cx, |card, cx| card.committed(view.error.is_none(), window, cx));
                     view.panel.update(cx, |panel, cx| panel.committed(cx));

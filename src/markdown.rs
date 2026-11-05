@@ -2083,11 +2083,14 @@ impl<'a> Builder<'a> {
         let label = &rest[..end];
         if !label.is_empty() && !label.contains(char::is_whitespace) {
             let at = self.location(offset);
-            let diagnostic = Diagnostic::new(Some(self.source.clone()), format!("footnote [^{label}] has no definition"))
-                .coded(Code::UndefinedFootnote {
-                    label: label.to_owned(),
-                })
-                .at(at.line, at.column);
+            let diagnostic = Diagnostic::new(
+                Some(self.source.clone()),
+                format!("footnote [^{label}] has no definition"),
+            )
+            .coded(Code::UndefinedFootnote {
+                label: label.to_owned(),
+            })
+            .at(at.line, at.column);
             self.diagnostics.push(diagnostic);
         }
     }

@@ -287,7 +287,7 @@ impl EditorView {
             .child(svg().path(icon).size(tokens::ICON_SIZE).text_color(if on {
                 tokens.panel
             } else if state == MarkState::Mixed {
-                tokens.accent
+                tokens.text_quiet
             } else {
                 tokens.text
             }))
@@ -326,7 +326,7 @@ impl EditorView {
                 .w(tokens::TOOLBAR_SEPARATOR)
                 .flex()
                 .justify_center()
-                .child(div().w(px(1.)).h(tokens::SPACE_4).bg(tokens_now.divider)),
+                .child(div().w(tokens::HAIRLINE).h(tokens::SPACE_4).bg(tokens_now.divider)),
         );
         for (target, icon, keys) in BLOCK_BUTTONS {
             let state = if block == Some(target) {
@@ -768,7 +768,7 @@ impl EditorView {
                             .flex_none()
                             .path(icon)
                             .size(tokens::ICON_SIZE)
-                            .text_color(if chosen { tokens.accent } else { tokens.text_faint }),
+                            .text_color(if chosen { tokens.text } else { tokens.text_faint }),
                     )
                     .child(div().flex_1().min_w_0().truncate().child(label))
                     .children(group.map(|group| {

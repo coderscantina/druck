@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use druck::editor::resolved_config::split_front_matter;
 use druck::input::MANIFEST;
@@ -32,7 +32,12 @@ impl Offer {
     pub fn hint(&self) -> String {
         let count = self.chapters.len();
         match &self.moves_front_matter_of {
-            Some(file) => crate::t!(Key::MakeProjectHintMoves, manifest = MANIFEST, count = count, file = file),
+            Some(file) => crate::t!(
+                Key::MakeProjectHintMoves,
+                manifest = MANIFEST,
+                count = count,
+                file = file
+            ),
             None => crate::t!(Key::MakeProjectHint, manifest = MANIFEST, count = count),
         }
     }
@@ -70,7 +75,9 @@ pub fn offer(dir: &Path) -> Option<Offer> {
     let chapters: Vec<String> = if in_manuscript.is_empty() {
         markdown_in(dir)
     } else {
-        (in_manuscript.iter()).map(|name| format!("{MANUSCRIPT}/{name}")).collect()
+        (in_manuscript.iter())
+            .map(|name| format!("{MANUSCRIPT}/{name}"))
+            .collect()
     };
     let first = chapters.first()?.clone();
     let text = fs::read_to_string(dir.join(&first)).ok()?;
@@ -81,10 +88,51 @@ pub fn offer(dir: &Path) -> Option<Offer> {
     })
 }
 
+/// A path `value` written in a file in `from`, as written from the project's folder. A path that is not relative stays.
+fn from_project(value: &str, from: &Path) -> String {
+    if Path::new(value).is_absolute() {
+        return value.to_owned();
+    }
+    let joined = from.join(value);
+    let mut parts: Vec<Component<'_>> = Vec::new();
+    for part in joined.components() {
+        match (part, parts.last()) {
+            (Component::CurDir, _) => {}
+            (Component::ParentDir, Some(Component::Normal(_))) => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    parts.iter().collect::<PathBuf>().to_string_lossy().replace('\\', "/")
+}
+
+/// The front matter with the paths it names written from the project's folder, since it moves there from `from`. A
+/// theme's bare name is no path.
+fn rebased(front_matter: &str, from: &Path, manifest: &Path) -> Result<String, String> {
+    if from.as_os_str().is_empty() || front_matter.is_empty() {
+        return Ok(front_matter.to_owned());
+    }
+    let settings = details::parse(front_matter, manifest)?;
+    let theme = settings.theme.filter(|theme| theme.contains('/'));
+    let mut text = front_matter.to_owned();
+    for (key, value) in [
+        ("bibliography", settings.bibliography),
+        ("cover", settings.cover),
+        ("theme", theme),
+    ] {
+        if let Some(value) = value {
+            let edit = yaml::set(&text, key, &yaml::scalar(&from_project(&value, from)), &[])?;
+            text = details::applied(&text, &edit);
+        }
+    }
+    Ok(text)
+}
+
 /// The manifest for `chapters`, from the first file's front matter as it was written, plus a title if it has none.
 fn manifest_text(front_matter: &str, chapters: &[String], dir: &Path) -> Result<String, String> {
     let with_chapters = {
-        let edit = yaml::set_list(front_matter, CHAPTERS, chapters, &[])?;
+        let edit = yaml::set_list(front_matter, CHAPTERS, chapters, details::ORDER)?;
         details::applied(front_matter, &edit)
     };
     let found = yaml::entries(&with_chapters, 0..with_chapters.len(), 0)?;
@@ -102,7 +150,8 @@ pub fn make_project(dir: &Path, offer: &Offer) -> Result<(), String> {
     let first_path = offer.moves_front_matter_of.as_ref().map(|first| dir.join(first));
     let first_text = match &first_path {
         Some(path) => Some(
-            fs::read_to_string(path).map_err(|error| crate::t!(Key::CannotRead, path = path.display(), error = error))?,
+            fs::read_to_string(path)
+                .map_err(|error| crate::t!(Key::CannotRead, path = path.display(), error = error))?,
         ),
         None => None,
     };
@@ -111,7 +160,12 @@ pub fn make_project(dir: &Path, offer: &Offer) -> Result<(), String> {
         None => None,
     };
     let front_matter = split.as_ref().map_or("", |split| split.yaml);
-    let manifest = manifest_text(front_matter, &offer.chapters, dir)?;
+    let from = offer
+        .moves_front_matter_of
+        .as_deref()
+        .and_then(|first| Path::new(first).parent());
+    let front_matter = rebased(front_matter, from.unwrap_or(Path::new("")), &manifest_path)?;
+    let manifest = manifest_text(&front_matter, &offer.chapters, dir)?;
     details::parse(&manifest, &manifest_path)?;
     let describe = |error: std::io::Error| crate::t!(Key::CannotCreate, path = manifest_path.display(), error = error);
     let mut file = fs::OpenOptions::new()
@@ -171,14 +225,38 @@ mod tests {
         make_project(&folder.0, &offer).expect("made");
         let manifest = fs::read_to_string(folder.0.join(MANIFEST)).expect("written");
         for line in front.lines() {
-            assert!(manifest.lines().any(|kept| kept == line), "{line} stays as written: {manifest}");
+            assert!(
+                manifest.lines().any(|kept| kept == line),
+                "{line} stays as written: {manifest}"
+            );
         }
-        assert!(manifest.contains("  - manuscript/01-a.md\n  - manuscript/02-b.md\n"), "{manifest}");
-        assert_eq!(fs::read_to_string(folder.0.join("manuscript/01-a.md")).expect("kept"), "# A\n\nEins.\n");
-        assert_eq!(fs::read_to_string(folder.0.join("manuscript/02-b.md")).expect("kept"), "# B\n\nZwei.\n");
+        assert!(
+            manifest.contains("  - manuscript/01-a.md\n  - manuscript/02-b.md\n"),
+            "{manifest}"
+        );
+        assert_eq!(
+            fs::read_to_string(folder.0.join("manuscript/01-a.md")).expect("kept"),
+            "# A\n\nEins.\n"
+        );
+        assert_eq!(
+            fs::read_to_string(folder.0.join("manuscript/02-b.md")).expect("kept"),
+            "# B\n\nZwei.\n"
+        );
         let session = Session::open(&folder.0).expect("opens as a project");
         assert_eq!(session.book().len(), 2);
         assert_eq!(session.details().title, "Mein Buch");
+    }
+
+    #[test]
+    fn paths_in_the_front_matter_still_name_their_files_from_the_project() {
+        let folder = Folder::new("paths");
+        let front = "bibliography: ../refs.bib\ncover: images/c.png\ntheme: memoir\n";
+        folder.write("manuscript/01-a.md", &format!("---\n{front}---\n\n# A\n"));
+        make_project(&folder.0, &offer(&folder.0).expect("has Markdown")).expect("made");
+        let manifest = fs::read_to_string(folder.0.join(MANIFEST)).expect("written");
+        assert!(manifest.contains("bibliography: refs.bib\n"), "{manifest}");
+        assert!(manifest.contains("cover: manuscript/images/c.png\n"), "{manifest}");
+        assert!(manifest.contains("theme: memoir\n"), "{manifest}");
     }
 
     #[test]
@@ -206,7 +284,10 @@ mod tests {
         };
         assert!(make_project(&folder.0, &found).is_err());
         assert!(!folder.0.join(MANIFEST).exists());
-        assert_eq!(fs::read_to_string(folder.0.join("manuscript/01-a.md")).expect("kept"), text);
+        assert_eq!(
+            fs::read_to_string(folder.0.join("manuscript/01-a.md")).expect("kept"),
+            text
+        );
     }
 
     #[test]
@@ -216,8 +297,15 @@ mod tests {
         let found = offer(&folder.0).expect("has Markdown");
         folder.write(MANIFEST, "title: Theirs\n");
         assert!(make_project(&folder.0, &found).is_err());
-        assert_eq!(fs::read_to_string(folder.0.join(MANIFEST)).expect("kept"), "title: Theirs\n");
-        assert!(fs::read_to_string(folder.0.join("manuscript/01-a.md")).expect("kept").starts_with("---"));
+        assert_eq!(
+            fs::read_to_string(folder.0.join(MANIFEST)).expect("kept"),
+            "title: Theirs\n"
+        );
+        assert!(
+            fs::read_to_string(folder.0.join("manuscript/01-a.md"))
+                .expect("kept")
+                .starts_with("---")
+        );
     }
 
     #[test]

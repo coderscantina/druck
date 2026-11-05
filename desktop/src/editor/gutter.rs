@@ -11,13 +11,8 @@ use crate::source::inline::SpanKind;
 use crate::source::{BlockKind, Selection};
 use crate::tokens;
 
-const ICON: Pixels = px(14.);
-const COMMENT_ICON: Pixels = px(12.);
 /// How far the pointer must move before a press on an icon is a drag, not a click.
 const DRAG_START: f32 = 4.;
-/// The space between a comment marker and the text.
-const MARKER_INSET: Pixels = px(20.);
-const ICON_INSET: Pixels = px(14.);
 
 /// A press on a block's icon, which a release turns into its menu and a move into a drag.
 #[derive(Clone)]
@@ -59,14 +54,14 @@ impl EditorView {
     /// The comment markers of this frame's blocks. A hidden comment block has no height of its own, so its marker stands
     /// beside the next block that shows. A chapter's notes have none, since they stand in the margin.
     pub(super) fn comment_markers(&mut self, blocks: &[FrameBlock]) -> Vec<CommentMarker> {
-        let x = self.column.text_left - MARKER_INSET;
+        let x = self.column.text_left - tokens::COMMENT_MARKER_INSET;
         let leading = notes::leading_region(self.session.active_buffer().text(), &self.blocks);
         let mut markers = Vec::new();
         let mut waiting: Option<usize> = None;
         let at = |top: Pixels, line_height: Pixels| {
             Bounds::new(
-                point(x, top + (line_height - COMMENT_ICON) * 0.5),
-                size(COMMENT_ICON, COMMENT_ICON),
+                point(x, top + (line_height - tokens::COMMENT_ICON) * 0.5),
+                size(tokens::COMMENT_ICON, tokens::COMMENT_ICON),
             )
         };
         for (block, (index, _)) in blocks.iter().zip(self.visible.clone()) {
@@ -159,7 +154,10 @@ impl EditorView {
         self.grab = Some(BlockGrab {
             block,
             origin: position,
-            anchor: Bounds::new(point(gutter_left + ICON_INSET, top), size(ICON, tokens::SECTION_HEIGHT)),
+            anchor: Bounds::new(
+                point(gutter_left + tokens::GUTTER_ICON_INSET, top),
+                size(tokens::GUTTER_ICON, tokens::SECTION_HEIGHT),
+            ),
             dragging: false,
             before: None,
         });
@@ -250,7 +248,7 @@ impl EditorView {
             })?;
         Some(Bounds::new(
             point(self.column.text_left, y - px(1.)),
-            size(self.column.text_width, px(2.)),
+            size(self.column.text_width, tokens::KEY_BAR),
         ))
     }
 }
@@ -264,13 +262,16 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
     if !frame.gutter_shown {
         return;
     }
-    let x = frame.column.text_left - tokens::GUTTER_WIDTH + ICON_INSET;
+    let x = frame.column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET;
     for block in &frame.blocks {
         let (Some(icon), false) = (block.icon, block.layout.collapsed) else {
             continue;
         };
         let line_height = block.layout.first_line_height();
-        let bounds = Bounds::new(point(x, block.top + (line_height - ICON) * 0.5), size(ICON, ICON));
+        let bounds = Bounds::new(
+            point(x, block.top + (line_height - tokens::GUTTER_ICON) * 0.5),
+            size(tokens::GUTTER_ICON, tokens::GUTTER_ICON),
+        );
         let color: Hsla = if block.hovered {
             frame.ink
         } else {

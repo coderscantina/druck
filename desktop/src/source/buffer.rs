@@ -380,7 +380,6 @@ impl Buffer {
     }
 
     /// The 1-based source line of a byte offset, the numbering engine diagnostics use for a whole file.
-    #[allow(dead_code, reason = "for click sync with the preview in the integration wave")]
     pub fn line_of(&self, offset: usize) -> usize {
         self.text.as_bytes()[..offset]
             .iter()
@@ -390,7 +389,6 @@ impl Buffer {
     }
 
     /// The byte offset where a 1-based source line starts, or the end of the text past the last line.
-    #[allow(dead_code, reason = "for click sync with the preview in the integration wave")]
     pub fn offset_of_line(&self, line: usize) -> usize {
         if line <= 1 {
             return 0;

@@ -15,9 +15,7 @@ use gpui::{
     UTF16Selection, Window, WrappedLine, canvas, div, fill, font, point, px, size, svg,
 };
 
-use super::commands::notes::{
-    Note, comments_in, first_meaningful_line, leading_notes, leading_region, shown_range,
-};
+use super::commands::notes::{Note, comments_in, first_meaningful_line, leading_notes, leading_region, shown_range};
 use super::strings::Key;
 use super::{
     Backspace, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView, Left, LineEnd,
@@ -200,13 +198,20 @@ impl EditorView {
         let mut found = Vec::new();
         for (index, top) in &self.visible {
             let block = &self.blocks.as_slice()[*index];
-            if leading.as_ref().is_some_and(|leading| leading.contains(&block.range.start)) {
+            if leading
+                .as_ref()
+                .is_some_and(|leading| leading.contains(&block.range.start))
+            {
                 continue;
             }
             let slot = &self.slots[*index];
             if block.kind == BlockKind::Comment {
                 if self.comment_is_hidden(*index) {
-                    found.extend(comments_in(text, &block.range).into_iter().map(|comment| (comment, *top)));
+                    found.extend(
+                        comments_in(text, &block.range)
+                            .into_iter()
+                            .map(|comment| (comment, *top)),
+                    );
                 }
                 continue;
             }
@@ -886,7 +891,10 @@ mod tests {
 
     #[test]
     fn notes_stand_beside_their_passages_while_there_is_room() {
-        assert_eq!(flow(&[wanted(40., 60.), wanted(450., 120.)], px(28.)), [px(40.), px(450.)]);
+        assert_eq!(
+            flow(&[wanted(40., 60.), wanted(450., 120.)], px(28.)),
+            [px(40.), px(450.)]
+        );
     }
 
     #[test]

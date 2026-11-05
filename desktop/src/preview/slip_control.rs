@@ -2,13 +2,17 @@
 //! carry its changes over and keep it on its paragraph when something else changes the chapter.
 
 use gpui::{App, Entity, Window};
+use serde_json::json;
 
+use super::directives::{self, edit_between};
 use super::job::BookType;
 use super::proof::BlockAt;
-use super::slip::{self, Directive, ProofSlip};
-use super::directives::{self, edit_between};
+use super::slip::{self, Directive, ProofSlip, StyleChoice};
+use super::strings::Key;
+use crate::editor::rich::styles;
 use crate::session::ChapterId;
-use crate::source::EditKind;
+use crate::source::{Blocks, EditKind};
+use crate::theme_file::editor::{Change, Outcome};
 use crate::tokens;
 use crate::workspace::Parts;
 
@@ -56,7 +60,9 @@ pub fn sync(parts: &Parts, cx: &mut App) {
         return;
     };
     let source = (file, start..start + opened.range.len());
-    parts.preview.update(cx, |preview, cx| preview.set_slip(Some(source), cx));
+    parts
+        .preview
+        .update(cx, |preview, cx| preview.set_slip(Some(source), cx));
 }
 
 /// Keeps the slip on its paragraph when something else changed the chapter. While the field composes this waits: the end
@@ -81,7 +87,9 @@ fn follow_chapter(parts: &Parts, cx: &mut App) -> bool {
         if revision == opened.revision {
             return Some(None);
         }
-        let splice = (revision == opened.revision + 1).then(|| buffer.last_splice()).flatten();
+        let splice = (revision == opened.revision + 1)
+            .then(|| buffer.last_splice())
+            .flatten();
         let text = chapter.text();
         let range = slip::relocated(text, &opened.synced, &opened.range, splice)?;
         Some(Some((directives::read(text, &range), range, revision)))
@@ -154,4 +162,133 @@ fn mark_synced(parts: &Parts, chapter: ChapterId, range: std::ops::Range<usize>,
     let buffer = parts.editor.read(cx).session().buffer(chapter);
     let (state, revision) = (directives::read(buffer.text(), &range), buffer.revision());
     slip_of(parts, cx).update(cx, |slip, cx| slip.synced(range, synced, revision, state, cx));
+}
+
+/// What the paragraph's list of styles offers, from the chapter and the theme as they stand. `None` for a block that takes
+/// no `{.name}`, such as a quotation.
+fn style_choice(parts: &Parts, cx: &App) -> Option<StyleChoice> {
+    let opened = slip_of(parts, cx).read(cx).opened()?.clone();
+    let session = parts.editor.read(cx).session();
+    let text = session.chapter(opened.chapter)?.text();
+    let blocks = Blocks::parse(text);
+    let index = blocks.index_at(opened.range.start);
+    let block = &blocks.as_slice()[index];
+    let class = styles::class_of(block.kind, &text[block.range.clone()])?;
+    let model = parts.inspector.read(cx).model().read(cx);
+    Some(StyleChoice {
+        current: styles::style_of(text, &blocks, index),
+        base: styles::base_style(block.kind),
+        styles: model
+            .file()
+            .map_or_else(|_| Vec::new(), |file| styles::styles_for(class, file.merged())),
+    })
+}
+
+/// Opens or closes the paragraph's list of styles. A block with no list goes straight to its style's section.
+pub fn toggle_styles(parts: &Parts, window: &mut Window, cx: &mut App) {
+    let slip = slip_of(parts, cx);
+    if slip.read(cx).choice().is_some() {
+        slip.update(cx, |slip, cx| slip.set_choice(None, cx));
+        return;
+    }
+    if !follow_chapter(parts, cx) {
+        return;
+    }
+    match style_choice(parts, cx) {
+        Some(choice) => slip.update(cx, |slip, cx| slip.set_choice(Some(choice), cx)),
+        None => {
+            let style = slip.read(cx).opened().and_then(|opened| opened.style.clone());
+            if let Some(style) = style {
+                parts
+                    .inspector
+                    .update(cx, |inspector, cx| inspector.open_style(&style, window, cx));
+            }
+        }
+    }
+}
+
+/// Writes `{.name}` as an ordinary edit of the text, or takes it off, and the slip follows its paragraph.
+pub fn pick_style(parts: &Parts, name: Option<&str>, window: &mut Window, cx: &mut App) {
+    if !follow_chapter(parts, cx) {
+        return;
+    }
+    let slip = slip_of(parts, cx);
+    let Some(opened) = slip.read(cx).opened().cloned() else {
+        return;
+    };
+    let editor = parts.editor.clone();
+    let session = editor.read(cx).session();
+    let text = session.buffer(opened.chapter).text();
+    let blocks = Blocks::parse(text);
+    let index = blocks.index_at(opened.range.start);
+    let style = name
+        .unwrap_or(styles::base_style(blocks.as_slice()[index].kind))
+        .to_owned();
+    let Some(edit) = styles::set_style(text, &blocks, index, name) else {
+        slip.update(cx, |slip, cx| slip.set_choice(None, cx));
+        return;
+    };
+    let range = slip::range_after_style(&opened.range, &edit);
+    let made = editor.update(cx, |editor, cx| {
+        editor.edit_outside(opened.chapter, vec![edit], EditKind::Discrete, window, cx)
+    });
+    if made.is_ok() {
+        let buffer = editor.read(cx).session().buffer(opened.chapter);
+        let written = buffer.text()[range.clone()].to_owned();
+        let (state, revision) = (directives::read(buffer.text(), &range), buffer.revision());
+        slip.update(cx, |slip, cx| slip.styled(style, range, written, revision, state, cx));
+    }
+}
+
+/// Picks or makes the named style that sets the paragraph this way: `body-center`, based on the style it has now. There are
+/// no per-block settings. A second press of the alignment it has takes it back off.
+pub fn pick_alignment(parts: &Parts, align: &'static str, window: &mut Window, cx: &mut App) {
+    let Some(choice) = style_choice(parts, cx) else {
+        return;
+    };
+    let current = choice.current.as_deref();
+    let base = current
+        .map_or(choice.base, |name| styles::unaligned(name).unwrap_or(name))
+        .to_owned();
+    let name = styles::aligned_name(&base, align);
+    if current == Some(name.as_str()) {
+        let back = (base != choice.base).then_some(base.as_str());
+        pick_style(parts, back, window, cx);
+        return;
+    }
+    if choice.styles.contains(&name) {
+        pick_style(parts, Some(&name), window, cx);
+        return;
+    }
+    let slip = slip_of(parts, cx);
+    let model = parts.inspector.read(cx).model().clone();
+    if model.read(cx).file().is_err() {
+        slip.update(cx, |slip, cx| {
+            slip.set_style_problem(Some(crate::t!(Key::SlipNoTheme).to_owned()), cx)
+        });
+        return;
+    }
+    let change = Change::set(&["custom-styles", &name], json!({"based-on": base, "align": align}));
+    match model.update(cx, |model, cx| model.change(change, cx)) {
+        Ok(Outcome::Saved) => pick_style(parts, Some(&name), window, cx),
+        Ok(Outcome::NeedsDecision) => slip.update(cx, |slip, cx| {
+            slip.set_waiting_style(name);
+            slip.set_style_problem(Some(crate::t!(Key::SlipStyleWaits).to_owned()), cx);
+        }),
+        Err(why) => slip.update(cx, |slip, cx| slip.set_style_problem(Some(why), cx)),
+    }
+}
+
+/// The theme changed. A style the question about a common theme held back is there now.
+pub fn theme_changed(parts: &Parts, window: &mut Window, cx: &mut App) {
+    let slip = slip_of(parts, cx);
+    let Some(name) = slip.update(cx, |slip, _| slip.take_waiting_style()) else {
+        return;
+    };
+    let there = style_choice(parts, cx).is_some_and(|choice| choice.styles.contains(&name));
+    if there {
+        pick_style(parts, Some(&name), window, cx);
+    } else {
+        slip.update(cx, |slip, _| slip.set_waiting_style(name));
+    }
 }

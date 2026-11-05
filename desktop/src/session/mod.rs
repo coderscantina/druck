@@ -1046,7 +1046,8 @@ impl Session {
             })
             .find(|(path, _)| !path.exists())
             .expect("some name is free");
-        fs::create_dir_all(&folder).map_err(|error| crate::t!(Key::CannotCreate, path = folder.display(), error = error))?;
+        fs::create_dir_all(&folder)
+            .map_err(|error| crate::t!(Key::CannotCreate, path = folder.display(), error = error))?;
         atomic::write(&path, markdown.as_bytes())
             .map_err(|error| crate::t!(Key::CannotCreate, path = path.display(), error = error))?;
         let before = self.revision();

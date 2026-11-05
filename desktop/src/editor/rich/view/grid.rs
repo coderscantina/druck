@@ -508,11 +508,11 @@ impl EditorView {
                     .id(id)
                     .toggle(&tokens, tip, chosen)
                     .flex_none()
-                    .size(px(22.))
+                    .size(tokens::SMALL_BUTTON_HEIGHT)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(4.))
+                    .rounded(tokens::CHIP_RADIUS)
                     .cursor_pointer()
                     .when(chosen, |button| button.bg(tokens.text))
                     .when(!chosen, |button| button.hover(|button| button.bg(tokens.raised)))
@@ -529,12 +529,11 @@ impl EditorView {
                             cx,
                         );
                     }))
-                    .child(
-                        svg()
-                            .path(icon)
-                            .size(px(14.))
-                            .text_color(if chosen { tokens.panel } else { tokens.text }),
-                    )
+                    .child(svg().path(icon).size(tokens::CHECK_SIZE).text_color(if chosen {
+                        tokens.panel
+                    } else {
+                        tokens.text
+                    }))
             };
         let aligns = div()
             .flex()
@@ -628,7 +627,7 @@ impl EditorView {
                             .when(active, |cell| cell.child(input.clone()))
                             .when(!active, |cell| {
                                 cell.px(tokens::SPACE_2)
-                                    .py(px(6.))
+                                    .py(tokens::GRID_ROW_Y)
                                     .cursor_text()
                                     .text_color(if row_index == 0 { tokens.text } else { tokens.text_quiet })
                                     .when(row_index == 0, |cell| cell.font_weight(gpui::FontWeight::SEMIBOLD))
@@ -647,7 +646,9 @@ impl EditorView {
             .collect();
         let placement_button = |id: &'static str, word: &'static str, value: &'static str, cx: &mut Context<Self>| {
             small_button(&tokens, id, word)
-                .when(placement == value, |button| button.text_color(tokens.accent))
+                .when(placement == value, |button| {
+                    button.bg(tokens.raised).text_color(tokens.text)
+                })
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if let Some(float) = this.grid_float_mut() {
                         float.placement = value.to_owned();
@@ -663,7 +664,7 @@ impl EditorView {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(160.))
+                    .min_w(tokens::GRID_FIELD_MIN)
                     .flex()
                     .flex_col()
                     .gap(tokens::SPACE_1)
@@ -672,7 +673,7 @@ impl EditorView {
             )
             .child(
                 div()
-                    .w(px(120.))
+                    .w(tokens::GRID_LABEL_WIDTH)
                     .flex()
                     .flex_col()
                     .gap(tokens::SPACE_1)
@@ -767,7 +768,7 @@ impl EditorView {
                     .flex_col()
                     .border_1()
                     .border_color(tokens.divider)
-                    .rounded(px(4.))
+                    .rounded(tokens::CHIP_RADIUS)
                     .children(rows),
             )
             .children(refused.map(|why| div().text_size(tokens::TEXT_SMALL).text_color(tokens.accent).child(why)))

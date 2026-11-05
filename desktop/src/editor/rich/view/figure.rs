@@ -33,8 +33,6 @@ impl FigureFloat {
     }
 }
 
-const WIDTH: Pixels = px(360.);
-
 impl EditorView {
     /// The figure at this byte of the active chapter, as it stands now.
     fn figure_at(&self, start: usize) -> Option<(String, Figure)> {
@@ -178,7 +176,9 @@ impl EditorView {
         };
         let segment = |id: &'static str, choice: Placement, word: &'static str, cx: &mut Context<Self>| {
             small_button(&tokens, id, word)
-                .when(placement == choice, |button| button.text_color(tokens.accent))
+                .when(placement == choice, |button| {
+                    button.bg(tokens.raised).text_color(tokens.text)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Float::Rich(RichFloat::Figure(float)) = &mut this.float {
                         float.placement = choice;
@@ -205,7 +205,7 @@ impl EditorView {
         let element = card(&tokens)
             .id("figure-float")
             .key_context(CONTEXT)
-            .w(WIDTH)
+            .w(tokens::FIGURE_CARD_WIDTH)
             .p(tokens::SPACE_2)
             .gap(tokens::SPACE_2)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -258,7 +258,7 @@ impl EditorView {
                 ),
             )
             .into_any_element();
-        let x = self.column.text_left + (self.column.text_width - WIDTH) * 0.5;
+        let x = self.column.text_left + (self.column.text_width - tokens::FIGURE_CARD_WIDTH) * 0.5;
         // Below the image, or over it when that would leave the galley.
         let room = px(area.bottom) - (top + height);
         let y = if room >= px(280.) {

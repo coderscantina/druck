@@ -58,7 +58,7 @@ Markdown text is the truth. Every edit is a change to the text, and syntax marke
 - **Fidelity:** the text uses the selected theme's fonts, sizes, weights, spacing, and heading hierarchy. These limits are deliberate, for the sake of writing: colours follow dark or light, and there is no sheet, justification, hyphenation, or pagination. Lines wrap at the book's measure by default, or at the author's own length.
 - **Behaviours:** live formatting as you type with markers hidden when the cursor leaves them, a slash menu, a toolbar on selection that a setting can turn off, a block gutter that shows only when the pointer enters the left margin, and a per-chapter source view. Selection crosses blocks; text stays continuous.
 - **Rich blocks:** footnotes (popover at the reference, generated labels), citations and references (picker, chips), tables and images (grid editing; assets copy into the project). Directives and index marks use source view.
-- **Comments:** a leading `<!-- -->` shows as a chapter note, inline ones as a marker.
+- **Comments:** a leading `<!-- -->` shows as one line above the chapter's title that unfolds in place, and a later one in the margin beside its passage, cut to six lines.
 - **Focus:** typewriter scrolling and dimming the other paragraphs, both settings. Typing stays under 16 ms median.
 - **Saving:** autosave after typing stops, watch the folder, reload external changes, merge when they do not overlap unsaved edits, ask when they do. `Cmd+S` only writes the pending save at once.
 - **What it reports:** spelling and broken references or citations, in place. Page problems wait for Publish.
@@ -70,7 +70,7 @@ The manuscript's pages, painted natively from the engine's page output, never th
 
 - **Spread and rail:** spreads in the centre, and a right rail with book details, style, fonts, images, and at its foot proof and export.
 - **Whole book:** zooming out past fit becomes a contact sheet of every page. Clicking a page zooms back into its spread. It is one zoom scale, with no extra mode.
-- **Proof slip:** clicking a line opens a small card at its paragraph with the text in the theme's font. Pages reflow on a pause. The slip also offers the directives that exist: a page break before, and keep together. Its foot names the paragraph's style and links to that style's section.
+- **Proof slip:** clicking a line opens a small card at its paragraph with the text in the theme's font. Pages reflow on a pause. The slip also offers the directives that exist: a page break before, and keep together. Its foot names the paragraph's style, which opens a short list of the theme's own style, the custom styles, and alignment as named styles, and a way to that style's section.
 - **Proof:** the rail's proof tab lists the book's diagnostics, the typesetting warnings among them, with a key to walk them. Pages mark the affected lines.
 - **Export:** named exports, from the rail and a button in the title bar.
 

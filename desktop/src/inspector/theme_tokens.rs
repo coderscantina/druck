@@ -287,16 +287,16 @@ impl TokensPanel {
             let renamed = name.to_owned();
             actions = actions
                 .child(
-                    widgets::link(tokens, id("rename"), Key::Rename)
+                    widgets::quiet_link(tokens, id("rename"), Key::Rename)
                         .on_click(cx.listener(move |panel, _, window, cx| panel.start_renaming(&renamed, window, cx))),
                 )
                 .child(
-                    widgets::link(tokens, id("delete"), Key::Delete)
+                    widgets::quiet_link(tokens, id("delete"), Key::Delete)
                         .on_click(cx.listener(move |panel, _, _, cx| panel.delete(&owned, cx))),
                 );
         } else if own {
             actions = actions.child(
-                widgets::link(tokens, id("reset"), Key::Reset)
+                widgets::quiet_link(tokens, id("reset"), Key::Reset)
                     .on_click(cx.listener(move |panel, _, _, cx| panel.delete(&owned, cx))),
             );
         }

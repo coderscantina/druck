@@ -4,9 +4,10 @@
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{Context, Task, Window, div};
+use gpui::{Context, Entity, Task, TextRun, Window, div, font};
 
 use super::text::Key;
+use crate::editor::EditorView;
 use crate::tokens::{self, Tokens};
 
 /// How long after the last key the count comes back.
@@ -15,6 +16,8 @@ const TYPING_PAUSE: Duration = Duration::from_millis(1200);
 const ZOOM_TIME: Duration = Duration::from_millis(1200);
 
 pub struct Footer {
+    /// Says how much room the text leaves at its right.
+    editor: Entity<EditorView>,
     chapter: Option<usize>,
     book: Option<usize>,
     /// Only Write has it.
@@ -26,8 +29,9 @@ pub struct Footer {
 }
 
 impl Footer {
-    pub fn new() -> Self {
+    pub fn new(editor: Entity<EditorView>) -> Self {
         Self {
+            editor,
             chapter: None,
             book: None,
             shown: true,
@@ -83,6 +87,20 @@ impl Footer {
     }
 }
 
+/// Whether the count stands clear of the text, which it would otherwise be drawn over in a narrow window.
+fn fits(count: &str, room: gpui::Pixels, window: &Window, tokens: &Tokens) -> bool {
+    let run = TextRun {
+        len: count.len(),
+        font: font(tokens::FONT_UI),
+        color: tokens.text_faint.into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let shaped = (window.text_system()).shape_line(count.to_owned().into(), tokens::TEXT_SMALL, &[run], None);
+    shaped.width + tokens::SPACE_3 * 2. <= room
+}
+
 /// A number with thousands separated by a thin space.
 fn grouped(number: usize) -> String {
     let digits = number.to_string();
@@ -97,7 +115,7 @@ fn grouped(number: usize) -> String {
 }
 
 impl Render for Footer {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
         let count = match (self.chapter, self.book) {
             (Some(chapter), Some(book)) => {
@@ -108,7 +126,12 @@ impl Render for Footer {
         };
         let text = match self.zoom {
             Some(zoom) => format!("{zoom}\u{202f}%"),
-            None if self.shown && !self.typing => count,
+            None if self.shown
+                && !self.typing
+                && fits(&count, self.editor.read(cx).room_beside_text(), window, tokens) =>
+            {
+                count
+            }
             None => String::new(),
         };
         // Takes only what it needs: a conflict in the same line needs the room for its sentence.

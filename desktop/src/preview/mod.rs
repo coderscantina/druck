@@ -528,11 +528,13 @@ impl PreviewView {
     }
 
     /// The page the slip is on. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn slip_page(&self) -> Option<usize> {
         self.slip_anchor().map(|mark| mark.page)
     }
 
-    /// Whether the slip's paragraph starts within the view.
+    /// Whether the slip's paragraph starts within the view. For scripted runs.
+    #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn slip_in_view(&self) -> bool {
         let Some(mark) = self.slip_anchor() else {
             return false;
@@ -969,7 +971,10 @@ impl PreviewView {
                 (false, false) => tokens::MARK_TINT,
             };
             let shown = !warning || warnings_shown;
-            marks.iter().filter(move |_| shown).map(move |mark| (mark, tint, warning))
+            marks
+                .iter()
+                .filter(move |_| shown)
+                .map(move |mark| (mark, tint, warning))
         });
         let slip = self.slip_marks.iter().map(|mark| (mark, tokens::MARK_TINT, false));
         problems
@@ -990,7 +995,10 @@ impl PreviewView {
         let room = f32::from(tokens::SPACE_2);
         let x = left.clamp(room, (self.view.0 - width - room).max(room));
         let y = bottom + (tokens::MARK_PADDING + tokens::MARK_PADDING) * zoom;
-        Some(point(px(self.origin.0 + x), px(self.origin.1 + y).max(tokens::TITLEBAR_HEIGHT)))
+        Some(point(
+            px(self.origin.0 + x),
+            px(self.origin.1 + y).max(tokens::TITLEBAR_HEIGHT),
+        ))
     }
 
     /// The status line's zoom: smaller, the value, larger, and fit.
@@ -1017,7 +1025,7 @@ impl PreviewView {
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(2.))
+            .gap(tokens::HAIR_GAP)
             .child(
                 button("zoom-out", "\u{2212}".into(), crate::t!(Key::ZoomOut), false)
                     .on_click(cx.listener(|view, _, _, cx| view.zoom_step(-1, cx))),

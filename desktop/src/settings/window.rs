@@ -327,7 +327,8 @@ impl SettingsWindow {
             .h(tokens::SWITCH_HEIGHT)
             .rounded(tokens::SWITCH_RADIUS)
             .cursor_pointer()
-            .bg(if on { tokens.accent } else { tokens.raised })
+            .when(on, |switch| switch.bg(tokens.switch_on))
+            .when(!on, |switch| switch.border_1().border_color(tokens.divider))
             .on_click(cx.listener(move |_, _, _, cx| change(cx, |settings| set(settings, !on))))
             .child(
                 div()
@@ -337,7 +338,7 @@ impl SettingsWindow {
                     .when(!on, |knob| knob.left(inset))
                     .size(tokens::SWITCH_KNOB)
                     .rounded(tokens::SWITCH_KNOB_RADIUS)
-                    .bg(gpui::white()),
+                    .bg(if on { tokens.switch_knob } else { tokens.text_faint }),
             )
     }
 

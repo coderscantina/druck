@@ -98,6 +98,13 @@ pub fn build(version: &str, current: &str) -> Shown {
     }
 }
 
+/// Where a comment's `<!--` and `-->` stand in `text`.
+fn comment_markup(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    ["<!--", "-->"]
+        .into_iter()
+        .flat_map(move |marker| text.match_indices(marker).map(|(at, found)| at..at + found.len()))
+}
+
 /// One block's text with its markers taken out. A comment or front matter nobody changed stays hidden, as in the text.
 fn shown_block(kind: BlockKind, range: Range<usize>, merged: &str, stretches: &[Stretch]) -> Option<ShownBlock> {
     let inside: Vec<&Stretch> = (stretches.iter())
@@ -112,9 +119,27 @@ fn shown_block(kind: BlockKind, range: Range<usize>, merged: &str, stretches: &[
         .into_iter()
         .map(|marker| marker.range)
         .collect();
+    if kind == BlockKind::Comment {
+        hidden.extend(comment_markup(source));
+    }
     let mut bold = Vec::new();
     let mut italic = Vec::new();
     for span in &spans {
+        if span.kind == SpanKind::Comment {
+            // Unchanged, it takes no room, as in the text. Changed, its words show and its markers do not.
+            let stretch_in_it = inside.iter().any(|stretch| {
+                stretch.range.start < range.start + span.range.end && range.start + span.range.start < stretch.range.end
+            });
+            if stretch_in_it {
+                hidden.extend(
+                    comment_markup(&source[span.range.clone()])
+                        .map(|marker| span.range.start + marker.start..span.range.start + marker.end),
+                );
+            } else {
+                hidden.push(span.range.clone());
+            }
+            continue;
+        }
         match span.kind {
             SpanKind::Strong => bold.push(span.range.clone()),
             SpanKind::Emphasis => italic.push(span.range.clone()),
@@ -174,6 +199,21 @@ mod tests {
             .filter(|run| run.tint == Some(tint))
             .map(|run| &block.text[run.range.clone()])
             .collect()
+    }
+
+    #[test]
+    fn comment_markup_stays_out_of_a_version() {
+        let shown = build(
+            "<!-- old note -->\n\nText <!-- aside --> here.\n",
+            "<!-- new note -->\n\nText <!-- aside --> here.\n",
+        );
+        let texts: Vec<&str> = shown.blocks.iter().map(|block| block.text.as_str()).collect();
+        assert!(
+            texts.iter().all(|text| !text.contains("<!--") && !text.contains("-->")),
+            "{texts:?}"
+        );
+        assert!(texts[0].contains("note"), "what changed in it still shows: {texts:?}");
+        assert_eq!(texts[1], "Text  here.");
     }
 
     #[test]

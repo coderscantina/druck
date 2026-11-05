@@ -30,23 +30,24 @@ pub enum Mark {
 }
 
 /// The dot of a mark, with its slot at the end of a row.
-pub(crate) fn mark_dot(tokens: &Tokens, mark: Option<Mark>) -> gpui::Div {
+pub(crate) fn mark_dot(tokens: &Tokens, mark: Option<Mark>) -> Option<gpui::Div> {
     let slot = div()
         .flex_none()
         .w(tokens::LIST_DOT_WIDTH)
         .flex()
         .items_center()
         .justify_center();
-    match mark {
-        Some(Mark::Problem) => slot.child(div().size(tokens::DOT_SIZE).rounded_full().bg(tokens.accent)),
-        Some(Mark::Placeholder) => slot.child(
-            div()
-                .size(tokens::DOT_SIZE)
-                .rounded_full()
-                .border_1()
-                .border_color(tokens.text_faint),
+    match mark? {
+        Mark::Problem => Some(slot.child(div().size(tokens::DOT_SIZE).rounded_full().bg(tokens.accent))),
+        Mark::Placeholder => Some(
+            slot.child(
+                div()
+                    .size(tokens::DOT_SIZE)
+                    .rounded_full()
+                    .border_1()
+                    .border_color(tokens.text_faint),
+            ),
         ),
-        None => slot,
     }
 }
 
@@ -287,8 +288,8 @@ impl SidebarView {
             .child(text)
     }
 
-    /// The slot at the end of a row.
-    fn dot(&self, tokens: &Tokens, id: ChapterId) -> gpui::Div {
+    /// The slot at the end of a row, which only a row with a dot has.
+    fn dot(&self, tokens: &Tokens, id: ChapterId) -> Option<gpui::Div> {
         mark_dot(tokens, self.marks.get(&id).copied())
     }
 
@@ -315,8 +316,6 @@ impl SidebarView {
             .pr(tokens::SPACE_1)
             .flex()
             .items_center()
-            .border_b_1()
-            .border_color(tokens.divider)
             .when(selected, |row| row.bg(tokens.raised))
             .relative()
             .when(keyed, |row| {
@@ -326,7 +325,7 @@ impl SidebarView {
                         .left_0()
                         .top_0()
                         .h_full()
-                        .w(gpui::px(2.))
+                        .w(tokens::KEY_BAR)
                         .bg(tokens.accent),
                 )
             })
@@ -348,8 +347,12 @@ impl SidebarView {
         let accent = tokens.accent;
         let edit = div()
             .id(ElementId::from(("edit", id.number())))
-            .flex_none()
+            .absolute()
+            .top_0()
+            .right_0()
+            .h_full()
             .w(tokens::LIST_DOT_WIDTH)
+            .bg(tokens.raised)
             .invisible()
             .group_hover("row", |button| button.visible())
             .flex()
@@ -376,12 +379,12 @@ impl SidebarView {
             .on_drop(cx.listener(move |_, dragged: &DraggedRow, _, cx| {
                 cx.emit(SidebarEvent::Move(dragged.id, place));
             }))
+            .children(self.dot(tokens, id))
             .child(edit)
-            .child(self.dot(tokens, id))
     }
 
     fn file_row(&self, row: &Row, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        self.row(row, true, tokens, cx).child(self.dot(tokens, row.id))
+        self.row(row, true, tokens, cx).children(self.dot(tokens, row.id))
     }
 
     /// A file not in the book, with its one action.
@@ -406,7 +409,9 @@ impl SidebarView {
                     .size(tokens::ICON_SIZE)
                     .text_color(tokens.text_quiet),
             );
-        self.row(row, true, tokens, cx).child(add).child(self.dot(tokens, id))
+        self.row(row, true, tokens, cx)
+            .child(add)
+            .children(self.dot(tokens, id))
     }
 
     fn fold_label(

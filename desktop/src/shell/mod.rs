@@ -15,11 +15,11 @@
 
 pub mod commands;
 pub mod diagnostics;
+pub mod engine_text;
 pub mod export;
 pub mod export_panel;
 pub mod facts;
 pub mod find_bar;
-pub mod engine_text;
 pub mod footer;
 pub mod manifest;
 pub mod menus;
@@ -414,7 +414,7 @@ impl Hub {
         let export = cx.new(|cx| ExportPanel::new(window, cx));
         let search = cx.new(|cx| SearchPanel::new(window, cx));
         let find = cx.new(|cx| FindBar::new(window, cx));
-        let footer = cx.new(|_| Footer::new());
+        let footer = cx.new(|_| Footer::new(parts.editor.clone()));
         parts.inspector.update(cx, |inspector, _| {
             inspector.mount(Tab::Proof, diagnostics.clone().into());
             inspector.mount(Tab::Export, export.clone().into());
@@ -868,9 +868,21 @@ impl Hub {
                 RunState::Failed
             }
         };
+        let finished = matches!(state, RunState::Done { .. });
         self.export.update(cx, |panel, cx| panel.set_run(state, cx));
         self.refresh_report(cx);
         self.refresh_export(window, cx);
+        // The run button that had the keys is gone. An author who went on to the text keeps them there.
+        let in_the_text = self.parts.editor.read(cx).focus_handle(cx).contains_focused(window, cx)
+            || self
+                .parts
+                .preview
+                .read(cx)
+                .focus_handle(cx)
+                .contains_focused(window, cx);
+        if finished && !in_the_text {
+            self.export.update(cx, |panel, cx| panel.focus_result(window, cx));
+        }
     }
 
     // Search across the project

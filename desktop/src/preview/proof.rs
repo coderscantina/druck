@@ -375,7 +375,11 @@ mod tests {
         assert_eq!(marks.of_problem[0][0].page, 0);
         assert_eq!(marks.of_problem[1][0].page, 1);
         assert!(marks.of_problem[2].is_empty());
-        assert_eq!(marks.pages, HashSet::from([0]), "a warning puts no dot on a contact sheet");
+        assert_eq!(
+            marks.pages,
+            HashSet::from([0]),
+            "a warning puts no dot on a contact sheet"
+        );
     }
 
     #[test]

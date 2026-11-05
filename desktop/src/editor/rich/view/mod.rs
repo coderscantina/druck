@@ -109,12 +109,12 @@ pub(super) fn small_button(
         .id(id)
         .button(tokens, label.clone())
         .flex_none()
-        .h(px(22.))
+        .h(tokens::SMALL_BUTTON_HEIGHT)
         .px(tokens::SPACE_2)
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.))
+        .rounded(tokens::CHIP_RADIUS)
         .border_1()
         .border_color(tokens.divider)
         .text_size(tokens::TEXT_SMALL)
@@ -628,7 +628,7 @@ impl EditorView {
         let bounds = self.caret_rect(target, window)?;
         let wanted = match &self.float {
             Float::Rich(RichFloat::Note(note)) => size(note::WIDTH, note.height(cx)),
-            Float::Rich(RichFloat::Picker(_)) => size(picker::WIDTH, px(460.)),
+            Float::Rich(RichFloat::Picker(_)) => size(picker::WIDTH, tokens::PICKER_CARD_HEIGHT),
             _ => size(tokens::LINK_POPUP_WIDTH, px(90.)),
         };
         let float = std::mem::take(&mut self.float);

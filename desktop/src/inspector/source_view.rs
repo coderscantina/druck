@@ -19,6 +19,8 @@ use crate::tokens::{self as chrome, Tokens};
 const PAUSE: Duration = Duration::from_millis(400);
 /// The longest default shown for reference, in lines.
 const DEFAULT_LINES: usize = 60;
+/// What an empty section's field shows, since a section with nothing set of its own is an empty object.
+const JSON_PLACEHOLDER: &str = "{}";
 
 pub struct SourceView {
     model: Entity<ThemeModel>,
@@ -33,7 +35,11 @@ pub struct SourceView {
 
 impl SourceView {
     pub fn new(model: Entity<ThemeModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| TextInput::multiline(window, cx));
+        let input = cx.new(|cx| {
+            TextInput::multiline(window, cx)
+                .with_placeholder(JSON_PLACEHOLDER)
+                .with_label(crate::t!(Key::JsonOwn))
+        });
         let subscriptions = vec![
             cx.observe_in(&model, window, |view, _, window, cx| view.show_section(window, cx)),
             cx.subscribe_in(&input, window, |view, _, _: &Edited, window, cx| {
@@ -173,6 +179,12 @@ impl SourceView {
             .flex()
             .flex_col()
             .gap(chrome::SPACE_2)
+            .child(
+                div()
+                    .text_size(chrome::TEXT_SMALL)
+                    .text_color(tokens.text_quiet)
+                    .child(crate::t!(Key::JsonOwn)),
+            )
             .child(self.input.clone())
             .child(match message {
                 Some(message) => widgets::error_line(tokens, message),
@@ -186,7 +198,6 @@ impl SourceView {
                             .font_family(chrome::FONT_MONO)
                             .text_size(chrome::TEXT_SMALL)
                             .text_color(tokens.text_faint)
-                            .whitespace_nowrap()
                             .child(SharedString::from(text)),
                     )
             })

@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{AnyView, Context, Entity, EventEmitter, Role, Subscription, Window, div, px, svg};
+use gpui::{AnyView, Context, Entity, EventEmitter, Role, Subscription, Window, div, svg};
 
 use fonts::FontsPanel;
 pub use fork_prompt::ForkPrompt;
@@ -263,8 +263,8 @@ impl InspectorView {
                 button.child(
                     div()
                         .absolute()
-                        .top(px(10.))
-                        .right(px(10.))
+                        .top(tokens::RAIL_DOT_INSET)
+                        .right(tokens::RAIL_DOT_INSET)
                         .size(tokens::DOT_SIZE)
                         .rounded_full()
                         .bg(tokens.accent),

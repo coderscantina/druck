@@ -469,7 +469,7 @@ impl StylesPanel {
                         crate::t!(Key::MissingStyleBlock, value = &selected.title()),
                     ))
                     .child(
-                        widgets::link(tokens, "show-specimen", Key::ShowSpecimen).on_click(cx.listener(
+                        widgets::quiet_link(tokens, "show-specimen", Key::ShowSpecimen).on_click(cx.listener(
                             |panel, _, _, cx| {
                                 panel.model.update(cx, |model, cx| model.request_specimen(cx));
                             },
@@ -529,10 +529,10 @@ impl StylesPanel {
                             .flex()
                             .gap(chrome::SPACE_3)
                             .child(
-                                widgets::link(tokens, "custom-rename", Key::Rename)
+                                widgets::quiet_link(tokens, "custom-rename", Key::Rename)
                                     .on_click(cx.listener(|panel, _, window, cx| panel.start_renaming(window, cx))),
                             )
-                            .child(widgets::link(tokens, "custom-delete", Key::Delete).on_click(
+                            .child(widgets::quiet_link(tokens, "custom-delete", Key::Delete).on_click(
                                 cx.listener(move |panel, _, window, cx| panel.delete_style(&owned, window, cx)),
                             )),
                     )
@@ -569,7 +569,7 @@ impl StylesPanel {
         if let Control::Reference(_) = property.control {
             let key = key.clone();
             end = end.child(
-                widgets::link(tokens, id("pick"), if open { "▴ $" } else { "▾ $" }).on_click(cx.listener(
+                widgets::quiet_link(tokens, id("pick"), if open { "▴ $" } else { "▾ $" }).on_click(cx.listener(
                     move |panel, _, _, cx| {
                         panel.open = if panel.open.as_deref() == Some(&key) {
                             None
@@ -583,7 +583,7 @@ impl StylesPanel {
         }
         if data.customized {
             end = end.child(
-                widgets::link(tokens, id("reset"), Key::Reset)
+                widgets::quiet_link(tokens, id("reset"), Key::Reset)
                     .on_click(cx.listener(move |panel, _, _, cx| panel.apply(property, None, cx))),
             );
         }

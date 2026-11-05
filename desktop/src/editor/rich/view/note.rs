@@ -34,7 +34,7 @@ pub struct NoteFloat {
     refused: Option<String>,
 }
 
-pub const WIDTH: gpui::Pixels = gpui::px(400.);
+pub const WIDTH: gpui::Pixels = tokens::NOTE_CARD_WIDTH;
 
 impl NoteFloat {
     /// About how tall the card comes out, to place it.

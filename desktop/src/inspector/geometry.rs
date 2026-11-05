@@ -92,7 +92,6 @@ pub struct GeometryPanel {
 }
 
 impl GeometryPanel {
-    #[allow(dead_code, reason = "mounted by the integrator")]
     pub fn new(model: Entity<ThemeModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut subscriptions = vec![cx.observe_in(&model, window, |panel, _, window, cx| panel.sync(window, cx))];
         let mut inputs = Vec::new();
@@ -182,7 +181,7 @@ impl GeometryPanel {
 
     fn reset(&self, key: &str, path: Vec<String>, tokens: &Tokens, cx: &mut Context<Self>) -> Stateful<Div> {
         let owned = key.to_owned();
-        widgets::link(tokens, SharedString::from(format!("reset-{key}")), Key::Reset)
+        widgets::quiet_link(tokens, SharedString::from(format!("reset-{key}")), Key::Reset)
             .on_click(cx.listener(move |panel, _, _, cx| panel.apply(owned.clone(), Change::Remove(path.clone()), cx)))
     }
 
@@ -281,7 +280,7 @@ impl GeometryPanel {
             .gap(chrome::SPACE_2)
             .when_some(shown.note.clone(), |end, note| end.child(widgets::note(tokens, note)))
             .child(
-                widgets::link(tokens, id("pick"), if open { "▴ $" } else { "▾ $" }).on_click(cx.listener(
+                widgets::quiet_link(tokens, id("pick"), if open { "▴ $" } else { "▾ $" }).on_click(cx.listener(
                     move |panel, _, _, cx| {
                         panel.open = if panel.open == Some(field) { None } else { Some(field) };
                         cx.notify();

@@ -490,12 +490,12 @@ impl Timeline {
                     run.range.start + shift..run.range.end + shift,
                     HighlightStyle {
                         background_color: tint.map(|tint| tint.opacity(tokens::DIFF_TINT)),
-                        strikethrough: (run.tint == Some(Tint::Removed)).then(|| StrikethroughStyle {
-                            thickness: px(1.),
+                        strikethrough: (run.tint == Some(Tint::Removed)).then_some(StrikethroughStyle {
+                            thickness: tokens::HAIRLINE,
                             color: None,
                         }),
                         underline: selected.then(|| UnderlineStyle {
-                            thickness: px(1.),
+                            thickness: tokens::HAIRLINE,
                             color: Some(tokens.accent.into()),
                             wavy: false,
                         }),
@@ -795,6 +795,12 @@ impl Render for Timeline {
                                 cx.listener(|timeline, _: &gpui::MouseUpEvent, _, _| timeline.dragging = false),
                             )
                             .child(self.strip(&tokens)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(tokens.text_faint)
+                            .child(crate::t!(Key::TimelineKeys)),
                     )
                     .child(div().flex_none().child(sync)),
             )

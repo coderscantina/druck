@@ -250,7 +250,8 @@ impl Session {
         edit: impl Fn(&str) -> Result<Option<Edit>, String>,
         check: impl Fn(&FrontMatter) -> bool,
     ) -> Result<(), String> {
-        let text = fs::read_to_string(manifest).map_err(|error| crate::t!(Key::CannotReadManifest, manifest = MANIFEST, error = error))?;
+        let text = fs::read_to_string(manifest)
+            .map_err(|error| crate::t!(Key::CannotReadManifest, manifest = MANIFEST, error = error))?;
         let Some(change) = edit(&text)? else {
             return Ok(());
         };

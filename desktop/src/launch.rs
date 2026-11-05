@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
-use gpui::{Context, EventEmitter, FontWeight, SharedString, Window, div, svg};
+use gpui::{Context, EventEmitter, FocusHandle, FontWeight, SharedString, Window, div, svg};
 
 use crate::a11y::Control as _;
 use crate::session::adopt::{self, Offer};
@@ -27,16 +27,25 @@ pub struct LaunchView {
     error: Option<SharedString>,
     /// A folder of Markdown that failed for having no manifest, and what making it a project would do.
     offer: Option<(PathBuf, Offer)>,
+    /// With nothing focused Tab has nowhere to start from, so the card holds the keys.
+    focus: FocusHandle,
 }
 
 impl LaunchView {
     /// `error` says why what was asked for failed to open, and what that was.
-    pub fn new(error: Option<(String, PathBuf)>) -> Self {
+    pub fn new(error: Option<(String, PathBuf)>, cx: &mut Context<Self>) -> Self {
         let (error, asked) = error.unzip();
         Self {
             error: error.map(SharedString::from),
             offer: asked.as_deref().and_then(offer_for),
+            focus: cx.focus_handle(),
         }
+    }
+
+    /// Gives the keys to the card, as the window shows it.
+    pub fn take_focus(view: &gpui::Entity<Self>, window: &mut Window, cx: &mut gpui::App) {
+        let focus = view.read(cx).focus.clone();
+        window.focus(&focus, cx);
     }
 
     /// Says why `asked` did not open, or with `None`, that nothing is wrong.
@@ -70,7 +79,7 @@ impl LaunchView {
                     .flex_none()
                     .path(icon)
                     .size(tokens::ICON_SIZE)
-                    .text_color(tokens.accent),
+                    .text_color(tokens.text_quiet),
             )
             .child(
                 div().flex_1().min_w_0().child(name).child(
@@ -115,6 +124,7 @@ impl Render for LaunchView {
             .items_center()
             .justify_center()
             .key_context("Workspace")
+            .track_focus(&self.focus)
             .on_action(|_: &crate::workspace::FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &crate::workspace::FocusPrevious, window, cx| window.focus_prev(cx))
             .bg(tokens.canvas)

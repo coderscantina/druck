@@ -18,5 +18,16 @@ crate::strings! {
         SlipPageBreak => ("Page break before", "Seitenumbruch davor"),
         SlipKeep => ("Keep together", "Zusammenhalten"),
         SlipEscape => ("Esc closes", "Esc schließt"),
+        SlipStyles => ("Styles of this paragraph", "Stile dieses Absatzes"),
+        SlipAlignLeft => ("Left", "Links"),
+        SlipAlignCenter => ("Center", "Mitte"),
+        SlipAlignRight => ("Right", "Rechts"),
+        SlipAlignJustify => ("Justify", "Block"),
+        SlipShowStyle => ("Edit this style", "Stil bearbeiten"),
+        SlipStyleWaits => (
+            "Choose where the theme is changed, and the style follows.",
+            "Wähle, wo das Thema geändert wird, dann folgt der Stil."
+        ),
+        SlipNoTheme => ("A style needs a theme file to live in.", "Ein Stil braucht eine Themendatei."),
     }
 }

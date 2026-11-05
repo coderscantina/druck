@@ -2,7 +2,7 @@
 //! click or the walking keys go to a problem's place on the pages, and Write opens there next.
 
 use gpui::prelude::*;
-use gpui::{Context, EventEmitter, FontWeight, ScrollHandle, SharedString, Window, div, px};
+use gpui::{Context, EventEmitter, FontWeight, ScrollHandle, SharedString, Window, div};
 
 use super::report::{Entry, Kind, Report};
 use super::text::Key;
@@ -28,10 +28,6 @@ enum Item {
     /// An entry, with its place among the entries.
     Entry(usize, Entry),
 }
-
-/// The height of a heading and of an entry.
-const HEADING_HEIGHT: gpui::Pixels = px(28.);
-const ENTRY_HEIGHT: gpui::Pixels = px(62.);
 
 pub struct DiagnosticsPanel {
     items: Vec<Item>,
@@ -88,7 +84,7 @@ impl DiagnosticsPanel {
     fn row(&self, at: usize, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::AnyElement {
         match &self.items[at] {
             Item::Heading { title, count } => div()
-                .h(HEADING_HEIGHT)
+                .h(tokens::PROOF_HEADING_HEIGHT)
                 .px(tokens::SPACE_3)
                 .flex()
                 .items_center()
@@ -117,7 +113,7 @@ impl DiagnosticsPanel {
                 div()
                     .id(("entry", at))
                     .button(tokens, format!("{label}: {}", entry.message))
-                    .h(ENTRY_HEIGHT)
+                    .h(tokens::PROOF_ENTRY_HEIGHT)
                     .px(tokens::SPACE_3)
                     .py(tokens::SPACE_1)
                     .flex()
@@ -128,7 +124,7 @@ impl DiagnosticsPanel {
                             .hover(|row| row.bg(tokens.raised))
                             .on_click(cx.listener(move |_, _, _, cx| cx.emit(DiagnosticsEvent::Select(number))))
                     })
-                    .child(div().pt(px(5.)).child(ui::dot(tokens, entry.kind)))
+                    .child(div().pt(tokens::PROOF_DOT_TOP).child(ui::dot(tokens, entry.kind)))
                     .child(
                         div()
                             .flex_1()

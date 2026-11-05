@@ -6,7 +6,7 @@ use std::ops::Range;
 use druck::editor::syntax::Form;
 use gpui::Focusable;
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Entity, MouseDownEvent, ScrollHandle, SharedString, Subscription, Window, div, px};
+use gpui::{AnyElement, Context, Entity, MouseDownEvent, ScrollHandle, SharedString, Subscription, Window, div};
 
 use super::{CONTEXT, NextField, PreviousField, RichFloat, card, field_label, small_button};
 use crate::editor::EditorView;
@@ -49,9 +49,8 @@ pub struct PickerFloat {
     _subscriptions: Vec<Subscription>,
 }
 
-pub const WIDTH: gpui::Pixels = px(400.);
+pub const WIDTH: gpui::Pixels = tokens::PICKER_CARD_WIDTH;
 const ROWS: usize = 8;
-const ROW_HEIGHT: gpui::Pixels = px(40.);
 
 impl PickerFloat {
     pub fn anchor(&self) -> usize {
@@ -493,7 +492,7 @@ impl EditorView {
                     .id(("picker-row", index))
                     .role(gpui::Role::MenuItem)
                     .flex_none()
-                    .h(ROW_HEIGHT)
+                    .h(tokens::PICKER_ROW_HEIGHT)
                     .px(tokens::SPACE_2)
                     .flex()
                     .flex_col()
@@ -558,11 +557,11 @@ impl EditorView {
             }))
             .child(
                 div()
-                    .size(px(12.))
-                    .rounded(px(3.))
+                    .size(tokens::CHECK_SMALL)
+                    .rounded(tokens::BOX_RADIUS)
                     .border_1()
                     .border_color(tokens.divider)
-                    .when(option, |check| check.bg(tokens.accent)),
+                    .when(option, |check| check.bg(tokens.text_quiet)),
             )
             .child(option_label);
         card(&tokens)
@@ -606,7 +605,7 @@ impl EditorView {
                     .id("picker-rows")
                     .flex()
                     .flex_col()
-                    .h(ROW_HEIGHT * shown_rows)
+                    .h(tokens::PICKER_ROW_HEIGHT * shown_rows)
                     .overflow_y_scroll()
                     .track_scroll(&picker.scroll)
                     .children(list)
@@ -647,7 +646,7 @@ impl EditorView {
             let chosen = index == item && !adding;
             row = row.child(
                 small_button(tokens, ("picker-work", index), work.key.clone())
-                    .when(chosen, |button| button.text_color(tokens.accent))
+                    .when(chosen, |button| button.bg(tokens.raised).text_color(tokens.text))
                     .on_click(cx.listener(move |this, _, _, cx| this.picker_set_item(index, false, cx))),
             );
         }
@@ -659,7 +658,7 @@ impl EditorView {
         }
         row = row.child(
             small_button(tokens, "picker-add-work", crate::t!(Key::AddWork))
-                .when(adding, |button| button.text_color(tokens.accent))
+                .when(adding, |button| button.bg(tokens.raised).text_color(tokens.text))
                 .on_click(cx.listener(|this, _, _, cx| this.picker_set_item(0, true, cx))),
         );
         Some(row)

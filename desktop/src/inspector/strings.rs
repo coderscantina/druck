@@ -211,6 +211,7 @@ crate::strings! {
         Decimal => (".", ","),
 
         // JSON view
+        JsonOwn => ("What this theme sets itself", "Was dieses Thema selbst setzt"),
         JsonValid => ("Valid. Changes apply as you type.", "Gültig. Änderungen gelten sofort."),
         JsonInvalid => ("Not applied: {value}", "Nicht übernommen: {value}"),
 

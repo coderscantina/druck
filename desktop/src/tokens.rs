@@ -148,6 +148,9 @@ pub const WARNING_MARK: u32 = 0x8a8a8a;
 pub const SLIP_WIDTH: Pixels = px(380.);
 pub const SLIP_TEXT: Pixels = px(14.);
 pub const SLIP_TEXT_MAX_HEIGHT: Pixels = px(260.);
+/// The slip's text while its list of styles is open, so the card stays small.
+pub const SLIP_TEXT_SHORT_HEIGHT: Pixels = px(60.);
+pub const SLIP_STYLES_MAX_HEIGHT: Pixels = px(168.);
 /// The status line's zoom buttons.
 pub const ZOOM_BUTTON: Pixels = px(20.);
 /// The commit card and the rows and buttons the versions views share.
@@ -164,6 +167,70 @@ pub const STRIP_TICK_HEIGHT: Pixels = px(7.);
 pub const STRIP_POSITION_HEIGHT: Pixels = px(27.);
 /// How strongly a word difference tints the text behind it.
 pub const DIFF_TINT: f32 = 0.24;
+/// A gap of two pixels, between things that belong together.
+pub const HAIR_GAP: Pixels = px(2.);
+/// A thin line: an underline, a rule, a caret.
+pub const HAIRLINE: Pixels = px(1.);
+/// A chip's corners, and a tick box's.
+pub const CHIP_RADIUS: Pixels = px(4.);
+pub const BOX_RADIUS: Pixels = px(3.);
+/// A tick box in a list, a chip's close button and its icon.
+pub const CHECK_SIZE: Pixels = px(14.);
+pub const CHECK_SMALL: Pixels = px(12.);
+/// How far a check's explanation stands in, past its box.
+pub const CHECK_INDENT: Pixels = px(22.);
+pub const CHIP_CLOSE: Pixels = px(16.);
+pub const CHIP_CLOSE_ICON: Pixels = px(10.);
+/// A dot's place on a rail tab, and on the mode switch.
+pub const RAIL_DOT_INSET: Pixels = px(10.);
+pub const SWITCH_DOT_INSET: Pixels = px(1.);
+/// The bar beside a row that has the keys, and a dragged block's drop line.
+pub const KEY_BAR: Pixels = px(2.);
+/// Export's progress segments.
+pub const PROGRESS_HEIGHT: Pixels = px(3.);
+pub const PROGRESS_RADIUS: Pixels = px(1.5);
+/// The proof list.
+pub const PROOF_HEADING_HEIGHT: Pixels = px(28.);
+pub const PROOF_ENTRY_HEIGHT: Pixels = px(62.);
+pub const PROOF_DOT_TOP: Pixels = px(5.);
+/// The project search card, and the line number beside a hit.
+pub const SEARCH_CARD_WIDTH: Pixels = px(440.);
+pub const SEARCH_RESULTS_HEIGHT: Pixels = px(340.);
+pub const SEARCH_HIT_Y: Pixels = px(3.);
+pub const SEARCH_LINE_WIDTH: Pixels = px(34.);
+/// The find bar, and its count of hits.
+pub const FIND_BAR_WIDTH: Pixels = px(380.);
+pub const FIND_COUNT_WIDTH: Pixels = px(64.);
+/// The agent's panel. The diff height is the tallest a diff in an approval grows before it scrolls.
+pub const AGENT_DIFF_HEIGHT: Pixels = px(180.);
+pub const AGENT_LINE_NUMBER: Pixels = px(22.);
+pub const AGENT_LIST_MARK: Pixels = px(14.);
+pub const AGENT_HEADING_1: Pixels = px(15.);
+pub const AGENT_HEADING_2: Pixels = px(14.);
+pub const AGENT_PARAGRAPH_Y: Pixels = px(4.);
+pub const PROMPT_MAX_HEIGHT: Pixels = px(160.);
+pub const PROMPT_MIN_HEIGHT: Pixels = px(54.);
+pub const PROMPT_Y: Pixels = px(6.);
+/// The block gutter's icons, and the space between a comment marker and the text.
+pub const GUTTER_ICON: Pixels = px(14.);
+pub const COMMENT_ICON: Pixels = px(12.);
+pub const COMMENT_MARKER_INSET: Pixels = px(20.);
+pub const GUTTER_ICON_INSET: Pixels = px(14.);
+/// The cards over the text: a figure's, a citation's, and a footnote's, and the citation card's rows.
+pub const FIGURE_CARD_WIDTH: Pixels = px(360.);
+pub const PICKER_CARD_WIDTH: Pixels = px(400.);
+pub const PICKER_CARD_HEIGHT: Pixels = px(460.);
+pub const PICKER_ROW_HEIGHT: Pixels = px(40.);
+pub const NOTE_CARD_WIDTH: Pixels = px(400.);
+pub const IMAGE_THUMB: Pixels = px(44.);
+/// A table in the text and in its editing grid.
+pub const CELL_X: Pixels = px(6.);
+pub const CELL_Y: Pixels = px(4.);
+pub const CAPTION_GAP: Pixels = px(6.);
+pub const GRID_FIELD_MIN: Pixels = px(160.);
+pub const GRID_LABEL_WIDTH: Pixels = px(120.);
+pub const GRID_ROW_Y: Pixels = px(6.);
+
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;
@@ -235,8 +302,12 @@ pub struct Tokens {
     pub text: Rgba,
     pub text_quiet: Rgba,
     pub text_faint: Rgba,
-    /// The author's choice. It colours only the caret, selection, marks, and the action that moves on.
+    /// The author's choice. It colours only the caret, selection, marks, and the action that moves on, and says what is
+    /// wrong.
     pub accent: Rgba,
+    /// A switch that is on, and its knob: a raised grey with a light knob, dark enough on a light surface to show it.
+    pub switch_on: Rgba,
+    pub switch_knob: Rgba,
     /// Links, footnote marks, and citation chips in the text.
     pub link: Rgba,
     /// What the book cannot resolve.
@@ -262,6 +333,8 @@ impl Tokens {
                 text_quiet: rgb(0xa6a6a6),
                 text_faint: rgb(0x6f6f6f),
                 accent: rgb(accent.unwrap_or(ACCENTS[0])),
+                switch_on: rgb(0x4a4a4a),
+                switch_knob: rgb(0xededed),
                 link: rgb(0x8fb4dc),
                 error: rgb(0xe5766b),
                 added: rgb(0x6fcf8a),
@@ -278,6 +351,8 @@ impl Tokens {
                 text_quiet: rgb(0x5e5e5e),
                 text_faint: rgb(0x8f8f8f),
                 accent: rgb(accent.unwrap_or(OXIDE_ON_LIGHT)),
+                switch_on: rgb(0xa0a0a0),
+                switch_knob: rgb(0xffffff),
                 link: rgb(0x2f5d8a),
                 error: rgb(0xb5442c),
                 added: rgb(0x1f7a3d),

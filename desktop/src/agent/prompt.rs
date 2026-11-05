@@ -16,8 +16,6 @@ use crate::source::buffer::{Buffer, Edit, EditKind, Selection};
 use crate::tokens::{self, Tokens};
 
 const CONTEXT: &str = "AgentPrompt";
-const MAX_HEIGHT: Pixels = px(160.);
-const MIN_HEIGHT: Pixels = px(54.);
 
 actions!(
     agent_prompt,
@@ -403,14 +401,14 @@ impl Render for PromptInput {
             .on_action(cx.listener(Self::on_undo))
             .on_action(cx.listener(Self::on_redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .max_h(MAX_HEIGHT)
+            .max_h(tokens::PROMPT_MAX_HEIGHT)
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .when(!self.bare, |input| {
                 input
-                    .min_h(MIN_HEIGHT)
+                    .min_h(tokens::PROMPT_MIN_HEIGHT)
                     .px(tokens::SPACE_2)
-                    .py(px(6.))
+                    .py(tokens::PROMPT_Y)
                     .rounded(tokens::RADIUS)
                     .border_1()
                     .border_color(tokens.divider)
@@ -499,7 +497,7 @@ impl Element for PromptText {
                     HighlightStyle {
                         background_color: is_selected.then_some(selection_color),
                         underline: is_marked.then_some(UnderlineStyle {
-                            thickness: px(1.),
+                            thickness: tokens::HAIRLINE,
                             color: Some(marked_color),
                             wavy: false,
                         }),
@@ -630,7 +628,7 @@ impl EntityInputHandler for PromptInput {
         let layout = self.layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
         let start = layout.position_for_index(range.start)?;
-        Some(Bounds::new(start, size(px(1.), layout.line_height())))
+        Some(Bounds::new(start, size(tokens::HAIRLINE, layout.line_height())))
     }
 
     fn character_index_for_point(

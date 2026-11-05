@@ -111,7 +111,7 @@ impl SectionDialog {
                     .mt(tokens::SPACE_1)
                     .path(template.icon)
                     .size(tokens::ICON_SIZE)
-                    .text_color(tokens.accent),
+                    .text_color(tokens.text_quiet),
             )
             .child(
                 div()

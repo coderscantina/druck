@@ -1,7 +1,7 @@
 //! The find bar of the galley: a small card at the top of the window, opened by Cmd+F, that finds in the open chapter.
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, EventEmitter, Focusable, SharedString, Subscription, Window, div, px, svg};
+use gpui::{Context, Entity, EventEmitter, Focusable, SharedString, Subscription, Window, div, svg};
 
 use super::text::Key;
 use crate::a11y::Control as _;
@@ -125,7 +125,7 @@ impl Render for FindBar {
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT + tokens::SECTION_HEIGHT)
             .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
-            .w(px(380.))
+            .w(tokens::FIND_BAR_WIDTH)
             .p(tokens::SPACE_2)
             .flex()
             .items_center()
@@ -140,7 +140,7 @@ impl Render for FindBar {
             .child(
                 div()
                     .flex_none()
-                    .min_w(px(64.))
+                    .min_w(tokens::FIND_COUNT_WIDTH)
                     .text_size(tokens::TEXT_SMALL)
                     .text_color(tokens.text_quiet)
                     .child(count),

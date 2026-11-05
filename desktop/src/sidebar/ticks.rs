@@ -126,7 +126,7 @@ impl TicksView {
                     }))
                     .child(row_lead(tokens, chapter, false, selected))
                     .child(div().flex_1().min_w_0().truncate().child(chapter.title.clone()))
-                    .child(mark_dot(tokens, self.marks.get(&id).copied()))
+                    .children(mark_dot(tokens, self.marks.get(&id).copied()))
             })
             .collect();
         div()

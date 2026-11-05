@@ -6,8 +6,7 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, EventEmitter, Focusable, FontWeight, ScrollHandle, SharedString, Subscription, Window, div, px,
-    svg,
+    Context, Entity, EventEmitter, Focusable, FontWeight, ScrollHandle, SharedString, Subscription, Window, div, svg,
 };
 
 use super::search::{FileHits, Options};
@@ -41,8 +40,6 @@ pub enum Status {
 
 /// The most rows drawn. A search for a common word finds more than any list shows, and a replacement still covers all.
 const MAX_ROWS: usize = 300;
-const CARD_WIDTH: gpui::Pixels = px(440.);
-const RESULTS_HEIGHT: gpui::Pixels = px(340.);
 
 pub struct SearchPanel {
     open: bool,
@@ -157,7 +154,7 @@ impl SearchPanel {
             let id = file.id;
             rows.push(
                 div()
-                    .h(px(30.))
+                    .h(tokens::FIELD_HEIGHT)
                     .px(tokens::SPACE_3)
                     .flex()
                     .items_center()
@@ -201,7 +198,7 @@ impl SearchPanel {
                         .id(("hit", id.number() * 100_000 + at))
                         .button(tokens, format!("{}{}", hit.before, hit.after))
                         .px(tokens::SPACE_3)
-                        .py(px(3.))
+                        .py(tokens::SEARCH_HIT_Y)
                         .flex()
                         .gap(tokens::SPACE_2)
                         .cursor_pointer()
@@ -210,7 +207,7 @@ impl SearchPanel {
                         .child(
                             div()
                                 .flex_none()
-                                .w(px(34.))
+                                .w(tokens::SEARCH_LINE_WIDTH)
                                 .text_size(tokens::TEXT_SMALL)
                                 .text_color(tokens.text_faint)
                                 .child(hit.line.to_string()),
@@ -292,7 +289,7 @@ impl Render for SearchPanel {
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT + tokens::SECTION_HEIGHT)
             .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
-            .w(CARD_WIDTH)
+            .w(tokens::SEARCH_CARD_WIDTH)
             .flex()
             .flex_col()
             .bg(tokens.panel)
@@ -373,7 +370,7 @@ impl Render for SearchPanel {
                 card.child(
                     div()
                         .id("search-results")
-                        .max_h(RESULTS_HEIGHT)
+                        .max_h(tokens::SEARCH_RESULTS_HEIGHT)
                         .overflow_y_scroll()
                         .track_scroll(&self.scroll)
                         .border_t_1()

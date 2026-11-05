@@ -16,6 +16,7 @@ use super::job::Face;
 use super::proof::{BlockAt, Parent};
 use super::strings::Key;
 use crate::a11y::Control as _;
+use crate::editor::rich::styles;
 use crate::inspector::input::{Cancelled, Committed, Edited, TextInput};
 use crate::session::{ChapterId, Session};
 use crate::source::buffer::Splice;
@@ -33,8 +34,39 @@ pub enum SlipEvent {
     /// The text in the slip changed.
     Edited,
     Toggle(Directive),
+    /// The name of the style at the slip's foot was pressed.
+    StylesWanted,
+    /// A style for the paragraph, or the theme's own.
+    PickStyle(Option<String>),
+    /// An alignment for the paragraph, as a named style.
+    PickAlignment(&'static str),
     ShowStyle(String),
     Closed,
+}
+
+/// What the slip's list of styles offers a paragraph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StyleChoice {
+    /// The style it names now, if any.
+    pub current: Option<String>,
+    /// The theme's own style for its kind of block.
+    pub base: &'static str,
+    /// The custom styles its kind may use.
+    pub styles: Vec<String>,
+}
+
+impl StyleChoice {
+    /// The custom styles to list, without the ones that only align, which have a button of their own.
+    fn listed(&self) -> impl Iterator<Item = &String> {
+        self.styles.iter().filter(|name| styles::unaligned(name).is_none())
+    }
+
+    /// The alignment the paragraph's style gives it, when it is one of those.
+    fn alignment(&self) -> Option<&str> {
+        let current = self.current.as_deref()?;
+        let base = styles::unaligned(current)?;
+        current[base.len()..].strip_prefix('-')
+    }
 }
 
 impl EventEmitter<SlipEvent> for ProofSlip {}
@@ -121,6 +153,17 @@ fn takes_directives(
         })
 }
 
+/// Where a paragraph stands after an edit of its style: a list's `{.name}` line stands before it and moves it, and a
+/// closing `{.name}` is part of it.
+pub fn range_after_style(range: &Range<usize>, edit: &crate::source::Edit) -> Range<usize> {
+    let change = edit.text.len() as isize - edit.range.len() as isize;
+    if edit.range.start <= range.start {
+        range.start.saturating_add_signed(change)..range.end.saturating_add_signed(change)
+    } else {
+        range.start..range.end.saturating_add_signed(change)
+    }
+}
+
 /// Where a slip's text stands in a chapter whose text changed: `range` moved by the change, if `splice` says what that was
 /// and the text is there, else the nearest place that holds it. A search alone could take the wrong one of two paragraphs
 /// that read the same. `None` when it is gone.
@@ -157,6 +200,12 @@ pub struct ProofSlip {
     opened: Option<Opening>,
     /// What the block has now. `None` when it cannot take directives.
     state: Option<State>,
+    /// The list of styles, while it is open.
+    choice: Option<StyleChoice>,
+    /// A style the question about a common theme holds back, to give the paragraph once it is there.
+    waiting_style: Option<String>,
+    /// Why a style could not be made.
+    style_problem: Option<String>,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -186,12 +235,21 @@ impl ProofSlip {
                     cx.emit(SlipEvent::Edited);
                 }
             }),
-            cx.subscribe(&input, |_, _, _: &Cancelled, cx| cx.emit(SlipEvent::Closed)),
+            cx.subscribe(&input, |slip, _, _: &Cancelled, cx| {
+                if slip.choice.is_some() {
+                    slip.set_choice(None, cx);
+                } else {
+                    cx.emit(SlipEvent::Closed);
+                }
+            }),
         ];
         Self {
             input,
             opened: None,
             state: None,
+            choice: None,
+            waiting_style: None,
+            style_problem: None,
             scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -200,6 +258,9 @@ impl ProofSlip {
     /// Opens on a paragraph.
     pub fn open(&mut self, opening: Opening, state: State, face: &Face, window: &mut Window, cx: &mut Context<Self>) {
         self.state = opening.takes_directives.then_some(state);
+        self.choice = None;
+        self.waiting_style = None;
+        self.style_problem = None;
         let (caret, text) = (opening.caret, opening.synced.clone());
         self.opened = Some(opening);
         self.input.update(cx, |input, cx| {
@@ -214,8 +275,55 @@ impl ProofSlip {
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
         if self.opened.take().is_some() {
+            self.choice = None;
             cx.notify();
         }
+    }
+
+    /// Whether the list of styles is open.
+    pub fn choice(&self) -> Option<&StyleChoice> {
+        self.choice.as_ref()
+    }
+
+    /// Opens the list of styles with this choice, or closes it.
+    pub fn set_choice(&mut self, choice: Option<StyleChoice>, cx: &mut Context<Self>) {
+        self.choice = choice;
+        self.style_problem = None;
+        cx.notify();
+    }
+
+    /// Says why a style could not be made, or that it waits for the question about a common theme.
+    pub fn set_style_problem(&mut self, problem: Option<String>, cx: &mut Context<Self>) {
+        self.style_problem = problem;
+        cx.notify();
+    }
+
+    /// The style waiting for the theme, which leaves the slip with this call.
+    pub fn take_waiting_style(&mut self) -> Option<String> {
+        self.waiting_style.take()
+    }
+
+    pub fn set_waiting_style(&mut self, name: String) {
+        self.waiting_style = Some(name);
+    }
+
+    /// The paragraph has a new style: `written` is its text now, at `range`, which the field takes over.
+    pub fn styled(
+        &mut self,
+        style: String,
+        range: Range<usize>,
+        written: String,
+        revision: u64,
+        state: State,
+        cx: &mut Context<Self>,
+    ) {
+        self.input
+            .update(cx, |input, cx| input.set_value(written.clone(), true, cx));
+        if let Some(opened) = &mut self.opened {
+            opened.style = Some(style);
+        }
+        self.choice = None;
+        self.synced(range, written, revision, state, cx);
     }
 
     pub fn opened(&self) -> Option<&Opening> {
@@ -296,12 +404,113 @@ impl ProofSlip {
     }
 }
 
+impl ProofSlip {
+    /// The short list at the slip's foot: the theme's own style, the custom ones, the alignments as named styles, and the
+    /// way to the style's section.
+    fn style_list(&self, choice: &StyleChoice, style: Option<&str>, tokens: &Tokens, cx: &mut Context<Self>) -> Div {
+        let row = |id: SharedString, label: String, chosen: bool| {
+            div()
+                .id(id)
+                .button(tokens, label.clone())
+                .flex_none()
+                .h(tokens::MENU_ROW_HEIGHT)
+                .px(tokens::SPACE_2)
+                .flex()
+                .items_center()
+                .rounded(tokens::RADIUS)
+                .cursor_pointer()
+                .text_size(tokens::TEXT_SMALL)
+                .text_color(if chosen { tokens.text } else { tokens.text_quiet })
+                .when(chosen, |row| row.bg(tokens.raised))
+                .hover(|row| row.bg(tokens.raised))
+                .child(div().min_w_0().truncate().child(label))
+        };
+        let own = row(
+            "slip-style-own".into(),
+            crate::inspector::style_title(choice.base),
+            choice.current.is_none(),
+        )
+        .on_click(cx.listener(|_, _, _, cx| cx.emit(SlipEvent::PickStyle(None))));
+        let custom: Vec<_> = choice
+            .listed()
+            .map(|name| {
+                let picked = name.clone();
+                row(
+                    format!("slip-style-{name}").into(),
+                    format!(".{name}"),
+                    choice.current.as_ref() == Some(name),
+                )
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(SlipEvent::PickStyle(Some(picked.clone())))))
+            })
+            .collect();
+        let aligned = choice.alignment().map(str::to_owned);
+        let alignments = styles::ALIGNMENTS.map(|align| {
+            let key = match align {
+                "left" => Key::SlipAlignLeft,
+                "center" => Key::SlipAlignCenter,
+                "right" => Key::SlipAlignRight,
+                _ => Key::SlipAlignJustify,
+            };
+            let label = crate::t!(key);
+            let on = aligned.as_deref() == Some(align);
+            div()
+                .id(label)
+                .toggle(tokens, label, on)
+                .flex_1()
+                .h(tokens::ZOOM_BUTTON + tokens::SPACE_1)
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(tokens::RADIUS)
+                .border_1()
+                .border_color(tokens.divider)
+                .text_size(tokens::TEXT_SMALL)
+                .cursor_pointer()
+                .text_color(if on { tokens.text } else { tokens.text_quiet })
+                .when(on, |button| button.bg(tokens.raised))
+                .hover(|button| button.bg(tokens.raised))
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(SlipEvent::PickAlignment(align))))
+                .child(label)
+        });
+        let section = style.map(str::to_owned).map(|style| {
+            row(
+                "slip-style-section".into(),
+                crate::t!(Key::SlipShowStyle).to_owned(),
+                false,
+            )
+            .on_click(cx.listener(move |_, _, _, cx| cx.emit(SlipEvent::ShowStyle(style.clone()))))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(tokens::SPACE_1)
+            .child(
+                div()
+                    .id("slip-styles")
+                    .role(Role::List)
+                    .aria_label(crate::t!(Key::SlipStyles))
+                    .max_h(tokens::SLIP_STYLES_MAX_HEIGHT)
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .child(own)
+                    .children(custom),
+            )
+            .child(div().flex().gap(tokens::SPACE_1).children(alignments))
+            .children(section)
+    }
+}
+
 impl Render for ProofSlip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         self.follow_caret(cx);
         let style = self.opened.as_ref().and_then(|opened| opened.style.clone());
-        let buttons = self.state.map(|state| {
+        let list = self
+            .choice
+            .clone()
+            .map(|choice| self.style_list(&choice, style.as_deref(), &tokens, cx));
+        let buttons = self.state.filter(|_| list.is_none()).map(|state| {
             div()
                 .flex()
                 .gap(tokens::SPACE_2)
@@ -329,7 +538,7 @@ impl Render for ProofSlip {
                         .text_color(tokens.text_quiet)
                         .cursor_pointer()
                         .hover(|link| link.text_color(tokens.text))
-                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(SlipEvent::ShowStyle(style.clone()))))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(SlipEvent::StylesWanted)))
                         .child(label)
                         .into_any_element()
                 }
@@ -355,12 +564,25 @@ impl Render for ProofSlip {
             .child(
                 div()
                     .id("slip-text")
-                    .max_h(tokens::SLIP_TEXT_MAX_HEIGHT)
+                    .max_h(if list.is_some() {
+                        tokens::SLIP_TEXT_SHORT_HEIGHT
+                    } else {
+                        tokens::SLIP_TEXT_MAX_HEIGHT
+                    })
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .child(self.input.clone()),
             )
             .children(buttons)
+            .children(list)
+            .when_some(self.style_problem.clone(), |slip, problem| {
+                slip.child(
+                    div()
+                        .text_size(tokens::TEXT_SMALL)
+                        .text_color(tokens.accent)
+                        .child(problem),
+                )
+            })
             .child(foot)
     }
 }
@@ -397,6 +619,27 @@ mod tests {
     }
 
     #[test]
+    fn a_style_grows_a_paragraph_and_moves_a_list() {
+        let closing = crate::source::Edit::new(10..10, " {.lead}");
+        assert_eq!(range_after_style(&(4..10), &closing), 4..18);
+        let removed = crate::source::Edit::new(10..18, "");
+        assert_eq!(range_after_style(&(4..18), &removed), 4..10);
+        let line_before = crate::source::Edit::new(4..4, "{.checks}\n");
+        assert_eq!(range_after_style(&(4..10), &line_before), 14..20);
+    }
+
+    #[test]
+    fn the_list_of_styles_keeps_alignments_to_their_buttons() {
+        let choice = StyleChoice {
+            current: Some("body-center".to_owned()),
+            base: "body",
+            styles: vec!["body-center".to_owned(), "lead".to_owned()],
+        };
+        assert_eq!(choice.listed().collect::<Vec<_>>(), ["lead"]);
+        assert_eq!(choice.alignment(), Some("center"));
+    }
+
+    #[test]
     fn a_slip_keeps_its_paragraph_through_outside_changes_or_lets_it_go() {
         let held = "A paragraph.";
         let first = "One.\n\nA paragraph.\n";
@@ -406,7 +649,11 @@ mod tests {
         assert_eq!(relocated(moved, held, &range, None), Some(22..34));
         assert_eq!(relocated("One.\n\nChanged.\n", held, &range, None), None);
         let twice = "A paragraph.\n\nOne.\n\nx\n\nA paragraph.\n";
-        assert_eq!(relocated(twice, held, &(20..32), None), Some(23..35), "the nearer of two");
+        assert_eq!(
+            relocated(twice, held, &(20..32), None),
+            Some(23..35),
+            "the nearer of two"
+        );
     }
 
     #[test]

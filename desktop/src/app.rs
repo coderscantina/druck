@@ -196,7 +196,8 @@ impl Shell {
             shell::save_at_exit(cx);
             true
         });
-        let launch = cx.new(|_| LaunchView::new(error));
+        let launch = cx.new(|cx| LaunchView::new(error, cx));
+        LaunchView::take_focus(&launch, window, cx);
         let subscriptions = vec![
             cx.subscribe_in(&launch, window, |shell, _, event, window, cx| match event {
                 LaunchEvent::Open => shell.ask_to_open(window, cx),
@@ -318,6 +319,7 @@ impl Shell {
             Box::new(|shell, window, cx| {
                 shell.workspace = None;
                 window.set_window_title("Druck");
+                LaunchView::take_focus(&shell.launch, window, cx);
                 cx.notify();
             }),
         );
@@ -412,6 +414,7 @@ impl Shell {
                 eprintln!("{problem}");
                 self.workspace = None;
                 window.set_window_title("Druck");
+                LaunchView::take_focus(&self.launch, window, cx);
                 self.launch
                     .update(cx, |launch, cx| launch.set_error(Some(problem), Some(path), cx));
                 cx.notify();

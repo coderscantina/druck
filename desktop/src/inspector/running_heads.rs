@@ -249,7 +249,7 @@ impl RunningHeads {
         }
         if own {
             end = end.child(
-                widgets::link(tokens, SharedString::from(format!("head-reset-{band}")), Key::Reset)
+                widgets::quiet_link(tokens, SharedString::from(format!("head-reset-{band}")), Key::Reset)
                     .on_click(cx.listener(move |panel, _, _, cx| panel.reset(band, cx))),
             );
         }

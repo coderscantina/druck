@@ -1,7 +1,7 @@
 //! Small pieces the shell's panels share, built from the tokens.
 
 use gpui::prelude::*;
-use gpui::{ElementId, FontWeight, SharedString, Stateful, div, px};
+use gpui::{ElementId, FontWeight, SharedString, Stateful, div};
 
 use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
@@ -62,11 +62,11 @@ pub fn check(
         .child(
             div()
                 .flex_none()
-                .size(px(14.))
-                .rounded(px(3.))
+                .size(tokens::CHECK_SIZE)
+                .rounded(tokens::BOX_RADIUS)
                 .border_1()
-                .border_color(if on { tokens.accent } else { tokens.text_faint })
-                .when(on, |square| square.bg(tokens.accent)),
+                .border_color(if on { tokens.text_quiet } else { tokens.text_faint })
+                .when(on, |square| square.bg(tokens.text_quiet)),
         )
         .child(div().min_w_0().child(label))
 }
@@ -91,7 +91,7 @@ pub fn chip(
         .justify_center()
         .rounded(tokens::RADIUS)
         .border_1()
-        .border_color(if on { tokens.accent } else { tokens.divider })
+        .border_color(tokens.divider)
         .text_color(if on { tokens.text } else { tokens.text_quiet })
         .when(on, |chip| chip.bg(tokens.raised))
         .cursor_pointer()

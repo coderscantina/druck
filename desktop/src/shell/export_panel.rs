@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, EventEmitter, Focusable, SharedString, Subscription, Window, div, px, svg};
+use gpui::{Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Subscription, Window, div, svg};
 
 use super::export::{Stage, Target};
 use super::manifest::Def;
@@ -67,6 +67,8 @@ struct Fields {
 pub struct ExportPanel {
     setup: Setup,
     run: RunState,
+    /// The finished run's Open button, which takes the keys its run button had.
+    open_file: FocusHandle,
     expanded: HashSet<String>,
     fields: HashMap<String, Fields>,
     adding: bool,
@@ -82,6 +84,7 @@ impl ExportPanel {
         Self {
             setup: Setup::default(),
             run: RunState::Idle,
+            open_file: cx.focus_handle().tab_stop(true),
             expanded: HashSet::new(),
             fields: HashMap::new(),
             adding: false,
@@ -122,6 +125,11 @@ impl ExportPanel {
     pub fn set_run(&mut self, run: RunState, cx: &mut Context<Self>) {
         self.run = run;
         cx.notify();
+    }
+
+    /// Gives the keys to the finished run's Open button, once it has been drawn.
+    pub fn focus_result(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.on_next_frame(window, |panel, window, cx| window.focus(&panel.open_file, cx));
     }
 
     pub fn is_running(&self) -> bool {
@@ -172,10 +180,18 @@ impl ExportPanel {
     fn progress(&self, stage: Stage, tokens: &Tokens) -> gpui::Div {
         let segments = (0..Stage::COUNT).map(|at| {
             let current = stage as usize;
-            let color = if at <= current { tokens.accent } else { tokens.divider };
-            div().flex_1().h(px(3.)).rounded(px(1.5)).bg(color)
+            let color = if at <= current {
+                tokens.text_quiet
+            } else {
+                tokens.divider
+            };
+            div()
+                .flex_1()
+                .h(tokens::PROGRESS_HEIGHT)
+                .rounded(tokens::PROGRESS_RADIUS)
+                .bg(color)
         });
-        div().flex().gap(px(2.)).children(segments)
+        div().flex().gap(tokens::HAIR_GAP).children(segments)
     }
 
     fn status(&self, tokens: &Tokens, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
@@ -218,9 +234,11 @@ impl ExportPanel {
                                 .flex()
                                 .gap(tokens::SPACE_2)
                                 .child(
-                                    ui::button(tokens, "open-file", crate::t!(Key::OpenFile)).on_click(
-                                        cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Open(open.clone()))),
-                                    ),
+                                    ui::button(tokens, "open-file", crate::t!(Key::OpenFile))
+                                        .track_focus(&self.open_file)
+                                        .on_click(
+                                            cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Open(open.clone()))),
+                                        ),
                                 )
                                 .child(ui::button(tokens, "reveal-file", crate::t!(Key::RevealFile)).on_click(
                                     cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Reveal(reveal.clone()))),
@@ -382,7 +400,7 @@ impl ExportPanel {
                         .child(switch("final", "final", crate::t!(Key::FieldFinal), def.is_final, cx))
                         .child(
                             div()
-                                .pl(px(22.))
+                                .pl(tokens::CHECK_INDENT)
                                 .text_size(tokens::TEXT_SMALL)
                                 .text_color(tokens.text_faint)
                                 .child(crate::t!(Key::FinalHint)),

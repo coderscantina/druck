@@ -160,11 +160,13 @@ impl Workspace {
             cx.subscribe_in(&editor, window, |workspace, _, _: &SessionChanged, window, cx| {
                 workspace.session_changed(window, cx);
             }),
-            cx.subscribe(&inspector, |workspace, _, event: &ThemeChanged, cx| {
-                workspace.theme_changed(event, cx)
+            cx.subscribe_in(&inspector, window, |workspace, _, event: &ThemeChanged, window, cx| {
+                workspace.theme_changed(event, cx);
+                slip_control::theme_changed(&workspace.parts, window, cx);
             }),
-            cx.subscribe(&model, |workspace, _, _: &ThemeSwitched, cx| {
-                workspace.theme_switched(cx)
+            cx.subscribe_in(&model, window, |workspace, _, _: &ThemeSwitched, window, cx| {
+                workspace.theme_switched(cx);
+                slip_control::theme_changed(&workspace.parts, window, cx);
             }),
             cx.subscribe(&model, |workspace, _, _: &SpecimenRequested, cx| {
                 workspace.specimen_requested(cx)
@@ -586,6 +588,9 @@ impl Workspace {
         match event {
             SlipEvent::Edited => slip_control::edited(&self.parts, window, cx),
             SlipEvent::Toggle(directive) => slip_control::toggled(&self.parts, *directive, window, cx),
+            SlipEvent::StylesWanted => slip_control::toggle_styles(&self.parts, window, cx),
+            SlipEvent::PickStyle(name) => slip_control::pick_style(&self.parts, name.as_deref(), window, cx),
+            SlipEvent::PickAlignment(align) => slip_control::pick_alignment(&self.parts, align, window, cx),
             SlipEvent::ShowStyle(style) => self.parts.inspector.update(cx, |inspector, cx| {
                 inspector.open_style(style, window, cx);
             }),
@@ -786,8 +791,8 @@ impl Workspace {
                         button.relative().child(
                             div()
                                 .absolute()
-                                .top(px(1.))
-                                .right(px(1.))
+                                .top(tokens::SWITCH_DOT_INSET)
+                                .right(tokens::SWITCH_DOT_INSET)
                                 .size(tokens::DOT_SIZE)
                                 .rounded_full()
                                 .bg(tokens.accent),
@@ -795,7 +800,7 @@ impl Workspace {
                     })
             })
             .collect();
-        div().flex().items_center().gap(px(2.)).children(buttons)
+        div().flex().items_center().gap(tokens::HAIR_GAP).children(buttons)
     }
 
     /// Publish's Export button: the action that moves on, so it has the accent.

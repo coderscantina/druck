@@ -42,13 +42,21 @@ pub enum Code {
     /// A page ends this many lines off the height of the page facing it.
     PageUneven { page: PageName, lines: f64 },
     /// A page ends a chapter with fewer lines than wanted.
-    ChapterEndShort { page: PageName, lines: usize, wanted: usize },
+    ChapterEndShort {
+        page: PageName,
+        lines: usize,
+        wanted: usize,
+    },
     /// A one-line paragraph stands alone at the top of a page.
     OneLinerAtTop { page: PageName },
     /// A one-line paragraph stands alone at the bottom of a page.
     OneLinerAtBottom { page: PageName },
     /// A heading at the foot of a page has fewer lines below it than wanted.
-    HeadingAtFoot { page: PageName, lines: usize, wanted: usize },
+    HeadingAtFoot {
+        page: PageName,
+        lines: usize,
+        wanted: usize,
+    },
     /// A line of a paragraph has its spaces stretched loose.
     LooseLine { page: PageName },
     /// A paragraph has more hyphenated lines in a row than the limit.
