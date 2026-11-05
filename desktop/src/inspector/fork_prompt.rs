@@ -2,7 +2,7 @@
 //! safe choice, or change the shared file that other documents may use too.
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, Subscription, Window, div};
+use gpui::{Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, Subscription, Window, deferred, div};
 
 use super::model::ThemeModel;
 use super::strings::Key;
@@ -159,27 +159,31 @@ impl Render for ForkPrompt {
                         .on_click(cx.listener(|prompt, _, _, cx| prompt.cancel(cx))),
                 ),
             );
-        div()
-            .id("fork-backdrop")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .occlude()
-            .on_key_down(cx.listener(|prompt, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
-                    cx.stop_propagation();
-                    prompt.cancel(cx);
-                }
-            }))
-            .on_action(cx.listener(|prompt, _: &FocusNext, window, cx| {
-                crate::a11y::cycle_within(&prompt.card, true, window, cx)
-            }))
-            .on_action(cx.listener(|prompt, _: &FocusPrevious, window, cx| {
-                crate::a11y::cycle_within(&prompt.card, false, window, cx)
-            }))
-            .on_mouse_down(MouseButton::Left, cx.listener(|prompt, _, _, cx| prompt.cancel(cx)))
-            .child(card)
-            .into_any_element()
+        // Above the proof slip, whose style list asked the question.
+        deferred(
+            div()
+                .id("fork-backdrop")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+                .on_key_down(cx.listener(|prompt, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape" {
+                        cx.stop_propagation();
+                        prompt.cancel(cx);
+                    }
+                }))
+                .on_action(cx.listener(|prompt, _: &FocusNext, window, cx| {
+                    crate::a11y::cycle_within(&prompt.card, true, window, cx)
+                }))
+                .on_action(cx.listener(|prompt, _: &FocusPrevious, window, cx| {
+                    crate::a11y::cycle_within(&prompt.card, false, window, cx)
+                }))
+                .on_mouse_down(MouseButton::Left, cx.listener(|prompt, _, _, cx| prompt.cancel(cx)))
+                .child(card),
+        )
+        .with_priority(tokens::LAYER_QUESTION)
+        .into_any_element()
     }
 }

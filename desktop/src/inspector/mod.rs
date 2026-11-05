@@ -24,7 +24,7 @@ use gpui::{AnyView, Context, Entity, EventEmitter, Role, Subscription, Window, d
 
 use fonts::FontsPanel;
 pub use fork_prompt::ForkPrompt;
-pub use model::{SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
+pub use model::{QuestionCancelled, SpecimenRequested, ThemeChanged, ThemeModel, ThemeSwitched};
 pub use picker::ThemePicker;
 use style_index::{IndexEvent, StyleIndex};
 use styles::StylesPanel;

@@ -236,6 +236,15 @@ impl Shell {
         if let Some(session) = session {
             shell.show_session(session, theme, window, cx);
         }
+        // `DRUCK_NEW_PROJECT=book:/path` makes a project there as the save panel would, for screenshots.
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        if let Some((slug, path)) = crate::gate::var("DRUCK_NEW_PROJECT")
+            .as_deref()
+            .and_then(|asked| asked.split_once(':'))
+            && let Some(starter) = Self::starter(slug)
+        {
+            shell.create_project(starter, Path::new(path), window, cx);
+        }
         shell
     }
 
@@ -277,20 +286,23 @@ impl Shell {
                 return;
             };
             shell
-                .update_in(cx, |shell, window, cx| {
-                    match starter.create(&path, crate::shell::strings::language()) {
-                        Ok(()) => {
-                            crate::versions::start_repo(&path, cx);
-                            shell.open_at(&path, Opening::AfterFirstTitle, window, cx);
-                        }
-                        Err(problem) => shell
-                            .launch
-                            .update(cx, |launch, cx| launch.set_error(Some(problem), None, cx)),
-                    }
-                })
+                .update_in(cx, |shell, window, cx| shell.create_project(starter, &path, window, cx))
                 .ok();
         })
         .detach();
+    }
+
+    /// Makes a new project from `starter` in `path`, as a repo, and opens it after its first title.
+    fn create_project(&mut self, starter: &'static Starter, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        match starter.create(path, crate::shell::strings::language()) {
+            Ok(()) => {
+                crate::versions::start_repo(path, cx);
+                self.open_at(path, Opening::AfterFirstTitle, window, cx);
+            }
+            Err(problem) => self
+                .launch
+                .update(cx, |launch, cx| launch.set_error(Some(problem), None, cx)),
+        }
     }
 
     /// Makes a folder of Markdown a project, and opens it. It is the author's folder, so it stays out of Git until they ask.

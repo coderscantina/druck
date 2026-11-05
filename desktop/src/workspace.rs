@@ -20,7 +20,9 @@ use gpui::{
 use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
-use crate::inspector::{InspectorView, SpecimenRequested, Tab, TabShown, ThemeChanged, ThemeSwitched};
+use crate::inspector::{
+    InspectorView, QuestionCancelled, SpecimenRequested, Tab, TabShown, ThemeChanged, ThemeSwitched,
+};
 #[cfg(any(debug_assertions, feature = "measure"))]
 use crate::preview::proof::BlockAt;
 #[cfg(any(debug_assertions, feature = "measure"))]
@@ -153,6 +155,9 @@ impl Workspace {
             cx.subscribe_in(&inspector, window, |workspace, _, event: &ThemeChanged, window, cx| {
                 workspace.theme_changed(event, cx);
                 slip_control::theme_changed(&workspace.parts, window, cx);
+            }),
+            cx.subscribe(&model, |workspace, _, _: &QuestionCancelled, cx| {
+                slip_control::question_cancelled(&workspace.parts, cx);
             }),
             cx.subscribe_in(&model, window, |workspace, _, _: &ThemeSwitched, window, cx| {
                 workspace.theme_switched(cx);

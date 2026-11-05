@@ -292,7 +292,16 @@ pub fn try_from_gate(parts: &Parts, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// The theme changed. A style the question about a common theme held back is there now.
+/// The question about a shared theme was cancelled: the style it held back is not coming.
+pub fn question_cancelled(parts: &Parts, cx: &mut App) {
+    slip_of(parts, cx).update(cx, |slip, cx| {
+        if slip.take_waiting_style().is_some() {
+            slip.set_style_problem(None, cx);
+        }
+    });
+}
+
+/// The theme changed. A style the question about a shared theme held back is there now.
 pub fn theme_changed(parts: &Parts, window: &mut Window, cx: &mut App) {
     let slip = slip_of(parts, cx);
     let Some(name) = slip.update(cx, |slip, _| slip.take_waiting_style()) else {

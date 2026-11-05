@@ -299,6 +299,9 @@ pub const DIFF_ROW_TINT: f32 = 0.14;
 /// The start of a fade.
 pub const CLEAR: f32 = 0.;
 
+/// The paint order of a card that asks a question, above the proof slip (1) and the text's floats (2).
+pub const LAYER_QUESTION: usize = 3;
+
 /// The window's regions, in the order Tab walks them.
 pub const TAB_TITLEBAR: isize = 0;
 pub const TAB_PANEL: isize = 1;

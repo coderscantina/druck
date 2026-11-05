@@ -24,6 +24,9 @@ pub struct ThemeChanged {
 /// Another theme file is open now.
 pub struct ThemeSwitched;
 
+/// The question about a shared theme was cancelled, and the change that asked it is dropped.
+pub struct QuestionCancelled;
+
 /// The author asked to see the specimen, since the document has no block in the style being edited.
 pub struct SpecimenRequested;
 
@@ -52,6 +55,7 @@ pub struct ThemeModel {
 
 impl EventEmitter<ThemeChanged> for ThemeModel {}
 impl EventEmitter<ThemeSwitched> for ThemeModel {}
+impl EventEmitter<QuestionCancelled> for ThemeModel {}
 impl EventEmitter<SpecimenRequested> for ThemeModel {}
 
 impl ThemeModel {
@@ -191,6 +195,7 @@ impl ThemeModel {
 
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self.editor.cancel();
+        cx.emit(QuestionCancelled);
         cx.notify();
     }
 

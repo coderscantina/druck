@@ -1356,20 +1356,18 @@ impl Render for PreviewView {
             };
             let marks_on = crate::settings::get(cx).warning_marks;
             let toggle = crate::t!(Key::WarningMarks);
-            // A narrow line drops the word before it cuts the number.
-            let parts = [
-                status.as_str(),
-                look_label.as_deref().unwrap_or_default(),
-                &label,
-                toggle,
-            ];
-            let shown = if self.status_fits(&parts, window) {
-                label.clone()
+            // A narrow line drops the word "warnings", then the switch's label, and never cuts the number.
+            let look = look_label.as_deref().unwrap_or_default();
+            let number = warnings.to_string();
+            let (shown, toggle_label) = if self.status_fits(&[&status, look, &label, toggle], window) {
+                (label.clone(), Some(toggle))
+            } else if self.status_fits(&[&status, look, &number, toggle], window) {
+                (number, Some(toggle))
             } else {
-                warnings.to_string()
+                (number, None)
             };
             div()
-                .min_w_0()
+                .flex_none()
                 .flex()
                 .items_center()
                 .gap(tokens::SPACE_1)
@@ -1377,8 +1375,7 @@ impl Render for PreviewView {
                     div()
                         .id("warnings")
                         .control(&tokens, Role::Link, SharedString::from(label.clone()))
-                        .min_w_0()
-                        .truncate()
+                        .flex_none()
                         .cursor_pointer()
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
                         .child(shown),
@@ -1401,7 +1398,7 @@ impl Render for PreviewView {
                             crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
                         })
                         .child(crate::shell::ui::switch_track(&tokens, marks_on))
-                        .child(toggle),
+                        .children(toggle_label),
                 )
         });
         let strip = div()
