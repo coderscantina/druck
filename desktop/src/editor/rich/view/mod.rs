@@ -1,4 +1,4 @@
-//! The views of the rich blocks: what the galley floats, and the Selection and Images tabs. Each float is drawn by the
+//! The views of the rich blocks: what the galley floats, and the Images tab. Each float is drawn by the
 //! galley's own frame, as the link field is, and has its own focus while it is open.
 
 mod figure;
@@ -6,7 +6,6 @@ mod grid;
 mod images_panel;
 mod note;
 mod picker;
-mod selection;
 pub mod shapes;
 
 use std::ops::Range;
@@ -26,11 +25,11 @@ use crate::a11y::Control as _;
 use crate::editor::commands::{Command, normalized, selection_after};
 use crate::editor::float::{Float, placed_at_caret};
 use crate::editor::place::Rect;
-use crate::editor::rich::{Atom, AtomKind, Key, check, facts, footnotes, images, styles};
+use crate::editor::rich::{Atom, AtomKind, Key, check, facts, footnotes, images};
 use crate::editor::{EditorView, ToggleBold, ToggleItalic, ToggleStrike, ToggleUnderline};
 use crate::session::ChapterId;
 use crate::source::inline::SpanKind;
-use crate::source::{BlockKind, Edit, EditKind, Selection};
+use crate::source::{Edit, EditKind, Selection};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Parts, Workspace};
 
@@ -59,19 +58,14 @@ pub struct RichChanged;
 
 impl gpui::EventEmitter<RichChanged> for EditorView {}
 
-/// Mounts the Selection and Images tabs.
+/// Mounts the Images tab.
 pub fn mount(parts: &Parts, cx: &mut Context<Workspace>) {
     use crate::inspector::Tab;
     let editor = parts.editor.clone();
-    let inspector = parts.inspector.clone();
-    let model = inspector.read(cx).model().clone();
-    let panel_inspector = inspector.clone();
-    let selection = cx.new(|cx| selection::SelectionPanel::new(editor.clone(), model, panel_inspector, cx));
-    let images = cx.new(|cx| images_panel::ImagesPanel::new(editor.clone(), cx));
-    inspector.update(cx, |inspector, _| {
-        inspector.mount(Tab::Selection, selection.into());
-        inspector.mount(Tab::Images, images.into());
-    });
+    let images = cx.new(|cx| images_panel::ImagesPanel::new(editor, cx));
+    parts
+        .inspector
+        .update(cx, |inspector, _| inspector.mount(Tab::Images, images.into()));
 }
 
 /// A message about a block, with the way to its source when that is what it takes.
@@ -720,54 +714,7 @@ impl EditorView {
     }
 }
 
-/// The block under the caret, for the Selection tab.
-pub(in crate::editor) struct BlockInfo {
-    pub kind: BlockKind,
-    pub is_figure: bool,
-    pub class: Option<styles::Class>,
-    pub style: Option<String>,
-}
-
 impl EditorView {
-    /// The block under the caret, if it is one that can show.
-    pub(in crate::editor) fn block_info(&self) -> Option<BlockInfo> {
-        let index = self.blocks.index_at(self.selection.head);
-        let block = &self.blocks.as_slice()[index];
-        if matches!(block.kind, BlockKind::Blank | BlockKind::FrontMatter) {
-            return None;
-        }
-        let text = self.session.active_buffer().text();
-        let written = &text[block.range.clone()];
-        let in_table = matches!(self.rich_atom(index).map(|atom| &atom.kind), Some(AtomKind::Table(_)));
-        let is_figure = matches!(self.rich_atom(index).map(|atom| &atom.kind), Some(AtomKind::Figure(_)));
-        Some(BlockInfo {
-            kind: if in_table { BlockKind::Table } else { block.kind },
-            is_figure,
-            class: if in_table || is_figure {
-                None
-            } else {
-                styles::class_of(block.kind, written)
-            },
-            style: styles::style_of(text, &self.blocks, index),
-        })
-    }
-
-    /// Gives the block under the caret a named style, or none, or says why it cannot have it.
-    pub(in crate::editor) fn set_block_style(
-        &mut self,
-        name: Option<&str>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        let index = self.blocks.index_at(self.selection.head);
-        let text = self.session.active_buffer().text();
-        let Some(edit) = styles::set_style(text, &self.blocks, index, name) else {
-            return Ok(());
-        };
-        let active = self.session.active();
-        self.write_rich(active, vec![edit], None, window, cx)
-    }
-
     /// Every use of an image in the book.
     pub(in crate::editor) fn image_uses(&self) -> Vec<(ChapterId, String, usize)> {
         self.rich.image_uses(&self.session)

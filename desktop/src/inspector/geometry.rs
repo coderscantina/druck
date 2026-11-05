@@ -489,13 +489,7 @@ impl Snapshot {
 impl Render for GeometryPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = &Tokens::get(cx).clone();
-        let column = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(widgets::header(tokens, crate::t!(Key::GeometryTitle).to_uppercase()));
+        let column = div().flex_1().min_w_0().h_full().flex().flex_col();
         let snapshot = match Snapshot::read(self.model.read(cx), self.open.is_some()) {
             Ok(snapshot) => snapshot,
             Err(message) => {

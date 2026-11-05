@@ -21,8 +21,6 @@ struct Project(PathBuf);
 
 const BIB: &str = "@book{müller2020,\n  author = {Müller, Anna and Groß, Jörg},\n  title = {Die Straße},\n  publisher = {Verlag},\n  year = {2020},\n}\n\n@article{bostrom2003,\n  author = {Bostrom, Nick},\n  title = {Are You Living in a Computer Simulation?},\n  journal = {Philosophical Quarterly},\n  year = {2003},\n}\n";
 
-const THEME: &str = r#"{"version": 1, "custom-styles": {"lead": {"based-on": "body", "align": "center"}, "checks": {"based-on": "list"}, "wide": {"based-on": "heading-1"}}}"#;
-
 impl Project {
     fn new(name: &str, chapters: &[(&str, &str)]) -> Self {
         let dir = std::env::temp_dir().join(format!("druck-rich-{name}-{}", std::process::id()));
@@ -581,33 +579,6 @@ fn an_image_comes_in_shows_and_renders_with_its_caption_label_and_placement() {
     round_trip(&shown, std::slice::from_ref(&edit));
     session.edit_chapter(id, vec![edit], EditKind::Discrete).expect("valid");
     renders(&session).expect("the figure renders");
-}
-
-#[test]
-fn a_named_style_written_on_each_kind_of_block_renders() {
-    let text = "# Eins\n\nEin Absatz.\n\n- a\n- b\n";
-    let project = Project::new("style", &[("a.md", text)]);
-    fs::create_dir_all(project.0.join("themes/mine")).expect("folder");
-    fs::write(project.0.join("themes/mine/theme.json"), THEME).expect("theme");
-    let manifest = fs::read_to_string(project.0.join("druck.yaml")).expect("manifest");
-    fs::write(project.0.join("druck.yaml"), format!("{manifest}theme: mine\n")).expect("manifest");
-    let mut session = project.session();
-    let id = session.active();
-    for (block, name) in [(0, "wide"), (2, "lead"), (4, "checks")] {
-        let text = session.buffer(id).text().to_owned();
-        let blocks = Blocks::parse(&text);
-        let edit = styles::set_style(&text, &blocks, block, Some(name)).expect("an edit");
-        round_trip(&text, std::slice::from_ref(&edit));
-        session.edit_chapter(id, vec![edit], EditKind::Discrete).expect("valid");
-    }
-    assert_eq!(
-        session.buffer(id).text(),
-        "# Eins {.wide}\n\nEin Absatz. {.lead}\n\n{.checks}\n- a\n- b\n"
-    );
-    let mut typesetter = Typesetter::new(session.kind().clone(), Some(project.0.join("themes/mine/theme.json")));
-    if let Err(failure) = typesetter.run(session.joined(), &Cancel::default()) {
-        panic!("the styles do not render: {failure}");
-    }
 }
 
 /// The book's chapters, if it is on this machine.

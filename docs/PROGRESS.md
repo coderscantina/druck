@@ -45,7 +45,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
   - [x] Slice 7: Rich blocks.
   - [ ] Slice 8: Beta gate, met with the gaps below.
 - [ ] 18: Writing surface. Built and checked on `t3/writing-first-surface`, unmerged. Stays unchecked until the owner has run the input method test, see the resume note.
-- [ ] 19: Publish view.
+- [x] 19: Publish view. Built and checked on its task branch, unmerged. What only the owner can check is in the [note](#milestone-19-note).
 - [ ] 20: Writing partner.
 - [ ] 21: Versions.
 - [ ] 22: Writer beta, the new gate for a first public release.
@@ -117,6 +117,18 @@ Evidence, on 2026-11-05 on this M1 Pro, on a copy of the book made into a projec
 - **Not run:** a soak, VoiceOver, Linux, and Windows. The engine's output was not compared by bytes after the removal: it removed only code behind the `editor` feature, which the CLI does not build with, and the parity test passed.
 
 Follow-ups: attribute the heap's slow rise, and trim undo histories if they are the cause. Labels on theme fields through `TextInput::with_label`. Spelling in tables. Arrow keys in the diagnostics list. Recovery copies with no unsaved text should go at a clean quit. Write shows no custom styles, tracking, capitals, or a chapter's number above its heading. The toolbar still covers the line below a selection. Publish's accent labels (`EIGEN`, the chosen sub-tab, the language chip) go beyond what the accent is for, which milestone 19's redesign should settle. The launch screen still lists report and offer until milestone 22.
+
+### Milestone 19 note
+
+Publish is built as in [the milestone](milestones/19-publish-view.md): spreads and contact sheets on one zoom scale, the proof slip, the proof tab with `Cmd+]` and `Cmd+[`, and the Style tab's index of 30 sections. See [the decisions](DECISIONS.md#2026-11-05-publish-view).
+
+Seams: `inspector.mount(Tab::Git, panel.into())` shows the Git tab, whose icon is there. `Tab::Agent` mounts as before. The Selection tab is gone, and `Tab::Diagnostics` is `Tab::Proof`. `EditorView::edit_outside` edits a chapter as typing does. `Diagnostic::page` is new in the engine.
+
+Evidence on the book as a project, release with `measure`, `DRUCK_GATE=1 DRUCK_GATE_SLIP=100`: last key in a slip to ready pages 467 ms median, 494 ms maximum, over 100 edits. A key's handling 0.33 ms median. All 27 chapters byte for byte as asked, in memory and on disk. A page break moved the slip's paragraph from page 40 to 41, with the slip on it and in view, and taking it away restored the bytes. A style change reached the pages in 405 ms and wrote only `"size": "10.7pt"` and the comma before it. Marking 300 problems takes 4.6 ms on the window's thread. Clicks through `Window::dispatch_event`: a line opens the slip, and a contact sheet goes back to a spread. Keys by PID: typing in the slip, Escape, `Cmd+]`, `Cmd+-`, `Cmd+0`, then `Cmd+1` and `Cmd+/` showing `::: page-break` in the source view with the caret on the paragraph. Write's gate is unchanged: typing 14.3 ms median, a pause in Write to exact pages in Publish 12 ms, theme edit to ready pages 369 ms, heap 177 to 178 MB over 25 refreshes. Commands: `cargo test -p druck-desktop` passed 572 with 1 ignored, `cargo test` passed 444 unit tests and the integration and doc tests, and `cargo clippy -p druck-desktop --all-targets --features measure -- -D warnings` and `cargo fmt --check` are clean. Inspected in dark and light, English and German: spread, contact sheet, slip, proof tab, Style index, and sections.
+
+Only the owner can check: a real mouse on all of this, since posted mouse events do not reach the window. An input method in the slip. Whether reflow feels calm, and whether a spread with many marks is too much tint. The Selection tab's removal means a custom style is now applied by writing `{.name}`, so decide whether the slip should offer them.
+
+Not done: the other 22 theme sections stay JSON, as the milestone says. Marks show a paragraph, not its single line.
 
 Older notes follow.
 

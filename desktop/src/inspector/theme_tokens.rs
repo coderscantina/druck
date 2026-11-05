@@ -362,7 +362,6 @@ impl Render for TokensPanel {
                     message.to_owned()
                 };
                 return column
-                    .child(widgets::header(tokens, crate::t!(Key::TokensTitle).to_uppercase()))
                     .child(
                         div()
                             .p(chrome::SPACE_3)
@@ -376,14 +375,11 @@ impl Render for TokensPanel {
         let creating = self.creating.clone();
         column
             .child(
-                widgets::bar(tokens)
-                    .justify_between()
-                    .child(crate::t!(Key::TokensTitle).to_uppercase())
-                    .child(
-                        widgets::link(tokens, "token-new", "+")
-                            .text_size(chrome::TEXT_BODY)
-                            .on_click(cx.listener(|panel, _, window, cx| panel.start_creating(window, cx))),
-                    ),
+                widgets::bar(tokens).justify_end().child(
+                    widgets::quiet_link(tokens, "token-new", "+")
+                        .text_size(chrome::TEXT_BODY)
+                        .on_click(cx.listener(|panel, _, window, cx| panel.start_creating(window, cx))),
+                ),
             )
             .child(self.groups(tokens, cx))
             .child(

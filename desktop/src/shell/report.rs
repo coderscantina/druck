@@ -29,6 +29,8 @@ pub struct Entry {
     pub line: Option<usize>,
     /// The place in the chapter a click opens.
     pub place: Option<(ChapterId, usize)>,
+    /// The page, for a typesetting warning, as its physical index.
+    pub page: Option<usize>,
     pub message: String,
 }
 
@@ -55,6 +57,11 @@ pub struct Counts {
 }
 
 impl Report {
+    /// Every entry, in the order the list shows them.
+    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+        self.sections.iter().flat_map(|section| &section.entries)
+    }
+
     pub fn counts(&self) -> Counts {
         let mut counts = Counts::default();
         for entry in self.sections.iter().flat_map(|section| &section.entries) {
@@ -119,9 +126,15 @@ fn place(session: &Session, path: &Path, line: usize) -> Option<(ChapterId, usiz
     }
 }
 
-/// One diagnostic as an entry, and the chapter it belongs to.
-fn entry(session: &Session, diagnostic: &Diagnostic) -> (Option<ChapterId>, Entry) {
+/// One diagnostic as an entry, and the chapter it belongs to. A warning about a whole page belongs to the chapter
+/// `page_place` says the page is in.
+fn entry(
+    session: &Session,
+    diagnostic: &Diagnostic,
+    page_place: &dyn Fn(usize) -> Option<(ChapterId, usize)>,
+) -> (Option<ChapterId>, Entry) {
     let base = session.base_dir();
+    let page = diagnostic.page;
     let line = diagnostic.location.map(|location| location.line as usize);
     let message = diagnostic.message.replace(&format!("{}/", base.display()), "");
     let kind = match diagnostic.severity {
@@ -130,7 +143,7 @@ fn entry(session: &Session, diagnostic: &Diagnostic) -> (Option<ChapterId>, Entr
     };
     let found = match (&diagnostic.source, line) {
         (Some(Source::Document(path)), Some(line)) => place(session, path, line),
-        _ => None,
+        _ => page.and_then(page_place),
     };
     if let Some((id, offset)) = found {
         return (
@@ -139,6 +152,7 @@ fn entry(session: &Session, diagnostic: &Diagnostic) -> (Option<ChapterId>, Entr
                 kind,
                 line,
                 place: Some((id, offset)),
+                page,
                 message,
             },
         );
@@ -159,24 +173,26 @@ fn entry(session: &Session, diagnostic: &Diagnostic) -> (Option<ChapterId>, Entr
             kind,
             line: None,
             place: None,
+            page,
             message,
         },
     )
 }
 
 /// The report for the engine's `errors` and `warnings` and the placeholders in the cache. `general` names the section of
-/// what belongs to no chapter.
+/// what belongs to no chapter. `page_place` says where a page's first text is written.
 pub fn build(
     session: &Session,
     errors: &[Diagnostic],
     warnings: &[Diagnostic],
     facts: &HashMap<ChapterId, Facts>,
     general: &str,
+    page_place: &dyn Fn(usize) -> Option<(ChapterId, usize)>,
 ) -> Report {
     let mut loose = Vec::new();
     let mut by_chapter: HashMap<ChapterId, Vec<Entry>> = HashMap::new();
     for diagnostic in errors.iter().chain(warnings) {
-        match entry(session, diagnostic) {
+        match entry(session, diagnostic, page_place) {
             (Some(id), entry) => by_chapter.entry(id).or_default().push(entry),
             (None, entry) => loose.push(entry),
         }
@@ -189,6 +205,7 @@ pub fn build(
                 kind: Kind::Todo,
                 line: Some(buffer.line_of(*offset)),
                 place: Some((*id, *offset)),
+                page: None,
                 message: text.clone(),
             });
         }
@@ -264,7 +281,7 @@ mod tests {
     fn entries_group_by_chapter_in_book_order_with_a_click_target() {
         let (dir, session) = project("group");
         let problems = [warning(&session, "two.md", 5), warning(&session, "two.md", 3)];
-        let report = build(&session, &[], &problems, &facts_of(&session), "Project");
+        let report = build(&session, &[], &problems, &facts_of(&session), "Project", &|_| None);
         let titles: Vec<_> = report.sections.iter().map(|section| section.title.as_str()).collect();
         assert_eq!(titles, ["One", "Two"]);
         let two = &report.sections[1];
@@ -282,7 +299,7 @@ mod tests {
     fn a_dot_says_error_over_placeholder_and_a_page_warning_says_nothing() {
         let (dir, session) = project("marks");
         let book = session.book().to_vec();
-        let open = build(&session, &[], &[], &facts_of(&session), "Project");
+        let open = build(&session, &[], &[], &facts_of(&session), "Project", &|_| None);
         assert_eq!(open.marks(), HashMap::from([(book[0], Mark::Placeholder)]));
         let both = build(
             &session,
@@ -290,6 +307,7 @@ mod tests {
             &[warning(&session, "one.md", 1)],
             &facts_of(&session),
             "Project",
+            &|_| None,
         );
         assert_eq!(both.marks(), HashMap::from([(book[0], Mark::Placeholder)]));
         assert_eq!(
@@ -309,10 +327,26 @@ mod tests {
         let mut theme = Diagnostic::error("unknown property");
         theme.source = Some(Source::Theme(session.base_dir().join("theme.json")));
         theme.location = Some(Location { line: 4, column: 2 });
-        let report = build(&session, &[theme], &[], &HashMap::new(), "Project");
+        let report = build(&session, &[theme], &[], &HashMap::new(), "Project", &|_| None);
         assert_eq!(report.sections[0].chapter, None);
         assert_eq!(report.sections[0].entries[0].message, "theme.json:4: unknown property");
         assert!(report.marks().is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_warning_about_a_page_stands_under_the_chapter_the_page_is_in() {
+        let (dir, session) = project("page");
+        let two = session.book()[1];
+        let mut short = Diagnostic::error("page 3 ends short");
+        short.severity = Severity::Warning;
+        short.page = Some(2);
+        let report = build(&session, &[], &[short], &HashMap::new(), "Project", &|page| {
+            (page == 2).then_some((two, 7))
+        });
+        assert_eq!(report.sections[0].chapter, Some(two));
+        let entry = &report.sections[0].entries[0];
+        assert_eq!((entry.page, entry.place), (Some(2), Some((two, 7))));
         fs::remove_dir_all(dir).ok();
     }
 

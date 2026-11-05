@@ -57,7 +57,8 @@ use self::strings::LanguageSetting;
 use self::text::Key;
 use crate::editor::{CaretMoved, SessionChanged, TextChanged};
 use crate::inspector::Tab;
-use crate::preview::Laid;
+use crate::preview::proof::Problem;
+use crate::preview::{Laid, ZoomChanged};
 use crate::session::{ChapterId, Kind};
 use crate::settings;
 use crate::source::EditKind;
@@ -268,7 +269,6 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::FindInProject, cx| with_hub(cx, Hub::search_project));
     cx.on_action(|_: &menus::ShowSettings, cx| settings::window::open(None, cx));
     cx.on_action(|_: &menus::ShowExport, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Export, w, cx)));
-    cx.on_action(|_: &menus::ShowSelection, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Selection, w, cx)));
     cx.on_action(|_: &menus::ShowStyles, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Styles, w, cx)));
     cx.on_action(|_: &menus::ChooseTheme, cx| with_hub(cx, Hub::choose_theme));
     cx.on_action(|_: &menus::ShowFonts, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Fonts, w, cx)));
@@ -277,8 +277,10 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::ShowAgent, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Agent, w, cx)));
     cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
-        with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Diagnostics, w, cx));
+        with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Proof, w, cx));
     });
+    cx.on_action(|_: &menus::NextProblem, cx| with_hub(cx, |hub, w, cx| hub.walk_problems(1, w, cx)));
+    cx.on_action(|_: &menus::PreviousProblem, cx| with_hub(cx, |hub, w, cx| hub.walk_problems(-1, w, cx)));
     cx.on_action(|_: &menus::ToggleBinder, cx| {
         settings::change(cx, |settings| settings.binder = !settings.binder);
         with_hub(cx, Hub::binder_toggled);
@@ -391,6 +393,10 @@ pub struct Hub {
     search_task: Task<()>,
     /// The count of a replacement, shown with the search that follows it.
     replaced: Option<usize>,
+    /// The places of the report's entries in its order, and the one being looked at.
+    problem_places: Vec<Option<(ChapterId, usize)>>,
+    current_problem: Option<usize>,
+    proof_hook: Option<usize>,
     /// Where the caret is, and where the find bar started.
     caret: usize,
     find_origin: usize,
@@ -405,12 +411,20 @@ impl Hub {
         let find = cx.new(|cx| FindBar::new(window, cx));
         let footer = cx.new(|_| Footer::new());
         parts.inspector.update(cx, |inspector, _| {
-            inspector.mount(Tab::Diagnostics, diagnostics.clone().into());
+            inspector.mount(Tab::Proof, diagnostics.clone().into());
             inspector.mount(Tab::Export, export.clone().into());
         });
         let subscriptions = vec![
             cx.subscribe_in(&parts.preview, window, |hub, _, _: &Laid, window, cx| {
-                hub.laid(window, cx)
+                hub.laid(window, cx);
+                // `DRUCK_PROOF=3` looks at a problem once there are pages, for screenshots.
+                if let Some(at) = hub.proof_hook.take() {
+                    hub.go_to_problem(at, window, cx);
+                }
+            }),
+            cx.subscribe(&parts.preview, |_, preview, _: &ZoomChanged, cx| {
+                let zoom = preview.read(cx).zoom();
+                cx.global_mut::<Prefs>().state.publish_zoom = zoom;
             }),
             cx.subscribe_in(&parts.editor, window, |hub, _, _: &SessionChanged, window, cx| {
                 hub.session_changed(window, cx);
@@ -441,6 +455,9 @@ impl Hub {
             running: None,
             search_task: Task::ready(()),
             replaced: None,
+            problem_places: Vec::new(),
+            current_problem: None,
+            proof_hook: crate::gate::var("DRUCK_PROOF").and_then(|at| at.parse().ok()),
             caret: 0,
             find_origin: 0,
             _subscriptions: subscriptions,
@@ -496,15 +513,38 @@ impl Hub {
             crate::t!(Key::ExportFailed, name = name)
         });
         let session = self.parts.editor.read(cx).session();
-        let report = report::build(
-            session,
-            &errors,
-            &warnings,
-            &self.facts.all(),
-            crate::t!(Key::ProjectSection),
-        );
+        let title = session.details().title.clone();
+        let general = if title.is_empty() {
+            crate::t!(Key::ProjectSection)
+        } else {
+            title.as_str()
+        };
+        let report = report::build(session, &errors, &warnings, &self.facts.all(), general, &|page| {
+            let (file, offset) = preview.first_place(page)?;
+            session.locate(&file, offset)
+        });
         let marks = report.marks();
-        self.diagnostics.update(cx, |panel, cx| panel.set(&report, notice, cx));
+        let problems: Vec<Problem> = report
+            .entries()
+            .map(|entry| Problem {
+                // A warning about a whole page has a place only to say what chapter it is in, and marks the page.
+                place: (entry.page.is_none() || entry.line.is_some())
+                    .then_some(entry.place)
+                    .flatten()
+                    .and_then(|(id, offset)| session.file_position(id, offset)),
+                page: entry.page,
+            })
+            .collect();
+        self.problem_places = report.entries().map(|entry| entry.place).collect();
+        self.current_problem = self.current_problem.filter(|at| *at < self.problem_places.len());
+        let current = self.current_problem;
+        self.parts
+            .preview
+            .update(cx, |preview, cx| preview.set_problems(problems, cx));
+        self.diagnostics.update(cx, |panel, cx| {
+            panel.set(&report, notice, cx);
+            panel.set_current(current, cx);
+        });
         if marks != self.marks {
             self.marks.clone_from(&marks);
             self.parts
@@ -566,12 +606,34 @@ impl Hub {
         cx: &mut Context<Self>,
     ) {
         match event {
-            DiagnosticsEvent::Open(id, offset) => self.open_place(*id, *offset..*offset, window, cx),
+            DiagnosticsEvent::Select(at) => self.go_to_problem(*at, window, cx),
             DiagnosticsEvent::DismissNotice => {
                 self.export_failure = None;
                 self.refresh_report(cx);
             }
         }
+    }
+
+    /// Goes to a problem on the pages, in Publish, with Write opening at the same place next.
+    fn go_to_problem(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Publish, window, cx));
+        self.current_problem = Some(at);
+        if let Some(Some((id, offset))) = self.problem_places.get(at).copied() {
+            self.open_place(id, offset..offset, window, cx);
+        }
+        self.parts
+            .preview
+            .update(cx, |preview, cx| preview.show_problem(Some(at), cx));
+        self.diagnostics.update(cx, |panel, cx| panel.set_current(Some(at), cx));
+    }
+
+    /// The next problem, or the one before it, around the ends of the list.
+    fn walk_problems(&mut self, direction: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(at) = next_problem(self.current_problem, self.problem_places.len(), direction) else {
+            return;
+        };
+        self.show_tab(Tab::Proof, window, cx);
+        self.go_to_problem(at, window, cx);
     }
 
     /// Opens a chapter with `range` selected, or the caret where an empty range is.
@@ -796,7 +858,7 @@ impl Hub {
                 self.export_failure = Some((name, errors));
                 self.parts
                     .inspector
-                    .update(cx, |inspector, cx| inspector.show(Tab::Diagnostics, cx));
+                    .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
                 RunState::Failed
             }
         };
@@ -989,9 +1051,11 @@ impl Hub {
         if let Some(zoom) = write {
             self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
         }
-        self.parts
-            .preview
-            .update(cx, |preview, cx| preview.set_zoom(publish, cx));
+        if publish.is_some() {
+            self.parts
+                .preview
+                .update(cx, |preview, cx| preview.set_zoom(publish, cx));
+        }
     }
 
     /// Zooms what the mode on screen shows, and keeps it for the next run. `direction` is a step up or down, or 0 for back
@@ -1015,7 +1079,6 @@ impl Hub {
                         preview.zoom_step(direction, cx);
                     }
                 });
-                cx.global_mut::<Prefs>().state.publish_zoom = self.parts.preview.read(cx).zoom();
             }
         }
     }
@@ -1047,6 +1110,19 @@ impl Hub {
     }
 }
 
+/// The problem after `current` in a list of `count`, or before it, around the ends.
+fn next_problem(current: Option<usize>, count: usize, direction: isize) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    Some(match (current, direction > 0) {
+        (None, true) => 0,
+        (None, false) => count - 1,
+        (Some(at), true) => (at + 1) % count,
+        (Some(at), false) => (at + count - 1) % count,
+    })
+}
+
 /// The next of Write's zoom steps up or down from `now`, or 100 percent for a `direction` of 0.
 fn next_write_zoom(now: f32, direction: isize) -> f32 {
     let steps = tokens::WRITE_ZOOMS;
@@ -1066,7 +1142,16 @@ impl Render for Hub {
 
 #[cfg(test)]
 mod tests {
-    use super::next_write_zoom;
+    use super::{next_problem, next_write_zoom};
+
+    #[test]
+    fn walking_the_problems_goes_around_the_ends() {
+        assert_eq!(next_problem(None, 3, 1), Some(0));
+        assert_eq!(next_problem(None, 3, -1), Some(2));
+        assert_eq!(next_problem(Some(2), 3, 1), Some(0));
+        assert_eq!(next_problem(Some(0), 3, -1), Some(2));
+        assert_eq!(next_problem(None, 0, 1), None);
+    }
 
     #[test]
     fn write_zoom_steps_stop_at_the_ends_and_zero_goes_back() {

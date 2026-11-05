@@ -513,6 +513,26 @@ impl EditorView {
         result
     }
 
+    /// Edits a chapter from a field outside the text, such as a proof slip, as typing does: [`TextChanged`] goes out, so the
+    /// pages follow on a pause and the save on its own.
+    pub fn edit_outside(
+        &mut self,
+        id: ChapterId,
+        edits: Vec<Edit>,
+        kind: EditKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), crate::source::buffer::EditError> {
+        self.store_view();
+        self.session.edit_chapter(id, edits, kind)?;
+        if id == self.session.active() {
+            self.adopt_active(window, cx);
+        }
+        cx.emit(TextChanged);
+        cx.notify();
+        Ok(())
+    }
+
     /// The session for bookkeeping that changes no text and nothing on screen, such as recording a finished save. Sends
     /// no event and leaves the galley alone.
     pub fn session_quietly(&mut self) -> &mut Session {

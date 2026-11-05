@@ -119,6 +119,22 @@ pub const SWITCH_KNOB_RADIUS: Pixels = px(3.);
 pub const TRAFFIC_LIGHTS: (f32, f32) = (9., 7.);
 /// The thin line around a page in Publish, which a white page on a light surface needs.
 pub const PAGE_EDGE: Pixels = px(1.);
+/// The gap at a spread's gutter, and around sheets on a contact sheet.
+pub const SPREAD_GUTTER: Pixels = px(2.);
+pub const CONTACT_GAP: Pixels = px(10.);
+/// A dot on a page of a contact sheet that has a problem, in from the page's corner.
+pub const CONTACT_DOT_INSET: Pixels = px(5.);
+/// How far a mark stands off the text it marks, in points of the page.
+pub const MARK_PADDING: f32 = 2.;
+/// The faint tint of a marked paragraph, and of the problem being looked at.
+pub const MARK_TINT: f32 = 0.08;
+pub const MARK_TINT_CURRENT: f32 = 0.2;
+/// The proof slip: its width, its text's size, and how tall the text gets before it scrolls.
+pub const SLIP_WIDTH: Pixels = px(380.);
+pub const SLIP_TEXT: Pixels = px(14.);
+pub const SLIP_TEXT_MAX_HEIGHT: Pixels = px(260.);
+/// The status line's zoom buttons.
+pub const ZOOM_BUTTON: Pixels = px(20.);
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;

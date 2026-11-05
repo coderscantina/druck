@@ -75,7 +75,6 @@ crate::strings! {
         SelectionToolbar => ("Toolbar on Selection", "Werkzeugleiste bei Auswahl"),
         FocusEditor => ("Go to the Text", "Zum Text"),
         Inspector => ("Inspector Tab", "Inspektor-Reiter"),
-        ShowSelection => ("Selection", "Auswahl"),
         ShowStyles => ("Styles", "Stile"),
         ShowFonts => ("Fonts", "Schriften"),
         ShowImages => ("Images", "Bilder"),
@@ -94,7 +93,9 @@ crate::strings! {
         ZoomReset => ("Reset Zoom", "Zoom zurücksetzen"),
         ToggleBinder => ("Binder", "Binder"),
         HideBinder => ("Hide Binder", "Binder ausblenden"),
-        ShowDiagnostics => ("Show Diagnostics", "Diagnose einblenden"),
+        ShowDiagnostics => ("Proof", "Korrektur"),
+        NextProblem => ("Next Problem", "Nächstes Problem"),
+        PreviousProblem => ("Previous Problem", "Voriges Problem"),
         FocusBinder => ("Go to the Binder", "Zum Binder"),
         Minimize => ("Minimize", "Im Dock ablegen"),
         WindowZoom => ("Zoom", "Zoomen"),
@@ -104,8 +105,8 @@ crate::strings! {
         WordsFooter => ("{chapter} of {book} words", "{chapter} von {book} Wörtern"),
         WordsChapterOnly => ("{chapter} words", "{chapter} Wörter"),
 
-        // Diagnostics
-        DiagnosticsTitle => ("DIAGNOSTICS", "DIAGNOSE"),
+        // Proof
+        DiagnosticsTitle => ("PROOF", "KORREKTUR"),
         Summary => (
             "Errors {errors} \u{b7} Warnings {warnings} \u{b7} Open {todos}",
             "Fehler {errors} \u{b7} Warnungen {warnings} \u{b7} Offen {todos}"
@@ -153,8 +154,8 @@ crate::strings! {
         StageWriting => ("Writing the file\u{2026}", "Datei wird geschrieben\u{2026}"),
         ExportCancelled => ("Cancelled.", "Abgebrochen."),
         ExportFailedSee => (
-            "The export failed. The reasons are in Diagnostics.",
-            "Der Export ist fehlgeschlagen. Die Gründe stehen unter Diagnose."
+            "The export failed. The reasons are in Proof.",
+            "Der Export ist fehlgeschlagen. Die Gründe stehen unter Korrektur."
         ),
         ExportDonePages => ("Pages: {parts} \u{b7} {seconds} s", "Seiten: {parts} \u{b7} {seconds} s"),
         ExportDoneSections => ("Sections: {parts} \u{b7} {seconds} s", "Abschnitte: {parts} \u{b7} {seconds} s"),

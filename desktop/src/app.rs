@@ -17,10 +17,10 @@
 //!   watcher, merges, and the recovery copies. Cmd+S asks it for an immediate save through `SaveRequested`.
 //! - **Editor commands** own `editor/`, whose text draws its own floats and margin notes.
 //! - **Theme core** owns `theme_file/` and the panels on the `Tab::Styles` and `Tab::Fonts` tabs.
-//! - **Shell** owns `shell/`: the `Tab::Diagnostics` and `Tab::Export` panels, the Binder's dots, search and the word
+//! - **Shell** owns `shell/`: the `Tab::Proof` and `Tab::Export` panels, the Binder's dots, search and the word
 //!   count, the string tables, and the rest of the menus.
 //! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the rail.
-//! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Selection` and `Tab::Images` panels.
+//! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Images` panel.
 
 use std::path::{Path, PathBuf};
 

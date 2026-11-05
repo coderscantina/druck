@@ -1,14 +1,21 @@
-//! Publish's pages: the engine's pages painted natively, never through PDF.
+//! Publish's pages: the engine's pages painted natively, never through PDF, in spreads or, zoomed out past fit, as a
+//! contact sheet of every page. The status line has the zoom.
 //!
 //! The workspace calls [`PreviewView::request`] with the session's joined text and hears [`Typeset`] when pages change.
 //! In Write they are not on screen, and [`PreviewView::ready_ahead`] keeps what Publish would show ready to paint.
+//!
+//! A click on a line asks the workspace to open the [`slip::ProofSlip`], which this view shows at its paragraph. Problems
+//! come in through [`PreviewView::set_problems`], and only these and the slip's paragraph are ever marked on a page.
 
 mod bench;
 mod cache;
+pub mod directives;
 pub mod fonts;
 pub(crate) mod job;
+pub mod proof;
 mod raster;
 mod sheets;
+pub mod slip;
 mod strings;
 
 use std::collections::HashSet;
@@ -18,11 +25,12 @@ use std::time::Instant;
 
 use druck::Failure;
 use druck::diagnostic::Diagnostic;
-use druck::output::{ChapterId, Item, Pt, SourcePos};
+use druck::output::{ChapterId, Item, SourcePos};
 use gpui::prelude::*;
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, MouseDownEvent, Pixels,
-    RenderImage, ScrollEvent, Window, actions, canvas, div, fill, point, px, size,
+    Anchor, AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding,
+    MouseDownEvent, Pixels, RenderImage, Role, ScrollEvent, SharedString, Window, actions, anchored, canvas, deferred,
+    div, fill, point, px, size,
 };
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
@@ -33,22 +41,27 @@ use self::cache::{PageCache, PageKey};
 pub use self::fonts::FontUse;
 pub use self::job::BookType;
 use self::job::{Job, Layout, Scheduler, Started, Typesetter};
+use self::proof::{BlockAt, Mark, Marks, Problem};
 use self::raster::pixel_size;
-use self::sheets::{Sheets, clamp_scroll, rescale_scroll};
+use self::sheets::{Arrangement, Sheets, clamp_scroll};
+use self::slip::ProofSlip;
 use self::strings::Key;
+use crate::a11y::Control as _;
 use crate::session::{Joined, Kind};
 use crate::theme_file::blocks::{self, Target};
 use crate::tokens::{self, Tokens};
 
-actions!(preview, [NextScreen, PreviousScreen]);
+actions!(preview, [NextScreen, PreviousScreen, CloseSlip]);
 
 /// The bundled specimen: every element of a document, to see a theme on.
 use crate::theme_file::SPECIMEN;
 /// Where the specimen pretends to be, beside the document, so relative paths in a theme resolve as for the document.
 const SPECIMEN_FILE: &str = "specimen.md";
 
-/// Fixed zoom levels, as logical pixels per point.
+/// Zoom levels above fit, as logical pixels per point.
 const ZOOMS: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+/// Zoom levels below fit, which show a contact sheet. Small enough that it reads as one, whatever the window.
+const CONTACT_ZOOMS: [f32; 4] = [0.14, 0.2, 0.3, 0.45];
 /// Sharper than this costs too much memory per page; higher zoom enlarges these pixels.
 const MAX_RESOLUTION: f32 = 4.0;
 /// Rasterized pages kept in memory. Painted ones also have a copy in the GPU atlas.
@@ -59,15 +72,38 @@ const RASTER_THREADS: usize = 3;
 const PREFETCH_PAGES: usize = 2;
 
 /// How large sheets are drawn.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Zoom {
-    FitWidth,
+    /// A whole spread fills the view.
+    Fit,
     Fixed(f32),
+}
+
+/// The next step of the one zoom scale from `now`, which is `current` pixels per point, where a spread fits at `fit`:
+/// contact sheets below fit, then fit, then larger. `None` at either end.
+fn next_zoom(now: Zoom, current: f32, fit: f32, direction: isize) -> Option<Zoom> {
+    let below_fit = CONTACT_ZOOMS.iter().copied().filter(|zoom| *zoom < fit * 0.99);
+    let above_fit = ZOOMS.iter().copied().filter(|zoom| *zoom > fit * 1.01);
+    let levels = below_fit
+        .map(Zoom::Fixed)
+        .chain([Zoom::Fit])
+        .chain(above_fit.map(Zoom::Fixed));
+    let value = |zoom: &Zoom| match zoom {
+        Zoom::Fit => fit,
+        Zoom::Fixed(zoom) => *zoom,
+    };
+    let current = if now == Zoom::Fit { fit } else { current };
+    if direction > 0 {
+        levels.into_iter().find(|zoom| value(zoom) > current * 1.01)
+    } else {
+        levels.into_iter().rev().find(|zoom| value(zoom) < current * 0.99)
+    }
 }
 
 /// A sheet to paint this frame.
 struct Placed {
     bounds: Bounds<Pixels>,
+    page: usize,
     image: Option<Arc<RenderImage>>,
     /// Rastered for this zoom and these pages, not an older image standing in.
     exact: bool,
@@ -83,13 +119,20 @@ pub struct Laid;
 
 impl EventEmitter<Laid> for PreviewView {}
 
-/// A click on a page landed on text written at this byte of this file.
-pub struct PageClicked {
-    pub file: PathBuf,
-    pub offset: usize,
-}
+/// A click on a page landed on this block, or on nothing that has one.
+pub struct PageClicked(pub Option<BlockAt>);
 
 impl EventEmitter<PageClicked> for PreviewView {}
+
+/// The zoom changed, to keep between runs.
+pub struct ZoomChanged;
+
+impl EventEmitter<ZoomChanged> for PreviewView {}
+
+/// The author asked to see the list of problems from the status line.
+pub struct ProblemsWanted;
+
+impl EventEmitter<ProblemsWanted> for PreviewView {}
 
 pub struct PreviewView {
     focus: FocusHandle,
@@ -113,6 +156,10 @@ pub struct PreviewView {
     zoom: Zoom,
     /// The zoom of the last frame, for moves between zoom levels.
     current_zoom: f32,
+    /// The zoom at which a spread fills the view. Below it, sheets show as a contact sheet.
+    fit: f32,
+    /// The page to bring to the middle of the view on the next frame, once the new zoom is known.
+    centre_on: Option<usize>,
     scroll: (f32, f32),
     view: (f32, f32),
     /// The first page on screen in the last frame.
@@ -130,6 +177,16 @@ pub struct PreviewView {
     exact_frame: Option<Instant>,
     /// While the pages are not on screen: where they would paint, to raster for.
     ahead: Option<Ahead>,
+    slip: Entity<ProofSlip>,
+    /// The file and bytes of the slip's paragraph, as the pages on screen have them, and where that is on them.
+    slip_source: Option<(PathBuf, std::ops::Range<usize>)>,
+    slip_marks: Vec<Mark>,
+    /// The page of the paragraph the slip stands on, which is where it was clicked when it runs over two pages.
+    slip_page: Option<usize>,
+    problems: Vec<Problem>,
+    marks: Marks,
+    /// The problem being looked at.
+    current_problem: Option<usize>,
 }
 
 /// Where the pages would paint if they were on screen.
@@ -146,12 +203,13 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("pagedown", NextScreen, context),
         KeyBinding::new("pageup", PreviousScreen, context),
+        KeyBinding::new("escape", CloseSlip, context),
     ]);
 }
 
 impl PreviewView {
     /// A view of the document in `theme`, or the theme it names.
-    pub fn new(kind: Kind, theme: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+    pub fn new(kind: Kind, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
         let mut view = Self {
             focus: cx.focus_handle().tab_stop(true),
@@ -171,8 +229,10 @@ impl PreviewView {
             cache: PageCache::new(CACHE_BYTES),
             rastering: HashSet::new(),
             dropped: Vec::new(),
-            zoom: Zoom::FitWidth,
+            zoom: Zoom::Fit,
             current_zoom: 1.0,
+            fit: 1.0,
+            centre_on: None,
             scroll: (0.0, 0.0),
             view: (0.0, 0.0),
             page: 0,
@@ -183,6 +243,13 @@ impl PreviewView {
             ready: (0, Instant::now()),
             exact_frame: None,
             ahead: None,
+            slip: cx.new(|cx| ProofSlip::new(window, cx)),
+            slip_source: None,
+            slip_marks: Vec::new(),
+            slip_page: None,
+            problems: Vec::new(),
+            marks: Marks::default(),
+            current_problem: None,
         };
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
             view.zoom = Zoom::Fixed(fixed);
@@ -255,10 +322,8 @@ impl PreviewView {
 
     /// Scrolls to the top of a page.
     pub fn show_page(&mut self, page: usize, cx: &mut Context<Self>) {
-        if let Some(sheets) = self.sheets(self.current_zoom) {
-            self.scroll.1 = sheets.top(page.min(sheets.len().saturating_sub(1)));
-            cx.notify();
-        }
+        self.centre_on = Some(page);
+        cx.notify();
     }
 
     /// Where the first block set in `style` is written, or that the style is on the first page. `text_of` reads a
@@ -307,29 +372,166 @@ impl PreviewView {
         cx.notify();
     }
 
-    /// Reports the written place of the text at a window position, if the position is on a page.
+    /// A click on the pages. On a contact sheet it zooms into that page's spread. On a spread it reports the block under
+    /// the pointer, if any.
     fn page_clicked(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
         let at = (
             f32::from(event.position.x) - self.origin.0,
             f32::from(event.position.y) - self.origin.1,
         );
-        let Some(sheets) = self.sheets(self.current_zoom) else {
+        let hit = self
+            .sheets(self.current_zoom)
+            .and_then(|sheets| sheets.point_at(at, self.view.0, self.scroll));
+        if self.is_contact_sheet() {
+            if let Some((page, ..)) = hit {
+                self.centre_on = Some(page);
+                self.set_zoom_by_author(Zoom::Fit, cx);
+            }
             return;
-        };
-        let Some((page, x, y)) = sheets.point_at(at, self.view.0, self.scroll) else {
-            return;
-        };
-        let clicked = self.layout.as_ref().and_then(|layout| {
-            let position = layout.laid.position_at(page, Pt(f64::from(x)), Pt(f64::from(y)))?;
-            let chapter = layout.laid.source_map()?.chapters().get(position.chapter.0 as usize)?;
-            Some(PageClicked {
-                file: chapter.path.clone(),
-                offset: position.offset as usize,
-            })
-        });
-        if let Some(clicked) = clicked {
-            cx.emit(clicked);
         }
+        self.slip_page = hit.map(|(page, ..)| page);
+        let block = hit.and_then(|(page, x, y)| {
+            let layout = self.layout.as_ref()?;
+            proof::block_under(&layout.laid, page, x, y)
+        });
+        cx.emit(PageClicked(block));
+    }
+
+    /// Whether the sheets show as a contact sheet.
+    pub fn is_contact_sheet(&self) -> bool {
+        self.current_zoom < self.fit * 0.999
+    }
+
+    /// The proof slip this view shows.
+    pub fn slip(&self) -> &Entity<ProofSlip> {
+        &self.slip
+    }
+
+    /// Shows the slip at these bytes of a file, on the pages on screen, or nowhere. Pages behind the text say nothing about
+    /// where the text is, so the workspace calls this once they are set from it. A paragraph that left the view brings the
+    /// view with it.
+    pub fn set_slip(&mut self, source: Option<(PathBuf, std::ops::Range<usize>)>, cx: &mut Context<Self>) {
+        self.slip_source = source;
+        let found = match (&self.slip_source, &self.layout) {
+            (Some((file, range)), Some(layout)) => proof::marks_of(&layout.laid, file, range.clone()),
+            _ => Vec::new(),
+        };
+        // A paragraph emptied in the slip has no text on the pages. The slip stays where it was.
+        if !found.is_empty() || self.slip_source.is_none() {
+            self.slip_marks = found;
+        }
+        if let Some(anchor) = self.slip_anchor().copied() {
+            self.slip_page = Some(anchor.page);
+            self.bring_into_view(anchor, cx);
+        }
+        cx.notify();
+    }
+
+    /// The part of the slip's paragraph the slip stands at: on the page it has been on, or where the paragraph starts.
+    fn slip_anchor(&self) -> Option<&Mark> {
+        let on_page = self.slip_marks.iter().find(|mark| Some(mark.page) == self.slip_page);
+        on_page.or(self.slip_marks.first())
+    }
+
+    /// Scrolls so a mark is on screen, if it is not.
+    fn bring_into_view(&mut self, mark: Mark, cx: &mut Context<Self>) {
+        if let Some(sheets) = self.sheets(self.current_zoom) {
+            let (top, height) = (mark.rect.y.0 as f32, mark.rect.height.0 as f32);
+            self.scroll.1 = sheets.scroll_to_show(mark.page, (top, top + height), self.view.1, self.scroll.1);
+            cx.notify();
+        }
+    }
+
+    /// The problems to mark on the pages, replacing the earlier ones.
+    pub fn set_problems(&mut self, problems: Vec<Problem>, cx: &mut Context<Self>) {
+        self.problems = problems;
+        self.mark_problems();
+        cx.notify();
+    }
+
+    /// Marks the problems again and says how many and how long it took. For measurements.
+    pub fn mark_again(&mut self, cx: &mut Context<Self>) -> (usize, std::time::Duration) {
+        let started = Instant::now();
+        self.mark_problems();
+        cx.notify();
+        (self.problems.len(), started.elapsed())
+    }
+
+    fn mark_problems(&mut self) {
+        self.marks = match &self.layout {
+            Some(layout) => proof::resolve(&layout.laid, &self.problems),
+            None => Marks::default(),
+        };
+    }
+
+    /// Goes to a problem's place on the pages, and marks it as the one being looked at. A problem with no place on them,
+    /// such as one about a theme, moves nothing.
+    pub fn show_problem(&mut self, at: Option<usize>, cx: &mut Context<Self>) {
+        self.current_problem = at;
+        let first = at.and_then(|at| self.marks.of_problem.get(at)?.first().copied());
+        if let Some(first) = first {
+            if self.is_contact_sheet() {
+                self.centre_on = Some(first.page);
+                self.set_zoom_by_author(Zoom::Fit, cx);
+            } else {
+                self.bring_into_view(first, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The block of the first text that holds `words`. For scripted runs, which have no pointer.
+    pub fn block_with_text(&self, words: &str) -> Option<BlockAt> {
+        proof::block_with_text(&self.layout.as_ref()?.laid, words)
+    }
+
+    /// A paragraph on a page, or the next page that has one. For scripted runs.
+    pub fn paragraph_on_page(&self, page: usize) -> Option<(usize, BlockAt)> {
+        proof::paragraph_on_page(&self.layout.as_ref()?.laid, page)
+    }
+
+    /// The window position of a line on the page in the middle of the view. For scripted runs.
+    pub fn point_on_a_line(&self) -> Option<gpui::Point<Pixels>> {
+        let sheets = self.sheets(self.current_zoom)?;
+        let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
+        let (page, block) = self.paragraph_on_page(page)?;
+        let marks = proof::marks_of(&self.layout.as_ref()?.laid, &block.file, block.range);
+        let mark = marks.iter().find(|mark| mark.page == page).or(marks.first())?;
+        let zoom = self.current_zoom;
+        let x = sheets.left(mark.page, self.view.0, self.scroll.0)
+            + (mark.rect.x.0 + mark.rect.width.0 / 2.0) as f32 * zoom;
+        let y = sheets.top(mark.page) - self.scroll.1 + (mark.rect.y.0 + mark.rect.height.0 / 2.0) as f32 * zoom;
+        Some(point(px(self.origin.0 + x), px(self.origin.1 + y)))
+    }
+
+    /// The window position of the middle of the view. For scripted runs.
+    pub fn middle_of_view(&self) -> gpui::Point<Pixels> {
+        point(
+            px(self.origin.0 + self.view.0 / 2.0),
+            px(self.origin.1 + self.view.1 / 2.0),
+        )
+    }
+
+    /// The page the slip is on. For scripted runs.
+    pub fn slip_page(&self) -> Option<usize> {
+        self.slip_anchor().map(|mark| mark.page)
+    }
+
+    /// Whether the slip's paragraph starts within the view.
+    pub fn slip_in_view(&self) -> bool {
+        let Some(mark) = self.slip_anchor() else {
+            return false;
+        };
+        let Some(sheets) = self.sheets(self.current_zoom) else {
+            return false;
+        };
+        let top = sheets.top(mark.page) + mark.rect.y.0 as f32 * self.current_zoom;
+        top >= self.scroll.1 && top <= self.scroll.1 + self.view.1
+    }
+
+    /// The written place of the first text on a page.
+    pub fn first_place(&self, page: usize) -> Option<(PathBuf, usize)> {
+        proof::first_place(&self.layout.as_ref()?.laid, page)
     }
 
     /// Whether a layout is running, which the next request would cancel.
@@ -438,6 +640,7 @@ impl PreviewView {
                 // Freeing a whole document's runs takes long enough to drop a frame.
                 let old = self.layout.replace(Arc::new(layout));
                 cx.background_spawn(async move { drop(old) }).detach();
+                self.mark_problems();
                 cx.emit(Typeset(book_type));
             }
             Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
@@ -453,56 +656,72 @@ impl PreviewView {
     /// The zoom to keep between runs. `None` fits the pages to the pane.
     pub fn zoom(&self) -> Option<f32> {
         match self.zoom {
-            Zoom::FitWidth => None,
+            Zoom::Fit => None,
             Zoom::Fixed(zoom) => Some(zoom),
         }
     }
 
     /// Sets the zoom from a past run. `None` fits the pages to the pane.
     pub fn set_zoom(&mut self, zoom: Option<f32>, cx: &mut Context<Self>) {
-        self.zoom = zoom.map_or(Zoom::FitWidth, Zoom::Fixed);
+        self.zoom = zoom.map_or(Zoom::Fit, Zoom::Fixed);
         self.prepare_ahead(cx);
         cx.notify();
     }
 
-    /// Fits the sheets to the width of the pane.
-    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
-        self.set_zoom(None, cx);
+    fn set_zoom_by_author(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
+        self.zoom = zoom;
+        self.prepare_ahead(cx);
+        cx.emit(ZoomChanged);
+        cx.notify();
     }
 
-    /// One zoom level larger for a positive `direction`, smaller for a negative one.
+    /// Fits a spread to the pane.
+    pub fn zoom_to_fit(&mut self, cx: &mut Context<Self>) {
+        self.set_zoom_by_author(Zoom::Fit, cx);
+    }
+
+    /// One step along the zoom scale: larger for a positive `direction`, smaller for a negative one. Past fit it becomes a
+    /// contact sheet.
     pub fn zoom_step(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let current = self.current_zoom;
-        let next = if direction > 0 {
-            ZOOMS.iter().find(|zoom| **zoom > current * 1.01)
+        if let Some(next) = next_zoom(self.zoom, self.current_zoom, self.fit, direction) {
+            self.set_zoom_by_author(next, cx);
+        }
+    }
+
+    fn arrangement(&self, zoom: f32) -> Arrangement {
+        if zoom < self.fit * 0.999 {
+            Arrangement::Contact { view: self.view.0 }
         } else {
-            ZOOMS.iter().rev().find(|zoom| **zoom < current * 0.99)
-        };
-        if let Some(next) = next {
-            self.set_zoom(Some(*next), cx);
+            Arrangement::Spreads {
+                gutter: f32::from(tokens::SPREAD_GUTTER),
+            }
         }
     }
 
     fn sheets(&self, zoom: f32) -> Option<Sheets> {
         let layout = self.layout.as_ref()?;
         let pages = (layout.laid.pages().iter()).map(|page| (page.width.0 as f32, page.height.0 as f32));
-        Some(Sheets::new(pages, zoom, f32::from(tokens::SPACE_4)))
+        let arrangement = self.arrangement(zoom);
+        let gap = match arrangement {
+            Arrangement::Spreads { .. } => tokens::SPACE_4,
+            Arrangement::Contact { .. } => tokens::CONTACT_GAP,
+        };
+        Some(Sheets::new(pages, zoom, f32::from(gap), arrangement))
     }
 
-    /// The zoom in effect for a view this large. Fitting shows a whole page.
-    fn resolve_zoom(&self, (width, height): (f32, f32)) -> f32 {
-        if let Zoom::Fixed(zoom) = self.zoom {
-            return zoom;
-        }
-        let Some(unit) = self.sheets(1.0) else {
-            return self.current_zoom;
+    /// The zoom at which a whole spread fills a view this large.
+    fn fit_zoom(&self, (width, height): (f32, f32)) -> f32 {
+        let Some(layout) = self.layout.as_ref() else {
+            return self.fit;
         };
+        let pages = layout.laid.pages();
+        let widest = pages.iter().map(|page| page.width.0 as f32).fold(1.0, f32::max);
+        let tallest = pages.iter().map(|page| page.height.0 as f32).fold(1.0, f32::max);
         let margins = 2.0 * f32::from(tokens::SPACE_4);
-        let widest = unit.width() - margins;
-        let tallest = (0..unit.len()).map(|page| unit.size(page).1).fold(1.0, f32::max);
-        ((width - margins) / widest)
+        let gutter = f32::from(tokens::SPREAD_GUTTER);
+        ((width - margins - gutter) / (2.0 * widest))
             .min((height - margins) / tallest)
-            .clamp(ZOOMS[0] / 2.0, ZOOMS[ZOOMS.len() - 1])
+            .clamp(CONTACT_ZOOMS[0], ZOOMS[ZOOMS.len() - 1])
     }
 
     /// A frame on screen: frees what the atlas no longer needs, and places the sheets.
@@ -530,21 +749,31 @@ impl PreviewView {
     fn prepare(&mut self, bounds: Bounds<Pixels>, device_scale: f32, cx: &mut Context<Self>) -> (Vec<Placed>, bool) {
         self.view = (f32::from(bounds.size.width), f32::from(bounds.size.height));
         self.origin = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
-        let zoom = self.resolve_zoom(self.view);
         let Some(layout) = self.layout.clone() else {
             return (Vec::new(), false);
         };
+        let fit = self.fit_zoom(self.view);
+        let zoom = match self.zoom {
+            Zoom::Fit => fit,
+            Zoom::Fixed(zoom) => zoom,
+        };
+        // The page at the middle stays there through a change of size or arrangement.
+        let keep = (zoom != self.current_zoom || fit != self.fit)
+            .then(|| {
+                self.sheets(self.current_zoom)?
+                    .page_at_middle(self.scroll.1, self.view.1)
+            })
+            .flatten();
+        self.fit = fit;
+        self.current_zoom = zoom;
         let Some(sheets) = self.sheets(zoom) else {
             return (Vec::new(), false);
         };
-        if zoom != self.current_zoom {
-            if let Some(old) = self.sheets(self.current_zoom) {
-                self.scroll.1 = rescale_scroll(self.scroll.1, self.view.1, old.height(), sheets.height());
-            }
-            self.current_zoom = zoom;
+        if let Some(page) = self.centre_on.take().or(keep) {
+            self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
         if let Some(page) = self.bench.as_mut().and_then(Bench::take_page) {
-            self.scroll.1 = sheets.top(page.min(sheets.len().saturating_sub(1)));
+            self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
         self.scroll.0 = clamp_scroll(self.scroll.0, sheets.width(), self.view.0);
         self.scroll.1 = clamp_scroll(self.scroll.1, sheets.height(), self.view.1);
@@ -589,6 +818,7 @@ impl PreviewView {
             let exact_here = found.is_some();
             exact += usize::from(exact_here);
             placed.push(Placed {
+                page,
                 bounds: Bounds::new(
                     point(bounds.origin.x + px(snap(centred)), bounds.origin.y + px(snap(top))),
                     size(px(snap(width)), px(snap(height))),
@@ -658,9 +888,132 @@ impl PreviewView {
             };
         };
         let pages = layout.laid.pages().len();
-        let page = (self.page + 1).min(pages);
-        let percent = (self.current_zoom * 100.0).round();
-        crate::t!(Key::PageOf, page = page, pages = pages, percent = percent)
+        if self.is_contact_sheet() {
+            return crate::t!(Key::PageCount, pages = pages);
+        }
+        let shown = self.sheets(self.current_zoom).and_then(|sheets| {
+            let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
+            Some(sheets.row_pages(page))
+        });
+        let shown = shown.unwrap_or(self.page..self.page + 1);
+        let number = |page: usize| page_label(&layout.laid, page);
+        if shown.len() > 1 {
+            crate::t!(
+                Key::PagesOf,
+                first = number(shown.start),
+                last = number(shown.end - 1),
+                pages = pages
+            )
+        } else {
+            crate::t!(Key::PageOf, page = number(shown.start.min(pages - 1)), pages = pages)
+        }
+    }
+
+    /// The window rectangles of what is marked on a sheet, with how strong the tint is.
+    fn marks_on(&self, sheet: &Placed) -> Vec<(Bounds<Pixels>, f32)> {
+        if self.is_contact_sheet() {
+            return Vec::new();
+        }
+        let to_bounds = |mark: &Mark| {
+            let padding = tokens::MARK_PADDING;
+            let (x, y) = (mark.rect.x.0 as f32 - padding, mark.rect.y.0 as f32 - padding);
+            let (width, height) = (
+                mark.rect.width.0 as f32 + 2.0 * padding,
+                mark.rect.height.0 as f32 + 2.0 * padding,
+            );
+            let zoom = self.current_zoom;
+            Bounds::new(
+                sheet.bounds.origin + point(px(x * zoom), px(y * zoom)),
+                size(px(width * zoom), px(height * zoom)),
+            )
+        };
+        let problems = self.marks.of_problem.iter().enumerate().flat_map(|(at, marks)| {
+            let tint = if Some(at) == self.current_problem {
+                tokens::MARK_TINT_CURRENT
+            } else {
+                tokens::MARK_TINT
+            };
+            marks.iter().map(move |mark| (mark, tint))
+        });
+        let slip = self.slip_marks.iter().map(|mark| (mark, tokens::MARK_TINT));
+        problems
+            .chain(slip)
+            .filter(|(mark, _)| mark.page == sheet.page)
+            .map(|(mark, tint)| (to_bounds(mark), tint))
+            .collect()
+    }
+
+    /// Where the slip stands: under its paragraph's first part on the pages, within the view. `None` while the slip is closed.
+    fn slip_position(&self) -> Option<gpui::Point<Pixels>> {
+        let mark = self.slip_anchor()?;
+        let sheets = self.sheets(self.current_zoom)?;
+        let zoom = self.current_zoom;
+        let left = sheets.left(mark.page, self.view.0, self.scroll.0) + mark.rect.x.0 as f32 * zoom;
+        let bottom = sheets.top(mark.page) - self.scroll.1 + (mark.rect.y.0 + mark.rect.height.0) as f32 * zoom;
+        let width = f32::from(tokens::SLIP_WIDTH);
+        let room = f32::from(tokens::SPACE_2);
+        let x = left.clamp(room, (self.view.0 - width - room).max(room));
+        let y = bottom + (tokens::MARK_PADDING + tokens::MARK_PADDING) * zoom;
+        Some(point(px(self.origin.0 + x), px(self.origin.1 + y)))
+    }
+
+    /// The status line's zoom: smaller, the value, larger, and fit.
+    fn zoom_controls(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let button = |id: &'static str, label: SharedString, aria: &'static str, on: bool| {
+            div()
+                .id(id)
+                .button(tokens, aria)
+                .flex_none()
+                .min_w(tokens::ZOOM_BUTTON)
+                .h(tokens::ZOOM_BUTTON)
+                .px(tokens::SPACE_1)
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(tokens::RADIUS)
+                .cursor_pointer()
+                .text_color(if on { tokens.text } else { tokens.text_quiet })
+                .hover(|button| button.bg(tokens.raised))
+                .child(label)
+        };
+        let percent = format!("{}%", (self.current_zoom * 100.0).round());
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .child(
+                button("zoom-out", "\u{2212}".into(), crate::t!(Key::ZoomOut), false)
+                    .on_click(cx.listener(|view, _, _, cx| view.zoom_step(-1, cx))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px(tokens::SPACE_1)
+                    .text_color(tokens.text)
+                    .child(percent),
+            )
+            .child(
+                button("zoom-in", "+".into(), crate::t!(Key::ZoomIn), false)
+                    .on_click(cx.listener(|view, _, _, cx| view.zoom_step(1, cx))),
+            )
+            .child(
+                button(
+                    "zoom-fit",
+                    crate::t!(Key::ZoomFit).into(),
+                    crate::t!(Key::ZoomFit),
+                    self.zoom == Zoom::Fit,
+                )
+                .on_click(cx.listener(|view, _, _, cx| view.zoom_to_fit(cx))),
+            )
+    }
+}
+
+/// A page as the book numbers it, which is what warnings say, or its place from the front where it has no number.
+fn page_label(laid: &druck::output::Layout, page: usize) -> String {
+    match laid.page_numbers().get(page).copied().flatten() {
+        Some(number) => number.format.format(number.value),
+        None => (page + 1).to_string(),
     }
 }
 
@@ -685,15 +1038,24 @@ impl Focusable for PreviewView {
 
 impl Render for PreviewView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tokens = Tokens::get(cx);
+        let tokens = Tokens::get(cx).clone();
         let this = cx.entity();
         let painted = this.clone();
-        let edge = tokens.divider;
+        let (edge, accent) = (tokens.divider, tokens.accent);
         let pages = canvas(
             move |bounds, window, cx| this.update(cx, |view, cx| view.frame(bounds, window, cx)),
             move |bounds, placed, window, cx| {
+                let view = painted.read(cx);
+                let drawn: Vec<_> = placed
+                    .into_iter()
+                    .map(|sheet| {
+                        let marks = view.marks_on(&sheet);
+                        let dot = view.is_contact_sheet() && view.marks.pages.contains(&sheet.page);
+                        (sheet, marks, dot)
+                    })
+                    .collect();
                 window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-                    for sheet in placed {
+                    for (sheet, marks, dot) in drawn {
                         window.paint_quad(gpui::outline(
                             sheet.bounds.dilate(tokens::PAGE_EDGE),
                             edge,
@@ -705,6 +1067,20 @@ impl Render for PreviewView {
                             window
                                 .paint_image(sheet.bounds, sheet.bounds, corners, image, 0, false)
                                 .ok();
+                        }
+                        for (mark, tint) in marks {
+                            window.paint_quad(fill(mark, gpui::Hsla::from(accent).opacity(tint)));
+                            window.paint_quad(gpui::outline(mark, accent, gpui::BorderStyle::Solid));
+                        }
+                        if dot {
+                            let origin = point(
+                                sheet.bounds.right() - tokens::CONTACT_DOT_INSET - tokens::DOT_SIZE,
+                                sheet.bounds.top() + tokens::CONTACT_DOT_INSET,
+                            );
+                            window.paint_quad(
+                                fill(Bounds::new(origin, size(tokens::DOT_SIZE, tokens::DOT_SIZE)), accent)
+                                    .corner_radii(tokens::DOT_SIZE / 2.),
+                            );
                         }
                     }
                 });
@@ -721,13 +1097,24 @@ impl Render for PreviewView {
             let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
             format!("{first}{suffix}")
         });
+        let count = self.problems.len();
+        let to_look_at = (count > 0).then(|| {
+            let label = crate::t!(Key::ToLookAt, count = count);
+            div()
+                .id("to-look-at")
+                .control(&tokens, Role::Link, SharedString::from(label.clone()))
+                .flex_none()
+                .text_color(tokens.accent)
+                .cursor_pointer()
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
+                .child(label)
+        });
         let strip = div()
             .flex_none()
             .h(tokens::SECTION_HEIGHT)
             .px(tokens::SPACE_3)
             .flex()
             .items_center()
-            .justify_between()
             .gap(tokens::SPACE_3)
             .border_t_1()
             .border_color(tokens.divider)
@@ -735,12 +1122,24 @@ impl Render for PreviewView {
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_quiet)
             .child(div().flex_none().child(self.status()))
-            .when_some(problem, |strip, problem| {
-                strip.child(div().min_w_0().truncate().text_color(tokens.accent).child(problem))
-            });
+            .children(to_look_at)
+            .child(div().flex_1().min_w_0().when_some(problem, |slot, problem| {
+                slot.truncate().text_color(tokens.accent).child(problem)
+            }))
+            .child(self.zoom_controls(&tokens, cx));
+        let slip = self.slip.read(cx).opened().and(self.slip_position()).map(|position| {
+            deferred(
+                anchored()
+                    .position(position)
+                    .anchor(Anchor::TopLeft)
+                    .snap_to_window_with_margin(tokens::SPACE_2)
+                    .child(self.slip.clone()),
+            )
+            .with_priority(1)
+        });
         div()
             .id("preview")
-            .role(gpui::Role::Group)
+            .role(Role::Group)
             .aria_label(crate::t!(crate::shell::text::Key::Publish))
             .key_context("Preview")
             .track_focus(&self.focus)
@@ -764,7 +1163,33 @@ impl Render for PreviewView {
                 view.scroll.1 -= view.view.1 * 0.9;
                 cx.notify();
             }))
+            .on_action(cx.listener(|_, _: &CloseSlip, _, cx| cx.emit(PageClicked(None))))
             .child(div().flex_1().min_h_0().overflow_hidden().child(pages))
             .child(strip)
+            .children(slip)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_zoom_scale_runs_from_contact_sheets_through_fit_to_larger() {
+        let step = |now, current, direction| next_zoom(now, current, 1.53, direction);
+        assert_eq!(step(Zoom::Fit, 1.53, -1), Some(Zoom::Fixed(0.45)));
+        assert_eq!(step(Zoom::Fixed(0.45), 0.45, -1), Some(Zoom::Fixed(0.3)));
+        assert_eq!(step(Zoom::Fixed(0.14), 0.14, -1), None);
+        assert_eq!(step(Zoom::Fixed(0.45), 0.45, 1), Some(Zoom::Fit));
+        assert_eq!(step(Zoom::Fit, 1.53, 1), Some(Zoom::Fixed(2.0)));
+        assert_eq!(step(Zoom::Fixed(2.0), 2.0, -1), Some(Zoom::Fit));
+        assert_eq!(step(Zoom::Fixed(3.0), 3.0, 1), None);
+    }
+
+    #[test]
+    fn a_level_on_the_wrong_side_of_fit_is_skipped() {
+        // In a small window a spread fits at 0.4, so the largest contact level would be larger than fit.
+        assert_eq!(next_zoom(Zoom::Fit, 0.4, 0.4, -1), Some(Zoom::Fixed(0.3)));
+        assert_eq!(next_zoom(Zoom::Fit, 0.4, 0.4, 1), Some(Zoom::Fixed(0.5)));
     }
 }
