@@ -51,6 +51,7 @@ crate::strings! {
             "Git needs a name and an email for commits. They stay in this repo.",
             "Git braucht für Commits einen Namen und eine E-Mail. Sie bleiben in diesem Repo."
         ),
+        Continue => ("Continue", "Weiter"),
         YourName => ("Name", "Name"),
         YourEmail => ("Email", "E-Mail"),
 

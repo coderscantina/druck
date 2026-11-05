@@ -231,7 +231,7 @@ impl CommitCard {
             parts.push(
                 Self::buttons()
                     .child(
-                        ui::button(tokens, "card-identity", crate::t!(Key::Commit))
+                        ui::button(tokens, "card-identity", crate::t!(Key::Continue))
                             .text_color(tokens.accent)
                             .on_click(cx.listener(|card, _, window, cx| card.save_identity(window, cx))),
                     )

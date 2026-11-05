@@ -706,3 +706,56 @@ fn closing_merges_a_change_that_arrived_between_the_last_look_and_the_write() {
         "{disk}"
     );
 }
+
+#[test]
+fn a_git_merge_that_overlaps_holds_both_sides_until_a_choice() {
+    let mut fixture = Fixture::new();
+    let path = fixture.one();
+    let ours = fixture.text("manuscript/one.md");
+    let base = ours.replace("First line", "Older line");
+    let theirs = ours.replace("First line", "Their line");
+    fs::write(&path, &theirs).unwrap();
+    fixture.session.restart_sync(&path, &base);
+    let change = fixture
+        .sync
+        .on_disk(&mut fixture.session, &path, Some(theirs.clone().into_bytes()))
+        .expect("a change");
+    assert_eq!(change.kind, ChangeKind::Conflict);
+    assert_eq!(fixture.text("manuscript/one.md"), ours);
+
+    // Nothing may treat this as settled, though the text was saved before the merge began.
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Held);
+    assert_eq!(fixture.disk("manuscript/one.md"), theirs);
+    let copies = fixture.sync.copies().expect("copies").load();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].text, ours);
+
+    fixture.sync.resolve(&mut fixture.session, &path, Choice::Mine).unwrap();
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
+    assert_eq!(fixture.disk("manuscript/one.md"), ours);
+    assert_eq!(fixture.kept().len(), 1);
+}
+
+#[test]
+fn a_git_merge_that_overlaps_by_line_only_merges_by_word() {
+    let mut fixture = Fixture::new();
+    let path = fixture.one();
+    let base = "# One\n\nFirst line of words.\n\nSecond line.\n";
+    let ours = "# One\n\nFirst line of my words.\n\nSecond line.\n";
+    let theirs = "# One\n\nFirst long line of words.\n\nSecond line.\n";
+    fixture.type_in("manuscript/one.md", "First line.", "First line of my words.");
+    fixture.save();
+    assert_eq!(fixture.text("manuscript/one.md"), ours);
+    fs::write(&path, theirs).unwrap();
+    fixture.session.restart_sync(&path, base);
+    let change = fixture
+        .sync
+        .on_disk(&mut fixture.session, &path, Some(theirs.as_bytes().to_vec()))
+        .expect("a change");
+    assert_eq!(change.kind, ChangeKind::Merged);
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
+    assert_eq!(
+        fixture.disk("manuscript/one.md"),
+        "# One\n\nFirst long line of my words.\n\nSecond line.\n"
+    );
+}
