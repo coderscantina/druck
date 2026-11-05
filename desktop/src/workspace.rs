@@ -21,7 +21,7 @@ use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
-use crate::preview::{BookType, PageClicked, PreviewView, Typeset};
+use crate::preview::{Ahead, BookType, PageClicked, PreviewView, Typeset};
 use crate::session::{Group, Session};
 use crate::settings;
 use crate::shell::text::Key;
@@ -287,12 +287,15 @@ impl Workspace {
             let window_size = window.viewport_size();
             let width = window_size.width - tokens::INSPECTOR_WIDTH - tokens::RAIL_WIDTH;
             let height = window_size.height - tokens::TITLEBAR_HEIGHT - tokens::SECTION_HEIGHT;
-            Bounds::new(point(px(0.), tokens::TITLEBAR_HEIGHT), gpui::size(width, height))
+            Ahead {
+                bounds: Bounds::new(point(px(0.), tokens::TITLEBAR_HEIGHT), gpui::size(width, height)),
+                scale: window.scale_factor(),
+                window: window.window_handle(),
+            }
         });
-        let scale = window.scale_factor();
         self.parts
             .preview
-            .update(cx, |preview, cx| preview.ready_ahead(ahead, scale, cx));
+            .update(cx, |preview, cx| preview.ready_ahead(ahead, cx));
     }
 
     /// Whether anything is not on disk yet.

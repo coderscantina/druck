@@ -21,8 +21,8 @@ use druck::diagnostic::Diagnostic;
 use druck::output::{ChapterId, Item, Pt, SourcePos};
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, MouseDownEvent, Pixels, RenderImage,
-    ScrollEvent, Window, actions, canvas, div, fill, point, px, size,
+    AnyWindowHandle, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, KeyBinding, MouseDownEvent, Pixels,
+    RenderImage, ScrollEvent, Window, actions, canvas, div, fill, point, px, size,
 };
 use image::RgbaImage;
 use resvg::tiny_skia::Pixmap;
@@ -128,8 +128,17 @@ pub struct PreviewView {
     ready: (u64, Instant),
     /// The last frame in which every visible page was exact.
     exact_frame: Option<Instant>,
-    /// While the pages are not on screen: the place and scale they would paint at, to raster for.
-    ahead: Option<(Bounds<Pixels>, f32)>,
+    /// While the pages are not on screen: where they would paint, to raster for.
+    ahead: Option<Ahead>,
+}
+
+/// Where the pages would paint if they were on screen.
+#[derive(Clone, Copy)]
+pub struct Ahead {
+    pub bounds: Bounds<Pixels>,
+    pub scale: f32,
+    /// The window whose atlas holds what they painted before, which a page evicted meanwhile is freed from.
+    pub window: AnyWindowHandle,
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -340,14 +349,14 @@ impl PreviewView {
 
     /// Keeps rastering what would show at `ahead` while the pages are not on screen, so that entering Publish finds them
     /// finished. `None` once they are on screen.
-    pub fn ready_ahead(&mut self, ahead: Option<Bounds<Pixels>>, scale: f32, cx: &mut Context<Self>) {
-        self.ahead = ahead.map(|bounds| (bounds, scale));
+    pub fn ready_ahead(&mut self, ahead: Option<Ahead>, cx: &mut Context<Self>) {
+        self.ahead = ahead;
         self.prepare_ahead(cx);
     }
 
     fn prepare_ahead(&mut self, cx: &mut Context<Self>) {
-        if let Some((bounds, scale)) = self.ahead {
-            self.prepare(bounds, scale, cx);
+        if let Some(ahead) = self.ahead {
+            self.prepare(ahead.bounds, ahead.scale, cx);
         }
     }
 
@@ -610,14 +619,25 @@ impl PreviewView {
             );
         cx.spawn(async move |this, cx| {
             let (image, bytes) = raster.await;
-            this.update(cx, |view, cx| {
+            let off_screen = this.update(cx, |view, cx| {
                 view.rastering.remove(&key);
                 let evicted = view.cache.insert(key, page, image, bytes);
                 view.dropped.extend(evicted);
                 view.prepare_ahead(cx);
                 cx.notify();
-            })
-            .ok();
+                view.ahead
+                    .map(|ahead| (ahead.window, std::mem::take(&mut view.dropped)))
+            });
+            // No frame comes to free what was evicted while the pages are not on screen.
+            if let Ok(Some((window, dropped))) = off_screen {
+                window
+                    .update(cx, |_, window, _| {
+                        for image in dropped {
+                            window.drop_image(image).ok();
+                        }
+                    })
+                    .ok();
+            }
         })
         .detach();
     }
@@ -675,7 +695,7 @@ impl Render for PreviewView {
                 window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
                     for sheet in placed {
                         window.paint_quad(gpui::outline(
-                            sheet.bounds.dilate(px(1.)),
+                            sheet.bounds.dilate(tokens::PAGE_EDGE),
                             edge,
                             gpui::BorderStyle::Solid,
                         ));
