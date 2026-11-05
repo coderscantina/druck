@@ -15,6 +15,7 @@ mod dates;
 mod git_cli;
 mod history;
 mod local;
+mod merge;
 mod pacing;
 mod panel;
 mod repo;
@@ -39,6 +40,7 @@ use self::commit_card::{CardField, CommitCard};
 use self::git_cli::{Git, Merged, Refused};
 use self::history::{History, Orphan};
 pub use self::local::label_history;
+use self::merge::PendingMerge;
 use self::pacing::Pacing;
 pub use self::panel::GitPanel;
 use self::panel::Slot;
@@ -249,21 +251,6 @@ enum RepoState {
     Broken(String),
 }
 
-/// Where a merge takes its other side from.
-enum MergeFrom {
-    Branch(String),
-    /// A fetch, then the branch's upstream.
-    Upstream,
-}
-
-enum MergeEnd {
-    Done,
-    /// And what was merged, which is what changed the same words.
-    Conflicts(Vec<Conflict>, String),
-    /// One file cannot be shown on the conflict line, so the merge was undone.
-    Outside(String),
-}
-
 type Done<T> = Box<dyn FnOnce(&mut Versions, Result<T, String>, &mut Window, &mut Context<Versions>)>;
 
 pub struct Versions {
@@ -296,12 +283,8 @@ pub struct Versions {
     fetch_wanted: bool,
     /// A fetch came back this run, so what the repo says about its remote is worth showing.
     fetched: bool,
-    /// A merge stopped on conflicts, and the card opens when the last one is settled.
-    awaiting_merge: bool,
-    /// The file that still holds both versions of a merge's conflict, which holds the card back, and its chapter's name.
-    both_stand_in: Option<(PathBuf, String)>,
-    /// The card opens once the repo has been read again, for the merge's message.
-    card_after_reading: bool,
+    /// A merge Git stopped on, until the commit that finishes it.
+    merge: PendingMerge,
     /// Changes coming in now are the repo's own moves, which were labelled before they began.
     quiet: bool,
     _subscriptions: Vec<Subscription>,
@@ -385,9 +368,7 @@ impl Versions {
             last_fetch: None,
             fetch_wanted: false,
             fetched: false,
-            awaiting_merge: false,
-            both_stand_in: None,
-            card_after_reading: false,
+            merge: PendingMerge::default(),
             quiet: false,
             _subscriptions: subscriptions,
         };
@@ -474,8 +455,7 @@ impl Versions {
                 if std::mem::take(&mut view.fetch_wanted) {
                     view.fetch_now_and_then(cx);
                 }
-                if view.card_after_reading {
-                    view.card_after_reading = false;
+                if view.merge.take_card_after_reading() {
                     with_view(cx, Versions::show_card);
                 }
             })
@@ -610,8 +590,7 @@ impl Versions {
             let done: Done<(String, Option<String>)> = Box::new(|view, result, window, cx| match result {
                 Ok((hash, problem)) => {
                     view.error = problem;
-                    view.awaiting_merge = false;
-                    view.both_stand_in = None;
+                    view.merge.over();
                     view.show_note(crate::t!(Key::Committed, hash = short_hash(&hash)), window, cx);
                     view.card
                         .update(cx, |card, cx| card.committed(view.error.is_none(), window, cx));
@@ -649,174 +628,6 @@ impl Versions {
             git.push(&book, target)
         };
         let done: Done<()> = Box::new(|view, result, _, _| view.error = result.err());
-        self.work(job, done, window, cx);
-    }
-
-    fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_merge(MergeFrom::Upstream, crate::t!(Key::BeforePull).to_owned(), window, cx);
-    }
-
-    fn merge_branch(&mut self, branch: String, window: &mut Window, cx: &mut Context<Self>) {
-        let label = crate::t!(Key::BeforeMerge, branch = branch);
-        self.run_merge(MergeFrom::Branch(branch), label, window, cx);
-    }
-
-    /// Merges into the current branch through `git`. While it runs, the files' changes are not taken in, because a file
-    /// `git` leaves in conflict holds marker lines for a moment. Then what overlaps goes to the existing conflict line.
-    fn run_merge(&mut self, from: MergeFrom, label: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.working || self.git.is_none() {
-            return;
-        }
-        self.after_settling(window, cx, move |view, window, cx| {
-            let (Some(git), Some(book)) = (view.git.clone(), view.book(cx)) else {
-                return;
-            };
-            view.label_all(&label, cx);
-            let session = view.session(cx);
-            let takeable: HashSet<PathBuf> = (session.files().into_iter())
-                .filter(|path| session.file_text(path).is_some() && session.chapter_of_file(path).is_some())
-                .collect();
-            let source = match &from {
-                MergeFrom::Branch(branch) => Source::Git(GitMove::Merge, branch.clone()),
-                MergeFrom::Upstream => Source::Git(GitMove::Pull, view.upstream_name()),
-            };
-            view.persist
-                .update(cx, |persist, _| persist.hold_outside_changes(source));
-            let job = move || merge_job(&git, &book, from, &takeable);
-            let done: Done<MergeEnd> = Box::new(|view, result, window, cx| view.merge_finished(result, window, cx));
-            view.work(job, done, window, cx);
-        });
-    }
-
-    /// `git` is done moving the files. What it changed comes in as the repo's own move, which was labelled before it began.
-    fn release_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.quiet = true;
-        self.persist
-            .update(cx, |persist, cx| persist.release_outside_changes(window, cx));
-        self.quiet = false;
-    }
-
-    /// The branch a pull brings text from, as the remote names it.
-    fn upstream_name(&self) -> String {
-        match &self.state {
-            RepoState::Ready(overview) => match &overview.remote {
-                Some(remote) => format!("{remote}/{}", overview.branch),
-                None => overview.branch.clone(),
-            },
-            _ => String::new(),
-        }
-    }
-
-    fn merge_finished(&mut self, result: Result<MergeEnd, String>, window: &mut Window, cx: &mut Context<Self>) {
-        self.quiet = true;
-        match result {
-            Ok(MergeEnd::Done) => {}
-            Ok(MergeEnd::Outside(file)) => self.error = Some(crate::t!(Key::MergeOutside, file = file)),
-            Ok(MergeEnd::Conflicts(conflicts, target)) => {
-                let persist = self.persist.clone();
-                self.awaiting_merge = true;
-                persist.update(cx, |persist, _| persist.merging_from(target));
-                for conflict in conflicts {
-                    let base = conflict.base.unwrap_or_default();
-                    let theirs = conflict.theirs.unwrap_or_default();
-                    let taken = persist.update(cx, |persist, cx| {
-                        persist.take_merge(&conflict.path, &base, &theirs, window, cx)
-                    });
-                    if let Err(error) = taken {
-                        self.error = Some(error.to_string());
-                    }
-                }
-            }
-            Err(reason) => self.error = Some(reason),
-        }
-        self.release_files(window, cx);
-        self.conflicts_settled(cx);
-    }
-
-    /// The last conflict of a merge was settled: the author commits it. "See both" leaves both versions in the text between
-    /// marker comments, which is not settled until those are gone, so the foot says so and the card waits.
-    fn conflicts_settled(&mut self, cx: &mut Context<Self>) {
-        if !self.awaiting_merge || self.working || self.persist.read(cx).has_conflicts() {
-            return;
-        }
-        let marked = self.chapter_with_markers(cx);
-        if marked != self.both_stand_in {
-            self.both_stand_in = marked;
-            cx.notify();
-        }
-        if self.both_stand_in.is_some() {
-            return;
-        }
-        self.awaiting_merge = false;
-        self.card_after_reading = true;
-        self.refresh(cx);
-    }
-
-    /// The app opened in the middle of a merge whose "See both" markers stand, as a quit left it: the foot asks again.
-    fn resume_merge(&mut self, cx: &mut Context<Self>) {
-        let merging = matches!(&self.state, RepoState::Ready(overview) if overview.merging.is_some());
-        if merging && !self.awaiting_merge && !self.working && self.chapter_with_markers(cx).is_some() {
-            self.awaiting_merge = true;
-            self.conflicts_settled(cx);
-        }
-    }
-
-    /// A file that still has "See both"'s marker comments, and its chapter's name.
-    fn chapter_with_markers(&self, cx: &App) -> Option<(PathBuf, String)> {
-        let session = self.session(cx);
-        let path = (session.files().into_iter())
-            .find(|path| session.file_text(path).is_some_and(|text| has_markers(&text)))?;
-        let name = session.chapter_of_file(&path).map_or_else(
-            || path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-            |chapter| session.title_of(chapter),
-        );
-        Some((path, name))
-    }
-
-    /// Settles the versions "See both" left in a file by one side, as one undo step, which takes the markers out too.
-    fn keep_one_side(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((path, _)) = self.both_stand_in.clone() else {
-            return;
-        };
-        let result = self.parts.editor.update(cx, |editor, cx| {
-            editor.update_session(
-                |session| {
-                    let text = session.file_text(&path).unwrap_or_default();
-                    let edits = edits_between(&text, &keep_one(&text, choice));
-                    session.apply_to_file(&path, &edits, EditKind::Discrete)
-                },
-                window,
-                cx,
-            )
-        });
-        if let Err(error) = result {
-            self.error = Some(error.to_string());
-        }
-        self.conflicts_settled(cx);
-    }
-
-    fn abort_merge(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(git), Some(book)) = (self.git.clone(), self.book(cx)) else {
-            return;
-        };
-        if self.working {
-            return;
-        }
-        self.error = None;
-        self.awaiting_merge = false;
-        self.both_stand_in = None;
-        let branch = match &self.state {
-            RepoState::Ready(overview) => overview.branch.clone(),
-            _ => String::new(),
-        };
-        let source = Source::Git(GitMove::Abort, branch);
-        self.persist
-            .update(cx, |persist, _| persist.hold_outside_changes(source));
-        let job = move || git.abort_merge(&book);
-        let done: Done<()> = Box::new(|view, result, window, cx| {
-            view.error = result.err();
-            view.release_files(window, cx);
-        });
         self.work(job, done, window, cx);
     }
 
@@ -1084,8 +895,8 @@ impl Render for Versions {
     /// A passing note at the window's foot, in the saving state's form.
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
-        let both = self.both_stand_in.is_some();
-        let (text, color): (SharedString, _) = match (&self.both_stand_in, &self.note) {
+        let both = self.merge.both_stand_in().is_some();
+        let (text, color): (SharedString, _) = match (self.merge.both_stand_in(), &self.note) {
             (Some((_, chapter)), _) => (crate::t!(Key::BothStand, chapter = chapter).into(), tokens.accent),
             (None, Some(note)) => (note.clone(), tokens.text_quiet),
             (None, None) => return div().into_any_element(),
@@ -1115,38 +926,6 @@ impl Render for Versions {
 
 fn open_repo(book: &Path) -> Result<Repo, Problem> {
     Repo::open(book)?.ok_or_else(|| Problem::Other(crate::t!(Key::NotARepo).to_owned()))
-}
-
-fn merge_job(git: &Git, book: &Path, from: MergeFrom, takeable: &HashSet<PathBuf>) -> Result<MergeEnd, String> {
-    let repo = open_repo(book).map_err(|problem| describe(&problem))?;
-    let target = match from {
-        MergeFrom::Branch(name) => name,
-        MergeFrom::Upstream => {
-            git.fetch(book)?;
-            (repo.upstream().map_err(|problem| describe(&problem))?)
-                .ok_or_else(|| crate::t!(Key::NoUpstream).to_owned())?
-        }
-    };
-    match git.merge(book, repo.git_dir(), &target) {
-        Ok(Merged::Done) => Ok(MergeEnd::Done),
-        Ok(Merged::Conflicts) => {
-            let conflicts =
-                (open_repo(book).and_then(|repo| repo.conflicts())).map_err(|problem| describe(&problem))?;
-            let stuck = conflicts.iter().find(|conflict| {
-                !(conflict.in_book
-                    && conflict.ours_exists
-                    && conflict.theirs.is_some()
-                    && takeable.contains(&conflict.path))
-            });
-            if let Some(stuck) = stuck {
-                let name = stuck.name.clone();
-                git.abort_merge(book)?;
-                return Ok(MergeEnd::Outside(name));
-            }
-            Ok(MergeEnd::Conflicts(conflicts, target))
-        }
-        Err(refused) => Err(describe_refused(&refused)),
-    }
 }
 
 fn describe_refused(refused: &Refused) -> String {

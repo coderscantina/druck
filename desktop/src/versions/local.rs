@@ -121,7 +121,7 @@ impl Versions {
             }
         }
         self.start_pacing(window, cx);
-        if self.awaiting_merge {
+        if self.merge.is_awaiting() {
             self.conflicts_settled(cx);
         }
         if self.panel.read(cx).is_open() {
