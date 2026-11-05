@@ -78,7 +78,7 @@ use crate::config::source::{InputSource, Resource};
 use crate::config::theme::{Align, BreakBefore, FontStyle, NumberPosition, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
 use crate::date::Date;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic, PageName};
 use crate::document::{Block, Class, Document, Footnote, Inline, InlineStyle, Link, Location, Matter, Placement};
 use crate::highlight;
 use crate::image::Image;
@@ -265,9 +265,14 @@ pub(crate) fn uncancelled(
 
 /// A rule the layout breaks as a warning at its source, naming the page as it is numbered.
 fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source: &InputSource) -> Diagnostic {
-    let page = match numbering.page(issue.page) {
+    let number = numbering.page(issue.page);
+    let page = match &number {
         Some(number) => format!("page {number}"),
         None => format!("unnumbered page {}", issue.page + 1),
+    };
+    let name = match number {
+        Some(number) => PageName::Numbered(number),
+        None => PageName::Unnumbered(issue.page + 1),
     };
     let rules = &config.typesetting;
     let lines = |count: usize| {
@@ -277,33 +282,75 @@ fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source:
             format!("{count} lines")
         }
     };
-    let message = match issue.kind {
-        IssueKind::Short(short) => format!("{page} ends {short:.1} lines short of the bottom"),
-        IssueKind::Uneven(uneven) => format!("{page} ends {uneven:.1} lines off the height of the page facing it"),
-        IssueKind::ChapterEnd(count) => format!(
-            "{page} ends a chapter with {}, fewer than the {} wanted",
-            lines(count),
-            rules.chapter_last_lines.get()
+    let (message, code) = match issue.kind {
+        IssueKind::Short(short) => (
+            format!("{page} ends {short:.1} lines short of the bottom"),
+            Code::PageShort {
+                page: name,
+                lines: short,
+            },
         ),
-        IssueKind::Break(pages::Rule::OneLinerAtTop) => {
-            format!("this one-line paragraph stands alone at the top of {page}")
-        }
-        IssueKind::Break(pages::Rule::OneLinerAtBottom) => {
-            format!("this one-line paragraph stands alone at the bottom of {page}")
-        }
-        IssueKind::Break(pages::Rule::HeadingLines(count)) => format!(
-            "a heading at the foot of {page} has {} of this text below it, fewer than the {} wanted",
-            lines(count),
-            rules.heading_lines.get()
+        IssueKind::Uneven(uneven) => (
+            format!("{page} ends {uneven:.1} lines off the height of the page facing it"),
+            Code::PageUneven {
+                page: name,
+                lines: uneven,
+            },
         ),
-        IssueKind::Line(Flaw::Loose) => format!("a line of this paragraph on {page} has its spaces stretched loose"),
-        IssueKind::Line(Flaw::Hyphens) => format!(
-            "this paragraph has more than {} hyphenated lines in a row on {page}",
-            rules.hyphens_in_a_row.get()
+        IssueKind::ChapterEnd(count) => (
+            format!(
+                "{page} ends a chapter with {}, fewer than the {} wanted",
+                lines(count),
+                rules.chapter_last_lines.get()
+            ),
+            Code::ChapterEndShort {
+                page: name,
+                lines: count,
+                wanted: rules.chapter_last_lines.get(),
+            },
         ),
-        IssueKind::Line(Flaw::ShortLast) => format!("this paragraph ends in a short last line on {page}"),
+        IssueKind::Break(pages::Rule::OneLinerAtTop) => (
+            format!("this one-line paragraph stands alone at the top of {page}"),
+            Code::OneLinerAtTop { page: name },
+        ),
+        IssueKind::Break(pages::Rule::OneLinerAtBottom) => (
+            format!("this one-line paragraph stands alone at the bottom of {page}"),
+            Code::OneLinerAtBottom { page: name },
+        ),
+        IssueKind::Break(pages::Rule::HeadingLines(count)) => (
+            format!(
+                "a heading at the foot of {page} has {} of this text below it, fewer than the {} wanted",
+                lines(count),
+                rules.heading_lines.get()
+            ),
+            Code::HeadingAtFoot {
+                page: name,
+                lines: count,
+                wanted: rules.heading_lines.get(),
+            },
+        ),
+        IssueKind::Line(Flaw::Loose) => (
+            format!("a line of this paragraph on {page} has its spaces stretched loose"),
+            Code::LooseLine { page: name },
+        ),
+        IssueKind::Line(Flaw::Hyphens) => (
+            format!(
+                "this paragraph has more than {} hyphenated lines in a row on {page}",
+                rules.hyphens_in_a_row.get()
+            ),
+            Code::TooManyHyphens {
+                page: name,
+                limit: rules.hyphens_in_a_row.get(),
+            },
+        ),
+        IssueKind::Line(Flaw::ShortLast) => (
+            format!("this paragraph ends in a short last line on {page}"),
+            Code::ShortLastLine { page: name },
+        ),
     };
-    let warning = Diagnostic::warning(Some(source.clone()), message).on_page(issue.page);
+    let warning = Diagnostic::warning(Some(source.clone()), message)
+        .coded(code)
+        .on_page(issue.page);
     match issue.at {
         Some(at) => warning.at(at.line, at.column),
         None => warning,

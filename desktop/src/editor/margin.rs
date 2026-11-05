@@ -1,7 +1,8 @@
-//! The chapter's notes in the right margin: each comment that opens the chapter, with a thin accent line at its left and
-//! a field that edits its text where it stands in the buffer, so undo and the bytes around it are the editor's. They show
-//! only when there are any. An agent's notes stand in the same margin, see [`super::review`], and [`flow`] places them
-//! all, so none is painted over another.
+//! Comments beside the text. A chapter's opening notes stand in one faint line above its first text, in the flow, and
+//! unfold there on a click or keyboard focus into fields that edit their text where it stands in the buffer, so undo and
+//! the bytes around it are the editor's. Later comments stand in the right margin beside their passages, cut to a few
+//! lines. An agent's notes stand in the same margin, see [`super::review`], and [`flow`] places them all, so none is
+//! painted over another. Nothing here changes a byte unless the author types in a note.
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -9,12 +10,14 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, TextRun, UTF16Selection, Window,
-    WrappedLine, canvas, div, fill, font, point, px, size,
+    AnyElement, App, Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, Role, SharedString, Subscription, TextRun,
+    UTF16Selection, Window, WrappedLine, canvas, div, fill, font, point, px, size, svg,
 };
 
-use super::commands::notes::{Note, leading_notes};
+use super::commands::notes::{
+    Note, comments_in, first_meaningful_line, leading_notes, leading_region, shown_range,
+};
 use super::strings::Key;
 use super::{
     Backspace, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView, Left, LineEnd,
@@ -22,7 +25,9 @@ use super::{
     SelectLineStart, SelectRight, SelectUp, SelectWordLeft, SelectWordRight, SessionChanged, TextChanged, Undo, Up,
     WordLeft, WordRight,
 };
-use crate::source::{Selection, motion};
+use crate::session::ChapterId;
+use crate::source::inline::SpanKind;
+use crate::source::{BlockKind, Selection, motion};
 use crate::tokens::{self, Tokens};
 
 const FIELD_CONTEXT: &str = "NoteField";
@@ -35,75 +40,70 @@ pub(super) struct Wanted {
     pub height: Pixels,
 }
 
-/// Where everything in the margin stands.
-#[derive(Debug, PartialEq)]
-pub(super) struct Flow {
-    pub chapter: Pixels,
-    pub notes: Vec<Pixels>,
-}
-
-/// Lays the margin out as one flow, down from `top`, the view's top. An agent's notes, in order, each belong beside a
-/// passage, so they stand as near it as the note above them allows. The chapter's note belongs to no passage: it stands at
-/// its place only if that leaves room before the next agent's note, and otherwise moves below them.
-pub(super) fn flow(chapter: Option<Wanted>, notes: &[Wanted], top: Pixels) -> Flow {
-    let gap = tokens::SPACE_3;
-    let mut pending = chapter;
-    let mut placed_chapter = chapter.map_or(top, |chapter| chapter.y);
-    let mut placed = Vec::with_capacity(notes.len());
+/// Lays the margin out as one flow, down from `top`, the view's top. `notes` are in the order they stand: each as near its
+/// passage as the note above it allows.
+pub(super) fn flow(notes: &[Wanted], top: Pixels) -> Vec<Pixels> {
     let mut next = top;
-    for note in notes {
-        if let Some(chapter) = pending {
-            // With nothing above it, it scrolls away with the text it stands beside.
-            let y = if placed.is_empty() { chapter.y } else { chapter.y.max(next) };
-            if y + chapter.height + gap <= note.y {
-                placed_chapter = y;
-                next = next.max(y + chapter.height + gap);
-                pending = None;
-            }
-        }
-        let y = note.y.max(next);
-        placed.push(y);
-        next = y + note.height + gap;
-    }
-    if let Some(chapter) = pending
-        && !placed.is_empty()
-    {
-        placed_chapter = chapter.y.max(next);
-    }
-    Flow {
-        chapter: placed_chapter,
-        notes: placed,
-    }
+    notes
+        .iter()
+        .map(|note| {
+            let y = note.y.max(next);
+            next = y + note.height + tokens::SPACE_3;
+            y
+        })
+        .collect()
 }
 
-pub struct MarginNotes {
+/// A chapter's opening notes: folded to one line, or unfolded into their fields.
+pub struct ChapterNotes {
     editor: Entity<EditorView>,
-    /// What the margin shows, so a key elsewhere in the chapter draws nothing here.
+    /// Holds the keys while they are in the notes, so leaving folds them.
+    focus: FocusHandle,
+    unfolded: bool,
+    /// What the notes show, so a key elsewhere in the chapter draws nothing here.
     shown: Vec<String>,
+    /// The line that stands for them when folded.
+    line: Option<String>,
+    chapter: Option<ChapterId>,
     fields: Vec<Entity<NoteField>>,
     _subscriptions: Vec<Subscription>,
 }
 
-impl MarginNotes {
-    pub fn new(editor: Entity<EditorView>, cx: &mut Context<Self>) -> Self {
+impl ChapterNotes {
+    pub fn new(editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle().tab_stop(true);
         let subscriptions = vec![
-            cx.subscribe(&editor, |panel, _, _: &TextChanged, cx| panel.sync(cx)),
-            cx.subscribe(&editor, |panel, _, _: &SessionChanged, cx| panel.sync(cx)),
+            cx.subscribe(&editor, |notes, _, _: &TextChanged, cx| notes.sync(cx)),
+            cx.subscribe(&editor, |notes, _, _: &SessionChanged, cx| notes.sync(cx)),
+            cx.on_focus_in(&focus, window, |notes, window, cx| notes.unfold(window, cx)),
+            cx.on_focus_out(&focus, window, |notes, _, _, cx| notes.set_unfolded(false, cx)),
         ];
-        let mut panel = Self {
+        let mut notes = Self {
             editor,
+            focus,
+            unfolded: false,
             shown: Vec::new(),
+            line: None,
+            chapter: None,
             fields: Vec::new(),
             _subscriptions: subscriptions,
         };
-        panel.sync(cx);
-        panel
+        notes.sync(cx);
+        notes
     }
 
     fn sync(&mut self, cx: &mut Context<Self>) {
-        let shown = self.editor.read(cx).note_texts();
-        if shown == self.shown {
+        let editor = self.editor.read(cx);
+        let chapter = editor.session().active();
+        let shown = editor.note_texts();
+        if shown == self.shown && self.chapter == Some(chapter) {
             return;
+        }
+        let title = editor.session().title_of(chapter);
+        self.line = first_meaningful_line(shown.iter().map(String::as_str), &title).map(str::to_owned);
+        if self.chapter != Some(chapter) {
+            self.chapter = Some(chapter);
+            self.set_unfolded(false, cx);
         }
         while self.fields.len() < shown.len() {
             let index = self.fields.len();
@@ -117,29 +117,255 @@ impl MarginNotes {
         }
         cx.notify();
     }
-}
 
-impl Render for MarginNotes {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tokens = Tokens::get(cx);
-        let notes = self.fields.iter().map(|field| {
-            div()
-                .pl(tokens::SPACE_2)
-                .border_l_1()
-                .border_color(tokens.accent)
-                .child(field.clone())
+    fn set_unfolded(&mut self, unfolded: bool, cx: &mut Context<Self>) {
+        if self.unfolded != unfolded {
+            self.unfolded = unfolded;
+            cx.notify();
+        }
+    }
+
+    /// Opens the notes and gives the keys to the first, unless they are in one already. The field takes focus once it has
+    /// been drawn, since until then it is in no part of the window.
+    fn unfold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.unfolded {
+            return;
+        }
+        self.set_unfolded(true, cx);
+        cx.on_next_frame(window, |notes, window, cx| {
+            let in_a_field = (notes.fields.iter()).any(|field| field.read(cx).focus.is_focused(window));
+            if !in_a_field && let Some(first) = notes.fields.first() {
+                let first = first.read(cx).focus.clone();
+                window.focus(&first, cx);
+            }
         });
-        div()
-            .w(tokens::NOTE_WIDTH)
-            .flex()
-            .flex_col()
-            .gap(tokens::SPACE_3)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .children(notes)
+    }
+
+    /// Folds the notes and returns the keys to the text.
+    fn fold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_unfolded(false, cx);
+        let text = self.editor.read(cx).focus_handle(cx);
+        window.focus(&text, cx);
     }
 }
 
-/// The width text wraps at in the margin.
+impl Render for ChapterNotes {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::get(cx).clone();
+        let line = self.line.clone().unwrap_or_default();
+        let label = crate::t!(Key::ChapterNotes);
+        let unfolded = self.unfolded;
+        let icon = svg()
+            .flex_none()
+            .path("icons/block-comment.svg")
+            .size(tokens::NOTE_ICON)
+            .text_color(tokens.text_faint);
+        let row = div()
+            .id("chapter-note")
+            .h(LINE_HEIGHT)
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_1)
+            .cursor_pointer()
+            .text_size(tokens::NOTE_TEXT)
+            .text_color(tokens.text_faint)
+            .child(icon)
+            .when(!unfolded, |row| row.child(div().min_w_0().truncate().child(line)))
+            .when(unfolded, |row| {
+                row.on_click(cx.listener(|notes, _, window, cx| notes.fold(window, cx)))
+            });
+        div()
+            .id("chapter-notes")
+            .role(Role::Button)
+            .aria_label(label)
+            .track_focus(&self.focus)
+            .w(self.editor.read(cx).text_width())
+            .flex()
+            .flex_col()
+            .gap(tokens::SPACE_1)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(row)
+            .when(unfolded, |notes| notes.children(self.fields.iter().cloned()))
+    }
+}
+
+/// How many lines of a later comment show until it is opened.
+const COMMENT_LINES: usize = 6;
+
+impl EditorView {
+    /// The later comments on screen, as where they stand in the text and the height of their passage.
+    fn comments_on_screen(&self) -> Vec<(Range<usize>, Pixels)> {
+        let text = self.text();
+        let leading = leading_region(text, &self.blocks);
+        let mut found = Vec::new();
+        for (index, top) in &self.visible {
+            let block = &self.blocks.as_slice()[*index];
+            if leading.as_ref().is_some_and(|leading| leading.contains(&block.range.start)) {
+                continue;
+            }
+            let slot = &self.slots[*index];
+            if block.kind == BlockKind::Comment {
+                if self.comment_is_hidden(*index) {
+                    found.extend(comments_in(text, &block.range).into_iter().map(|comment| (comment, *top)));
+                }
+                continue;
+            }
+            let (Some(syntax), Some(layout)) = (&slot.syntax, &slot.layout) else {
+                continue;
+            };
+            for span in syntax.spans.iter().filter(|span| span.kind == SpanKind::Comment) {
+                let line = (layout.lines.iter())
+                    .rfind(|line| line.display.source.start <= span.range.start)
+                    .filter(|line| line.height > px(0.));
+                if let Some(line) = line {
+                    let row = line.row_of(line.display.to_display(span.range.start), false);
+                    let comment = block.range.start + span.range.start..block.range.start + span.range.end;
+                    found.push((comment, *top + line.y + line.line_height * row as f32));
+                }
+            }
+        }
+        found
+    }
+
+    /// The later comments for this frame's margin, each with the height it wants to stand at.
+    pub(super) fn comment_notes(&mut self, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, Pixels)> {
+        if self.column.note_left.is_none() || self.source {
+            return Vec::new();
+        }
+        let tokens = Tokens::get(cx).clone();
+        let on_screen = self.comments_on_screen();
+        let mut notes = Vec::with_capacity(on_screen.len());
+        for (comment, y) in on_screen {
+            let text = self.text();
+            if !text[comment.clone()].starts_with("<!--") || !text[comment.clone()].ends_with("-->") {
+                continue;
+            }
+            let shown = text[shown_range(text, &comment)].to_owned();
+            if shown.is_empty() {
+                continue;
+            }
+            let rows = rows_of(&shown, window, &tokens);
+            let focus = (self.comment_focus)
+                .entry(shown.clone())
+                .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                .clone();
+            let open = self.open_comments.contains(&shown) || focus.is_focused(window);
+            let element = self.comment_note(shown, rows, open, focus, &tokens, cx);
+            notes.push((element.into_any_element(), y));
+        }
+        notes
+    }
+
+    fn comment_note(
+        &self,
+        shown: String,
+        rows: usize,
+        open: bool,
+        focus: FocusHandle,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let clipped = rows > COMMENT_LINES && !open;
+        let fade = gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(gpui::Hsla::from(tokens.canvas).opacity(0.), 0.),
+            gpui::linear_color_stop(tokens.canvas, 1.),
+        );
+        let toggled = shown.clone();
+        let more = (rows > COMMENT_LINES).then(|| {
+            let label = crate::t!(if open { Key::NoteLess } else { Key::NoteMore });
+            div()
+                .id(SharedString::from(format!("comment-more-{shown}")))
+                .role(Role::Button)
+                .aria_label(label)
+                .track_focus(&focus)
+                .mt(tokens::SPACE_1)
+                .cursor_pointer()
+                .text_color(tokens.text_quiet)
+                .hover(|link| link.text_color(tokens.text))
+                .on_click(cx.listener(move |editor, _, window, cx| {
+                    if !editor.open_comments.remove(&toggled) {
+                        editor.open_comments.insert(toggled.clone());
+                    } else {
+                        // The field stays open while it has the keys, so closing hands them back.
+                        window.focus(&editor.focus, cx);
+                    }
+                    cx.notify();
+                }))
+                .child(label)
+        });
+        div()
+            .w(tokens::NOTE_WIDTH)
+            .pl(tokens::SPACE_2)
+            .border_l_1()
+            .border_color(tokens.divider)
+            .font_family(tokens::FONT_UI)
+            .text_size(tokens::NOTE_TEXT)
+            .line_height(LINE_HEIGHT)
+            .text_color(tokens.text_faint)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .relative()
+                    .when(clipped, |text| {
+                        text.max_h(LINE_HEIGHT * COMMENT_LINES as f32).overflow_hidden()
+                    })
+                    .child(shown)
+                    .when(clipped, |text| {
+                        text.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(LINE_HEIGHT * 2.)
+                                .bg(fade),
+                        )
+                    }),
+            )
+            .children(more)
+    }
+
+    /// Whether anything but an agent's notes wants the margin: a comment after the chapter's opening notes.
+    pub(super) fn has_later_comment(&self) -> bool {
+        let text = self.text();
+        let from = leading_region(text, &self.blocks).map_or(0, |leading| leading.end);
+        text[from..].contains("<!--")
+    }
+
+    /// The room the unfolded opening notes need above the chapter's first text, past the line the folded ones stand in.
+    pub(super) fn set_note_room(&mut self, height: Pixels, cx: &mut Context<Self>) {
+        let room = (height - LINE_HEIGHT).max(px(0.));
+        if self.note_room != room {
+            self.note_room = room;
+            cx.notify();
+        }
+    }
+}
+
+/// How many rows a comment takes in the margin.
+fn rows_of(shown: &str, window: &Window, tokens: &Tokens) -> usize {
+    let run = TextRun {
+        len: shown.len(),
+        font: font(tokens::FONT_UI),
+        color: tokens.text_faint.into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_text(
+            SharedString::from(shown.to_owned()),
+            tokens::NOTE_TEXT,
+            &[run],
+            Some(text_width()),
+            None,
+        )
+        .map_or(0, |lines| lines.iter().map(|line| line.wrap_boundaries.len() + 1).sum())
+}
+
+/// The width a comment wraps at in the margin.
 fn text_width() -> Pixels {
     tokens::NOTE_WIDTH - tokens::SPACE_2 - tokens::NOTE_RULE
 }
@@ -347,6 +573,7 @@ impl Render for NoteField {
         let tokens = Tokens::get(cx).clone();
         let text = self.shown(cx);
         let color = tokens.text_quiet;
+        let width = self.editor.read(cx).text_width();
         let run = TextRun {
             len: text.len(),
             font: font(tokens::FONT_UI),
@@ -358,7 +585,7 @@ impl Render for NoteField {
         let shared: SharedString = text.clone().into();
         let shaped = window
             .text_system()
-            .shape_text(shared, tokens::NOTE_TEXT, &[run], Some(text_width()), None)
+            .shape_text(shared, tokens::NOTE_TEXT, &[run], Some(width), None)
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         self.lines = Rc::new(shaped);
@@ -412,7 +639,7 @@ impl Render for NoteField {
                 }
             },
         )
-        .w(text_width())
+        .w(width)
         .h(height);
 
         let field = div()
@@ -658,34 +885,21 @@ mod tests {
     }
 
     #[test]
-    fn an_agents_notes_push_the_chapters_note_down() {
-        // A note whose text is gone at the top, and one beside a passage, over a chapter's note that runs long.
-        let placed = flow(Some(wanted(40., 900.)), &[wanted(40., 60.), wanted(450., 120.)], px(28.));
-        assert_eq!(placed.notes, [px(40.), px(450.)]);
-        assert_eq!(placed.chapter, px(450. + 120.) + tokens::SPACE_3);
-    }
-
-    #[test]
-    fn a_chapters_note_stays_at_its_place_when_there_is_room() {
-        let placed = flow(Some(wanted(40., 100.)), &[wanted(450., 120.)], px(28.));
-        assert_eq!(placed.chapter, px(40.));
-        assert_eq!(placed.notes, [px(450.)]);
+    fn notes_stand_beside_their_passages_while_there_is_room() {
+        assert_eq!(flow(&[wanted(40., 60.), wanted(450., 120.)], px(28.)), [px(40.), px(450.)]);
     }
 
     #[test]
     fn nothing_in_the_flow_overlaps() {
         let notes = [wanted(30., 80.), wanted(50., 80.), wanted(60., 80.)];
-        let placed = flow(Some(wanted(40., 300.)), &notes, px(28.));
-        let mut all: Vec<(Pixels, Pixels)> = placed.notes.iter().zip(&notes).map(|(y, note)| (*y, note.height)).collect();
-        all.push((placed.chapter, px(300.)));
-        all.sort_by_key(|(y, _)| *y);
-        for pair in all.windows(2) {
-            assert!(pair[0].0 + pair[0].1 <= pair[1].0, "{pair:?}");
+        let placed = flow(&notes, px(28.));
+        for (pair, note) in placed.windows(2).zip(&notes) {
+            assert!(pair[0] + note.height <= pair[1], "{placed:?}");
         }
     }
 
     #[test]
-    fn a_chapters_note_alone_scrolls_with_its_text() {
-        assert_eq!(flow(Some(wanted(-300., 100.)), &[], px(28.)).chapter, px(-300.));
+    fn a_note_above_the_view_stays_in_it() {
+        assert_eq!(flow(&[wanted(-300., 100.)], px(28.)), [px(28.)]);
     }
 }

@@ -71,6 +71,7 @@ pub const NOTE_WIDTH: Pixels = px(220.);
 pub const NOTE_GAP: Pixels = px(28.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
 pub const NOTE_TEXT: Pixels = px(12.);
+pub const NOTE_ICON: Pixels = px(12.);
 pub const NOTE_RULE: Pixels = px(1.);
 /// The buttons of the agent's cards and of a passage under review.
 pub const SMALL_BUTTON_HEIGHT: Pixels = px(22.);
@@ -141,6 +142,8 @@ pub const MARK_PADDING: f32 = 2.;
 /// The faint tint of a marked paragraph, and of the problem being looked at.
 pub const MARK_TINT: f32 = 0.08;
 pub const MARK_TINT_CURRENT: f32 = 0.2;
+/// A typesetting warning's mark on a page, which is white in either appearance. Not the accent: a warning is not an error.
+pub const WARNING_MARK: u32 = 0x8a8a8a;
 /// The proof slip: its width, its text's size, and how tall the text gets before it scrolls.
 pub const SLIP_WIDTH: Pixels = px(380.);
 pub const SLIP_TEXT: Pixels = px(14.);

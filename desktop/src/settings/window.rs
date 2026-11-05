@@ -113,6 +113,12 @@ const ROWS: &[Row] = &[
         control: Control::Switch(|s| s.binder, |s, on| s.binder = on),
     },
     Row {
+        category: Category::Writing,
+        label: Key::WarningMarks,
+        hint: Key::WarningMarksHint,
+        control: Control::Switch(|s| s.warning_marks, |s, on| s.warning_marks = on),
+    },
+    Row {
         category: Category::Language,
         label: Key::Language,
         hint: Key::LanguageHint,

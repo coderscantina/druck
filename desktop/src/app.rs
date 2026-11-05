@@ -37,13 +37,14 @@ use gpui::{
 use crate::editor::Save;
 use crate::launch::{LaunchEvent, LaunchView};
 use crate::persist::Closing;
+use crate::session::adopt::Offer;
 use crate::session::{STARTERS, Session, Starter};
 use crate::shell::text::Key;
 use crate::shell::{self, menus};
 use crate::tokens::{self, Scheme, Tokens};
 use crate::workspace::{Parts, ShowPublish, ShowWrite, Slots, Workspace, titlebar};
 
-actions!(druck_desktop, [Quit, Open, NewBook, NewReport, NewOffer]);
+actions!(druck_desktop, [Quit, Open, NewBook, NewPaper, NewArticle]);
 
 /// The window the app opens to, smaller on a smaller display.
 const WINDOW_SIZE: (f32, f32) = (1680., 1000.);
@@ -70,15 +71,15 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
         |cx| crate::agent::unreviewed_changes(cx).iter().map(|file| file.count).sum(),
         cx,
     );
-    crate::editor::mount(parts, cx);
+    crate::editor::mount(parts, window, cx);
 }
 
 /// Opens the only window, with a document or with the launch screen. `error` says why a document asked for did not
-/// open. `theme` is the file the preview typesets with and the inspector edits. A fixed `scheme` overrides the system
+/// open, and which it was. `theme` is the file the preview typesets with and the inspector edits. A fixed `scheme` overrides the system
 /// appearance.
 pub fn open(
     session: Option<Session>,
-    error: Option<String>,
+    error: Option<(String, PathBuf)>,
     theme: Option<PathBuf>,
     scheme: Option<Scheme>,
     documents: UnboundedReceiver<Vec<PathBuf>>,
@@ -182,7 +183,7 @@ struct Shell {
 impl Shell {
     fn new(
         session: Option<Session>,
-        error: Option<String>,
+        error: Option<(String, PathBuf)>,
         theme: Option<PathBuf>,
         mut documents: UnboundedReceiver<Vec<PathBuf>>,
         window: &mut Window,
@@ -200,6 +201,7 @@ impl Shell {
             cx.subscribe_in(&launch, window, |shell, _, event, window, cx| match event {
                 LaunchEvent::Open => shell.ask_to_open(window, cx),
                 LaunchEvent::New(starter) => shell.ask_for_new_project(starter, window, cx),
+                LaunchEvent::MakeProject(dir, offer) => shell.make_project(dir, offer, window, cx),
             }),
         ];
         // A document opened from the Finder or dropped on the Dock icon. One window holds one document, so the first
@@ -273,11 +275,21 @@ impl Shell {
                     }
                     Err(problem) => shell
                         .launch
-                        .update(cx, |launch, cx| launch.set_error(Some(problem), cx)),
+                        .update(cx, |launch, cx| launch.set_error(Some(problem), None, cx)),
                 })
                 .ok();
         })
         .detach();
+    }
+
+    /// Makes a folder of Markdown a project, and opens it. It is the author's folder, so it stays out of Git until they ask.
+    fn make_project(&mut self, dir: &Path, offer: &Offer, window: &mut Window, cx: &mut Context<Self>) {
+        match crate::session::adopt::make_project(dir, offer) {
+            Ok(()) => self.open_path(dir, window, cx),
+            Err(problem) => self
+                .launch
+                .update(cx, |launch, cx| launch.set_error(Some(problem), Some(dir), cx)),
+        }
     }
 
     /// Opens a document in this window. Text not yet on disk is written first, and a person is asked only if that fails.
@@ -393,14 +405,15 @@ impl Shell {
     fn replace_document(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         match Session::open(path) {
             Ok(session) => {
-                self.launch.update(cx, |launch, cx| launch.set_error(None, cx));
+                self.launch.update(cx, |launch, cx| launch.set_error(None, None, cx));
                 self.show_session(session, None, window, cx);
             }
             Err(problem) => {
                 eprintln!("{problem}");
                 self.workspace = None;
                 window.set_window_title("Druck");
-                self.launch.update(cx, |launch, cx| launch.set_error(Some(problem), cx));
+                self.launch
+                    .update(cx, |launch, cx| launch.set_error(Some(problem), Some(path), cx));
                 cx.notify();
             }
         }
@@ -432,8 +445,8 @@ impl Render for Shell {
             .bg(tokens.canvas)
             .on_action(cx.listener(|shell, _: &Open, window, cx| shell.ask_to_open(window, cx)))
             .on_action(cx.listener(|shell, _: &NewBook, window, cx| shell.new_project("book", window, cx)))
-            .on_action(cx.listener(|shell, _: &NewReport, window, cx| shell.new_project("report", window, cx)))
-            .on_action(cx.listener(|shell, _: &NewOffer, window, cx| shell.new_project("offer", window, cx)))
+            .on_action(cx.listener(|shell, _: &NewPaper, window, cx| shell.new_project("paper", window, cx)))
+            .on_action(cx.listener(|shell, _: &NewArticle, window, cx| shell.new_project("article", window, cx)))
             .on_action(cx.listener(|shell, _: &menus::CloseDocument, window, cx| shell.close_document(window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent0, window, cx| shell.open_recent(0, window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent1, window, cx| shell.open_recent(1, window, cx)))

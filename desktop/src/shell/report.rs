@@ -136,7 +136,7 @@ fn entry(
     let base = session.base_dir();
     let page = diagnostic.page;
     let line = diagnostic.location.map(|location| location.line as usize);
-    let message = diagnostic.message.replace(&format!("{}/", base.display()), "");
+    let message = super::engine_text::message(diagnostic).replace(&format!("{}/", base.display()), "");
     let kind = match diagnostic.severity {
         Severity::Error => Kind::Error,
         Severity::Warning => Kind::Warning,

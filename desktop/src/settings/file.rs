@@ -55,6 +55,8 @@ pub struct Settings {
     pub dim_paragraphs: bool,
     pub selection_toolbar: bool,
     pub binder: bool,
+    /// Typesetting warnings stay marked on the pages with the Proof tab closed, for a proof pass.
+    pub warning_marks: bool,
     pub spelling: bool,
     /// The writing partner: Claude Code, spawned on request. Off leaves no trace on screen and spawns nothing.
     pub agent: bool,
@@ -71,6 +73,7 @@ impl Default for Settings {
             dim_paragraphs: false,
             selection_toolbar: true,
             binder: false,
+            warning_marks: false,
             spelling: true,
             agent: false,
         }
@@ -171,6 +174,7 @@ const FIELDS: &[Field] = &[
     switch!("dim_other_paragraphs", dim_paragraphs),
     switch!("selection_toolbar", selection_toolbar),
     switch!("binder", binder),
+    switch!("warning_marks", warning_marks),
     switch!("spelling", spelling),
     switch!("agent", agent),
 ];

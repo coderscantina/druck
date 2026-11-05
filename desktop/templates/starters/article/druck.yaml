@@ -1,0 +1,12 @@
+title: Untitled article
+subtitle: What this article is about
+author: Your Name
+lang: en
+theme: article
+chapters:
+  - manuscript/01-article.md
+exports:
+  article:
+    output: build/article.pdf
+  ebook:
+    output: build/article.epub

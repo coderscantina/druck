@@ -156,6 +156,10 @@ macro_rules! file {
     };
 }
 
+/// What a book's repo leaves out, since exports are made again at will.
+pub const GITIGNORE: &str = ".gitignore";
+pub const GITIGNORE_TEXT: &str = "build/\n";
+
 pub const STARTERS: &[Starter] = &[
     Starter {
         slug: "book",
@@ -171,26 +175,26 @@ pub const STARTERS: &[Starter] = &[
         ],
     },
     Starter {
-        slug: "report",
-        name: Key::ReportName,
-        description: Key::ReportDescription,
+        slug: "paper",
+        name: Key::PaperName,
+        description: Key::PaperDescription,
         files: &[
-            file!("report", "druck.yaml"),
-            file!("report", "references.bib"),
-            file!("report", "manuscript/01-introduction.md"),
-            file!("report", "manuscript/02-findings.md"),
-            file!("report", "themes/report/theme.json"),
-            file!("report", "themes/report/logo.svg"),
+            file!("paper", "druck.yaml"),
+            file!("paper", "references.bib"),
+            file!("paper", "manuscript/01-introduction.md"),
+            file!("paper", "manuscript/02-findings.md"),
+            file!("paper", "themes/paper/theme.json"),
+            file!("paper", "themes/paper/logo.svg"),
         ],
     },
     Starter {
-        slug: "offer",
-        name: Key::OfferName,
-        description: Key::OfferDescription,
+        slug: "article",
+        name: Key::ArticleName,
+        description: Key::ArticleDescription,
         files: &[
-            file!("offer", "druck.yaml"),
-            file!("offer", "manuscript/01-offer.md"),
-            file!("offer", "themes/business/theme.json"),
+            file!("article", "druck.yaml"),
+            file!("article", "manuscript/01-article.md"),
+            file!("article", "themes/article/theme.json"),
         ],
     },
 ];
@@ -198,10 +202,12 @@ pub const STARTERS: &[Starter] = &[
 impl Starter {
     /// Creates the project in `dir`, a folder that does not exist or is empty, titled after the folder.
     pub fn create(&self, dir: &Path) -> Result<(), String> {
-        let describe = |error: std::io::Error| format!("cannot create {}: {error}", dir.display());
+        let describe = |error: std::io::Error| crate::t!(Key::CannotCreate, path = dir.display(), error = error);
         if dir.read_dir().is_ok_and(|mut files| files.next().is_some()) {
-            return Err(format!("{} already holds files", dir.display()));
+            return Err(crate::t!(Key::AlreadyHoldsFiles, path = dir.display()));
         }
+        fs::create_dir_all(dir).map_err(describe)?;
+        fs::write(dir.join(GITIGNORE), GITIGNORE_TEXT).map_err(describe)?;
         for (path, bytes) in self.files {
             let target = dir.join(path);
             if let Some(parent) = target.parent() {
@@ -219,7 +225,7 @@ impl Starter {
 }
 
 /// The manifest with the folder's name as its title.
-fn titled(manifest: &str, dir: &Path) -> Result<String, String> {
+pub(super) fn titled(manifest: &str, dir: &Path) -> Result<String, String> {
     let Some(name) = dir.file_name().map(|name| name.to_string_lossy()) else {
         return Ok(manifest.to_owned());
     };

@@ -20,7 +20,7 @@ use gpui::{
 use crate::a11y::Control as _;
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
-use crate::inspector::{InspectorView, SpecimenRequested, Tab, ThemeChanged, ThemeSwitched};
+use crate::inspector::{InspectorView, SpecimenRequested, Tab, TabShown, ThemeChanged, ThemeSwitched};
 use crate::preview::proof::BlockAt;
 #[cfg(any(debug_assertions, feature = "measure"))]
 use crate::preview::slip::Directive;
@@ -196,6 +196,13 @@ impl Workspace {
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
             }),
+            cx.subscribe(&inspector, |workspace, _, TabShown(tab), cx| {
+                let proof_open = *tab == Tab::Proof;
+                workspace
+                    .parts
+                    .preview
+                    .update(cx, |preview, cx| preview.set_proof_open(proof_open, cx));
+            }),
             cx.subscribe_in(&proof_slip, window, Self::slip_event),
             cx.subscribe_in(&sidebar, window, |workspace, _, event, window, cx| {
                 workspace.sidebar_event(event, window, cx);
@@ -236,6 +243,11 @@ impl Workspace {
             _subscriptions: subscriptions,
         };
         workspace.theme_setting = workspace.parts.editor.read(cx).session().theme_setting();
+        let proof_open = workspace.parts.inspector.read(cx).active() == Tab::Proof;
+        workspace
+            .parts
+            .preview
+            .update(cx, |preview, cx| preview.set_proof_open(proof_open, cx));
         workspace.sync_panels(window, cx);
         // `DRUCK_SPECIMEN=1` opens on the specimen, for screenshots.
         if crate::gate::var("DRUCK_SPECIMEN").is_some() {

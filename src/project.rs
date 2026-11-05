@@ -11,7 +11,7 @@ use serde_saphyr::Spanned;
 use crate::config::front_matter::{self, Export, FrontMatter};
 use crate::config::resolved::Config;
 use crate::config::source::{ChapterMap, InputSource, Origin, normalize};
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::input::{DocumentText, ExportSettings, Input};
 use crate::pipeline::{self, DocumentFile};
 use crate::renderer::PdfOptions;
@@ -66,6 +66,7 @@ impl Project {
                     Some(InputSource::Document(path)),
                     format!("excluded from the book: not listed under chapters in {MANIFEST}"),
                 )
+                .coded(Code::NotInChapterList)
             })
             .collect();
         Ok(Self {

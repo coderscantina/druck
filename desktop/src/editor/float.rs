@@ -800,15 +800,18 @@ impl EditorView {
             .children(rows)
     }
 
-    /// The chapter's notes for this frame, with the height they want to stand at: beside the chapter's first text while
-    /// that is on screen.
-    pub(super) fn margin_element(&self) -> Option<(AnyElement, Pixels)> {
-        self.column.note_left?;
+    /// The chapter's opening notes for this frame: one line above the last hidden block before its first text, which keeps
+    /// the room they need when unfolded. They scroll away with the chapter's top.
+    pub(super) fn margin_element(&self) -> Option<(AnyElement, Point<Pixels>)> {
+        if self.source {
+            return None;
+        }
         let margin = self.margin.clone()?;
         let region = notes::leading_region(self.text(), &self.blocks)?;
-        let first = self.blocks.index_at(region.start);
-        let (_, top) = self.visible.iter().find(|(index, _)| *index >= first)?;
-        Some((margin.into_any_element(), *top))
+        let last = self.blocks.index_at(region.end.saturating_sub(1));
+        let (_, top) = self.visible.iter().find(|(index, _)| *index == last)?;
+        let y = *top - tokens::NOTE_LINE_HEIGHT - tokens::SPACE_2;
+        Some((margin.into_any_element(), point(self.column.text_left, y)))
     }
 
     // The frame's floats
@@ -840,8 +843,21 @@ impl EditorView {
                 if let Some(target) = Self::selection_box(selection)
                     && self.toolbar_wanted()
                 {
-                    let origin = placed(target, toolbar_size(), area);
-                    return vec![(self.toolbar(cx).into_any_element(), origin)];
+                    // Inside the text column, so it never stands over the margin.
+                    let column = Rect {
+                        left: f32::from(self.column.text_left),
+                        right: f32::from(self.column.text_left + self.column.text_width),
+                        ..area
+                    };
+                    let size = toolbar_size();
+                    let (x, y) = place::above(
+                        rect(target),
+                        f32::from(size.width),
+                        f32::from(size.height),
+                        column,
+                        f32::from(tokens::FLOAT_GAP),
+                    );
+                    return vec![(self.toolbar(cx).into_any_element(), point(px(x), px(y)))];
                 }
                 Vec::new()
             }

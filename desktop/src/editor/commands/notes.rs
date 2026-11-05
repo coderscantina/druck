@@ -1,9 +1,12 @@
-//! Comments as the galley treats them: the ones that open a chapter are its notes, and the panel edits their text where
-//! it stands in the buffer.
+//! Comments as the galley treats them: the ones that open a chapter are its notes, shown in one line above its first
+//! text and edited where they stand in the buffer. Later ones stand beside their passages in the margin.
 
 use std::ops::Range;
 
 use crate::source::{BlockKind, Blocks, Edit};
+
+/// The most words of a label before a chapter's title, such as `Kapitel 3:`.
+const MAX_LABEL_WORDS: usize = 3;
 
 /// A comment that opens a chapter.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +25,7 @@ pub fn is_closed(block_text: &str) -> bool {
 }
 
 /// The comments in a comment block, relative to the text.
-fn comments_in(text: &str, range: &Range<usize>) -> Vec<Range<usize>> {
+pub fn comments_in(text: &str, range: &Range<usize>) -> Vec<Range<usize>> {
     let mut comments = Vec::new();
     let mut from = range.start;
     while let Some(open) = text[from..range.end].find("<!--") {
@@ -56,7 +59,36 @@ pub fn leading_notes(text: &str, blocks: &Blocks) -> Vec<Note> {
     notes
 }
 
-fn shown_range(text: &str, comment: &Range<usize>) -> Range<usize> {
+/// The line that stands for a chapter's notes when they are folded: the first with something to say. A line that only
+/// repeats the chapter's title, such as `Kapitel 3: Warum 404`, is not one. With nothing else it still stands.
+pub fn first_meaningful_line<'a>(notes: impl IntoIterator<Item = &'a str>, title: &str) -> Option<&'a str> {
+    let mut repeating = None;
+    for line in notes.into_iter().flat_map(str::lines).map(str::trim) {
+        if line.is_empty() {
+            continue;
+        }
+        if !repeats_title(line, title) {
+            return Some(line);
+        }
+        repeating = repeating.or(Some(line));
+    }
+    repeating
+}
+
+/// Whether a line is the title, alone or after a short label that ends in a colon.
+fn repeats_title(line: &str, title: &str) -> bool {
+    let (line, title) = (line.to_lowercase(), title.trim().to_lowercase());
+    if title.is_empty() {
+        return false;
+    }
+    line.strip_suffix(title.as_str()).is_some_and(|label| {
+        let label = label.trim_end();
+        label.is_empty() || (label.ends_with(':') && label.split_whitespace().count() <= MAX_LABEL_WORDS)
+    })
+}
+
+/// The text of a comment: inside the markers, without the whitespace at either end.
+pub fn shown_range(text: &str, comment: &Range<usize>) -> Range<usize> {
     let inner = comment.start + "<!--".len()..comment.end - "-->".len();
     let written = &text[inner.clone()];
     let trimmed = written.trim();
@@ -122,6 +154,24 @@ mod tests {
         assert_eq!(shown, ["one", "two\n\nlines"]);
         assert!(notes_of("# T\n\n<!-- later -->\n").is_empty());
         assert!(notes_of("<!-- c --> text\n").is_empty());
+    }
+
+    #[test]
+    fn a_folded_note_shows_its_first_line_with_something_to_say() {
+        let note = "Kapitel 3: Warum 404 die richtige Antwort ist\n\nStand: Entwurf von Claude, noch nicht überarbeitet.\nMehr.";
+        assert_eq!(
+            first_meaningful_line([note], "Warum 404 die richtige Antwort ist"),
+            Some("Stand: Entwurf von Claude, noch nicht überarbeitet.")
+        );
+        assert_eq!(first_meaningful_line(["  \n\n  Eine Zeile"], "Titel"), Some("Eine Zeile"));
+        assert_eq!(first_meaningful_line(["Titel", "Der zweite"], "Titel"), Some("Der zweite"));
+        assert_eq!(first_meaningful_line(["Kapitel 1: Titel"], "Titel"), Some("Kapitel 1: Titel"));
+        assert_eq!(
+            first_meaningful_line(["Mehr über den Titel"], "Titel"),
+            Some("Mehr über den Titel"),
+            "the title at the end of a sentence is not a repeat"
+        );
+        assert_eq!(first_meaningful_line(["", "  "], "Titel"), None);
     }
 
     #[test]

@@ -21,7 +21,7 @@ mod strings;
 mod trace;
 
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -50,13 +50,13 @@ use float::Float;
 pub(crate) use float::tooltip;
 use gutter::{BlockGrab, CommentMarker};
 use layout::{BlockLayout, Column, GalleyStyle, ShapeRequest, shape_block};
-use margin::MarginNotes;
+use margin::ChapterNotes;
 use trace::Trace;
 
-/// Mounts what this slice shows beside the text: the chapter's notes, and the rich blocks' tabs.
-pub fn mount(parts: &Parts, cx: &mut Context<Workspace>) {
+/// Mounts what this slice shows around the text: the chapter's notes, and the rich blocks' tabs.
+pub fn mount(parts: &Parts, window: &mut Window, cx: &mut Context<Workspace>) {
     let editor = parts.editor.clone();
-    let notes = cx.new(|cx| MarginNotes::new(editor.clone(), cx));
+    let notes = cx.new(|cx| ChapterNotes::new(editor.clone(), window, cx));
     editor.update(cx, |editor, _| editor.margin = Some(notes));
     rich::view::mount(parts, cx);
 }
@@ -370,8 +370,14 @@ pub struct EditorView {
     rich_labels: Task<()>,
     /// The settings that shape the text, kept here so a layout needs no `App`.
     writing: Writing,
-    /// The chapter's notes in the right margin.
-    margin: Option<Entity<MarginNotes>>,
+    /// The chapter's opening notes, above its first text.
+    margin: Option<Entity<ChapterNotes>>,
+    /// The room those notes take in the flow while unfolded.
+    note_room: Pixels,
+    /// Later comments the author opened with their More, by their text.
+    open_comments: HashSet<String>,
+    /// The keys of those comments' More, by their text.
+    comment_focus: HashMap<String, FocusHandle>,
     /// The pointer is in the left margin.
     gutter_shown: bool,
     /// The caret last moved by a key, which typewriter scrolling follows. A click leaves the text where it is.
@@ -484,6 +490,9 @@ impl EditorView {
             rich_labels: Task::ready(()),
             writing: Writing::of(cx),
             margin: None,
+            note_room: px(0.),
+            open_comments: HashSet::new(),
+            comment_focus: HashMap::new(),
             gutter_shown: crate::gate::var("DRUCK_GUTTER").is_some(),
             caret_by_keys: false,
             spelling: spelling::Spelling::new(cx, &spelling_folder),
@@ -1661,6 +1670,24 @@ impl EditorView {
         }
     }
 
+    /// The room a block keeps for the unfolded opening notes: the last hidden block before the chapter's first text.
+    fn note_room_at(&self, index: usize) -> Pixels {
+        if self.note_room == px(0.) {
+            return px(0.);
+        }
+        let region = notes::leading_region(self.text(), &self.blocks);
+        if region.is_some_and(|region| self.blocks.index_at(region.end.saturating_sub(1)) == index) {
+            self.note_room
+        } else {
+            px(0.)
+        }
+    }
+
+    /// The width the text wraps at.
+    pub(crate) fn text_width(&self) -> Pixels {
+        self.column.text_width
+    }
+
     /// Shapes a block for the current caret and width, or returns the shape it already has.
     fn layout_block(&mut self, index: usize, window: &Window) -> Rc<BlockLayout> {
         let block = self.blocks.as_slice()[index].clone();
@@ -1720,7 +1747,7 @@ impl EditorView {
             chips.extend(self.review_chips(&block.range, block_text, &hidden, &chips));
             chips.sort_by_key(|chip| chip.range.start);
         }
-        let below = self.review_room(index);
+        let below = self.review_room(index) + self.note_room_at(index);
         let dim = self.is_dimmed(index);
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let list = self.blocks.as_slice();
@@ -1821,7 +1848,7 @@ impl EditorView {
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>) {
         let notes =
-            !self.advice.is_empty() || (!self.source && !notes::leading_notes(self.text(), &self.blocks).is_empty());
+            !self.advice.is_empty() || (!self.source && self.has_later_comment());
         let column = Column::place(bounds, self.measure(), notes);
         if column.text_width != self.column.text_width {
             for slot in &self.slots {

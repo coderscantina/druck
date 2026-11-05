@@ -19,6 +19,7 @@ use gix::refs::transaction::{Change as RefChange, LogChange, PreviousValue, RefE
 use super::git_cli::Git;
 use super::{history, words};
 use crate::persist::atomic;
+use crate::session::templates::{GITIGNORE, GITIGNORE_TEXT};
 
 /// How far back a file's history and the list of commits look.
 const LOG_LIMIT: usize = 5000;
@@ -155,9 +156,15 @@ impl Repo {
         Self::from_repo(gix::discover(book)?, book).map(Some)
     }
 
-    /// Makes a book's folder a repo. Nothing is committed.
+    /// Makes a book's folder a repo. Nothing is committed. Exports stay out of it, so a first commit does not take them,
+    /// unless the folder already says what to leave out.
     pub fn init(book: &Path) -> Result<Self> {
-        Self::from_repo(gix::init(book)?, book)
+        let repo = Self::from_repo(gix::init(book)?, book)?;
+        let ignore = book.join(GITIGNORE);
+        if !ignore.exists() {
+            fs::write(ignore, GITIGNORE_TEXT)?;
+        }
+        Ok(repo)
     }
 
     fn from_repo(repo: gix::Repository, book: &Path) -> Result<Self> {

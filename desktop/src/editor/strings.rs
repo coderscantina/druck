@@ -3,6 +3,9 @@
 crate::strings! {
     pub enum Key {
         Accept => ("Accept", "Annehmen"),
+        ChapterNotes => ("Chapter notes", "Kapitelnotizen"),
+        NoteMore => ("More", "Mehr"),
+        NoteLess => ("Less", "Weniger"),
         Reject => ("Reject", "Ablehnen"),
         TryAgain => ("Try again", "Neu versuchen"),
         Apply => ("Apply", "Anwenden"),

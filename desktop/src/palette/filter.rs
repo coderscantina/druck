@@ -1,9 +1,26 @@
 //! What the palette's field finds, without gpui: every letter of the query, in order, with what reads most like the query
 //! first.
 
-/// How well `text` holds `query`, lower being better, or `None` if it does not. Case does not count.
+/// `text` as the palette compares it: lower case, with ß as ss and umlauts as their base letters, so a German title is
+/// found from a keyboard without them.
+fn folded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for letter in text.chars().flat_map(char::to_lowercase) {
+        match letter {
+            '\u{df}' => out.push_str("ss"),
+            '\u{e4}' => out.push('a'),
+            '\u{f6}' => out.push('o'),
+            '\u{fc}' => out.push('u'),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// How well `text` holds `query`, lower being better, or `None` if it does not. Case does not count, and neither do ß and
+/// umlauts.
 pub fn score(query: &str, text: &str) -> Option<usize> {
-    let (query, text) = (query.to_lowercase(), text.to_lowercase());
+    let (query, text) = (folded(query), folded(text));
     if let Some(at) = text.find(&query) {
         let at_word_start = at == 0 || !text[..at].chars().next_back().is_some_and(char::is_alphanumeric);
         return Some(if at == 0 {
@@ -50,6 +67,14 @@ mod tests {
     #[test]
     fn the_start_of_a_title_beats_a_word_inside_it_and_that_beats_the_middle_of_a_word() {
         assert_eq!(ranked("su", ["Absurd", "Die Suche", "Suche"]), [2, 1, 0]);
+    }
+
+    #[test]
+    fn sharp_s_and_umlauts_fold_on_either_side() {
+        assert_eq!(score("fuss", "Fußnote"), Some(0));
+        assert_eq!(score("fuß", "Fussnote"), Some(0));
+        assert_eq!(score("uber", "Über uns"), Some(0));
+        assert_eq!(score("übe", "Uber uns"), Some(0));
     }
 
     #[test]

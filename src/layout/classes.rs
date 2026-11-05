@@ -2,7 +2,7 @@
 
 use crate::config::resolved::{BlockKind, Config};
 use crate::config::source::InputSource;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{Block, Class, Document};
 
 /// Reports, at the attribute, each style name the theme does not define and each style applied to a
@@ -30,7 +30,14 @@ pub(super) fn check(document: &Document, config: &Config, source: &InputSource) 
                 )
             }
         };
-        errors.push(Diagnostic::new(Some(source.clone()), message).at(class.at.line, class.at.column));
+        let mut diagnostic = Diagnostic::new(Some(source.clone()), message).at(class.at.line, class.at.column);
+        if !config.custom_styles.contains_key(class.name.as_str()) {
+            diagnostic = diagnostic.coded(Code::UnknownStyle {
+                name: class.name.to_string(),
+                known: config.custom_styles.keys().cloned().collect(),
+            });
+        }
+        errors.push(diagnostic);
     };
     walk(&document.blocks, &mut visit);
     for footnote in document.footnotes.iter().chain(&document.margin_notes) {

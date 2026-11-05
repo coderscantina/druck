@@ -5,7 +5,7 @@ use gpui::{Action, App};
 
 use super::menus::*;
 use super::text::Key;
-use crate::app::{NewBook, NewOffer, NewReport, Open, Quit};
+use crate::app::{NewArticle, NewBook, NewPaper, Open, Quit};
 use crate::editor::{
     Copy, Cut, EditRich, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, OpenLink, Paste,
     Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers, ToggleQuote,
@@ -109,8 +109,8 @@ pub fn all() -> Vec<Command> {
         command(Key::SelectAll, Write, SelectAll),
         command(Key::Open, Anywhere, Open),
         command(Key::NewBook, Anywhere, NewBook),
-        command(Key::NewReport, Anywhere, NewReport),
-        command(Key::NewOffer, Anywhere, NewOffer),
+        command(Key::NewPaper, Anywhere, NewPaper),
+        command(Key::NewArticle, Anywhere, NewArticle),
         command(Key::Close, Anywhere, CloseDocument),
         command(Key::ClearRecent, Anywhere, ClearRecent),
         command(Key::About, Anywhere, About),

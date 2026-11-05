@@ -247,7 +247,6 @@ impl EditorView {
             };
             notes.push((self.advice_note(note, &body, &tokens, cx).into_any_element(), y));
         }
-        notes.sort_by_key(|(_, y)| *y);
         notes
     }
 
@@ -339,6 +338,8 @@ impl EditorView {
     pub(super) fn forget_review(&mut self) {
         self.review.clear();
         self.advice.clear();
+        self.open_comments.clear();
+        self.comment_focus.clear();
     }
 }
 

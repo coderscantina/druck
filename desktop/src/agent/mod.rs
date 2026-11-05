@@ -865,7 +865,8 @@ impl AgentView {
 
     // Context
 
-    /// Reads the open chapter, the selection, and the diagnostics, to offer as chips.
+    /// Reads the open chapter, the selection, and the errors, to offer as chips. Typesetting warnings stay out: a book has
+    /// hundreds, and they say nothing about the words.
     fn snapshot_context(&mut self, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
         let session = editor.session();
@@ -882,11 +883,7 @@ impl AgentView {
                 text: text[range].to_owned(),
             }
         });
-        let preview = self.preview.read(cx);
-        let diagnostics = preview
-            .diagnostics()
-            .iter()
-            .chain(preview.warnings())
+        let diagnostics = (self.preview.read(cx).diagnostics().iter())
             .map(|diagnostic| diagnostic.display_from(&self.base).to_string())
             .collect();
         let context = PromptContext {

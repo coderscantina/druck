@@ -483,3 +483,23 @@ fn folders_of_sync_services_are_named() {
     );
     assert_eq!(cloud_service(Path::new("/Users/a/Books/book")), None);
 }
+
+#[test]
+fn a_new_repo_leaves_exports_out_and_keeps_an_ignore_file_it_finds() {
+    let fresh = std::env::temp_dir().join(format!("druck-ignore-{}", std::process::id()));
+    fs::remove_dir_all(&fresh).ok();
+    fs::create_dir_all(fresh.join("build")).expect("folder");
+    fs::write(fresh.join("a.md"), "A\n").expect("file");
+    fs::write(fresh.join("build/book.pdf"), "pdf").expect("file");
+    let repo = Repo::init(&fresh).expect("a repo");
+    assert_eq!(fs::read_to_string(fresh.join(".gitignore")).expect("written"), "build/\n");
+    let changed: Vec<_> = (repo.changes().expect("changes").into_iter()).map(|change| change.path).collect();
+    assert!(changed.iter().all(|path| !path.to_string_lossy().contains("build")), "{changed:?}");
+    fs::remove_dir_all(&fresh).ok();
+
+    fs::create_dir_all(&fresh).expect("folder");
+    fs::write(fresh.join(".gitignore"), "mine/\n").expect("file");
+    Repo::init(&fresh).expect("a repo");
+    assert_eq!(fs::read_to_string(fresh.join(".gitignore")).expect("kept"), "mine/\n");
+    fs::remove_dir_all(&fresh).ok();
+}

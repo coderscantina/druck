@@ -8,6 +8,8 @@ crate::strings! {
         PagesOf => ("Pages {first}\u{2013}{last} of {pages}", "Seiten {first}\u{2013}{last} von {pages}"),
         PageCount => ("{pages} pages", "{pages} Seiten"),
         ToLookAt => ("{count} to look at", "{count} zu prüfen"),
+        Warnings => ("{count} warnings", "{count} Warnungen"),
+        WarningMarks => ("Marks", "Marken"),
         ZoomOut => ("Zoom out", "Verkleinern"),
         ZoomIn => ("Zoom in", "Vergrößern"),
         ZoomFit => ("Fit", "Einpassen"),

@@ -36,6 +36,8 @@ pub struct BlockAt {
 pub struct Problem {
     pub place: Option<(PathBuf, usize)>,
     pub page: Option<usize>,
+    /// A typesetting warning, which only a proof pass looks at. Errors and open placeholders are always marked.
+    pub warning: bool,
 }
 
 /// A rectangle on a page, in points.
@@ -50,7 +52,7 @@ pub struct Mark {
 pub struct Marks {
     /// What each problem marks, by its place in the list.
     pub of_problem: Vec<Vec<Mark>>,
-    /// The pages with a mark, for the dots on a contact sheet.
+    /// The pages with an error or an open placeholder, for the dots on a contact sheet.
     pub pages: HashSet<usize>,
 }
 
@@ -281,7 +283,9 @@ pub fn resolve(laid: &Layout, problems: &[Problem]) -> Marks {
                 .collect(),
             _ => Vec::new(),
         };
-        marks.pages.extend(found.iter().map(|mark| mark.page));
+        if !problem.warning {
+            marks.pages.extend(found.iter().map(|mark| mark.page));
+        }
         marks.of_problem.push(found);
     }
     marks
@@ -354,21 +358,24 @@ mod tests {
             Problem {
                 place: Some((file.clone(), at)),
                 page: Some(0),
+                warning: false,
             },
             Problem {
                 place: None,
                 page: Some(1),
+                warning: true,
             },
             Problem {
                 place: None,
                 page: None,
+                warning: false,
             },
         ];
         let marks = resolve(&layout.laid, &problems);
         assert_eq!(marks.of_problem[0][0].page, 0);
         assert_eq!(marks.of_problem[1][0].page, 1);
         assert!(marks.of_problem[2].is_empty());
-        assert_eq!(marks.pages, HashSet::from([0, 1]));
+        assert_eq!(marks.pages, HashSet::from([0]), "a warning puts no dot on a contact sheet");
     }
 
     #[test]

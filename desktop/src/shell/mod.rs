@@ -19,6 +19,7 @@ pub mod export;
 pub mod export_panel;
 pub mod facts;
 pub mod find_bar;
+pub mod engine_text;
 pub mod footer;
 pub mod manifest;
 pub mod menus;
@@ -537,6 +538,7 @@ impl Hub {
                     .flatten()
                     .and_then(|(id, offset)| session.file_position(id, offset)),
                 page: entry.page,
+                warning: entry.kind == report::Kind::Warning,
             })
             .collect();
         self.problem_places = report.entries().map(|entry| entry.place).collect();

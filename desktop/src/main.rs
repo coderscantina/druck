@@ -61,9 +61,9 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     // Anything else that keeps a document from opening shows on the launch screen.
-    let (session, error) = match cli.open.as_deref().map(Session::open) {
-        Some(Ok(session)) => (Some(session), None),
-        Some(Err(problem)) => (None, Some(problem)),
+    let (session, error) = match cli.open.as_deref().map(|path| (path, Session::open(path))) {
+        Some((_, Ok(session))) => (Some(session), None),
+        Some((path, Err(problem))) => (None, Some((problem, path.to_owned()))),
         None => (None, None),
     };
     let theme = cli.theme.as_deref().map(|theme| {

@@ -48,7 +48,7 @@ use crate::bibliography::syntax::{self, Segment};
 use crate::config::source::InputSource;
 use crate::config::template::Placeholder;
 use crate::config::theme::{CalloutKind, Lang};
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{
     Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, IndexMark, Inline,
     InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See, Todo,
@@ -499,9 +499,11 @@ impl<'a> Builder<'a> {
         }
         for (label, at) in std::mem::take(&mut self.references_to) {
             if !self.labels.contains_key(&label) {
-                self.report_at(
-                    at,
-                    format!("@{label} refers to an undefined label; define it with {{#{label}}}"),
+                let message = format!("@{label} refers to an undefined label; define it with {{#{label}}}");
+                self.diagnostics.push(
+                    Diagnostic::new(Some(self.source.clone()), message)
+                        .coded(Code::UndefinedLabel { label })
+                        .at(at.line, at.column),
                 );
             }
         }
@@ -2080,7 +2082,13 @@ impl<'a> Builder<'a> {
         let Some(end) = rest.find(']') else { return };
         let label = &rest[..end];
         if !label.is_empty() && !label.contains(char::is_whitespace) {
-            self.report(offset, format!("footnote [^{label}] has no definition"));
+            let at = self.location(offset);
+            let diagnostic = Diagnostic::new(Some(self.source.clone()), format!("footnote [^{label}] has no definition"))
+                .coded(Code::UndefinedFootnote {
+                    label: label.to_owned(),
+                })
+                .at(at.line, at.column);
+            self.diagnostics.push(diagnostic);
         }
     }
 

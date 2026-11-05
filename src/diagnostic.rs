@@ -1,6 +1,6 @@
 //! What is wrong with a document, in a form a client can present without parsing text.
 //!
-//! A [`Diagnostic`] has a [`Severity`], a message, and, where they apply, the [`Source`] it concerns, a
+//! A [`Diagnostic`] has a [`Severity`], a message, and, where they apply, a [`Code`], the [`Source`] it concerns, a
 //! [`Location`] in it, the dotted property of a theme or setting, and the [`Resource`] that could not be used. These
 //! meanings are stable; the words of a message are not. Paths are absolute. A terminal shortens them with
 //! [`Diagnostic::display_from`].
@@ -23,6 +23,52 @@ pub enum Severity {
     Warning,
 }
 
+/// A page as a message names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageName {
+    /// As it is numbered.
+    Numbered(String),
+    /// A page without a number, counting physical pages from one.
+    Unnumbered(usize),
+}
+
+/// What a diagnostic says, with its values, so a client can put it in its own words and language. It says no more than
+/// the message, whose English the terminal prints. A diagnostic that has none yet can only be shown by its message.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Code {
+    /// A page ends this many lines short of the bottom.
+    PageShort { page: PageName, lines: f64 },
+    /// A page ends this many lines off the height of the page facing it.
+    PageUneven { page: PageName, lines: f64 },
+    /// A page ends a chapter with fewer lines than wanted.
+    ChapterEndShort { page: PageName, lines: usize, wanted: usize },
+    /// A one-line paragraph stands alone at the top of a page.
+    OneLinerAtTop { page: PageName },
+    /// A one-line paragraph stands alone at the bottom of a page.
+    OneLinerAtBottom { page: PageName },
+    /// A heading at the foot of a page has fewer lines below it than wanted.
+    HeadingAtFoot { page: PageName, lines: usize, wanted: usize },
+    /// A line of a paragraph has its spaces stretched loose.
+    LooseLine { page: PageName },
+    /// A paragraph has more hyphenated lines in a row than the limit.
+    TooManyHyphens { page: PageName, limit: usize },
+    /// A paragraph ends in a short last line.
+    ShortLastLine { page: PageName },
+    /// A Markdown file in `manuscript/` the chapter list does not name.
+    NotInChapterList,
+    /// `@label` names no label.
+    UndefinedLabel { label: String },
+    /// `[^label]` has no definition.
+    UndefinedFootnote { label: String },
+    /// A citation with no bibliography set.
+    NoBibliography,
+    /// A citation key the bibliography does not have. `file` is the bibliography's absolute path.
+    MissingCitation { file: PathBuf, key: String },
+    /// `{.name}` names no custom style. `known` is what the theme has.
+    UnknownStyle { name: String, known: Vec<String> },
+}
+
 /// The input a diagnostic concerns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
@@ -42,6 +88,8 @@ pub enum Source {
 pub struct Diagnostic {
     pub severity: Severity,
     pub message: String,
+    /// What the message says, for a client that words it itself.
+    pub code: Option<Code>,
     /// The input responsible, if a single one is.
     pub source: Option<Source>,
     /// Where in `source`.
@@ -75,6 +123,7 @@ impl Diagnostic {
         Self {
             severity: Severity::Error,
             message: message.into(),
+            code: None,
             source: source.map(Source::from),
             location: None,
             page: None,
@@ -102,6 +151,12 @@ impl Diagnostic {
             self.source = Some(Source::Document(chapter.to_owned()));
             self.location = Some(Location { line: real, column });
         }
+        self
+    }
+
+    /// Says what the message says.
+    pub(crate) fn coded(mut self, code: Code) -> Self {
+        self.code = Some(code);
         self
     }
 

@@ -43,6 +43,11 @@ crate::strings! {
             "Auszeichnungen und Listen über dem markierten Text. Die Tasten gehen immer."
         ),
         Binder => ("Binder", "Binder"),
+        WarningMarks => ("Warning marks", "Warnungen markieren"),
+        WarningMarksHint => (
+            "Mark typesetting warnings on the pages with the Proof tab closed.",
+            "Satzwarnungen auf den Seiten markieren, auch wenn die Korrektur zu ist."
+        ),
         BinderHint => ("A slim contents list on the left, on Cmd+\\.", "Eine schmale Inhaltsliste links, auf Cmd+\\."),
 
         Language => ("Language", "Sprache"),

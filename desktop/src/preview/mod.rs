@@ -189,6 +189,8 @@ pub struct PreviewView {
     slip_page: Option<usize>,
     problems: Vec<Problem>,
     marks: Marks,
+    /// The Proof tab is open, so warnings are marked.
+    proof_open: bool,
     /// The problem being looked at.
     current_problem: Option<usize>,
 }
@@ -253,6 +255,7 @@ impl PreviewView {
             slip_page: None,
             problems: Vec::new(),
             marks: Marks::default(),
+            proof_open: false,
             current_problem: None,
         };
         if let Some(fixed) = view.bench.as_ref().and_then(Bench::zoom) {
@@ -442,6 +445,14 @@ impl PreviewView {
         if let Some(sheets) = self.sheets(self.current_zoom) {
             let (top, height) = (mark.rect.y.0 as f32, mark.rect.height.0 as f32);
             self.scroll.1 = sheets.scroll_to_show(mark.page, (top, top + height), self.view.1, self.scroll.1);
+            cx.notify();
+        }
+    }
+
+    /// Says whether the Proof tab is open.
+    pub fn set_proof_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.proof_open != open {
+            self.proof_open = open;
             cx.notify();
         }
     }
@@ -930,8 +941,9 @@ impl PreviewView {
         }
     }
 
-    /// The window rectangles of what is marked on a sheet, with how strong the tint is.
-    fn marks_on(&self, sheet: &Placed) -> Vec<(Bounds<Pixels>, f32)> {
+    /// The window rectangles of what is marked on a sheet, with how strong the tint is and whether it is a warning. A
+    /// warning shows during a proof pass, and only the one being looked at has a tint.
+    fn marks_on(&self, sheet: &Placed, warnings_shown: bool) -> Vec<(Bounds<Pixels>, f32, bool)> {
         if self.is_contact_sheet() {
             return Vec::new();
         }
@@ -949,18 +961,21 @@ impl PreviewView {
             )
         };
         let problems = self.marks.of_problem.iter().enumerate().flat_map(|(at, marks)| {
-            let tint = if Some(at) == self.current_problem {
-                tokens::MARK_TINT_CURRENT
-            } else {
-                tokens::MARK_TINT
+            let warning = self.problems.get(at).is_some_and(|problem| problem.warning);
+            let current = Some(at) == self.current_problem;
+            let tint = match (current, warning) {
+                (true, _) => tokens::MARK_TINT_CURRENT,
+                (false, true) => 0.,
+                (false, false) => tokens::MARK_TINT,
             };
-            marks.iter().map(move |mark| (mark, tint))
+            let shown = !warning || warnings_shown;
+            marks.iter().filter(move |_| shown).map(move |mark| (mark, tint, warning))
         });
-        let slip = self.slip_marks.iter().map(|mark| (mark, tokens::MARK_TINT));
+        let slip = self.slip_marks.iter().map(|mark| (mark, tokens::MARK_TINT, false));
         problems
             .chain(slip)
-            .filter(|(mark, _)| mark.page == sheet.page)
-            .map(|(mark, tint)| (to_bounds(mark), tint))
+            .filter(|(mark, ..)| mark.page == sheet.page)
+            .map(|(mark, tint, warning)| (to_bounds(mark), tint, warning))
             .collect()
     }
 
@@ -1063,14 +1078,16 @@ impl Render for PreviewView {
         let this = cx.entity();
         let painted = this.clone();
         let (edge, accent) = (tokens.divider, tokens.accent);
+        let warning_color = gpui::rgb(tokens::WARNING_MARK);
         let pages = canvas(
             move |bounds, window, cx| this.update(cx, |view, cx| view.frame(bounds, window, cx)),
             move |bounds, placed, window, cx| {
                 let view = painted.read(cx);
+                let warnings_shown = view.proof_open || crate::settings::get(cx).warning_marks;
                 let drawn: Vec<_> = placed
                     .into_iter()
                     .map(|sheet| {
-                        let marks = view.marks_on(&sheet);
+                        let marks = view.marks_on(&sheet, warnings_shown);
                         let dot = view.is_contact_sheet() && view.marks.pages.contains(&sheet.page);
                         (sheet, marks, dot)
                     })
@@ -1089,9 +1106,10 @@ impl Render for PreviewView {
                                 .paint_image(sheet.bounds, sheet.bounds, corners, image, 0, false)
                                 .ok();
                         }
-                        for (mark, tint) in marks {
-                            window.paint_quad(fill(mark, gpui::Hsla::from(accent).opacity(tint)));
-                            window.paint_quad(gpui::outline(mark, accent, gpui::BorderStyle::Solid));
+                        for (mark, tint, warning) in marks {
+                            let color = if warning { warning_color } else { accent };
+                            window.paint_quad(fill(mark, gpui::Hsla::from(color).opacity(tint)));
+                            window.paint_quad(gpui::outline(mark, color, gpui::BorderStyle::Solid));
                         }
                         if dot {
                             let origin = point(
@@ -1116,9 +1134,15 @@ impl Render for PreviewView {
         let problem = self.diagnostics.first().map(|first| {
             let more = self.diagnostics.len() - 1;
             let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
+            let first = if first.code.is_some() {
+                crate::shell::engine_text::message(first)
+            } else {
+                first.to_string()
+            };
             format!("{first}{suffix}")
         });
-        let count = self.problems.len();
+        let warnings = self.problems.iter().filter(|problem| problem.warning).count();
+        let count = self.problems.len() - warnings;
         let to_look_at = (count > 0).then(|| {
             let label = crate::t!(Key::ToLookAt, count = count);
             div()
@@ -1129,6 +1153,43 @@ impl Render for PreviewView {
                 .cursor_pointer()
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
                 .child(label)
+        });
+        let warning_count = (warnings > 0).then(|| {
+            let label = crate::t!(Key::Warnings, count = warnings);
+            let marks_on = crate::settings::get(cx).warning_marks;
+            let toggle = crate::t!(Key::WarningMarks);
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(tokens::SPACE_1)
+                .child(
+                    div()
+                        .id("warnings")
+                        .control(&tokens, Role::Link, SharedString::from(label.clone()))
+                        .cursor_pointer()
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .id("warning-marks")
+                        .toggle(&tokens, toggle, marks_on)
+                        .flex_none()
+                        .h(tokens::ZOOM_BUTTON)
+                        .px(tokens::SPACE_1)
+                        .flex()
+                        .items_center()
+                        .rounded(tokens::RADIUS)
+                        .cursor_pointer()
+                        .when(marks_on, |button| button.bg(tokens.raised).text_color(tokens.text))
+                        .hover(|button| button.bg(tokens.raised))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(|_, _, cx| {
+                            crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
+                        })
+                        .child(toggle),
+                )
         });
         let strip = div()
             .flex_none()
@@ -1144,6 +1205,7 @@ impl Render for PreviewView {
             .text_color(tokens.text_quiet)
             .child(div().flex_none().child(self.status()))
             .children(to_look_at)
+            .children(warning_count)
             .child(div().flex_1().min_w_0().when_some(problem, |slot, problem| {
                 slot.truncate().text_color(tokens.accent).child(problem)
             }))

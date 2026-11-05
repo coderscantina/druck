@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 
 use super::text::Key;
-use crate::app::{NewBook, NewOffer, NewReport, Open, Quit};
+use crate::app::{NewArticle, NewBook, NewPaper, Open, Quit};
 use crate::editor::{
     Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
     ShowSpelling, ToggleSource, Undo,
@@ -180,8 +180,8 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         Menu::new(crate::t!(Key::MenuFile)).items([
             MenuItem::submenu(Menu::new(crate::t!(Key::New)).items([
                 item(Key::NewBook, NewBook),
-                item(Key::NewReport, NewReport),
-                item(Key::NewOffer, NewOffer),
+                item(Key::NewPaper, NewPaper),
+                item(Key::NewArticle, NewArticle),
             ])),
             item(Key::Open, Open),
             MenuItem::submenu(Menu::new(crate::t!(Key::OpenRecent)).items(recent)),

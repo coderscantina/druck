@@ -49,15 +49,58 @@ crate::strings! {
             "Chapters, a title page, and print and ebook exports",
             "Kapitel, Titelseite und Exporte für Druck und E-Book"
         ),
-        ReportName => ("Report", "Bericht"),
-        ReportDescription => (
-            "Numbered headings, contents, and references",
-            "Nummerierte Überschriften, Inhalt und Literatur"
+        PaperName => ("Paper", "Paper"),
+        PaperDescription => (
+            "Numbered headings, an abstract, and references",
+            "Nummerierte Überschriften, Abstract und Literatur"
         ),
-        OfferName => ("Offer", "Angebot"),
-        OfferDescription => (
-            "A cover with the client's address and a price table",
-            "Deckblatt mit Kundenadresse und Preistabelle"
+        ArticleName => ("Article", "Artikel"),
+        ArticleDescription => (
+            "One file, a title, and PDF and ebook exports",
+            "Eine Datei, ein Titel und Exporte für PDF und E-Book"
         ),
+
+        CannotFindWorkingDir => ("cannot find the working directory: {error}", "Der Arbeitsordner ist nicht zu finden: {error}"),
+        NoSuchFile => ("cannot open {path}: no such file or folder", "{path} lässt sich nicht öffnen: Datei oder Ordner gibt es nicht"),
+        CannotRead => ("cannot read {path}: {error}", "{path} lässt sich nicht lesen: {error}"),
+        NotUtf8 => ("{path} is not UTF-8 text.", "{path} ist kein UTF-8-Text."),
+        NoManifest => (
+            "{path} has no {manifest}. A project folder needs one, or open a Markdown file.",
+            "{path} hat keine {manifest}. Ein Projektordner braucht eine, oder öffne eine Markdown-Datei."
+        ),
+        NotThereYet => ("{listed} is not there yet. Saving creates it.", "{listed} gibt es noch nicht. Sichern legt die Datei an."),
+        ChangedNotSaved => ("{path} changed on disk, so it was not saved.", "{path} wurde auf der Platte geändert und daher nicht gesichert."),
+        CannotSave => ("cannot save {path}: {error}", "{path} lässt sich nicht sichern: {error}"),
+        SingleFileChapters => (
+            "A single file cannot change a chapter list: its order is its text.",
+            "Eine einzelne Datei hat keine Kapitelliste: Ihre Reihenfolge ist ihr Text."
+        ),
+        OnlyBookChaptersMove => ("Only a chapter in the book can move.", "Nur ein Kapitel im Buch lässt sich verschieben."),
+        BookNeedsChapter => ("A book needs at least one chapter.", "Ein Buch braucht mindestens ein Kapitel."),
+        NameEmpty => ("A name cannot be empty.", "Ein Name darf nicht leer sein."),
+        AlreadyExists => ("{path} already exists.", "{path} gibt es schon."),
+        StayInFolder => ("A chapter must stay in the project folder.", "Ein Kapitel muss im Projektordner bleiben."),
+        CannotRename => ("cannot rename {path}: {error}", "{path} lässt sich nicht umbenennen: {error}"),
+        CannotCreate => ("cannot create {path}: {error}", "{path} lässt sich nicht anlegen: {error}"),
+        AlreadyHoldsFiles => ("{path} already holds files", "In {path} liegen schon Dateien"),
+        NotAFile => ("{path} is not a file", "{path} ist keine Datei"),
+        CannotCopy => ("cannot copy {path}: {error}", "{path} lässt sich nicht kopieren: {error}"),
+        CannotReadManifest => ("cannot read {manifest}: {error}", "{manifest} lässt sich nicht lesen: {error}"),
+        CannotChangeManifest => ("cannot change {manifest} here. Edit the file directly.", "{manifest} lässt sich hier nicht ändern. Bearbeite die Datei direkt."),
+        ManifestChanged => ("{manifest} just changed on disk. Try again.", "{manifest} wurde eben auf der Platte geändert. Versuch es noch einmal."),
+        CannotWriteManifest => ("cannot write {manifest}: {error}", "{manifest} lässt sich nicht schreiben: {error}"),
+        CannotChangeFrontMatter => ("cannot change the front matter here. Edit it directly.", "Die Front Matter lässt sich hier nicht ändern. Bearbeite sie direkt."),
+        OutsideProject => ("{path} is outside the project.", "{path} liegt außerhalb des Projekts."),
+
+        MakeProject => ("Make this a project", "Daraus ein Projekt machen"),
+        MakeProjectHint => (
+            "Writes {manifest} with {count} chapters in name order. Your files stay where they are.",
+            "Schreibt {manifest} mit {count} Kapiteln nach Namen. Deine Dateien bleiben, wo sie sind."
+        ),
+        MakeProjectHintMoves => (
+            "Writes {manifest} with {count} chapters in name order, and moves the front matter of {file} into it.",
+            "Schreibt {manifest} mit {count} Kapiteln nach Namen und übernimmt die Front Matter aus {file}."
+        ),
+        ManifestExists => ("{path} already has a {manifest}.", "{path} hat schon eine {manifest}."),
     }
 }

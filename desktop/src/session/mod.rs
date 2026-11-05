@@ -12,6 +12,7 @@
 //! The editor view holds the session, since every key needs the active buffer. Others read it through
 //! `EditorView::session` and change it through `EditorView::update_session`, which keeps the view in step.
 
+pub mod adopt;
 pub mod details;
 pub mod disk;
 mod joined;
@@ -37,6 +38,7 @@ use self::disk::Synced;
 pub use self::joined::{ChapterMap, Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
+use self::strings::Key;
 pub use self::templates::{STARTERS, Starter, TEMPLATES, Template};
 use crate::persist::atomic;
 use crate::source::buffer::EditError;
@@ -143,7 +145,7 @@ impl Chapter {
     /// Why this chapter has no text to show, if so.
     pub fn problem(&self) -> Option<String> {
         match &self.read {
-            Read::Missing => Some(format!("{} is not there yet. Saving creates it.", self.listed)),
+            Read::Missing => Some(crate::t!(Key::NotThereYet, listed = self.listed)),
             Read::Failed(problem) => Some(problem.clone()),
             Read::Later | Read::Done => None,
         }
@@ -224,10 +226,10 @@ impl Session {
     /// they can be fixed in the editor; only a path with nothing to show is an error.
     pub fn open(path: &Path) -> Result<Self, String> {
         let working_dir =
-            std::env::current_dir().map_err(|error| format!("cannot find the working directory: {error}"))?;
+            std::env::current_dir().map_err(|error| crate::t!(Key::CannotFindWorkingDir, error = error))?;
         let path = normalize(&working_dir.join(path));
         if !path.exists() {
-            return Err(format!("cannot open {}: no such file or folder", path.display()));
+            return Err(crate::t!(Key::NoSuchFile, path = path.display()));
         }
         if path.is_dir() {
             return Self::open_project(&path);
@@ -268,8 +270,8 @@ impl Session {
     }
 
     fn open_single(path: &Path) -> Result<Self, String> {
-        let bytes = fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let text = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 text.", path.display()))?;
+        let bytes = fs::read(path).map_err(|error| crate::t!(Key::CannotRead, path = path.display(), error = error))?;
+        let text = String::from_utf8(bytes).map_err(|_| crate::t!(Key::NotUtf8, path = path.display()))?;
         let mut session = Self::empty(Kind::Single { path: path.to_owned() });
         session.synced.insert(path.to_owned(), Synced::new(&text, true));
         session.split_into_sections(&text);
@@ -300,10 +302,7 @@ impl Session {
     fn open_project(dir: &Path) -> Result<Self, String> {
         let manifest = dir.join(MANIFEST);
         if !manifest.exists() {
-            return Err(format!(
-                "{} has no {MANIFEST}. A project folder needs one, or open a Markdown file.",
-                dir.display()
-            ));
+            return Err(crate::t!(Key::NoManifest, path = dir.display(), manifest = MANIFEST));
         }
         let mut session = Self::empty(Kind::Project { dir: dir.to_owned() });
         session.read_manifest();
@@ -329,7 +328,7 @@ impl Session {
             }
         }
         self.settings = text
-            .map_err(|error| format!("cannot read {MANIFEST}: {error}"))
+            .map_err(|error| crate::t!(Key::CannotReadManifest, manifest = MANIFEST, error = error))
             .and_then(|text| details::parse(&text, &manifest));
         let listed: Vec<String> = match &self.settings {
             Ok(settings) => (settings.chapters.iter().flatten())
@@ -378,13 +377,13 @@ impl Session {
                 Ok(buffer) => (buffer, Read::Done),
                 Err(_) => (
                     Buffer::new(""),
-                    Read::Failed(format!("{} is not UTF-8 text.", path.display())),
+                    Read::Failed(crate::t!(Key::NotUtf8, path = path.display())),
                 ),
             },
             Err(druck::resource::ResolveError::NotFound(_)) => (Buffer::new(""), Read::Missing),
             Err(error) => (
                 Buffer::new(""),
-                Read::Failed(format!("cannot read {}: {error}", path.display())),
+                Read::Failed(crate::t!(Key::CannotRead, path = path.display(), error = error)),
             ),
         }
     }
@@ -830,8 +829,8 @@ impl Session {
             let path = outgoing.path.display();
             match outgoing.write() {
                 Ok(atomic::Outcome::Written) => {}
-                Ok(atomic::Outcome::Changed(_)) => return Err(format!("{path} changed on disk, so it was not saved.")),
-                Err(error) => return Err(format!("cannot save {path}: {error}")),
+                Ok(atomic::Outcome::Changed(_)) => return Err(crate::t!(Key::ChangedNotSaved, path = path)),
+                Err(error) => return Err(crate::t!(Key::CannotSave, path = path, error = error)),
             }
             self.written(&outgoing);
             written += 1;
@@ -896,16 +895,16 @@ impl Session {
     // Changing the book
 
     /// The project's folder, or why this document has no book to change.
-    fn project_dir(&self, doing: &str) -> Result<PathBuf, String> {
+    fn project_dir(&self) -> Result<PathBuf, String> {
         match &self.kind {
             Kind::Project { dir } => Ok(dir.clone()),
-            Kind::Single { .. } => Err(format!("A single file cannot {doing}: its order is its text.")),
+            Kind::Single { .. } => Err(crate::t!(Key::SingleFileChapters).to_owned()),
         }
     }
 
     /// Writes the current chapter list to `druck.yaml`.
     fn write_chapter_list(&mut self) -> Result<(), String> {
-        let dir = self.project_dir("change its chapter list")?;
+        let dir = self.project_dir()?;
         let manifest = dir.join(MANIFEST);
         let wanted: Vec<String> = self.book.iter().map(|id| self.known(*id).listed.clone()).collect();
         self.patch_manifest(
@@ -921,7 +920,7 @@ impl Session {
     /// Moves a chapter so it stands before the one now at `to`, or last if `to` is the length of the book.
     pub fn move_chapter(&mut self, id: ChapterId, to: usize) -> Result<(), String> {
         let Some(from) = self.book.iter().position(|other| *other == id) else {
-            return Err("Only a chapter in the book can move.".to_owned());
+            return Err(crate::t!(Key::OnlyBookChaptersMove).to_owned());
         };
         let target = if from < to { to - 1 } else { to }.min(self.book.len() - 1);
         if target == from {
@@ -935,9 +934,9 @@ impl Session {
 
     /// Takes a chapter out of the book. Its file stays, in the "Not in book" list.
     pub fn remove_from_book(&mut self, id: ChapterId) -> Result<(), String> {
-        self.project_dir("take out a section")?;
+        self.project_dir()?;
         if self.book.len() == 1 && self.book[0] == id {
-            return Err("A book needs at least one chapter.".to_owned());
+            return Err(crate::t!(Key::BookNeedsChapter).to_owned());
         }
         let before = self.revision();
         let order = self.book.clone();
@@ -953,7 +952,7 @@ impl Session {
 
     /// Adds a file from "Not in book" at the end of the book.
     pub fn add_to_book(&mut self, id: ChapterId) -> Result<(), String> {
-        self.project_dir("add a file")?;
+        self.project_dir()?;
         self.set_read(id);
         let before = self.revision();
         self.book.push(id);
@@ -978,14 +977,14 @@ impl Session {
     pub fn rename(&mut self, id: ChapterId, name: &str) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() {
-            return Err("A name cannot be empty.".to_owned());
+            return Err(crate::t!(Key::NameEmpty).to_owned());
         }
         if let Some(heading) = self.known(id).outline.heading.clone() {
             return self
                 .edit_chapter(id, vec![Edit::new(heading, name)], EditKind::Discrete)
                 .map_err(|error| error.to_string());
         }
-        let dir = self.project_dir("rename a section without a heading")?;
+        let dir = self.project_dir()?;
         let chapter = self.known(id);
         let extension = chapter
             .path
@@ -995,16 +994,16 @@ impl Session {
         let folder = chapter.path.parent().map(Path::to_owned).unwrap_or_else(|| dir.clone());
         let target = folder.join(format!("{}.{extension}", slug(name)));
         if target.exists() {
-            return Err(format!("{} already exists.", target.display()));
+            return Err(crate::t!(Key::AlreadyExists, path = target.display()));
         }
         let old = chapter.path.clone();
         let old_listed = chapter.listed.clone();
         let listed = target
             .strip_prefix(&dir)
-            .map_err(|_| "A chapter must stay in the project folder.".to_owned())?
+            .map_err(|_| crate::t!(Key::StayInFolder).to_owned())?
             .to_string_lossy()
             .into_owned();
-        fs::rename(&old, &target).map_err(|error| format!("cannot rename {}: {error}", old.display()))?;
+        fs::rename(&old, &target).map_err(|error| crate::t!(Key::CannotRename, path = old.display(), error = error))?;
         self.move_synced(&old, &target);
         let chapter = self.known_mut(id);
         chapter.path = target.clone();
@@ -1047,9 +1046,9 @@ impl Session {
             })
             .find(|(path, _)| !path.exists())
             .expect("some name is free");
-        fs::create_dir_all(&folder).map_err(|error| format!("cannot create {}: {error}", folder.display()))?;
+        fs::create_dir_all(&folder).map_err(|error| crate::t!(Key::CannotCreate, path = folder.display(), error = error))?;
         atomic::write(&path, markdown.as_bytes())
-            .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+            .map_err(|error| crate::t!(Key::CannotCreate, path = path.display(), error = error))?;
         let before = self.revision();
         let id = self.add(Chapter::new(
             path.clone(),

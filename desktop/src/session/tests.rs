@@ -778,3 +778,14 @@ fn engine_goes_from_markdown_to_pages_and_pdf() {
     assert!(pdf.parts > 0);
     assert!(pdf.bytes.starts_with(b"%PDF"));
 }
+
+#[test]
+fn every_starter_leaves_its_exports_out_of_git() {
+    for starter in STARTERS {
+        let dir = std::env::temp_dir().join(format!("druck-starter-ignore-{}-{}", starter.slug, std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        starter.create(&dir).expect("made");
+        assert_eq!(fs::read_to_string(dir.join(".gitignore")).expect("written"), "build/\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+}

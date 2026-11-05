@@ -29,7 +29,7 @@ The public modules, as `cargo doc --no-deps` lists them:
 | `input` | `Input`, `DocumentText`, `ThemeSelection`, `ThemeDirs`, `Overrides`, `Project`, `ExportSettings`, `Export`, `Date`, `MANIFEST` |
 | `resource` | `Resolver`, `FileResolver`, `MemoryResolver`, `Bytes`, `ResolveError`, `InstalledFace`, `Origin`, `Resource`, `normalize`, `source_date`, `clock_date` |
 | `output` | `Layout` and everything it returns: `Page`, `Item`, `Run`, `Glyph`, `Face`, `FaceId`, `Picture`, `Pixels`, `Link`, `Structure`, `Rect`, `Position`, `Bookmark`, `PageNumber`, `Hit`, `Located`, `Color`, `Pt`, and the source map types |
-| `diagnostic` | `Diagnostic`, `Severity`, `Source`, `Location`, `Origin`, `Resource`, `path_from` |
+| `diagnostic` | `Diagnostic`, `Severity`, `Code`, `PageName`, `Source`, `Location`, `Origin`, `Resource`, `path_from` |
 | `cancel` | `Cancel` |
 
 Private: the parser, `document`, citations, `layout` and its scoring, `tags`, `pdf`, `epub`, `pipeline`, `config` (the resolved `Config` is opaque, inspected as JSON), `text`, `installed`, `theme_path`, `highlight`.
@@ -242,6 +242,7 @@ Encoding and semantics are in the rustdoc of `SourceMap`. The corpus's map is 0.
 pub struct Diagnostic {
     pub severity: Severity,                 // Error | Warning
     pub message: String,
+    pub code: Option<Code>,                 // what the message says, with its values, for a client's own wording
     pub source: Option<Source>,             // Bundled | Theme(PathBuf) | Document(PathBuf) | Bibliography(PathBuf) | Overrides
     pub location: Option<Location>,         // 1-based line and column in `source`; in a project, in the chapter file
     pub property: Option<String>,           // dotted theme or setting path, "styles.body.size"

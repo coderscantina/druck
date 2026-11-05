@@ -27,6 +27,13 @@ pub fn beside(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> (f
     (x, y)
 }
 
+/// The same as [`beside`], but above `target` first, and below it only if above does not fit: the selection toolbar.
+pub fn above(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> (f32, f32) {
+    let top = target.top - gap - height;
+    let (x, y) = beside(target, width, height, area, gap);
+    (x, if top >= area.top + gap { top } else { y })
+}
+
 /// The top left of a list opening at a caret: starting at the caret's left edge rather than centered on it.
 pub fn at_caret(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> (f32, f32) {
     let (_, y) = beside(target, width, height, area, gap);
@@ -61,6 +68,12 @@ mod tests {
     #[test]
     fn it_goes_above_when_there_is_no_room_below() {
         assert_eq!(beside(line(300., 570., 500.), 100., 30., AREA, 6.), (350., 534.));
+    }
+
+    #[test]
+    fn the_toolbar_goes_above_and_below_only_with_no_room_above() {
+        assert_eq!(above(line(300., 100., 500.), 100., 30., AREA, 6.), (350., 64.));
+        assert_eq!(above(line(300., 40., 500.), 100., 30., AREA, 6.), (350., 66.));
     }
 
     #[test]

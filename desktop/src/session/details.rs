@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::strings::Key;
 use druck::editor::resolved_config::{FrontMatter, InputSource, parse_settings, split_front_matter};
 use druck::input::MANIFEST;
 
@@ -146,7 +147,7 @@ pub(super) fn parse(text: &str, path: &Path) -> Result<FrontMatter, String> {
     })
 }
 
-fn applied(text: &str, edit: &Edit) -> String {
+pub(super) fn applied(text: &str, edit: &Edit) -> String {
     format!("{}{}{}", &text[..edit.range.start], edit.text, &text[edit.range.end..])
 }
 
@@ -203,9 +204,9 @@ impl Session {
             (None, Kind::Project { .. }) => {
                 let name = path
                     .file_name()
-                    .ok_or_else(|| format!("{} is not a file", path.display()))?;
+                    .ok_or_else(|| crate::t!(Key::NotAFile, path = path.display()))?;
                 let assets = base.join("assets");
-                let describe = |error: std::io::Error| format!("cannot copy {}: {error}", path.display());
+                let describe = |error: std::io::Error| crate::t!(Key::CannotCopy, path = path.display(), error = error);
                 fs::create_dir_all(&assets).map_err(describe)?;
                 fs::copy(path, assets.join(name)).map_err(describe)?;
                 PathBuf::from("assets").join(name)
@@ -249,20 +250,20 @@ impl Session {
         edit: impl Fn(&str) -> Result<Option<Edit>, String>,
         check: impl Fn(&FrontMatter) -> bool,
     ) -> Result<(), String> {
-        let text = fs::read_to_string(manifest).map_err(|error| format!("cannot read {MANIFEST}: {error}"))?;
+        let text = fs::read_to_string(manifest).map_err(|error| crate::t!(Key::CannotReadManifest, manifest = MANIFEST, error = error))?;
         let Some(change) = edit(&text)? else {
             return Ok(());
         };
         let patched = applied(&text, &change);
         let settings = parse(&patched, manifest)?;
         if !check(&settings) {
-            return Err(format!("cannot change {MANIFEST} here. Edit the file directly."));
+            return Err(crate::t!(Key::CannotChangeManifest, manifest = MANIFEST));
         }
         let expected = Some(content_hash(text.as_bytes()));
         match atomic::write_if(manifest, patched.as_bytes(), expected) {
             Ok(Outcome::Written) => {}
-            Ok(Outcome::Changed(_)) => return Err(format!("{MANIFEST} just changed on disk. Try again.")),
-            Err(error) => return Err(format!("cannot write {MANIFEST}: {error}")),
+            Ok(Outcome::Changed(_)) => return Err(crate::t!(Key::ManifestChanged, manifest = MANIFEST)),
+            Err(error) => return Err(crate::t!(Key::CannotWriteManifest, manifest = MANIFEST, error = error)),
         }
         self.set_synced(manifest, patched.into(), true);
         self.bump_revision();
@@ -287,7 +288,7 @@ impl Session {
         let patched = applied(yaml_text, &change);
         let settings = parse(&patched, path)?;
         if !check(&settings) {
-            return Err("cannot change the front matter here. Edit it directly.".to_owned());
+            return Err(crate::t!(Key::CannotChangeFrontMatter).to_owned());
         }
         let edit = match &found {
             Some(split) => {

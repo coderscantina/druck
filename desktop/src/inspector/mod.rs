@@ -129,6 +129,11 @@ pub struct InspectorView {
 /// The inspector announces what its panels change, for the shell to pass on to the galley and the preview.
 impl EventEmitter<ThemeChanged> for InspectorView {}
 
+/// The rail shows another tab.
+pub struct TabShown(pub Tab);
+
+impl EventEmitter<TabShown> for InspectorView {}
+
 impl InspectorView {
     /// `theme` is the JSON file the theme tabs edit, and `dirs` the folders themes may be changed in.
     pub fn new(theme: Option<PathBuf>, dirs: Dirs, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -209,7 +214,12 @@ impl InspectorView {
     /// Shows a tab.
     pub fn show(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.active = tab;
+        cx.emit(TabShown(tab));
         cx.notify();
+    }
+
+    pub fn active(&self) -> Tab {
+        self.active
     }
 
     /// Shows a style's place in the Style tab: its own section, or its row's detail.
@@ -260,10 +270,7 @@ impl InspectorView {
                         .bg(tokens.accent),
                 )
             })
-            .on_click(cx.listener(move |view, _, _, cx| {
-                view.active = tab;
-                cx.notify();
-            }))
+            .on_click(cx.listener(move |view, _, _, cx| view.show(tab, cx)))
     }
 }
 

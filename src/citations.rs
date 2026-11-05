@@ -7,7 +7,7 @@ use crate::bibliography::{Bibliography, Citations, Part, Reference};
 use crate::cancel::{Cancel, CheckPoint};
 use crate::config::resolved::Config;
 use crate::config::source::InputSource;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{Block, Document, Inline, Location};
 use crate::renderer::Failure;
 
@@ -49,7 +49,7 @@ pub fn resolve(
     let error = |at: Location, message: String| Diagnostic::new(Some(source.clone()), message).at(at.line, at.column);
     let Some(bibliography) = bibliography else {
         let message = "a citation needs a bibliography; set `bibliography` to a BibTeX file in the front matter";
-        return Err(vec![error(first.at, message.to_owned())].into());
+        return Err(vec![error(first.at, message.to_owned()).coded(Code::NoBibliography)].into());
     };
 
     let mut order = Vec::with_capacity(document.citations.len());
@@ -65,7 +65,12 @@ pub fn resolve(
             Err(missing) => errors.extend(missing.into_iter().map(|missing| {
                 let file = bibliography.path();
                 let message = format!("no entry in {} has the key `{}`", file.display(), missing.key);
-                error(citation.keys[missing.item], message).naming(file)
+                error(citation.keys[missing.item], message)
+                    .coded(Code::MissingCitation {
+                        file: file.to_owned(),
+                        key: missing.key.clone(),
+                    })
+                    .naming(file)
             })),
         }
     }

@@ -1,11 +1,11 @@
-title: Untitled report
-subtitle: What this report is about
+title: Untitled paper
+subtitle: What this paper is about
 author: Your Name
 date: Draft
 abstract: |
   One paragraph on the question, the method, and the result. The title page shows it.
 lang: en
-theme: report
+theme: paper
 title-page: true
 toc: true
 bibliography: references.bib
@@ -13,5 +13,5 @@ chapters:
   - manuscript/01-introduction.md
   - manuscript/02-findings.md
 exports:
-  report:
-    output: build/report.pdf
+  paper:
+    output: build/paper.pdf

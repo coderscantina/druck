@@ -152,7 +152,9 @@ impl Element for Galley {
             let floats = view.floats(&selection, caret, window, cx);
             let margin = view.margin_element();
             let rows = view.review_rows(cx);
-            let advice = view.advice_elements(cx);
+            let mut advice = view.advice_elements(cx);
+            advice.extend(view.comment_notes(window, cx));
+            advice.sort_by_key(|(_, y)| *y);
             (frame, floats, margin, rows, advice)
         });
         frame.images = self.prepaint_images(&frame, bounds, window, cx);
@@ -162,22 +164,29 @@ impl Element for Galley {
                 element.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
                 frame.review.push(element);
             }
-            let mut measured = |(mut element, y): (AnyElement, Pixels)| {
-                let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
-                (element, Wanted { y, height })
-            };
-            let chapter = margin.map(&mut measured);
-            let advice: Vec<_> = advice.into_iter().map(&mut measured).collect();
-            let wanted: Vec<Wanted> = advice.iter().map(|(_, wanted)| *wanted).collect();
-            let placed = flow(chapter.as_ref().map(|(_, wanted)| *wanted), &wanted, bounds.top());
-            frame.margin = chapter.map(|(mut element, _)| {
-                element.prepaint_at(point(note_left, placed.chapter), window, cx);
-                element
-            });
-            for ((mut element, _), y) in advice.into_iter().zip(placed.notes) {
+            let measured: Vec<_> = advice
+                .into_iter()
+                .map(|(mut element, y)| {
+                    let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
+                    (element, Wanted { y, height })
+                })
+                .collect();
+            let wanted: Vec<Wanted> = measured.iter().map(|(_, wanted)| *wanted).collect();
+            for ((mut element, _), y) in measured.into_iter().zip(flow(&wanted, bounds.top())) {
                 element.prepaint_at(point(note_left, y), window, cx);
                 frame.review.push(element);
             }
+        });
+        // The chapter's opening notes stand in the flow, above its first text.
+        frame.margin = margin.map(|(mut element, origin)| {
+            let height = window
+                .with_content_mask(Some(ContentMask { bounds }), |window| {
+                    let height = element.layout_as_root(AvailableSpace::min_size(), window, cx).height;
+                    element.prepaint_at(origin, window, cx);
+                    height
+                });
+            self.view.update(cx, |view, cx| view.set_note_room(height, cx));
+            element
         });
         frame.floats = floats
             .into_iter()

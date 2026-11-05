@@ -456,7 +456,7 @@ impl Session {
                 return Ok(());
             };
             let listed = (path.strip_prefix(dir))
-                .map_err(|_| format!("{} is outside the project.", path.display()))?
+                .map_err(|_| crate::t!(super::strings::Key::OutsideProject, path = path.display()))?
                 .to_string_lossy()
                 .into_owned();
             let group = match listed.split('/').next() {
