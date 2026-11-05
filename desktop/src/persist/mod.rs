@@ -778,9 +778,7 @@ impl PersistView {
 
     /// A note about a kept copy: it names the folder, and Show in Finder shows the copy in it.
     fn note_kept(&mut self, before: Option<&str>, kept: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let folder = (kept.parent().and_then(Path::file_name))
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        let says = crate::t!(Key::CopyKept, folder = folder);
+        let says = crate::t!(Key::CopyKept, folder = recovery::KEPT_FOLDER);
         let text = before.map_or_else(|| says.clone(), |before| format!("{before} {says}"));
         self.show_note_about(text, Some(kept), window, cx);
     }

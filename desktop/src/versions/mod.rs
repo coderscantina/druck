@@ -834,8 +834,8 @@ impl Versions {
     }
 
     /// One step of `DRUCK_VERSIONS_RUN`, separated by semicolons: `commit:message`, `create:branch`, `switch:branch`,
-    /// `merge:branch`, `delete:branch`, `abort`, `push`, `pull`, `repo`, `keep:mine`, `keep:theirs`, or `keep:both`. These call
-    /// what the buttons call.
+    /// `merge:branch`, `delete:branch`, `abort`, `push`, `pull`, `repo`, `keep:mine`, `keep:theirs`, `keep:both`, and
+    /// `side:mine` or `side:theirs` for the versions See both left. These call what the buttons call.
     #[cfg(any(debug_assertions, feature = "measure"))]
     fn run_scripted(&mut self, step: &str, window: &mut Window, cx: &mut Context<Self>) {
         let (name, value) = step.split_once(':').unwrap_or((step, ""));
@@ -859,6 +859,14 @@ impl Versions {
                 };
                 self.persist
                     .update(cx, |persist, cx| persist.settle_first(choice, window, cx));
+            }
+            "side" => {
+                let choice = if value == "theirs" {
+                    Choice::Theirs
+                } else {
+                    Choice::Mine
+                };
+                self.keep_one_side(choice, window, cx);
             }
             _ => eprintln!("no such step: {step}"),
         }

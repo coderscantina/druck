@@ -55,6 +55,9 @@ pub struct Copies {
     kept: PathBuf,
 }
 
+/// The folder in the data folder that holds kept copies, one folder in it per document.
+pub const KEPT_FOLDER: &str = "kept";
+
 impl Copies {
     /// The copies of the document at `location`, under `data`.
     pub fn new(data: &Path, location: &Path) -> Self {
@@ -62,7 +65,7 @@ impl Copies {
         let document = format!("{name}-{}", key(location));
         Self {
             recovery: data.join("recovery").join(&document),
-            kept: data.join("kept").join(document),
+            kept: data.join(KEPT_FOLDER).join(document),
         }
     }
 

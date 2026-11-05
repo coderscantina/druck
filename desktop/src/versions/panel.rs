@@ -2,7 +2,7 @@
 //! right panel in Write, through [`Slot`], and the view itself mounts as a rail tab in Publish.
 
 use gpui::prelude::*;
-use gpui::{Context, Entity, Focusable as _, ScrollHandle, SharedString, Subscription, WeakEntity, Window, div};
+use gpui::{Context, Entity, Focusable as _, ScrollHandle, Subscription, WeakEntity, Window, div};
 
 use super::repo::{Branch, Overview};
 use super::strings::Key;
@@ -181,7 +181,6 @@ impl GitPanel {
         &self,
         at: usize,
         branch: &Branch,
-        into: &str,
         tokens: &Tokens,
         can_move: bool,
         cx: &mut Context<Self>,
@@ -227,9 +226,9 @@ impl GitPanel {
             })
             .when(!current && can_move, |row| {
                 let merge_label = if merge_asked {
-                    crate::t!(Key::MergeAsk, branch = into).into()
+                    crate::t!(Key::MergeAsk)
                 } else {
-                    SharedString::from(crate::t!(Key::Merge))
+                    crate::t!(Key::Merge)
                 };
                 row.child(ui::button(tokens, ("git-switch", at), crate::t!(Key::Switch)).on_click(
                     cx.listener(move |panel, _, window, cx| act(panel, window, cx, Action::Switch(switch.clone()))),
@@ -357,10 +356,7 @@ impl Render for GitPanel {
             .collect();
         let branch_rows: Vec<_> = if self.branches_open {
             (overview.branches.iter().enumerate())
-                .map(|(at, branch)| {
-                    self.branch_row(at, branch, &overview.branch, &tokens, can_move, cx)
-                        .into_any_element()
-                })
+                .map(|(at, branch)| self.branch_row(at, branch, &tokens, can_move, cx).into_any_element())
                 .collect()
         } else {
             Vec::new()

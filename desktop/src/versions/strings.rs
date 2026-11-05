@@ -83,7 +83,7 @@ crate::strings! {
         NoCommits => ("No commits yet.", "Noch keine Commits."),
         NewBranch => ("New branch", "Neuer Branch"),
         Merge => ("Merge", "Merge"),
-        MergeAsk => ("Merge into {branch}?", "In {branch} mergen?"),
+        MergeAsk => ("Merge now?", "Jetzt mergen?"),
         Switch => ("Switch", "Wechseln"),
         Delete => ("Delete", "Löschen"),
         DeleteUnmerged => ("Not merged. Delete?", "Nicht gemerged. Löschen?"),
