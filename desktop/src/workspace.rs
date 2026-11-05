@@ -758,10 +758,14 @@ impl Workspace {
             .filter(|file| self.fonts.insert(file.hash()))
             .map(|file| Cow::Owned(file.to_vec()))
             .collect();
-        if !new_files.is_empty()
-            && let Err(error) = cx.text_system().add_fonts(new_files)
-        {
-            eprintln!("the galley cannot use the theme's font: {error}");
+        if !new_files.is_empty() {
+            let error = cx
+                .text_system()
+                .add_fonts(new_files)
+                .err()
+                .map(|error| error.to_string());
+            let folder = self.parts.editor.read(cx).session().base_dir();
+            crate::persist::report(&folder, crate::persist::sync::Problem::Fonts, error, cx);
         }
         self.parts
             .editor

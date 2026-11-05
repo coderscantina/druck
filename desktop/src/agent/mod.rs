@@ -459,15 +459,19 @@ impl AgentView {
             .is_some_and(|cli| matches!(cli.state, CliState::Ready(_) | CliState::Untested(_)))
     }
 
-    fn remember(&self) {
+    fn remember(&self, cx: &mut App) {
         if let Some(store) = &self.store {
             let remembered = Remembered {
                 session: self.conversation.session_id().map(str::to_owned),
                 model: self.model.map(str::to_owned),
             };
-            if let Err(error) = store.set(&self.project, &remembered) {
-                eprintln!("cannot remember the agent session: {error}");
-            }
+            let error = store
+                .set(&self.project, &remembered)
+                .err()
+                .map(|error| error.to_string());
+            self.persist.update(cx, |persist, cx| {
+                persist.report(&self.base, crate::persist::sync::Problem::AgentSession, error, cx);
+            });
         }
     }
 
@@ -571,7 +575,7 @@ impl AgentView {
 
     fn take(&mut self, effect: Effect, window: &mut Window, cx: &mut Context<Self>) {
         match effect {
-            Effect::SessionId(_) => self.remember(),
+            Effect::SessionId(_) => self.remember(cx),
             Effect::Patched(path) => self.forget_patch_of_open_file(&path, cx),
             Effect::Created(_) => self.take_in_new_files(cx),
             Effect::NoteLeft(input) => self.note_left(&input, window, cx),
@@ -584,7 +588,7 @@ impl AgentView {
                 if never_started && self.conversation.session_id().is_some() {
                     self.conversation.set_session_id(None);
                     self.resumable = false;
-                    self.remember();
+                    self.remember(cx);
                 }
             }
         }
@@ -884,7 +888,7 @@ impl AgentView {
         self.expanded.clear();
         self.parsed.borrow_mut().clear();
         self.removed.clear();
-        self.remember();
+        self.remember(cx);
         self.update_attention(cx);
         cx.notify();
     }
@@ -895,7 +899,7 @@ impl AgentView {
             self.model = model;
             // The model is fixed when the process starts, so the next prompt starts one with the new choice.
             self.running = None;
-            self.remember();
+            self.remember(cx);
         }
         cx.notify();
     }

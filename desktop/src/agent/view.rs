@@ -359,10 +359,13 @@ impl AgentView {
         for file in &changes.files {
             // A chapter goes by its title, as the text names it, and anything else by its path.
             let session = self.editor.read(cx).session();
-            let path = file.chapter.filter(|&chapter| session.chapter(chapter).is_some()).map_or_else(
-                || super::relative(&self.base, &file.path),
-                |chapter| session.title_of(chapter),
-            );
+            let path = file
+                .chapter
+                .filter(|&chapter| session.chapter(chapter).is_some())
+                .map_or_else(
+                    || super::relative(&self.base, &file.path),
+                    |chapter| session.title_of(chapter),
+                );
             let hunks: Vec<_> = file
                 .hunks
                 .iter()

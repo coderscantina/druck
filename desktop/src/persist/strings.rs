@@ -90,5 +90,17 @@ crate::strings! {
             "This book could not become a Git repo, and has local history only: {error}",
             "Dieses Buch konnte kein Git-Repo werden und hat nur den lokalen Verlauf: {error}"
         ),
+        CannotSaveState => (
+            "Cannot save the app's recent documents and window to {file}: {error}",
+            "Zuletzt geöffnete Dokumente und Fenster lassen sich nicht in {file} sichern: {error}"
+        ),
+        CannotUseFonts => (
+            "Write cannot use the theme's fonts and shows others: {error}",
+            "Schreiben kann die Schriften des Themes nicht nutzen und zeigt andere: {error}"
+        ),
+        CannotRememberAgent => (
+            "The agent's conversation cannot be kept for the next start: {error}",
+            "Das Gespräch mit dem Agenten lässt sich nicht für den nächsten Start sichern: {error}"
+        ),
     }
 }

@@ -83,6 +83,20 @@ fn choose(choice: Choice, cx: &mut App) {
     });
 }
 
+/// Says on the saving-state line of the open document that something about `path` went wrong, or with `None` that it is
+/// over, for parts of the app that hold no view of it.
+pub fn report(path: &Path, kind: fn(String) -> Problem, error: Option<String>, cx: &mut App) {
+    let Some(current) = cx.try_global::<Current>() else {
+        return;
+    };
+    let view = current.view.clone();
+    let path = path.to_owned();
+    // A report may come from inside the window's own update, which cannot be entered again.
+    cx.defer(move |cx| {
+        view.update(cx, |view, cx| view.report(&path, kind, error, cx)).ok();
+    });
+}
+
 /// Mounts the saving state and starts everything behind it. One line in `app::mount`.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut App) -> Entity<PersistView> {
     let view = cx.new(|cx| PersistView::new(parts.editor.clone(), parts.inspector.clone(), window, cx));
@@ -1021,6 +1035,9 @@ impl Render for PersistView {
                 Problem::ChapterList(error) => crate::t!(Key::CannotUpdateChapters, error = error),
                 Problem::History(error) => crate::t!(Key::CannotKeepHistory, file = file_name(path), error = error),
                 Problem::Repo(error) => crate::t!(Key::CannotMakeRepo, error = error),
+                Problem::State(error) => crate::t!(Key::CannotSaveState, file = path.display(), error = error),
+                Problem::Fonts(error) => crate::t!(Key::CannotUseFonts, error = error),
+                Problem::AgentSession(error) => crate::t!(Key::CannotRememberAgent, error = error),
             };
             return root
                 .flex_1()

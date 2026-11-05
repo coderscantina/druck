@@ -49,7 +49,7 @@ impl State {
 
     /// Writes the file whole or not at all.
     pub fn save(&self, file: &Path) -> Result<(), String> {
-        let describe = |error: std::io::Error| format!("cannot save {}: {error}", file.display());
+        let describe = |error: std::io::Error| error.to_string();
         if let Some(folder) = file.parent() {
             fs::create_dir_all(folder).map_err(describe)?;
         }

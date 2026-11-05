@@ -146,11 +146,11 @@ fn save_prefs(cx: &mut App) {
         return;
     }
     prefs.state.window = prefs.window.or(prefs.state.window);
-    if let Some(file) = &prefs.file
-        && let Err(problem) = prefs.state.save(file)
-    {
-        eprintln!("{problem}");
-    }
+    let Some(file) = prefs.file.clone() else {
+        return;
+    };
+    let error = prefs.state.save(&file).err();
+    crate::persist::report(&file, crate::persist::sync::Problem::State, error, cx);
 }
 
 /// Keeps the window's size to write at quit.

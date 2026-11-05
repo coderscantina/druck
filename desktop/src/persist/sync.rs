@@ -218,6 +218,12 @@ pub enum Problem {
     History(String),
     /// A new project could not become a Git repo. It works without one, with local history.
     Repo(String),
+    /// The app's own state, such as the recent documents and the window's size, cannot be written.
+    State(String),
+    /// Write cannot use the theme's fonts, so the text shows in others.
+    Fonts(String),
+    /// The writing partner's conversation cannot be remembered for the next start.
+    AgentSession(String),
 }
 
 /// What is left to say about unsaved text after everything that can be written has been, for a document that is about to
