@@ -6,8 +6,8 @@ crate::strings! {
         Reject => ("Reject", "Ablehnen"),
         TryAgain => ("Try again", "Neu versuchen"),
         Apply => ("Apply", "Anwenden"),
-        Reply => ("Reply", "Antworten"),
-        Dismiss => ("Dismiss", "Verwerfen"),
+        Reply => ("Reply", "Antwort"),
+        Dismiss => ("Dismiss", "Ablegen"),
         NoteTextGone => (
             "The text this note was about is gone.",
             "Der Text zu dieser Notiz ist nicht mehr da."
