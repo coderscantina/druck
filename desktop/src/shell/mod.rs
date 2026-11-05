@@ -911,6 +911,7 @@ impl Hub {
             SearchEvent::Open(id, range) => self.open_place(*id, range.clone(), window, cx),
             SearchEvent::ReplaceAll => self.replace(None, window, cx),
             SearchEvent::ReplaceFile(id) => self.replace(Some(*id), window, cx),
+            SearchEvent::Closed => self.with_workspace(cx, |workspace, cx| workspace.focus_main(window, cx)),
         }
     }
 

@@ -175,6 +175,14 @@ impl Workspace {
                 slip_control::sync(&workspace.parts, cx);
             }),
             cx.observe_global_in::<settings::Store>(window, |_, _, cx| cx.notify()),
+            // A card, float, or panel that went with the keys leaves them to the nearest place still on screen, or to
+            // what the mode is about, so typed letters never go nowhere.
+            cx.on_focus_lost(window, |workspace, window, cx| {
+                match window.focus_lost_restore_target(cx) {
+                    Some(target) => window.focus(&target, cx),
+                    None => workspace.focus_main(window, cx),
+                }
+            }),
             cx.subscribe(&editor, |workspace, _, CaretMoved(offset), cx| {
                 workspace.caret = Some(*offset);
                 workspace.show_caret(cx);

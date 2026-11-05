@@ -23,6 +23,8 @@ pub enum SearchEvent {
     Open(ChapterId, Range<usize>),
     ReplaceAll,
     ReplaceFile(ChapterId),
+    /// The card went, so the keys go back to the text.
+    Closed,
 }
 
 impl EventEmitter<SearchEvent> for SearchPanel {}
@@ -105,8 +107,11 @@ impl SearchPanel {
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
-        self.open = false;
-        cx.notify();
+        if self.open {
+            self.open = false;
+            cx.emit(SearchEvent::Closed);
+            cx.notify();
+        }
     }
 
     /// The text of the query and the replacement, and the options.

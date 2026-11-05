@@ -50,7 +50,7 @@ use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
 use crate::persist::merge::{Choice, edits_between, has_markers, keep_one};
 use crate::persist::recovery::data_dir;
-use crate::persist::{Closing, FileChange, PersistView};
+use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, PersistView};
 use crate::session::{ChapterId, Kind, Session};
 use crate::source::EditKind;
 use crate::tokens::{self, Tokens};
@@ -332,6 +332,15 @@ impl Versions {
                 view.outside_change(change, cx)
             }),
             cx.observe(&persist, |view, _, cx| view.conflicts_settled(cx)),
+            cx.subscribe_in(
+                &persist,
+                window,
+                |view, _, ChoiceWithoutConflict(choice), window, cx| {
+                    if *choice != Choice::Both {
+                        view.keep_one_side(*choice, window, cx);
+                    }
+                },
+            ),
             cx.subscribe(&parts.inspector, |view, _, TabShown(tab), cx| {
                 if *tab == Tab::Git {
                     view.refresh(cx);
@@ -456,6 +465,7 @@ impl Versions {
                     if view.card.read(cx).is_open() {
                         with_view(cx, Versions::prepare_open_card);
                     }
+                    view.resume_merge(cx);
                 }
                 if std::mem::take(&mut view.fetch_wanted) {
                     view.fetch_now_and_then(cx);
@@ -722,6 +732,15 @@ impl Versions {
         self.awaiting_merge = false;
         self.card_after_reading = true;
         self.refresh(cx);
+    }
+
+    /// The app opened in the middle of a merge whose "See both" markers stand, as a quit left it: the foot asks again.
+    fn resume_merge(&mut self, cx: &mut Context<Self>) {
+        let merging = matches!(&self.state, RepoState::Ready(overview) if overview.merging.is_some());
+        if merging && !self.awaiting_merge && !self.working && self.chapter_with_markers(cx).is_some() {
+            self.awaiting_merge = true;
+            self.conflicts_settled(cx);
+        }
     }
 
     /// A file that still has "See both"'s marker comments, and its chapter's name.

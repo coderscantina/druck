@@ -166,6 +166,11 @@ pub struct ResourceChanged;
 
 impl EventEmitter<ResourceChanged> for PersistView {}
 
+/// A conflict key was pressed with no conflict open, for "See both"'s markers that a merge left standing.
+pub struct ChoiceWithoutConflict(pub Choice);
+
+impl EventEmitter<ChoiceWithoutConflict> for PersistView {}
+
 impl PersistView {
     fn new(
         editor: Entity<EditorView>,
@@ -840,6 +845,7 @@ impl PersistView {
     /// Settles the first conflict, for the keys and buttons of the prompt.
     fn resolve_first(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self.sync.conflicts().next().map(Path::to_owned) else {
+            cx.emit(ChoiceWithoutConflict(choice));
             return;
         };
         self.resolve(&path, choice, window, cx);
