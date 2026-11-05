@@ -70,8 +70,9 @@ pub fn build(version: &str, current: &str) -> Shown {
     let mut read = 0;
     for (at, hunk) in hunks.iter().enumerate() {
         merged.push_str(&version[read..hunk.old.start]);
-        let mut stretch = |text: &str, tint| {
+        let mut stretch = |text: &str, tint, before: &str| {
             if !text.is_empty() {
+                merged.push_str(before);
                 let start = merged.len();
                 merged.push_str(text);
                 stretches.push(Stretch {
@@ -81,8 +82,12 @@ pub fn build(version: &str, current: &str) -> Shown {
                 });
             }
         };
-        stretch(&version[hunk.old.clone()], Tint::Removed);
-        stretch(&current[hunk.new.clone()], Tint::Added);
+        let (removed, added) = (&version[hunk.old.clone()], &current[hunk.new.clone()]);
+        stretch(removed, Tint::Removed, "");
+        // Words that go and words that come are two runs, so a space stands between them.
+        let joined =
+            !removed.is_empty() && !removed.ends_with(char::is_whitespace) && !added.starts_with(char::is_whitespace);
+        stretch(added, Tint::Added, if joined { " " } else { "" });
         read = hunk.old.end;
     }
     merged.push_str(&version[read..]);
@@ -256,6 +261,12 @@ mod tests {
         assert_eq!(build(same, same).blocks.len(), 2);
         let changed = "Text.\n\n<!-- a better note -->\n\nMore.\n";
         assert_eq!(build(same, changed).blocks.len(), 3);
+    }
+
+    #[test]
+    fn a_replaced_word_and_its_replacement_stand_apart() {
+        let shown = build("Ich war sechzehn Jahre alt.\n", "Ich war sechzehn geworden.\n");
+        assert_eq!(shown.blocks[0].text, "Ich war sechzehn Jahre alt geworden.");
     }
 
     #[test]

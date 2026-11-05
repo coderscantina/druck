@@ -12,6 +12,7 @@
 //! place stays where it is, and the timeline names it.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
@@ -232,18 +233,20 @@ impl History {
         if orphans.is_empty() {
             return followed;
         }
-        let mut held: HashMap<String, usize> = HashMap::new();
+        // A log goes to a file only by its name and its last text: a file that once held the same text, such as a new
+        // starter chapter or an empty note, is not the one that moved.
+        let mut last: HashMap<(OsString, String), usize> = HashMap::new();
         for (at, orphan) in orphans.iter().enumerate() {
-            for snapshot in read_log(&orphan.log) {
-                held.insert(snapshot.hash, at);
+            if let (Some(name), Some(snapshot)) = (orphan.path.file_name(), read_log(&orphan.log).pop()) {
+                last.insert((name.to_owned(), snapshot.hash), at);
             }
         }
         let mut taken = HashSet::new();
         lost.retain(|file| {
-            let Ok(bytes) = fs::read(file) else {
+            let (Some(name), Ok(bytes)) = (file.file_name(), fs::read(file)) else {
                 return true;
             };
-            let Some(&at) = held.get(&blob_id(&bytes)) else {
+            let Some(&at) = last.get(&(name.to_owned(), blob_id(&bytes))) else {
                 return true;
             };
             if !taken.insert(at) || self.move_log(&orphans[at].log, file).is_err() {
@@ -628,6 +631,28 @@ mod tests {
         assert_eq!(followed.unplaced[0].1.path, elsewhere);
         history.claim(&followed.unplaced[0].1, &files[3]).unwrap();
         assert_eq!(history.text(&history.versions(&files[3])[0].hash).unwrap(), "gone");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_file_takes_no_log_that_only_once_held_its_text_or_has_another_name() {
+        let (dir, history) = store("claim");
+        let deleted = dir.join("deleted/book/manuscript/01-first-chapter.md");
+        history.snapshot(&deleted, "# The first chapter\n", None, 1).unwrap();
+        history
+            .snapshot(&deleted, "# The first chapter\n\nWritten on.\n", None, 2)
+            .unwrap();
+        let other = dir.join("deleted/book/notes/idea.md");
+        history.snapshot(&other, "", None, 1).unwrap();
+        fs::create_dir_all(dir.join("new/manuscript")).unwrap();
+        let starter = dir.join("new/manuscript/01-first-chapter.md");
+        fs::write(&starter, "# The first chapter\n").unwrap();
+        let empty = dir.join("new/manuscript/empty.md");
+        fs::write(&empty, "").unwrap();
+        let followed = history.follow(&[starter.clone(), empty.clone()]);
+        assert_eq!(followed.files, 0);
+        assert!(history.versions(&starter).is_empty());
+        assert!(history.versions(&empty).is_empty());
         fs::remove_dir_all(dir).ok();
     }
 

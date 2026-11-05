@@ -696,11 +696,11 @@ impl Render for Timeline {
                     .when(can_restore && passage_count > 0, |row| {
                         row.child(
                             ui::button(&tokens, "restore-passage", crate::t!(Key::RestorePassage))
+                                .text_color(tokens.accent)
                                 .on_click(cx.listener(|timeline, _, window, cx| timeline.restore_passage(window, cx))),
                         )
                         .child(
                             ui::button(&tokens, "restore-chapter", crate::t!(Key::RestoreChapter))
-                                .text_color(tokens.accent)
                                 .on_click(cx.listener(|timeline, _, window, cx| timeline.restore_chapter(window, cx))),
                         )
                     }),
