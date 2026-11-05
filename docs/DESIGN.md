@@ -36,11 +36,14 @@ The launch screen is one small card of rows on the canvas color: open, then the 
 
 ## Publish
 
-- Spreads in the centre on the canvas color, then a panel and the rail on the right. The status line holds the page range, how many problems remain in the accent color, and at its right the zoom.
-- The rail's tabs are book details, style, fonts, and images at the top, and agent, proof, and export at the foot.
-- Zooming out past fit becomes a contact sheet of every page, with a dot on a page that has a problem. A click zooms into its spread.
-- A proof slip is a card at the paragraph on the panel color, with the paragraph's text in the theme's font, the two directive buttons, and at its foot the paragraph's style as a link. Escape closes it. The marked paragraph has a thin accent outline.
-- Pages mark a problem with the same outline and a faint tint. Only proof marks appear on pages, and only in this view.
+- Spreads in the centre on the canvas color, then a panel and the rail on the right. The status line holds the page range, how many problems remain in the accent color, and at its right the zoom: minus, the value, plus, and Fit.
+- The first page is a recto and stands alone right of the gutter. After it, pages pair up as a printed book's do, with a 2 px gutter.
+- The rail's tabs are book details, style, fonts, and images at the top, and agent, proof, and export at the foot. A tab shows once something is mounted on it.
+- One zoom scale: contact sheets below fit, then fit, which shows a whole spread, then larger. Zooming out past fit becomes a contact sheet of every page, with a dot on a page that has a problem. A click zooms into its spread. Below fit there are four fixed sizes, so a sheet looks like one whatever the window.
+- A proof slip is a card under its paragraph on the panel color, with the paragraph's written text in the theme's font at 14 px, the two directive buttons, and at its foot the paragraph's style as a link. It follows the paragraph, and the view follows it to another page. Escape closes it, and so does a click on no text. The marked paragraph has a thin accent outline.
+- A block in a list, a quotation, or a group kept together shows no directive buttons, since a directive line cannot stand there.
+- Pages mark a problem with the same outline and a faint tint, and the one being looked at with a stronger tint. A warning about a whole page marks the page's text. Only proof marks appear on pages, and only in this view.
+- The accent stays on the action that moves on and on marks. A chosen segment and a chosen item are the raised grey with full ink, never the accent.
 
 ## Settings
 
@@ -124,7 +127,7 @@ The panels of Publish's rail. See [Publish](#publish) for the tabs.
 
 ### Theme panels
 
-- The Style tab is a search field and a list of the theme's 30 sections under quiet group labels, with a section's main value at the end of its row when it has one. A section opens as its own view with a quiet back link. Tokens and the theme's source are entries in the same list. A section with no designed panel yet opens as JSON in the same place. The Fonts tab has its own.
+- The Style tab is the theme picker, a search field, and a list of the theme's 30 sections under quiet group labels, with a section's main value at the end of its row when it has one. A section opens as its own view with a quiet back link. Tokens and the theme's source are entries in the same list. A section with no designed panel yet opens as JSON in the same place, and one with a panel has a quiet JSON link at the bar's end. The Fonts row goes to the Fonts tab.
 - A field is a label row, then its control. The label row has the label at the start, and at the end what the value comes to when it is a token (quiet), a small `▾ $` link when the field takes tokens, and an accent Reset link only when the theme itself sets the property. Values the theme inherits show in the faint text color, its own values in the full one.
 - A token list opens inline below its field, never as a floating menu, so it cannot be clipped by the narrow panel. Colors have a swatch left of the field.
 - The engine's refusal shows under the field in the accent color. A field the engine refused keeps what was typed.
@@ -132,7 +135,7 @@ The panels of Publish's rail. See [Publish](#publish) for the tabs.
 
 ### Proof
 
-The list groups by chapter in book order, with what belongs to no chapter, such as settings and themes, first under the project's name. A row is a dot, a quiet line with the kind and the line number, then the message in up to two lines. A click opens the chapter at the line.
+The list groups by chapter in book order, with what belongs to no chapter, such as settings and themes, first under the project's name. A row is a dot, a quiet line with the kind and the line number, then the message in up to two lines. A click goes to the problem on the pages and `Cmd+]` and `Cmd+[` walk the list. The row being looked at is raised, and Write opens at that place next.
 
 ### Export
 
