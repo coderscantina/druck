@@ -11,6 +11,7 @@ use crate::editor::{
     Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
     ShowSpelling, ToggleSource, Undo,
 };
+use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{FocusNext, FocusPrevious, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
 actions!(
@@ -200,6 +201,11 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             },
             item(Key::FocusBinder, FocusBinder),
             item(Key::FocusEditor, FocusEditor),
+            MenuItem::separator(),
+            item(Key::CommitCard, ShowCommitCard),
+            item(Key::Timeline, ShowTimeline),
+            item(Key::GitPanel, ShowGitPanel),
+            MenuItem::separator(),
             MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items([
                 item(Key::ShowSelection, ShowSelection),
                 item(Key::ShowStyles, ShowStyles),

@@ -21,6 +21,7 @@
 //!   count, the string tables, and the rest of the menus.
 //! - **Agent** owns `agent/`, whose panel is the `Tab::Agent` tab of the rail.
 //! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Selection` and `Tab::Images` panels.
+//! - **Versions** own `versions/`: local history, the commit card, the timeline, and the Git panel.
 
 use std::path::{Path, PathBuf};
 
@@ -54,7 +55,8 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     shell::mount(parts, slots, window, cx);
     crate::palette::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
-    crate::agent::mount(parts, persist, window, cx);
+    crate::agent::mount(parts, persist.clone(), window, cx);
+    crate::versions::mount(parts, &persist, slots, window, cx);
     crate::editor::mount(parts, cx);
 }
 
@@ -82,6 +84,7 @@ pub fn open(
     crate::persist::bind_keys(cx);
     shell::install(cx);
     crate::palette::install(cx);
+    crate::versions::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
         async {}
@@ -251,7 +254,10 @@ impl Shell {
             };
             shell
                 .update_in(cx, |shell, window, cx| match starter.create(&path) {
-                    Ok(()) => shell.open_path(&path, window, cx),
+                    Ok(()) => {
+                        crate::versions::start_repo(&path, cx);
+                        shell.open_path(&path, window, cx);
+                    }
                     Err(problem) => shell
                         .launch
                         .update(cx, |launch, cx| launch.set_error(Some(problem), cx)),

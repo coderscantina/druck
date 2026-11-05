@@ -83,6 +83,8 @@ pub struct Slots {
     pub footer: Vec<AnyView>,
     /// Layers over the window, last on top. A layer draws nothing while it is closed.
     pub overlays: Vec<AnyView>,
+    /// Panels at the right of the text or the pages, before the rail. A view that is closed draws nothing.
+    pub right: Vec<AnyView>,
 }
 
 /// What a slice's view can hold on to. Everything about the document is in the editor's session; events are on the
@@ -812,6 +814,7 @@ impl Render for Workspace {
                     .bg(tokens.canvas)
                     .children(binder)
                     .child(centre.child(foot))
+                    .children(self.slots.right.clone())
                     .children(rail),
             )
             .children(self.slots.overlays.clone())
