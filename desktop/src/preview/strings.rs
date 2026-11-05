@@ -32,6 +32,10 @@ crate::strings! {
             "Choose where the theme is changed, and the style follows.",
             "Wähle, wo das Theme geändert wird, dann folgt der Stil."
         ),
+        EngineStopped => (
+            "The typesetter stopped on an internal error: {message}",
+            "Der Satz hat mit einem internen Fehler angehalten: {message}"
+        ),
         SlipNoTheme => ("A style needs a theme file to live in.", "Ein Stil braucht eine Theme-Datei."),
     }
 }

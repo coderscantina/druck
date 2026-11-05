@@ -15,6 +15,7 @@ use druck::{Failure, LayoutOptions, Renderer};
 
 use super::fonts::{FontUse, fonts_in_use};
 use super::raster::{Painter, family_name, fingerprint};
+use super::strings::Key;
 use crate::session::{Joined, Kind, LiveResolver};
 
 /// What one layout typesets: a text, in a theme, which is the specimen or the document.
@@ -243,16 +244,10 @@ impl Typesetter {
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
     /// of stack, and a debug build needs about as much for deserializing a theme alone. The schema's nesting
     /// is fixed, so one size covers any input.
+    ///
+    /// A panic in the engine is a failure like any other, so the pages say so and the next change lays out again.
     pub fn run(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
-        std::thread::scope(|scope| {
-            std::thread::Builder::new()
-                .name("druck-layout".into())
-                .stack_size(LAYOUT_STACK)
-                .spawn_scoped(scope, || self.typeset(joined, cancel))
-                .expect("the system starts a thread")
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-        })
+        on_layout_thread(|| self.typeset(joined, cancel))
     }
 
     /// The engine's text for chips, for the document as `joined` has it. `None` while it cannot be read.
@@ -358,6 +353,25 @@ fn same_fonts(painter: &mut Option<Arc<Painter>>, laid: &druck::output::Layout) 
         Some(painter) if painter.draws(laid) => painter.clone(),
         _ => painter.insert(Arc::new(Painter::new(laid))).clone(),
     }
+}
+
+/// Runs a layout on a thread with [`LAYOUT_STACK`], and reports a panic in it as an error with the panic's message.
+fn on_layout_thread<T: Send>(work: impl FnOnce() -> Result<T, Failure> + Send) -> Result<T, Failure> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("druck-layout".into())
+            .stack_size(LAYOUT_STACK)
+            .spawn_scoped(scope, work)
+            .expect("the system starts a thread")
+            .join()
+            .unwrap_or_else(|panic| {
+                let message = (panic.downcast_ref::<&str>().map(|text| text.to_string()))
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_default();
+                let text = crate::t!(Key::EngineStopped, message = message);
+                Err(Failure::Errors(vec![Diagnostic::error(text)]))
+            })
+    })
 }
 
 #[cfg(test)]
@@ -515,6 +529,15 @@ mod tests {
             .position(source.expect("the word is on a page"), 0)
             .expect("written");
         assert_eq!(&written[at.offset as usize..at.offset as usize + 4], "word");
+    }
+
+    #[test]
+    fn a_panic_in_layout_is_a_failure_with_its_message() {
+        let result: Result<(), Failure> = on_layout_thread(|| panic!("index out of bounds"));
+        let Err(Failure::Errors(diagnostics)) = result else {
+            panic!("a failure")
+        };
+        assert!(diagnostics[0].message.contains("index out of bounds"));
     }
 
     #[test]

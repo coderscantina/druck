@@ -675,7 +675,8 @@ impl PreviewView {
         };
         let revision = joined.revision;
         let layout = cx.background_spawn(async move {
-            let mut typesetter = typesetter.lock().expect("no panic in layout");
+            // A panic is caught inside the run, so this lock is not poisoned, and if it were the typesetter is still whole.
+            let mut typesetter = typesetter.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             typesetter.set_theme(theme);
             typesetter.run(joined, &cancel)
         });

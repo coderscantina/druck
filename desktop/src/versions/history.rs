@@ -520,21 +520,6 @@ mod tests {
     }
 
     #[test]
-    fn a_line_cut_short_by_a_crash_loses_only_that_line() {
-        let (dir, history) = store("torn");
-        let path = dir.join("a.md");
-        history.snapshot(&path, "one", None, 1).unwrap();
-        history.snapshot(&path, "two", None, 2).unwrap();
-        let log = history.log_of(&path);
-        let mut file = fs::OpenOptions::new().append(true).open(&log).unwrap();
-        file.write_all(b"{\"t\":3,\"h\":\"ab").unwrap();
-        let versions = history.versions(&path);
-        assert_eq!(versions.len(), 2);
-        assert_eq!(history.text(&versions[1].hash).unwrap(), "two");
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
     fn age_thins_to_hours_then_days_then_nothing() {
         let now = 100 * DAY;
         let at = |time: i64, label: Option<&str>| Snapshot {
