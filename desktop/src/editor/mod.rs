@@ -36,6 +36,7 @@ use gpui::{
 use crate::preview::BookType;
 use crate::session::{ChapterId, ChapterView, Session};
 use crate::settings::{self, LineLength};
+use crate::source::blocks::BlockChange;
 use crate::source::inline::{inline_spans, line_markers};
 use crate::source::{BlockKind, Blocks, Edit, EditKind, Selection, motion, typing};
 use crate::tokens::{self, Tokens};
@@ -973,6 +974,7 @@ impl EditorView {
             .collect();
         self.slots
             .splice(change.start..change.start + change.removed, new_slots);
+        follow_blocks(&mut self.visible, change);
         let moved = if anchor_start > splice.start {
             anchor_start.saturating_add_signed(delta).max(splice.start)
         } else {
@@ -2143,6 +2145,17 @@ type ShownBlock = (usize, Rc<BlockLayout>);
 
 /// The galley's lines on screen for assistive technology: one text run per line, with the caret or selection where a run
 /// holds it. What is off screen is not in the tree, as the toolkit's own lists leave it out.
+/// Keeps the blocks on screen pointing at the same blocks after an edit replaced some. Until the next layout they are all
+/// there is of where things stand, and the next render reads them first, so none may point past the end. A replaced block
+/// goes: its layout is gone too.
+fn follow_blocks(visible: &mut Vec<(usize, Pixels)>, change: BlockChange) {
+    let replaced = change.start..change.start + change.removed;
+    visible.retain(|(index, _)| !replaced.contains(index));
+    for (index, _) in visible.iter_mut().filter(|(index, _)| *index >= replaced.end) {
+        *index = *index - change.removed + change.inserted;
+    }
+}
+
 fn a11y_text(shown: &[ShownBlock], selection: Selection, builder: &mut gpui::A11ySubtreeBuilder) {
     let mut anchor = None;
     let mut focus = None;
@@ -2336,4 +2349,62 @@ fn byte_offset(text: &str, utf16: usize) -> usize {
         units += character.len_utf16();
     }
     text.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn indices(visible: &[(usize, Pixels)]) -> Vec<usize> {
+        visible.iter().map(|(index, _)| *index).collect()
+    }
+
+    #[test]
+    fn blocks_on_screen_never_point_past_the_end_after_an_edit() {
+        let on_screen =
+            |from: usize, to: usize| -> Vec<(usize, Pixels)> { (from..to).map(|index| (index, px(0.))).collect() };
+        // Backspace at the end of a chapter merges the last two blocks of 134.
+        let mut visible = on_screen(125, 134);
+        follow_blocks(
+            &mut visible,
+            BlockChange {
+                start: 132,
+                removed: 2,
+                inserted: 1,
+            },
+        );
+        assert_eq!(indices(&visible), (125..132).collect::<Vec<_>>());
+        // Select all and a key: everything after the opening note became one block, leaving 3.
+        let mut visible = on_screen(140, 150);
+        follow_blocks(
+            &mut visible,
+            BlockChange {
+                start: 2,
+                removed: 169,
+                inserted: 1,
+            },
+        );
+        assert!(visible.is_empty());
+        // Blocks after the change keep pointing at the same blocks.
+        let mut visible = on_screen(4, 8);
+        follow_blocks(
+            &mut visible,
+            BlockChange {
+                start: 1,
+                removed: 3,
+                inserted: 1,
+            },
+        );
+        assert_eq!(indices(&visible), [2, 3, 4, 5]);
+        let mut visible = on_screen(4, 8);
+        follow_blocks(
+            &mut visible,
+            BlockChange {
+                start: 5,
+                removed: 1,
+                inserted: 3,
+            },
+        );
+        assert_eq!(indices(&visible), [4, 8, 9]);
+    }
 }

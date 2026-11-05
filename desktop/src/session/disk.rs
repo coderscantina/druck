@@ -191,6 +191,17 @@ impl Session {
         }
     }
 
+    /// Starts a file's record over from `base`, as what the file and the session last agreed on, with no earlier versions
+    /// to match against. For a merge whose base is known exactly. The buffers count as unsaved from here, since the file
+    /// is about to hold the other side: a conflict then holds the text as any other, with a recovery copy.
+    pub fn restart_sync(&mut self, path: &Path, base: &str) {
+        self.synced.insert(path.to_owned(), Synced::new(base, true));
+        for id in self.ids_of(path) {
+            let chapter = self.known_mut(id);
+            chapter.saved = chapter.buffer.revision().wrapping_sub(1);
+        }
+    }
+
     /// Holds a file's text back from the disk, or lets it go again.
     pub fn hold_file(&mut self, path: &Path, held: bool) {
         if held {

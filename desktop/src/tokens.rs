@@ -147,6 +147,20 @@ pub const SLIP_TEXT: Pixels = px(14.);
 pub const SLIP_TEXT_MAX_HEIGHT: Pixels = px(260.);
 /// The status line's zoom buttons.
 pub const ZOOM_BUTTON: Pixels = px(20.);
+/// The commit card and the rows and buttons the versions views share.
+pub const COMMIT_CARD_WIDTH: Pixels = px(420.);
+pub const COMMIT_CARD_MAX_ROWS: usize = 12;
+pub const VERSIONS_ROW_HEIGHT: Pixels = px(24.);
+pub const VERSIONS_BUTTON_HEIGHT: Pixels = px(22.);
+/// The timeline's strip: commits as tall marks, local history as small ticks, and the position.
+pub const STRIP_HEIGHT: Pixels = px(50.);
+pub const STRIP_COMMIT_WIDTH: Pixels = px(2.);
+pub const STRIP_COMMIT_HEIGHT: Pixels = px(23.);
+pub const STRIP_TICK_WIDTH: Pixels = px(1.5);
+pub const STRIP_TICK_HEIGHT: Pixels = px(7.);
+pub const STRIP_POSITION_HEIGHT: Pixels = px(27.);
+/// How strongly a word difference tints the text behind it.
+pub const DIFF_TINT: f32 = 0.24;
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;

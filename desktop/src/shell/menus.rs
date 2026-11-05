@@ -11,6 +11,7 @@ use crate::editor::{
     Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
     ShowSpelling, ToggleSource, Undo,
 };
+use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{FocusNext, FocusPrevious, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
 actions!(
@@ -104,7 +105,6 @@ pub fn bind_keys(cx: &mut App) {
 /// The rail's tabs, without the agent's while it is off.
 fn inspector_items(state: &MenuState) -> Vec<MenuItem> {
     let mut items = vec![
-        item(Key::ShowSelection, ShowSelection),
         item(Key::ShowStyles, ShowStyles),
         item(Key::ShowFonts, ShowFonts),
         item(Key::ShowImages, ShowImages),
@@ -224,6 +224,11 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             },
             item(Key::FocusBinder, FocusBinder),
             item(Key::FocusEditor, FocusEditor),
+            MenuItem::separator(),
+            item(Key::CommitCard, ShowCommitCard),
+            item(Key::Timeline, ShowTimeline),
+            item(Key::GitPanel, ShowGitPanel),
+            MenuItem::separator(),
             MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items(inspector_items(state))),
             item(Key::NextProblem, NextProblem),
             item(Key::PreviousProblem, PreviousProblem),

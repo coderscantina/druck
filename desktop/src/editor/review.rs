@@ -343,6 +343,7 @@ impl EditorView {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init, reason = "a list of byte ranges that holds one")]
 mod tests {
     use super::*;
 

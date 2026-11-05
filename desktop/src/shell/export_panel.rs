@@ -412,6 +412,7 @@ impl ExportPanel {
 
 impl Render for ExportPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let unreviewed: usize = crate::agent::unreviewed_changes(cx).iter().map(|file| file.count).sum();
         let tokens = Tokens::get(cx).clone();
         let body = if self.setup.single {
             div()
@@ -480,6 +481,14 @@ impl Render for ExportPanel {
                 .flex_col()
                 .when_some(self.setup.problem.clone(), |column, problem| {
                     column.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(problem))
+                })
+                .when(unreviewed > 0, |column| {
+                    column.child(
+                        div()
+                            .p(tokens::SPACE_3)
+                            .text_color(tokens.accent)
+                            .child(crate::t!(Key::ExportUnreviewed, count = unreviewed)),
+                    )
                 })
                 .when(cards.is_empty() && self.setup.problem.is_none(), |column| {
                     column.child(

@@ -773,9 +773,10 @@ impl AgentView {
         true
     }
 
-    /// Where a local history label belongs, so one undo takes back a whole turn. Milestone 21 fills this in. Until it
-    /// does, the per-passage reject and Reject all take a turn back.
-    fn label_local_history_before_turn(&mut self, _: &mut Context<Self>) {}
+    /// Marks local history, so a whole turn can be taken back from the timeline.
+    fn label_local_history_before_turn(&mut self, cx: &mut Context<Self>) {
+        crate::versions::label_history(self.editor.read(cx).session(), crate::t!(Key::BeforeTurn), cx);
+    }
 
     fn project_now(&self, cx: &App) -> TurnStart {
         let session = self.editor.read(cx).session();

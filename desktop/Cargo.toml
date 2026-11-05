@@ -30,6 +30,11 @@ skrifa = "0.42"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 notify = "8.2"
 similar = { version = "3.2", default-features = false, features = ["std"] }
+# Versions: reading a repo and committing without Git installed. Switching, merging, pushing, and pulling call the
+# installed `git`, see versions/git_cli.rs. MIT or Apache-2.0.
+gix = { version = "0.90", default-features = false, features = ["sha1", "status", "index", "revision", "attributes"] }
+# Dates in the author's time zone. Already in the lockfile through gix. MIT or Unlicense.
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # renamex_np, so an autosave cannot overwrite a file another program wrote a moment before.

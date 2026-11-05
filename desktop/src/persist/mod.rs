@@ -147,6 +147,8 @@ pub struct PersistView {
     gone_task: Option<Task<()>>,
     /// The hash of each file's newest recovery copy, so unchanged text is not written again.
     recovered: HashMap<PathBuf, u64>,
+    /// A Git command is moving the files, and what they hold now is not for taking in yet.
+    holding_outside: bool,
     _incoming: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -229,6 +231,7 @@ impl PersistView {
             note_task: Task::ready(()),
             gone_task: None,
             recovered: HashMap::new(),
+            holding_outside: false,
             _incoming: incoming,
             _subscriptions: subscriptions,
         };
@@ -248,7 +251,7 @@ impl PersistView {
     /// wants all changes up to now calls this first. While a save is running or an input method composes, the look
     /// waits for them.
     pub fn scan_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.writing.is_some() || self.editor.read(cx).holds_outside_changes() {
+        if self.writing.is_some() || self.holding_outside || self.editor.read(cx).holds_outside_changes() {
             self.signals.unbounded_send(Signal::Everything).ok();
             return;
         }
@@ -260,6 +263,55 @@ impl PersistView {
             window,
             cx,
         );
+    }
+
+    /// While a Git command moves the files: what the watcher reports waits. Whoever holds it lets go and calls
+    /// [`Self::scan_now`].
+    pub fn hold_outside_changes(&mut self, holding: bool) {
+        self.holding_outside = holding;
+    }
+
+    /// Whether a conflict waits on the line at the window's foot.
+    pub fn has_conflicts(&self) -> bool {
+        self.sync.conflicts().next().is_some()
+    }
+
+    /// Whether this file's conflict waits there.
+    pub fn has_conflict_in(&self, path: &Path) -> bool {
+        self.sync.conflicts().any(|conflict| conflict == path)
+    }
+
+    /// Takes in one file of a Git merge that overlapped. The file gets their text, and the buffer, which holds ours, merges
+    /// against the merge's base: cleanly word by word, or as a conflict on the line at the window's foot, exactly as if
+    /// another program had written the file.
+    pub fn take_merge(
+        &mut self,
+        path: &Path,
+        base: &str,
+        theirs: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> std::io::Result<()> {
+        atomic::write(path, theirs.as_bytes())?;
+        let sync = &mut self.sync;
+        let change = self.editor.update(cx, |editor, cx| {
+            editor.update_session(
+                |session| {
+                    session.restart_sync(path, base);
+                    sync.on_disk(session, path, Some(theirs.as_bytes().to_vec()))
+                },
+                window,
+                cx,
+            )
+        });
+        if let Some(change) = change {
+            self.tell(change, window, cx);
+        }
+        if self.session(cx).is_dirty() {
+            self.edited(window, cx);
+        }
+        cx.notify();
+        Ok(())
     }
 
     fn start_watching(&mut self, cx: &mut Context<Self>) {
@@ -557,7 +609,7 @@ impl PersistView {
     /// Takes what is ready from the waiting paths, and returns how long until the next look, if anything still waits.
     fn take_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Duration> {
         let now = Instant::now();
-        let busy = self.writing.is_some() || self.editor.read(cx).holds_outside_changes();
+        let busy = self.writing.is_some() || self.holding_outside || self.editor.read(cx).holds_outside_changes();
         let session = self.editor.read(cx).session();
         let theme = self.theme.as_deref();
         // An empty file may be a program halfway through writing it, so it gets the same grace as a missing one.
@@ -683,6 +735,11 @@ impl PersistView {
             None => crate::t!(Key::UndoDone).to_owned(),
         };
         self.show_note(text, window, cx);
+    }
+
+    /// Settles the first conflict, as a key or button of the prompt does.
+    pub fn settle_first(&mut self, choice: Choice, window: &mut Window, cx: &mut Context<Self>) {
+        self.resolve_first(choice, window, cx);
     }
 
     /// Settles the first conflict, for the keys and buttons of the prompt.

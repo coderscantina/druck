@@ -22,6 +22,7 @@
 //! - **Agent** owns `agent/` and `editor/review.rs`: `Cmd+J`, the chat card that is also the `Tab::Agent` tab of the rail,
 //!   review in the text, and margin notes. Off until enabled in Settings.
 //! - **Rich blocks** own `editor/rich/`, whose floats the text draws, and the `Tab::Images` panel.
+//! - **Versions** own `versions/`: local history, the commit card, the timeline, and the Git panel.
 
 use std::path::{Path, PathBuf};
 
@@ -55,7 +56,20 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     shell::mount(parts, slots, window, cx);
     crate::palette::mount(parts, slots, window, cx);
     crate::inspector::mount_theme(parts, slots, cx);
-    crate::agent::mount(parts, persist, slots, window, cx);
+    crate::agent::mount(parts, persist.clone(), slots, window, cx);
+    let git_panel = crate::versions::mount(parts, &persist, slots, window, cx);
+    let inspector = parts.inspector.clone();
+    inspector.update(cx, |inspector, _| {
+        inspector.mount(crate::inspector::Tab::Git, git_panel.into())
+    });
+    crate::versions::use_rail_tab(
+        move |_, cx| inspector.update(cx, |inspector, cx| inspector.show(crate::inspector::Tab::Git, cx)),
+        cx,
+    );
+    crate::versions::set_unreviewed_changes(
+        |cx| crate::agent::unreviewed_changes(cx).iter().map(|file| file.count).sum(),
+        cx,
+    );
     crate::editor::mount(parts, cx);
 }
 
@@ -83,6 +97,7 @@ pub fn open(
     crate::persist::bind_keys(cx);
     shell::install(cx);
     crate::palette::install(cx);
+    crate::versions::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
         async {}
@@ -252,7 +267,10 @@ impl Shell {
             };
             shell
                 .update_in(cx, |shell, window, cx| match starter.create(&path) {
-                    Ok(()) => shell.open_path(&path, window, cx),
+                    Ok(()) => {
+                        crate::versions::start_repo(&path, cx);
+                        shell.open_path(&path, window, cx);
+                    }
                     Err(problem) => shell
                         .launch
                         .update(cx, |launch, cx| launch.set_error(Some(problem), cx)),

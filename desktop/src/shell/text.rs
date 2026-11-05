@@ -81,6 +81,9 @@ crate::strings! {
         ShowDetails => ("Details", "Angaben"),
         ShowAgent => ("Agent", "Agent"),
         AskAgent => ("Ask the Agent\u{2026}", "Agent fragen\u{2026}"),
+        CommitCard => ("Commit…", "Commit…"),
+        Timeline => ("Timeline", "Zeitleiste"),
+        GitPanel => ("Git Panel", "Git-Panel"),
         MenuInsert => ("Insert", "Einfügen"),
         InsertFootnote => ("Footnote", "Fußnote"),
         InsertCitation => ("Citation…", "Zitat…"),
@@ -154,6 +157,7 @@ crate::strings! {
         StageTypesetting => ("Typesetting\u{2026}", "Wird gesetzt\u{2026}"),
         StageWriting => ("Writing the file\u{2026}", "Datei wird geschrieben\u{2026}"),
         ExportCancelled => ("Cancelled.", "Abgebrochen."),
+        ExportUnreviewed => ("Agent changes not reviewed yet: {count}", "Noch nicht geprüfte Agent-Änderungen: {count}"),
         ExportFailedSee => (
             "The export failed. The reasons are in Proof.",
             "Der Export ist fehlgeschlagen. Die Gründe stehen unter Korrektur."

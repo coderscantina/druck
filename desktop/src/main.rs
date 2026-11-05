@@ -20,6 +20,7 @@ mod source;
 mod spell;
 mod theme_file;
 mod tokens;
+mod versions;
 mod workspace;
 
 use std::path::PathBuf;

@@ -11,6 +11,7 @@ use crate::editor::{
     Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers, ToggleQuote,
     ToggleSmallCaps, ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline, Undo,
 };
+use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{NewSection, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
 /// Where a command makes sense. The palette leaves out what the mode on screen has no use for.
@@ -59,6 +60,9 @@ pub fn all() -> Vec<Command> {
         command(Key::FindInProject, Anywhere, FindInProject),
         command(Key::SaveItem, Anywhere, Save),
         command(Key::ExportItem, Anywhere, ShowExport),
+        command(Key::CommitCard, Anywhere, ShowCommitCard),
+        command(Key::Timeline, Anywhere, ShowTimeline),
+        command(Key::GitPanel, Anywhere, ShowGitPanel),
         command(Key::Settings, Anywhere, ShowSettings),
         command(Key::SourceView, Write, ToggleSource),
         command(Key::NewSection, Anywhere, NewSection),
