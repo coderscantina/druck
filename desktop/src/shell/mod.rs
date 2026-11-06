@@ -1078,9 +1078,8 @@ impl Hub {
             let prefs = prefs(cx);
             (prefs.write_zoom(), prefs.publish_zoom())
         };
-        if let Some(zoom) = write {
-            self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
-        }
+        let zoom = write.unwrap_or(tokens::WRITE_ZOOM_START);
+        self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
         if publish.is_some() {
             self.parts
                 .preview
@@ -1098,7 +1097,7 @@ impl Hub {
                 let now = self.parts.editor.read(cx).zoom();
                 let zoom = next_write_zoom(now, direction);
                 self.parts.editor.update(cx, |editor, cx| editor.set_zoom(zoom, cx));
-                cx.global_mut::<Prefs>().state.write_zoom = (zoom != 1.).then_some(zoom);
+                cx.global_mut::<Prefs>().state.write_zoom = (zoom != tokens::WRITE_ZOOM_START).then_some(zoom);
                 self.footer.update(cx, |footer, cx| footer.show_zoom(zoom, cx));
             }
             Mode::Publish => {
@@ -1153,11 +1152,11 @@ fn next_problem(current: Option<usize>, count: usize, direction: isize) -> Optio
     })
 }
 
-/// The next of Write's zoom steps up or down from `now`, or 100 percent for a `direction` of 0.
+/// The next of Write's zoom steps up or down from `now`, or the starting zoom for a `direction` of 0.
 fn next_write_zoom(now: f32, direction: isize) -> f32 {
     let steps = tokens::WRITE_ZOOMS;
     let found = match direction {
-        0 => Some(&1.),
+        0 => Some(&tokens::WRITE_ZOOM_START),
         up if up > 0 => steps.iter().find(|step| **step > now * 1.01),
         _ => steps.iter().rev().find(|step| **step < now * 0.99),
     };
@@ -1189,6 +1188,6 @@ mod tests {
         assert_eq!(next_write_zoom(1.1, -1), 1.);
         assert_eq!(next_write_zoom(2., 1), 2.);
         assert_eq!(next_write_zoom(0.8, -1), 0.8);
-        assert_eq!(next_write_zoom(1.5, 0), 1.);
+        assert_eq!(next_write_zoom(1.5, 0), 1.25);
     }
 }

@@ -110,6 +110,8 @@ pub const DIM_OPACITY: f32 = 0.32;
 pub const TYPEWRITER_AT: f32 = 0.45;
 /// The zoom steps of Write. Pages have their own, see `preview`.
 pub const WRITE_ZOOMS: [f32; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+/// Where Write's zoom starts until the author picks another, and where `Cmd+0` returns: body text of about 18 px.
+pub const WRITE_ZOOM_START: f32 = 1.25;
 /// A chapter's tick at the left edge, the current one longer.
 pub const TICK_WIDTH: Pixels = px(10.);
 pub const TICK_WIDTH_CURRENT: Pixels = px(18.);
