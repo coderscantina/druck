@@ -3,9 +3,6 @@
   "document": {
     "numbering-depth": 2
   },
-  "images": {
-    "logo": "logo.svg"
-  },
   "tokens": {
     "colors": {
       "accent": "#7a2a2a",
@@ -44,8 +41,7 @@
       {
         "anchor": "top-left",
         "slots": [
-          { "image": "logo", "width": "22mm", "style": "title", "space-before": "4em" },
-          { "text": "{title}", "style": "title", "required": true, "space-before": "1.5em" },
+          { "text": "{title}", "style": "title", "required": true, "space-before": "4em" },
           { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" },
           { "text": "{author}", "style": "author", "required": true, "space-before": "3em" },
           { "text": "{date}", "style": "date", "space-before": "0.3em" },

@@ -211,7 +211,6 @@ pub const STARTERS: &[Starter] = &[
                 file!("paper", "manuscript/01-introduction.md"),
                 file!("paper", "manuscript/02-findings.md"),
                 file!("paper", "themes/paper/theme.json"),
-                file!("paper", "themes/paper/logo.svg"),
             ],
             &[
                 german!("paper", "druck.yaml"),
@@ -219,7 +218,6 @@ pub const STARTERS: &[Starter] = &[
                 german!("paper", "manuscript/01-einleitung.md"),
                 german!("paper", "manuscript/02-ergebnisse.md"),
                 file!("paper", "themes/paper/theme.json"),
-                file!("paper", "themes/paper/logo.svg"),
             ],
         ],
     },
