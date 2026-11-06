@@ -308,8 +308,9 @@ impl GalleyStyle {
 }
 
 /// Where the text stands in the pane: centred at its measure on the window's centre, so a panel that opens beside it
-/// moves nothing while there is room, and keeping room for the gutter on its left. Margin notes stand
-/// at its right, and the text moves left for them only if the window is too narrow to hold both. The text keeps its measure
+/// moves nothing while there is room, and keeping room for the gutter on its left. Margin notes stand at its right,
+/// centred in the room left there as their own column, and the text moves left for them only if the window is too narrow
+/// to hold both. The text keeps its measure
 /// before the notes keep their place: below measure plus margin they do not show, and the gutter's marker stands for them.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Column {
@@ -337,7 +338,10 @@ impl Column {
             viewport,
             text_left,
             text_width,
-            note_left: notes_fit.then_some(text_left + text_width + tokens::NOTE_GAP),
+            note_left: notes_fit.then(|| {
+                let free = right - text_left - text_width - tokens::NOTE_WIDTH;
+                text_left + text_width + (free * 0.5).clamp(tokens::NOTE_GAP, tokens::NOTE_GAP_WIDE)
+            }),
         }
     }
 }
@@ -427,9 +431,10 @@ pub struct BlockLayout {
     pub whole: Option<Box<Whole>>,
     /// Shaped in the faded colour of a paragraph out of focus.
     pub dim: bool,
-    /// The room it was shaped with: a separator's gap, a first line's indent, and what stands below its text.
+    /// The room it was shaped with: a separator's gap, a first line's indent, and what stands above and below its text.
     pub gap: Pixels,
     pub indent: Pixels,
+    pub above: Pixels,
     pub below: Pixels,
 }
 
@@ -467,6 +472,8 @@ pub struct ShapeRequest<'a> {
     pub gap: Pixels,
     /// How far in the block's first line starts.
     pub indent: Pixels,
+    /// Room kept above the text, for the chapter's opening line and label.
+    pub above: Pixels,
     /// Room kept below the text, for what stands under it.
     pub below: Pixels,
 }
@@ -487,6 +494,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         dim,
         gap,
         indent,
+        above,
         below,
     } = request;
     let base = if source {
@@ -498,7 +506,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
     let hang = style.body_size * 1.25;
     let unit = hang * 0.5;
     let mut shaped_lines = Vec::with_capacity(lines.len());
-    let mut y = whole.as_deref().map_or(px(0.), Whole::height);
+    let mut y = above + whole.as_deref().map_or(px(0.), Whole::height);
     for display in lines {
         let quote_indent = if kind == BlockKind::Quote { hang } else { px(0.) };
         let x = match kind {
@@ -524,19 +532,19 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
                 .and_then(|mut lines| lines.pop())
                 .unwrap_or_default()
         };
-        // The toolkit wraps every row alike, so a first row that starts further in is broken here.
-        let first_row_in =
-            (!source && indent > px(0.) && display.source.start == 0 && !display.text.is_empty()).then_some(indent);
-        let shaped = match first_row_in {
-            Some(indent) => {
-                let mut shaped = shape(None);
-                let breaks = breaks_within(&shaped, indent, wrap);
-                indent_rows(&mut shaped, &breaks, indent);
-                shaped
-            }
-            None => shape(Some(wrap)),
+        // The toolkit wraps every row alike, so a first row that starts further in, or hangs its heading marker out, is
+        // broken here.
+        let first_row = !source && display.source.start == 0 && !display.text.is_empty();
+        let marker = if first_row { heading_marker(kind, &display) } else { 0 };
+        let (shaped, row_indent) = if first_row && (indent > px(0.) || marker > 0) {
+            let mut shaped = shape(None);
+            let row_indent = indent - shaped.unwrapped_layout.x_for_index(marker);
+            let breaks = breaks_within(&shaped, row_indent, wrap);
+            indent_rows(&mut shaped, &breaks, row_indent);
+            (shaped, row_indent)
+        } else {
+            (shape(Some(wrap)), px(0.))
         };
-        let row_indent = first_row_in.unwrap_or(px(0.));
         let rows = rows_of(&shaped);
         let hidden_line = collapsed || display.is_collapsed();
         let skipped = separator || hidden_line;
@@ -581,8 +589,20 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         dim,
         gap,
         indent,
+        above,
         below,
     }
+}
+
+/// The length of a heading's shown `#` marker and the space after it, which hang left of the text so the title never
+/// moves as the caret comes to it.
+fn heading_marker(kind: BlockKind, display: &DisplayLine) -> usize {
+    let shown = matches!(kind, BlockKind::Heading { .. }) && display.runs.first().is_some_and(|(_, run)| run.quiet);
+    let hashes = display.text.bytes().take_while(|byte| *byte == b'#').count();
+    if !shown || hashes == 0 {
+        return 0;
+    }
+    hashes + display.text[hashes..].bytes().take_while(|byte| *byte == b' ').count()
 }
 
 /// Where a line breaks with its first row starting `indent` in: at the last space that fits each row, or inside a word
@@ -820,7 +840,7 @@ mod tests {
         assert_eq!(bare.text_width, px(460.));
         assert_eq!(bare.note_left, None);
         assert_eq!(noted.text_left, bare.text_left);
-        assert_eq!(noted.note_left, Some(px(958.)));
+        assert_eq!(noted.note_left, Some(px(1023.)));
     }
 
     #[test]

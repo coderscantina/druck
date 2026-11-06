@@ -663,6 +663,7 @@ impl TicksView {
 impl Render for TicksView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let fresh = self.refresh(cx);
+        self.title_middle = self.editor.read(cx).title_middle();
         #[cfg(any(debug_assertions, feature = "measure"))]
         if !fresh && self.pinned.is_some() {
             self.repin(cx);
@@ -672,7 +673,6 @@ impl Render for TicksView {
         let tokens = Tokens::get(cx).clone();
         let room = window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::FOOTER_HEIGHT;
         self.room = room;
-        self.title_middle = self.editor.read(cx).title_middle();
         let count = self.headings().len();
         let veil = Hsla::from(tokens.canvas).opacity(1. - tokens::OUTLINE_TEXT_OPACITY);
         let root = div().id("heading-ticks").absolute().top_0().left_0();

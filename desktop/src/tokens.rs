@@ -79,6 +79,8 @@ pub const TEXT_MIN_WIDTH: Pixels = px(320.);
 pub const NOTE_TIME: std::time::Duration = std::time::Duration::from_secs(6);
 pub const NOTE_WIDTH: Pixels = px(260.);
 pub const NOTE_GAP: Pixels = px(28.);
+/// The widest gap beside margin notes, which centre in the room right of the text up to it.
+pub const NOTE_GAP_WIDE: Pixels = px(96.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
 pub const NOTE_TEXT: Pixels = px(12.);
 pub const NOTE_ICON: Pixels = px(12.);
@@ -124,7 +126,7 @@ pub const WRITE_ZOOMS: [f32; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 /// Where Write's zoom starts until the author picks another, and where `Cmd+0` returns: body text of about 18 px.
 pub const WRITE_ZOOM_START: f32 = 1.25;
 /// A heading's tick at the left edge: its width by level, the height, the step between two, and the strip they stand in.
-pub const TICK_WIDTHS: [Pixels; 3] = [px(16.), px(12.), px(8.)];
+pub const TICK_WIDTHS: [Pixels; 3] = [px(21.), px(16.), px(11.)];
 pub const TICK_HEIGHT: Pixels = px(1.5);
 pub const TICK_STEP: Pixels = px(8.);
 pub const TICK_LEFT: Pixels = px(12.);
@@ -132,7 +134,7 @@ pub const TICK_ZONE_WIDTH: Pixels = px(36.);
 pub const TICK_OPACITY: f32 = 0.65;
 /// How far the pointer's reach is along the strip, and how much wider the tick under it grows, against its width.
 pub const TICK_REACH: Pixels = px(48.);
-pub const TICK_GROWTH: f32 = 2.2;
+pub const TICK_GROWTH: f32 = 1.7;
 /// The outline a resting pointer unfolds from the ticks: its row, its width, how far a level moves a heading in, and
 /// how much of the text shows through the veil laid over it.
 pub const OUTLINE_ROW_HEIGHT: Pixels = px(20.);

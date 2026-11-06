@@ -843,48 +843,73 @@ impl EditorView {
             .children(rows)
     }
 
-    /// The chapter's opening notes for this frame: one line above the last hidden block before its first text, which keeps
-    /// the room they need when unfolded. They scroll away with the chapter's top. While the caret shows a note raw in the
-    /// flow there is no line, which would stand over the note's own text.
+    /// The chapter's opening notes for this frame: one line above its first text, standing in the room that text keeps
+    /// above it, which grows for the notes when unfolded. They scroll away with the chapter's top. While the caret shows
+    /// a note raw in the flow there is no line, which would stand over the note's own text.
     pub(super) fn margin_element(&self) -> Option<(AnyElement, Point<Pixels>)> {
-        if self.source {
+        let margin = self.margin.clone()?;
+        let last = self.opening_line_block()?;
+        let (_, top) = self.visible.iter().find(|(index, _)| *index == last)?;
+        Some((margin.into_any_element(), point(self.column.text_left, *top)))
+    }
+
+    /// The last hidden block of the chapter's opening notes while their line shows.
+    fn opening_line_block(&self) -> Option<usize> {
+        if self.source || self.margin.is_none() {
             return None;
         }
-        let margin = self.margin.clone()?;
         let region = notes::leading_region(self.text(), &self.blocks)?;
         let first = self.blocks.index_at(region.start);
         let last = self.blocks.index_at(region.end.saturating_sub(1));
         let shown_raw = (first..=last)
             .any(|index| self.blocks.as_slice()[index].kind == BlockKind::Comment && !self.comment_is_hidden(index));
-        if shown_raw {
-            return None;
-        }
-        let (_, top) = self.visible.iter().find(|(index, _)| *index == last)?;
-        let label = self.chapter_label().map_or(px(0.), |_| self.chapter_label_room());
-        let y = *top - label - tokens::NOTE_LINE_HEIGHT - tokens::SPACE_2;
-        Some((margin.into_any_element(), point(self.column.text_left, y)))
+        (!shown_raw).then_some(last)
     }
 
-    /// The chapter's number as the theme writes it, for a numbered chapter whose text opens with its level 1 heading,
-    /// with the title's top. None in the source view and while the opening notes are unfolded above the title.
-    fn chapter_label(&self) -> Option<(String, Pixels)> {
-        if self.source || self.note_room > px(0.) {
-            return None;
-        }
-        let number = self.session.number_of(self.session.active())?;
-        let label = self.style.chapter_number(number)?;
-        let list = self.blocks.as_slice();
-        let title = (list.iter()).position(|block| {
+    /// The chapter's first block of text, after its hidden notes and front matter.
+    pub(super) fn first_text_block(&self) -> Option<usize> {
+        (self.blocks.as_slice().iter()).position(|block| {
             !matches!(
                 block.kind,
                 BlockKind::Blank | BlockKind::Comment | BlockKind::FrontMatter
             )
-        })?;
-        if list[title].kind != (BlockKind::Heading { level: 1 }) {
+        })
+    }
+
+    /// The room the chapter's first text keeps above it for the opening notes' line and the chapter's label, so the
+    /// text's top margin stands above the whole opening.
+    pub(super) fn opening_room(&self, index: usize) -> Pixels {
+        if self.source || self.first_text_block() != Some(index) {
+            return px(0.);
+        }
+        let label = self.chapter_label_text().map_or(px(0.), |_| self.chapter_label_room());
+        let line = self
+            .opening_line_block()
+            .map_or(px(0.), |_| tokens::NOTE_LINE_HEIGHT + tokens::SPACE_2);
+        label + line
+    }
+
+    /// The chapter's number as the theme writes it, for a numbered chapter whose text opens with its level 1 heading.
+    /// None in the source view and while the opening notes are unfolded above the title.
+    fn chapter_label_text(&self) -> Option<String> {
+        if self.source || self.note_room > px(0.) {
             return None;
         }
+        let number = self.session.number_of(self.session.active())?;
+        let title = self.first_text_block()?;
+        if self.blocks.as_slice()[title].kind != (BlockKind::Heading { level: 1 }) {
+            return None;
+        }
+        self.style.chapter_number(number)
+    }
+
+    /// The chapter's label with the top of its title's text, while the title is on screen.
+    fn chapter_label(&self) -> Option<(String, Pixels)> {
+        let label = self.chapter_label_text()?;
+        let title = self.first_text_block()?;
         let (_, top) = self.visible.iter().find(|(index, _)| *index == title)?;
-        Some((label, *top))
+        let above = self.slots[title].layout.as_ref().map_or(px(0.), |layout| layout.above);
+        Some((label, *top + above))
     }
 
     fn chapter_label_size(&self) -> Pixels {
@@ -956,13 +981,18 @@ impl EditorView {
                         ..area
                     };
                     let size = toolbar_size();
-                    let (x, y) = place::above(
-                        rect(target),
-                        f32::from(size.width),
-                        f32::from(size.height),
-                        column,
-                        f32::from(tokens::FLOAT_GAP),
-                    );
+                    let gap = f32::from(tokens::FLOAT_GAP);
+                    let (x, y) = place::above(rect(target), f32::from(size.width), f32::from(size.height), column, gap);
+                    // Above the selection where there is room, its edges between lines rather than through glyphs.
+                    let pitch = (selection.iter())
+                        .min_by(|a, b| f32::from(a.top()).total_cmp(&f32::from(b.top())))
+                        .map(|row| row.size.height);
+                    let y = pitch
+                        .map(|pitch| {
+                            place::between_lines(f32::from(target.top()), f32::from(pitch), f32::from(size.height))
+                        })
+                        .filter(|snapped| y < f32::from(target.top()) && *snapped >= column.top + gap)
+                        .unwrap_or(y);
                     return vec![(self.toolbar(cx).into_any_element(), Spot::At(point(px(x), px(y))))];
                 }
                 Vec::new()

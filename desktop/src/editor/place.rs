@@ -34,6 +34,14 @@ pub fn above(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> (f3
     (x, if top >= area.top + gap { top } else { y })
 }
 
+/// The top of something `height` tall above a line that starts at `line_top`, in lines `pitch` apart: centred on whole
+/// lines above it, so its edges fall in the space between lines and cut no glyphs, and never reaching the line.
+pub fn between_lines(line_top: f32, pitch: f32, height: f32) -> f32 {
+    let overhang = (height - pitch) * 0.5;
+    let lines = (1. + overhang / pitch).ceil().max(1.);
+    line_top - lines * pitch - overhang
+}
+
 /// The top left of a list opening at a caret: starting at the caret's left edge rather than centered on it.
 pub fn at_caret(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> (f32, f32) {
     let (_, y) = beside(target, width, height, area, gap);
@@ -74,6 +82,14 @@ mod tests {
     fn the_toolbar_goes_above_and_below_only_with_no_room_above() {
         assert_eq!(above(line(300., 100., 500.), 100., 30., AREA, 6.), (350., 64.));
         assert_eq!(above(line(300., 40., 500.), 100., 30., AREA, 6.), (350., 66.));
+    }
+
+    #[test]
+    fn the_toolbar_stands_with_its_edges_between_lines() {
+        // 36 high over 30 px lines: over the second line up, 3 px into the space on each side of it.
+        assert_eq!(between_lines(300., 30., 36.), 237.);
+        // Over 45 px lines it fits over the line just above.
+        assert_eq!(between_lines(300., 45., 36.), 259.5);
     }
 
     #[test]

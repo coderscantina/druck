@@ -325,10 +325,10 @@ impl EditorView {
             .when_some(note.suggestion.clone().filter(|_| !gone), |column, suggestion| {
                 column.child(
                     div()
-                        .font_family(body.family.clone())
+                        .font(body.clone())
                         .text_size(body_size * tokens::ADVICE_SUGGESTION)
                         .line_height(body_size * tokens::ADVICE_SUGGESTION * tokens::ADVICE_LEADING)
-                        .text_color(tokens.text)
+                        .text_color(tokens.writing)
                         .child(suggestion),
                 )
             })

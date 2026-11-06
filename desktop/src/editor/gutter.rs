@@ -89,7 +89,7 @@ impl EditorView {
             }
             if let Some(block_index) = waiting.take() {
                 markers.push(CommentMarker {
-                    bounds: at(block.top, line_height),
+                    bounds: at(block.top + block.layout.above, line_height),
                     block: block_index,
                 });
             }
@@ -97,7 +97,7 @@ impl EditorView {
                 && !crate::persist::merge::is_marker(&self.session.active_buffer().text()[range.clone()])
             {
                 markers.push(CommentMarker {
-                    bounds: at(block.top, line_height),
+                    bounds: at(block.top + block.layout.above, line_height),
                     block: index,
                 });
             }
@@ -127,7 +127,7 @@ impl EditorView {
         }
         if let (Some(block), Some(last)) = (waiting, blocks.last()) {
             markers.push(CommentMarker {
-                bounds: at(last.top, last.layout.first_line_height()),
+                bounds: at(last.top + last.layout.above, last.layout.first_line_height()),
                 block,
             });
         }
@@ -280,7 +280,10 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
         let x = block.icon_x;
         let line_height = block.layout.first_line_height();
         let bounds = Bounds::new(
-            point(x, block.top + (line_height - tokens::GUTTER_ICON) * 0.5),
+            point(
+                x,
+                block.top + block.layout.above + (line_height - tokens::GUTTER_ICON) * 0.5,
+            ),
             size(tokens::GUTTER_ICON, tokens::GUTTER_ICON),
         );
         let color: Hsla = if block.hovered {

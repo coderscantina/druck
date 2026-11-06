@@ -268,6 +268,8 @@ pub struct EditorView {
     margin: Option<Entity<ChapterNotes>>,
     /// The room those notes take in the flow while unfolded.
     note_room: Pixels,
+    /// Where the lowest note in the right margin ended as last drawn, or nothing when none stood there.
+    margin_bottom: Option<Pixels>,
     /// Where the open table or figure card was drawn last, which [`EditorView::reveal_float`] brings into view.
     float_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Frames left to bring the card into view, after it opened or its cell moved.
@@ -430,6 +432,7 @@ impl EditorView {
             writing: Writing::of(cx),
             margin: None,
             note_room: px(0.),
+            margin_bottom: None,
             float_bounds: Rc::default(),
             reveal_float: 0,
             float_room: px(0.),
@@ -744,7 +747,8 @@ impl EditorView {
 
     /// How far down the pane the middle of the chapter title's first line stands as the chapter opens.
     pub fn title_middle(&self) -> Pixels {
-        tokens::TEXT_MARGIN_Y + self.style.title_line_height() / 2.
+        let opening = self.first_text_block().map_or(px(0.), |index| self.opening_room(index));
+        tokens::TEXT_MARGIN_Y + opening + self.style.title_line_height() / 2.
     }
 
     /// Selects `range` of the active chapter and brings it into view, for the find bar.
@@ -1233,13 +1237,23 @@ impl EditorView {
         }
     }
 
-    /// How much of the pane stands empty right of the text and whatever is in its margin.
+    /// How much of the pane's foot stands empty right of the text, and of its margin where a note reaches the foot.
     pub fn room_beside_text(&self) -> Pixels {
         let column = &self.column;
-        let end = column
-            .note_left
-            .map_or(column.text_left + column.text_width, |left| left + tokens::NOTE_WIDTH);
+        let foot = column.viewport.bottom() - tokens::FOOTER_HEIGHT;
+        let end = match (column.note_left, self.margin_bottom) {
+            (Some(left), Some(bottom)) if bottom > foot => left + tokens::NOTE_WIDTH,
+            _ => column.text_left + column.text_width,
+        };
         column.viewport.right() - end
+    }
+
+    /// Takes where the margin's lowest note ended as the text was drawn, and returns whether that moved the room at the
+    /// foot. A notify while drawing asks for no frame, so the caller asks for the next one.
+    pub(super) fn set_margin_bottom(&mut self, bottom: Option<Pixels>) -> bool {
+        let room = self.room_beside_text();
+        self.margin_bottom = bottom;
+        self.room_beside_text() != room
     }
 
     /// The width the text wraps at.
@@ -1334,6 +1348,7 @@ impl EditorView {
             + self.note_room_at(index)
             + standalone.map_or(px(0.), |kind| self.standalone_room(kind))
             + ghost_room;
+        let above = self.opening_room(index);
         let dim = self.is_dimmed(index);
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let list = self.blocks.as_slice();
@@ -1366,6 +1381,7 @@ impl EditorView {
             && layout.dim == dim
             && layout.gap == gap
             && layout.indent == indent
+            && layout.above == above
             && layout.hidden == hidden
             && layout.marked == marked
             && layout.collapsed == collapsed
@@ -1403,6 +1419,7 @@ impl EditorView {
                 dim,
                 gap,
                 indent,
+                above,
                 below,
             },
             window,

@@ -202,9 +202,15 @@ impl Element for Galley {
                 })
                 .collect();
             let wanted: Vec<Wanted> = measured.iter().map(|(_, wanted)| *wanted).collect();
-            for ((mut element, _), y) in measured.into_iter().zip(flow(&wanted, bounds.top())) {
+            let mut bottom = None;
+            for ((mut element, wanted), y) in measured.into_iter().zip(flow(&wanted, bounds.top())) {
                 element.prepaint_at(point(note_left, y), window, cx);
                 frame.review.push(element);
+                bottom = Some(y + wanted.height);
+            }
+            if self.view.update(cx, |view, _| view.set_margin_bottom(bottom)) {
+                let view = self.view.clone();
+                window.on_next_frame(move |_, cx| view.update(cx, |_, cx| cx.emit(super::RoomChanged)));
             }
         });
         // The chapter's opening notes stand in the flow, above its first text.
@@ -476,8 +482,8 @@ struct StyleName {
     top: Pixels,
     height: Pixels,
     name: String,
-    /// The left edge of a directive's bracket name on the same row, which the style's name ends before.
-    before: Option<Pixels>,
+    /// What the style's name ends before: the block's gutter icon, or a directive's bracket name on the same row.
+    before: Pixels,
 }
 
 /// A block's style name, one faint word that ends clear of the block gutter's icons and of a bracket's name, and starts
@@ -500,8 +506,7 @@ fn prepaint_style_name(column: &Column, style_name: StyleName, colors: &Tokens, 
         .child(SharedString::from(name))
         .into_any_element();
     let wanted = element.layout_as_root(AvailableSpace::min_size(), window, cx);
-    let clear_of_icons = column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET;
-    let right = before.map_or(clear_of_icons, |left| left.min(clear_of_icons)) - tokens::STYLE_NAME_GAP;
+    let right = before - tokens::STYLE_NAME_GAP;
     let left = right - wanted.width;
     // Clear of the heading ticks at the pane's left edge too.
     if left < column.viewport.left() + tokens::TICK_ZONE_WIDTH {
@@ -582,6 +587,9 @@ impl EditorView {
                 icon
             };
             let left = self.block_left(index);
+            let layout = self.layout_block(index, window);
+            // A heading's marker hanging out of the text keeps the icon clear of it.
+            let hang = layout.lines.first().map_or(px(0.), |line| line.indent.min(px(0.)));
             blocks.push(FrameBlock {
                 kind: block.kind,
                 top,
@@ -590,9 +598,9 @@ impl EditorView {
                 icon_x: if left > column.text_left {
                     left - (gap + tokens::GUTTER_ICON) * 0.5
                 } else {
-                    gutter_icon
+                    gutter_icon.min(left + hang - tokens::SPACE_1 - tokens::GUTTER_ICON)
                 },
-                layout: self.layout_block(index, window),
+                layout,
                 hovered: self.hovered == Some(index),
                 icon,
             });
@@ -644,11 +652,14 @@ impl EditorView {
         let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
         let directives = self.directive_marks(&blocks, &indices, window, cx);
         // After the brackets, whose names on the same row the style's name ends before.
-        let style_name = self.style_name_at_caret(&blocks).map(|(top, height, name)| StyleName {
-            top,
-            height,
-            name,
-            before: self.directives.name_left_beside(top, top + height),
+        let style_name = self.style_name_at_caret(&blocks).map(|(top, height, name, icon_x)| {
+            let icons = gutter_icon.min(icon_x);
+            StyleName {
+                top,
+                height,
+                name,
+                before: (self.directives.name_left_beside(top, top + height)).map_or(icons, |left| left.min(icons)),
+            }
         });
         Frame {
             column,
@@ -701,8 +712,9 @@ impl EditorView {
         Some((target, placeholders::hint(kind, &name, &self.placeholder_values)))
     }
 
-    /// The style name of the block the caret is in, beside its first line, while that block is on screen.
-    fn style_name_at_caret(&self, blocks: &[FrameBlock]) -> Option<(Pixels, Pixels, String)> {
+    /// The style name of the block the caret is in, beside its first line, with its gutter icon's left, while that block
+    /// is on screen.
+    fn style_name_at_caret(&self, blocks: &[FrameBlock]) -> Option<(Pixels, Pixels, String, Pixels)> {
         if self.source {
             return None;
         }
@@ -713,7 +725,7 @@ impl EditorView {
             .find(|(_, (visible, _))| *visible == index)?;
         let line = block.layout.lines.iter().find(|line| line.height > px(0.))?;
         let name = placeholders::style_name(self.session.active_buffer().text(), &self.blocks, index)?;
-        Some((block.top + line.y, line.line_height, name))
+        Some((block.top + line.y, line.line_height, name, block.icon_x))
     }
 
     /// The rectangles that cover `selection` in the visible blocks. `past_chip` starts them after removed words standing
