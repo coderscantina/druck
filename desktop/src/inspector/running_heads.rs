@@ -287,7 +287,7 @@ impl Render for RunningHeads {
                     .id(name)
                     .toggle(tokens, label, on)
                     .flex_none()
-                    .px(chrome::SPACE_2)
+                    .px(chrome::SPACE_1)
                     .h(chrome::ZOOM_BUTTON + chrome::SPACE_1)
                     .flex()
                     .items_center()
@@ -314,11 +314,13 @@ impl Render for RunningHeads {
             .overflow_y_scroll()
             .pt(chrome::SPACE_2)
             .child(
+                // One row, which scrolls sideways where the page kinds' names are longer than the panel.
                 div()
+                    .id("page-kinds")
                     .px(chrome::SPACE_3)
                     .flex()
-                    .flex_wrap()
                     .gap(chrome::SPACE_1)
+                    .overflow_x_scroll()
                     .children(variants),
             )
             .children(rows)
