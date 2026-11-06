@@ -6,8 +6,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Anchor, Context, ElementId, FontWeight, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString, Window,
-    anchored, deferred, div,
+    Anchor, App, Bounds, Context, ElementId, FontWeight, KeyDownEvent, MouseButton, Pixels, Role, ScrollHandle,
+    SharedString, TextAlign, TextRun, Window, anchored, canvas, deferred, div, font, point,
 };
 
 use super::book::{Book, Entry, Place, Shelf};
@@ -645,18 +645,7 @@ impl Desk<'_> {
                             .child(entry.row.title.clone()),
                     ),
             )
-            .child(
-                div()
-                    .mt(tokens::HAIR_GAP)
-                    .font_family(self.font.clone())
-                    .flex_none()
-                    .text_size(tokens::NAV_DESK_FIRST_LINE)
-                    .line_height(tokens::NAV_DESK_FIRST_LINE_LEADING)
-                    .text_color(tokens.text_quiet)
-                    .line_clamp(2)
-                    .text_ellipsis()
-                    .children(entry.opening.first().map(|line| filled(line, &self.values))),
-            )
+            .children((entry.opening.first()).map(|line| self.first_line(filled(line, &self.values))))
             .child(
                 div()
                     .mt_auto()
@@ -670,6 +659,43 @@ impl Desk<'_> {
         let place = (!aside).then_some(entry.place).flatten();
         self.cell(ElementId::from(("desk-cell", id.number())), place, cx)
             .child(self.draggable(card, entry))
+    }
+
+    /// A card's first line in two lines at most, the last cut at a whole word with an ellipsis. It is broken here, at
+    /// the width the card got, since gpui's own clamp cuts inside a word.
+    fn first_line(&self, text: String) -> impl IntoElement + use<> {
+        let font = font(self.font.clone());
+        let color = self.tokens.text_quiet;
+        let leading = tokens::NAV_DESK_FIRST_LINE_LEADING;
+        let paint = move |bounds: Bounds<Pixels>, _: (), window: &mut Window, cx: &mut App| {
+            let run = |text: &str| TextRun {
+                len: text.len(),
+                font: font.clone(),
+                color: color.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shape = |text: &str, window: &Window| {
+                let line = SharedString::from(text.to_owned());
+                window
+                    .text_system()
+                    .shape_line(line, tokens::NAV_DESK_FIRST_LINE, &[run(text)], None)
+            };
+            let measure = |text: &str| f32::from(shape(text, window).width);
+            let lines = crate::editor::review::wrapped(&text, 2, f32::from(bounds.size.width), measure);
+            for (at, line) in lines.iter().enumerate() {
+                let origin = point(bounds.left(), bounds.top() + leading * at as f32);
+                shape(line, window)
+                    .paint(origin, leading, TextAlign::Left, None, window, cx)
+                    .ok();
+            }
+        };
+        canvas(|_, _, _| {}, paint)
+            .mt(tokens::HAIR_GAP)
+            .flex_none()
+            .w_full()
+            .h(leading * 2.)
     }
 
     /// A chapter's writing state in the quiet colour, and on the focused card without one a fainter offer to set it. A

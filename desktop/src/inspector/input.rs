@@ -1289,7 +1289,7 @@ impl Render for TextInput {
         if self.bare {
             return field.child(InputElement { input: cx.entity() });
         }
-        let ring = crate::a11y::ring(tokens);
+        let accent = tokens.accent;
         let field = field
             .px(tokens::SPACE_2)
             .rounded(tokens::RADIUS)
@@ -1297,7 +1297,7 @@ impl Render for TextInput {
             .border_color(if focused { tokens.text_faint } else { tokens.divider })
             .bg(tokens.field)
             .when(crate::a11y::tabbed_to(&self.focus, cx), |field| {
-                field.focus_visible(move |style| style.shadow(vec![ring.clone()]))
+                field.focus_visible(move |style| crate::a11y::ringed(style, accent))
             });
         if multiline {
             field

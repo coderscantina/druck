@@ -204,7 +204,9 @@ pub const SPINE_CARD_WIDTH: Pixels = px(204.);
 pub const PALETTE_WIDTH: Pixels = px(480.);
 /// How far a card over the text reaches past the text on each side.
 pub const CARD_OVERHANG: Pixels = px(28.);
-pub const PALETTE_MAX_ROWS: usize = 12;
+/// The palette's list shows this many rows. The last is half shown, so its foot's solid band covers that row's glyphs
+/// instead of cutting through them.
+pub const PALETTE_MAX_ROWS: f32 = 11.5;
 /// The settings window.
 pub const SETTINGS_WINDOW: (f32, f32) = (860., 620.);
 pub const SETTINGS_NAV_WIDTH: Pixels = px(190.);

@@ -398,7 +398,7 @@ impl Render for Palette {
                     .child(
                         div()
                             .id("palette-rows")
-                            .max_h(tokens::MENU_ROW_HEIGHT * tokens::PALETTE_MAX_ROWS as f32)
+                            .max_h(tokens::MENU_ROW_HEIGHT * tokens::PALETTE_MAX_ROWS)
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
                             .flex()

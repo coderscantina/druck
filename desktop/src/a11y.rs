@@ -4,7 +4,7 @@
 //! control.
 
 use gpui::prelude::*;
-use gpui::{App, BoxShadow, Div, FocusHandle, Global, Role, SharedString, Stateful, Toggled, Window, point, px};
+use gpui::{App, BoxShadow, Div, FocusHandle, Global, Rgba, Role, SharedString, Stateful, Toggled, Window, point, px};
 
 use crate::tokens::{self, Tokens};
 
@@ -25,10 +25,20 @@ pub trait Control: Sized {
     fn ring_while_focused(self, tokens: &Tokens) -> Self;
 }
 
+/// Draws the keyboard's focus ring on `element`. A border paints over the ring, so it takes the accent too, and a
+/// bordered control shows the same 2 px as one without.
+pub(crate) fn ringed<E: Styled>(element: E, accent: Rgba) -> E {
+    element.shadow(vec![ring_of(accent)]).border_color(accent)
+}
+
 /// The keyboard's focus ring, for a control that draws it itself.
 pub(crate) fn ring(tokens: &Tokens) -> BoxShadow {
+    ring_of(tokens.accent)
+}
+
+fn ring_of(accent: Rgba) -> BoxShadow {
     BoxShadow {
-        color: tokens.accent.into(),
+        color: accent.into(),
         offset: point(px(0.), px(0.)),
         blur_radius: px(0.),
         spread_radius: tokens::FOCUS_RING,
@@ -38,17 +48,17 @@ pub(crate) fn ring(tokens: &Tokens) -> BoxShadow {
 
 impl Control for Stateful<Div> {
     fn control(self, tokens: &Tokens, role: Role, label: impl Into<SharedString>) -> Self {
-        let ring = ring(tokens);
+        let accent = tokens.accent;
         self.role(role)
             .aria_label(label)
             .focusable()
             .tab_stop(true)
-            .focus_visible(move |style| style.shadow(vec![ring.clone()]))
+            .focus_visible(move |style| ringed(style, accent))
     }
 
     fn ring_while_focused(self, tokens: &Tokens) -> Self {
-        let ring = ring(tokens);
-        self.focus(move |style| style.shadow(vec![ring.clone()]))
+        let accent = tokens.accent;
+        self.focus(move |style| ringed(style, accent))
     }
 
     fn toggle(self, tokens: &Tokens, label: impl Into<SharedString>, on: bool) -> Self {

@@ -206,9 +206,8 @@ impl Render for LaunchView {
                     .child(
                         div()
                             .px(tokens::SPACE_3)
-                            .py(tokens::SPACE_2)
-                            .border_b_1()
-                            .border_color(tokens.divider)
+                            .pt(tokens::SPACE_3)
+                            .pb(tokens::SPACE_1)
                             .text_size(tokens::TEXT_SMALL)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(tokens.text_quiet)

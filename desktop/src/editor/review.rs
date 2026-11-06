@@ -430,10 +430,22 @@ pub(super) fn clipped(
         last = longer;
         words.next();
     }
-    let mut last = last.trim_end_matches([',', ';', ':']).to_owned();
+    let mut last = last.trim_end_matches([',', ';', ':', '.']).to_owned();
     last.push_str(ellipsis);
     shown.push(last);
     Some(shown)
+}
+
+/// `text` broken at words into at most `lines` lines that fit `width`, the last cut at a whole word with an ellipsis
+/// when more is left.
+pub(crate) fn wrapped(text: &str, lines: usize, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
+    clipped(text, lines, width, 0., &measure).unwrap_or_else(|| {
+        let mut words = text.split_whitespace().peekable();
+        (0..lines)
+            .map(|_| take_line(&mut words, width, &measure))
+            .take_while(|line| !line.is_empty())
+            .collect()
+    })
 }
 
 /// The words of one line up to `width`, at least one so a long word still moves on.
@@ -480,6 +492,18 @@ mod tests {
         assert_eq!(lines, Some(vec!["one two".to_owned(), "three\u{2026}".to_owned()]));
         let lines = clipped("one two three, four five six", 2, 10., 3., measure);
         assert_eq!(lines, Some(vec!["one two".to_owned(), "three\u{2026}".to_owned()]));
+    }
+
+    #[test]
+    fn wrapped_text_keeps_whole_words_and_cuts_only_what_is_left_over() {
+        let measure = |text: &str| text.chars().count() as f32;
+        assert_eq!(wrapped("one", 2, 10., measure), vec!["one".to_owned()]);
+        assert_eq!(
+            wrapped("one two three", 2, 10., measure),
+            vec!["one two".to_owned(), "three".to_owned()]
+        );
+        let lines = wrapped("one two three four programmer", 2, 10., measure);
+        assert_eq!(lines, vec!["one two".to_owned(), "three\u{2026}".to_owned()]);
     }
 
     #[test]
