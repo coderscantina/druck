@@ -394,342 +394,7 @@ impl EditorView {
         let refused = float.refused.clone();
         let (caption, label) = (float.caption.clone(), float.label.clone());
         let placement = float.placement.clone();
-        let column_of =
-            |row: usize, cell: usize| -> usize { grid.rows[row].iter().take(cell).map(|cell| cell.span).sum() };
-        let column = column_of(row, cell);
-        let align = grid.aligns.get(column).copied().unwrap_or_default();
-
-        let button = |id: &'static str, label: &'static str| small_button(&tokens, id, label);
-        let row_tools = div()
-            .flex()
-            .items_center()
-            .gap(tokens::SPACE_1)
-            .child(field_label(&tokens, crate::t!(Key::RowLabel)))
-            .child(button("row-add", "+").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, _| grid.add_row(text, row),
-                    |row, cell| (row + 1, cell),
-                    window,
-                    cx,
-                );
-            })))
-            .child(button("row-remove", "−").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, _| grid.remove_row(text, row),
-                    |row, cell| (row, cell),
-                    window,
-                    cx,
-                );
-            })))
-            .child(button("row-up", "↑").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, _| {
-                        if row == 0 {
-                            Err(Key::TableNoRowThere)
-                        } else {
-                            grid.move_row_down(text, row - 1)
-                        }
-                    },
-                    |row, cell| (row.saturating_sub(1), cell),
-                    window,
-                    cx,
-                );
-            })))
-            .child(button("row-down", "↓").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, _| grid.move_row_down(text, row),
-                    |row, cell| (row + 1, cell),
-                    window,
-                    cx,
-                );
-            })));
-        let column_tools = div()
-            .flex()
-            .items_center()
-            .gap(tokens::SPACE_1)
-            .child(field_label(&tokens, crate::t!(Key::ColumnLabel)))
-            .child(button("column-add", "+").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, cell| {
-                        let column = grid.rows[row]
-                            .iter()
-                            .take(cell + 1)
-                            .map(|cell| cell.span)
-                            .sum::<usize>()
-                            - 1;
-                        grid.add_column(text, Some(column))
-                    },
-                    |row, cell| (row, cell + 1),
-                    window,
-                    cx,
-                );
-            })))
-            .child(
-                button("column-remove", "−").on_click(cx.listener(|this, _, window, cx| {
-                    this.grid_change(
-                        |grid, text, row, cell| {
-                            let column = grid.rows[row].iter().take(cell).map(|cell| cell.span).sum();
-                            grid.remove_column(text, column)
-                        },
-                        |row, cell| (row, cell),
-                        window,
-                        cx,
-                    );
-                })),
-            )
-            .child(button("column-left", "←").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, cell| {
-                        let column: usize = grid.rows[row].iter().take(cell).map(|cell| cell.span).sum();
-                        if column == 0 {
-                            Err(Key::TableNoColumnThere)
-                        } else {
-                            grid.move_column_right(text, column - 1)
-                        }
-                    },
-                    |row, cell| (row, cell.saturating_sub(1)),
-                    window,
-                    cx,
-                );
-            })))
-            .child(button("column-right", "→").on_click(cx.listener(|this, _, window, cx| {
-                this.grid_change(
-                    |grid, text, row, cell| {
-                        let column = grid.rows[row].iter().take(cell).map(|cell| cell.span).sum();
-                        grid.move_column_right(text, column)
-                    },
-                    |row, cell| (row, cell + 1),
-                    window,
-                    cx,
-                );
-            })));
-        let align_button =
-            |id: &'static str, icon: &'static str, tip: &'static str, choice: Align, cx: &mut Context<Self>| {
-                let chosen = align == choice;
-                div()
-                    .id(id)
-                    .toggle(&tokens, tip, chosen)
-                    .flex_none()
-                    .size(tokens::SMALL_BUTTON_HEIGHT)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(tokens::CHIP_RADIUS)
-                    .cursor_pointer()
-                    .when(chosen, |button| button.bg(tokens.text))
-                    .when(!chosen, |button| button.hover(|button| button.bg(tokens.raised)))
-                    .tooltip(crate::editor::float::tooltip(tip.to_owned()))
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.grid_change(
-                            move |grid, text, row, cell| {
-                                let column = grid.rows[row].iter().take(cell).map(|cell| cell.span).sum();
-                                grid.set_align(text, column, choice)
-                            },
-                            |row, cell| (row, cell),
-                            window,
-                            cx,
-                        );
-                    }))
-                    .child(svg().path(icon).size(tokens::CHECK_SIZE).text_color(if chosen {
-                        tokens.panel
-                    } else {
-                        tokens.text
-                    }))
-            };
-        let aligns = div()
-            .flex()
-            .items_center()
-            .child(align_button(
-                "align-default",
-                "icons/align-default.svg",
-                crate::t!(Key::AlignDefault),
-                Align::Default,
-                cx,
-            ))
-            .child(align_button(
-                "align-left",
-                "icons/align-left.svg",
-                crate::t!(Key::AlignLeft),
-                Align::Left,
-                cx,
-            ))
-            .child(align_button(
-                "align-center",
-                "icons/align-center.svg",
-                crate::t!(Key::AlignCenter),
-                Align::Center,
-                cx,
-            ))
-            .child(align_button(
-                "align-right",
-                "icons/align-right.svg",
-                crate::t!(Key::AlignRight),
-                Align::Right,
-                cx,
-            ));
-        let span_tools = is_list.then(|| {
-            div()
-                .flex()
-                .items_center()
-                .gap(tokens::SPACE_1)
-                .child(
-                    button("span-more", "⇥")
-                        .tooltip(crate::editor::float::tooltip(crate::t!(Key::MergeRight).to_owned()))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.grid_change(
-                                |grid, text, row, cell| grid.merge_right(text, row, cell),
-                                |row, cell| (row, cell),
-                                window,
-                                cx,
-                            );
-                        })),
-                )
-                .child(
-                    button("span-less", "⇤")
-                        .tooltip(crate::editor::float::tooltip(crate::t!(Key::SplitCell).to_owned()))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.grid_change(
-                                |grid, text, row, cell| grid.split(text, row, cell),
-                                |row, cell| (row, cell),
-                                window,
-                                cx,
-                            );
-                        })),
-                )
-        });
-        let toolbar = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(tokens::SPACE_2)
-            .child(row_tools)
-            .child(column_tools)
-            .child(aligns)
-            .children(span_tools);
-        let columns = grid.columns.max(1) as f32;
-        let rows: Vec<_> = grid
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(row_index, cells)| {
-                let shown: Vec<_> = cells
-                    .iter()
-                    .enumerate()
-                    .map(|(cell_index, shown)| {
-                        let active = row_index == row && cell_index == cell;
-                        let share = shown.span as f32 / columns;
-                        div()
-                            .id(("grid-cell", row_index * 1024 + cell_index))
-                            .w(relative(share))
-                            .min_w_0()
-                            .min_h(tokens::FIELD_HEIGHT)
-                            .border_r_1()
-                            .border_color(tokens.divider)
-                            .when(active, |cell| cell.child(input.clone()))
-                            .when(!active, |cell| {
-                                cell.px(tokens::SPACE_2)
-                                    .py(tokens::GRID_ROW_Y)
-                                    .cursor_text()
-                                    .text_color(if row_index == 0 { tokens.text } else { tokens.text_quiet })
-                                    .when(row_index == 0, |cell| cell.font_weight(gpui::FontWeight::SEMIBOLD))
-                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        if this.grid_write_cell(window, cx) {
-                                            this.grid_show(row_index, cell_index, window, cx);
-                                        }
-                                    }))
-                                    .child(shown.text.replace('\n', " "))
-                            })
-                    })
-                    .collect();
-                div().flex().border_b_1().border_color(tokens.divider).children(shown)
-            })
-            .collect();
-        let placement_button = |id: &'static str, word: &'static str, value: &'static str, cx: &mut Context<Self>| {
-            small_button(&tokens, id, word)
-                .h(tokens::FIELD_HEIGHT)
-                .when(placement == value, |button| {
-                    button.bg(tokens.raised).text_color(tokens.text)
-                })
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if let Some(float) = this.grid_float_mut() {
-                        float.placement = value.to_owned();
-                    }
-                    this.grid_write_caption(window, cx);
-                }))
-        };
-        let caption_row = div()
-            .flex()
-            .flex_wrap()
-            .items_start()
-            .gap(tokens::SPACE_2)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(tokens::GRID_FIELD_MIN)
-                    .flex()
-                    .flex_col()
-                    .gap(tokens::SPACE_1)
-                    .child(field_label(&tokens, crate::t!(Key::CaptionLabel)))
-                    .child(caption),
-            )
-            .child(
-                div()
-                    .w(tokens::GRID_LABEL_WIDTH)
-                    .flex()
-                    .flex_col()
-                    .gap(tokens::SPACE_1)
-                    .child(field_label(&tokens, format!("{} (tbl:)", crate::t!(Key::LabelLabel))))
-                    .child(label),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(tokens::SPACE_1)
-                    .child(field_label(&tokens, crate::t!(Key::PlacementLabel)))
-                    .child(
-                        div()
-                            .flex()
-                            .gap(tokens::SPACE_1)
-                            .child(placement_button("grid-here", crate::t!(Key::PlacementHere), "", cx))
-                            .child(placement_button("grid-top", crate::t!(Key::PlacementTop), "top", cx))
-                            .child(placement_button(
-                                "grid-bottom",
-                                crate::t!(Key::PlacementBottom),
-                                "bottom",
-                                cx,
-                            )),
-                    ),
-            );
-        let footer = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(tokens::SPACE_2)
-            .child(
-                small_button(&tokens, "grid-source", crate::t!(Key::ShowSource)).on_click(cx.listener(
-                    |this, _, window, cx| {
-                        this.commit_rich_float(window, cx);
-                        this.toggle_source(window, cx);
-                    },
-                )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(tokens::SPACE_1)
-                    .child(
-                        small_button(&tokens, "grid-delete", crate::t!(Key::DeleteTable))
-                            .on_click(cx.listener(|this, _, window, cx| this.grid_delete(window, cx))),
-                    )
-                    .child(
-                        small_button(&tokens, "grid-done", crate::t!(Key::CloseLabel))
-                            .text_color(tokens.accent)
-                            .on_click(cx.listener(|this, _, window, cx| this.commit_rich_float(window, cx))),
-                    ),
-            );
+        let align = (grid.aligns.get(column_of(&grid, row, cell)).copied()).unwrap_or_default();
         let max_height = self.column.viewport.size.height - tokens::SPACE_4;
         let element = card(&tokens)
             .id("grid-float")
@@ -764,7 +429,7 @@ impl EditorView {
             .on_action(cx.listener(|this, _: &ToggleItalic, _, cx| this.grid_mark(Mark::Italic, cx)))
             .on_action(cx.listener(|this, _: &ToggleUnderline, _, cx| this.grid_mark(Mark::Underline, cx)))
             .on_action(cx.listener(|this, _: &ToggleStrike, _, cx| this.grid_mark(Mark::Strike, cx)))
-            .child(toolbar)
+            .child(grid_tools(align, is_list, &tokens, cx))
             .child(
                 div()
                     .flex()
@@ -772,11 +437,11 @@ impl EditorView {
                     .border_1()
                     .border_color(tokens.divider)
                     .rounded(tokens::CHIP_RADIUS)
-                    .children(rows),
+                    .children(grid_cells(&grid, (row, cell), &input, &tokens, cx)),
             )
             .children(refused.map(|why| div().text_size(tokens::TEXT_SMALL).text_color(tokens.accent).child(why)))
-            .child(caption_row)
-            .child(footer)
+            .child(grid_caption_row(caption, label, &placement, &tokens, cx))
+            .child(grid_footer(&tokens, cx))
             .child(bounds_probe(self.float_bounds.clone()))
             .into_any_element();
         let x = self.column.text_left - tokens::SPACE_2;
@@ -789,4 +454,342 @@ impl EditorView {
         self.grid_float()
             .is_some_and(|float| float.input.focus_handle(cx).is_focused(window))
     }
+}
+
+/// The column a cell starts in, counting the cells before it by their spans.
+fn column_of(grid: &Grid, row: usize, cell: usize) -> usize {
+    grid.rows[row].iter().take(cell).map(|cell| cell.span).sum()
+}
+
+/// A change to a grid at a row and cell: its edits, or why it cannot be made.
+type GridChange = fn(&Grid, &str, usize, usize) -> Result<Vec<Edit>, Key>;
+
+/// A small button that changes the grid with `change`, then moves to the cell `to` gives.
+fn grid_tool(
+    tokens: &Tokens,
+    id: &'static str,
+    label: &'static str,
+    change: GridChange,
+    to: fn(usize, usize) -> (usize, usize),
+    cx: &mut Context<EditorView>,
+) -> gpui::Stateful<gpui::Div> {
+    small_button(tokens, id, label)
+        .on_click(cx.listener(move |this, _, window, cx| this.grid_change(change, to, window, cx)))
+}
+
+/// The tools above the cells: rows, columns, the column's alignment, and for a list table a cell's span.
+fn grid_tools(align: Align, is_list: bool, tokens: &Tokens, cx: &mut Context<EditorView>) -> gpui::Div {
+    let row_tools = div()
+        .flex()
+        .items_center()
+        .gap(tokens::SPACE_1)
+        .child(field_label(tokens, crate::t!(Key::RowLabel)))
+        .child(grid_tool(
+            tokens,
+            "row-add",
+            "+",
+            |grid, text, row, _| grid.add_row(text, row),
+            |row, cell| (row + 1, cell),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "row-remove",
+            "−",
+            |grid, text, row, _| grid.remove_row(text, row),
+            |row, cell| (row, cell),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "row-up",
+            "↑",
+            |grid, text, row, _| {
+                if row == 0 {
+                    Err(Key::TableNoRowThere)
+                } else {
+                    grid.move_row_down(text, row - 1)
+                }
+            },
+            |row, cell| (row.saturating_sub(1), cell),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "row-down",
+            "↓",
+            |grid, text, row, _| grid.move_row_down(text, row),
+            |row, cell| (row + 1, cell),
+            cx,
+        ));
+    let column_tools = div()
+        .flex()
+        .items_center()
+        .gap(tokens::SPACE_1)
+        .child(field_label(tokens, crate::t!(Key::ColumnLabel)))
+        .child(grid_tool(
+            tokens,
+            "column-add",
+            "+",
+            |grid, text, row, cell| grid.add_column(text, Some(column_of(grid, row, cell + 1) - 1)),
+            |row, cell| (row, cell + 1),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "column-remove",
+            "−",
+            |grid, text, row, cell| grid.remove_column(text, column_of(grid, row, cell)),
+            |row, cell| (row, cell),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "column-left",
+            "←",
+            |grid, text, row, cell| match column_of(grid, row, cell) {
+                0 => Err(Key::TableNoColumnThere),
+                column => grid.move_column_right(text, column - 1),
+            },
+            |row, cell| (row, cell.saturating_sub(1)),
+            cx,
+        ))
+        .child(grid_tool(
+            tokens,
+            "column-right",
+            "→",
+            |grid, text, row, cell| grid.move_column_right(text, column_of(grid, row, cell)),
+            |row, cell| (row, cell + 1),
+            cx,
+        ));
+    let aligns = [
+        (
+            "align-default",
+            "icons/align-default.svg",
+            crate::t!(Key::AlignDefault),
+            Align::Default,
+        ),
+        (
+            "align-left",
+            "icons/align-left.svg",
+            crate::t!(Key::AlignLeft),
+            Align::Left,
+        ),
+        (
+            "align-center",
+            "icons/align-center.svg",
+            crate::t!(Key::AlignCenter),
+            Align::Center,
+        ),
+        (
+            "align-right",
+            "icons/align-right.svg",
+            crate::t!(Key::AlignRight),
+            Align::Right,
+        ),
+    ]
+    .map(|(id, icon, tip, choice)| {
+        let chosen = align == choice;
+        div()
+            .id(id)
+            .toggle(tokens, tip, chosen)
+            .flex_none()
+            .size(tokens::SMALL_BUTTON_HEIGHT)
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(tokens::CHIP_RADIUS)
+            .cursor_pointer()
+            .when(chosen, |button| button.bg(tokens.text))
+            .when(!chosen, |button| button.hover(|button| button.bg(tokens.raised)))
+            .tooltip(crate::editor::float::tooltip(tip.to_owned()))
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.grid_change(
+                    move |grid, text, row, cell| grid.set_align(text, column_of(grid, row, cell), choice),
+                    |row, cell| (row, cell),
+                    window,
+                    cx,
+                );
+            }))
+            .child(svg().path(icon).size(tokens::CHECK_SIZE).text_color(if chosen {
+                tokens.panel
+            } else {
+                tokens.text
+            }))
+    });
+    let span_tools = is_list.then(|| {
+        div()
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_1)
+            .child(
+                grid_tool(
+                    tokens,
+                    "span-more",
+                    "⇥",
+                    |grid, text, row, cell| grid.merge_right(text, row, cell),
+                    |row, cell| (row, cell),
+                    cx,
+                )
+                .tooltip(crate::editor::float::tooltip(crate::t!(Key::MergeRight).to_owned())),
+            )
+            .child(
+                grid_tool(
+                    tokens,
+                    "span-less",
+                    "⇤",
+                    |grid, text, row, cell| grid.split(text, row, cell),
+                    |row, cell| (row, cell),
+                    cx,
+                )
+                .tooltip(crate::editor::float::tooltip(crate::t!(Key::SplitCell).to_owned())),
+            )
+    });
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(tokens::SPACE_2)
+        .child(row_tools)
+        .child(column_tools)
+        .child(div().flex().items_center().children(aligns))
+        .children(span_tools)
+}
+
+/// The cells, row by row: the field in the one at `at`, and the others' Markdown as written, which a click moves to.
+fn grid_cells(
+    grid: &Grid,
+    at: (usize, usize),
+    input: &Entity<TextInput>,
+    tokens: &Tokens,
+    cx: &mut Context<EditorView>,
+) -> Vec<gpui::Div> {
+    let columns = grid.columns.max(1) as f32;
+    (grid.rows.iter().enumerate())
+        .map(|(row_index, cells)| {
+            let shown = cells.iter().enumerate().map(|(cell_index, shown)| {
+                let active = (row_index, cell_index) == at;
+                let share = shown.span as f32 / columns;
+                div()
+                    .id(("grid-cell", row_index * 1024 + cell_index))
+                    .w(relative(share))
+                    .min_w_0()
+                    .min_h(tokens::FIELD_HEIGHT)
+                    .border_r_1()
+                    .border_color(tokens.divider)
+                    .when(active, |cell| cell.child(input.clone()))
+                    .when(!active, |cell| {
+                        cell.px(tokens::SPACE_2)
+                            .py(tokens::GRID_ROW_Y)
+                            .cursor_text()
+                            .text_color(if row_index == 0 { tokens.text } else { tokens.text_quiet })
+                            .when(row_index == 0, |cell| cell.font_weight(gpui::FontWeight::SEMIBOLD))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if this.grid_write_cell(window, cx) {
+                                    this.grid_show(row_index, cell_index, window, cx);
+                                }
+                            }))
+                            .child(shown.text.replace('\n', " "))
+                    })
+            });
+            div()
+                .flex()
+                .border_b_1()
+                .border_color(tokens.divider)
+                .children(shown.collect::<Vec<_>>())
+        })
+        .collect()
+}
+
+/// The caption, the label, and the placement below the cells.
+fn grid_caption_row(
+    caption: Entity<TextInput>,
+    label: Entity<TextInput>,
+    placement: &str,
+    tokens: &Tokens,
+    cx: &mut Context<EditorView>,
+) -> gpui::Div {
+    let placements = [
+        ("grid-here", crate::t!(Key::PlacementHere), ""),
+        ("grid-top", crate::t!(Key::PlacementTop), "top"),
+        ("grid-bottom", crate::t!(Key::PlacementBottom), "bottom"),
+    ]
+    .map(|(id, word, value)| {
+        small_button(tokens, id, word)
+            .h(tokens::FIELD_HEIGHT)
+            .when(placement == value, |button| {
+                button.bg(tokens.raised).text_color(tokens.text)
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if let Some(float) = this.grid_float_mut() {
+                    float.placement = value.to_owned();
+                }
+                this.grid_write_caption(window, cx);
+            }))
+    });
+    div()
+        .flex()
+        .flex_wrap()
+        .items_start()
+        .gap(tokens::SPACE_2)
+        .child(
+            div()
+                .flex_1()
+                .min_w(tokens::GRID_FIELD_MIN)
+                .flex()
+                .flex_col()
+                .gap(tokens::SPACE_1)
+                .child(field_label(tokens, crate::t!(Key::CaptionLabel)))
+                .child(caption),
+        )
+        .child(
+            div()
+                .w(tokens::GRID_LABEL_WIDTH)
+                .flex()
+                .flex_col()
+                .gap(tokens::SPACE_1)
+                .child(field_label(tokens, format!("{} (tbl:)", crate::t!(Key::LabelLabel))))
+                .child(label),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(tokens::SPACE_1)
+                .child(field_label(tokens, crate::t!(Key::PlacementLabel)))
+                .child(div().flex().gap(tokens::SPACE_1).children(placements)),
+        )
+}
+
+/// The way to the source, then Delete and Done.
+fn grid_footer(tokens: &Tokens, cx: &mut Context<EditorView>) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(tokens::SPACE_2)
+        .child(
+            small_button(tokens, "grid-source", crate::t!(Key::ShowSource)).on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.commit_rich_float(window, cx);
+                    this.toggle_source(window, cx);
+                },
+            )),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(tokens::SPACE_1)
+                .child(
+                    small_button(tokens, "grid-delete", crate::t!(Key::DeleteTable))
+                        .on_click(cx.listener(|this, _, window, cx| this.grid_delete(window, cx))),
+                )
+                .child(
+                    small_button(tokens, "grid-done", crate::t!(Key::CloseLabel))
+                        .text_color(tokens.accent)
+                        .on_click(cx.listener(|this, _, window, cx| this.commit_rich_float(window, cx))),
+                ),
+        )
 }

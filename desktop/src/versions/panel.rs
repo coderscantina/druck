@@ -279,6 +279,169 @@ enum Action {
     Delete(String),
 }
 
+impl GitPanel {
+    /// What the panel says while there is no overview of a repo: a single file, a read under way, a repo that cannot be
+    /// read, or a folder with none yet, which offers to make one.
+    fn no_overview(
+        &self,
+        state: &RepoState,
+        cloud: Option<&str>,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let section = div().flex_none().flex().flex_col().pt(tokens::SPACE_2);
+        match state {
+            RepoState::Single => section.child(ui::quiet_line(tokens, crate::t!(Key::SingleFile))),
+            RepoState::Broken(reason) => section.child(ui::accent_line(tokens, reason.clone())),
+            RepoState::NoRepo => section
+                .child(ui::quiet_line(tokens, crate::t!(Key::NoRepoLine)))
+                .children(cloud.map(|service| ui::accent_line(tokens, crate::t!(Key::CloudWarning, service = service))))
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .justify_end()
+                        .px(tokens::SPACE_3)
+                        .pt(tokens::SPACE_2)
+                        .child(
+                            ui::button(tokens, "panel-make-repo", crate::t!(Key::MakeRepo))
+                                .text_color(tokens.accent)
+                                .on_click(cx.listener(|panel, _, window, cx| {
+                                    if let Some(view) = panel.view.upgrade() {
+                                        view.update(cx, |view, cx| view.make_repo(window, cx));
+                                    }
+                                })),
+                        ),
+                ),
+            RepoState::Reading | RepoState::Ready(_) => section.child(ui::quiet_line(tokens, crate::t!(Key::Reading))),
+        }
+    }
+
+    /// The branch picker, and while it is open the branches and the field for a new one.
+    fn branches(&self, overview: &Overview, can_move: bool, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::Div {
+        let rows: Vec<_> = if self.branches_open {
+            (overview.branches.iter().enumerate())
+                .map(|(at, branch)| self.branch_row(at, branch, tokens, can_move, cx).into_any_element())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .child(ui::group_label(tokens, crate::t!(Key::BranchGroup)))
+            .child(self.picker(tokens, overview, cx))
+            .when(self.branches_open, |section| {
+                section
+                    .child(div().flex_none().pt(tokens::SPACE_1).flex().flex_col().children(rows))
+                    .child(
+                        div()
+                            .flex_none()
+                            .pt(tokens::SPACE_1)
+                            .child(Self::field(&self.new_branch)),
+                    )
+            })
+    }
+
+    /// The line about a merge Git stopped on, with Abort merge when Git is installed.
+    fn merge_banner(message: &str, installed: bool, tokens: &Tokens, cx: &mut Context<Self>) -> gpui::Div {
+        div()
+            .flex_none()
+            .pt(tokens::SPACE_2)
+            .flex()
+            .flex_col()
+            .child(ui::accent_line(
+                tokens,
+                crate::t!(Key::MergingBanner, message = message),
+            ))
+            .child(ui::quiet_line(tokens, crate::t!(Key::ConflictsOnLine)))
+            .when(installed, |banner| {
+                banner.child(div().flex_none().flex().justify_end().px(tokens::SPACE_3).child(
+                    ui::button(tokens, "git-abort", crate::t!(Key::AbortMerge)).on_click(cx.listener(
+                        |panel, _, window, cx| {
+                            if let Some(view) = panel.view.upgrade() {
+                                view.update(cx, |view, cx| view.abort_merge(window, cx));
+                            }
+                        },
+                    )),
+                ))
+            })
+    }
+
+    /// The changes, the message, what went wrong last, then Pull, Push, and Commit.
+    fn changes(
+        &self,
+        rows: Vec<gpui::AnyElement>,
+        overview: &Overview,
+        installed: bool,
+        error: Option<String>,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let can_push = installed && overview.remote.is_some();
+        let can_pull = can_push && !matches!(overview.sync, repo::Sync::NotPushed);
+        let ready = overview.has_something_to_commit() && !self.message.read(cx).text().trim().is_empty();
+        let on_view = |run: fn(&mut Versions, &mut Window, &mut Context<Versions>)| {
+            cx.listener(move |panel: &mut Self, _: &gpui::ClickEvent, window, cx| {
+                if let Some(view) = panel.view.upgrade() {
+                    view.update(cx, |view, cx| run(view, window, cx));
+                }
+            })
+        };
+        let (pull, push) = (on_view(Versions::pull), on_view(Versions::push));
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .child(ui::group_label(tokens, crate::t!(Key::ChangesGroup)))
+            .when(rows.is_empty(), |section| {
+                section.child(ui::quiet_line(tokens, crate::t!(Key::NothingChanged)))
+            })
+            .children(rows)
+            .child(div().flex_none().pt(tokens::SPACE_2).child(Self::field(&self.message)))
+            .children(error.map(|error| ui::accent_line(tokens, error).pt(tokens::SPACE_2)))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .justify_end()
+                    .flex_wrap()
+                    .gap(tokens::SPACE_1)
+                    .px(tokens::SPACE_3)
+                    .pt(tokens::SPACE_2)
+                    .when(can_pull, |row| {
+                        row.child(ui::button(tokens, "git-pull", crate::t!(Key::Pull)).on_click(pull))
+                    })
+                    .when(can_push, |row| {
+                        row.child(ui::button(tokens, "git-push", crate::t!(Key::Push)).on_click(push))
+                    })
+                    .child(
+                        ui::button(tokens, "git-commit", crate::t!(Key::Commit))
+                            .when(ready, |button| button.text_color(tokens.accent))
+                            .on_click(cx.listener(|panel, _, window, cx| panel.commit(false, window, cx))),
+                    ),
+            )
+    }
+}
+
+/// The history: a row per commit with its quiet date.
+fn history(overview: &Overview, tokens: &Tokens) -> gpui::Div {
+    let now = super::history::now_ms() / 1000;
+    let rows: Vec<_> = (overview.log.iter())
+        .map(|commit| ui::commit_row(tokens, commit.summary.clone(), dates::short(commit.time, now)))
+        .collect();
+    div()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .child(ui::group_label(tokens, crate::t!(Key::HistoryGroup)))
+        .when(rows.is_empty(), |section| {
+            section.child(ui::quiet_line(tokens, crate::t!(Key::NoCommits)))
+        })
+        .children(rows)
+}
+
 impl Render for GitPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
@@ -296,178 +459,37 @@ impl Render for GitPanel {
             return root.into_any_element();
         };
         let read = view.read(cx);
+        let cloud = read.book_folder(cx).as_deref().and_then(repo::cloud_service);
         let overview = match read.state() {
-            RepoState::Single => {
-                return root
-                    .child(ui::quiet_line(&tokens, crate::t!(Key::SingleFile)).pt(tokens::SPACE_2))
-                    .into_any_element();
-            }
-            RepoState::Reading => {
-                return root
-                    .child(ui::quiet_line(&tokens, crate::t!(Key::Reading)).pt(tokens::SPACE_2))
-                    .into_any_element();
-            }
-            RepoState::Broken(reason) => {
-                return root
-                    .child(ui::accent_line(&tokens, reason.clone()).pt(tokens::SPACE_2))
-                    .into_any_element();
-            }
-            RepoState::NoRepo => {
-                let cloud = read.book_folder(cx).as_deref().and_then(repo::cloud_service);
-                return root
-                    .child(ui::quiet_line(&tokens, crate::t!(Key::NoRepoLine)).pt(tokens::SPACE_2))
-                    .children(
-                        cloud.map(|service| ui::accent_line(&tokens, crate::t!(Key::CloudWarning, service = service))),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .justify_end()
-                            .px(tokens::SPACE_3)
-                            .pt(tokens::SPACE_2)
-                            .child(
-                                ui::button(&tokens, "panel-make-repo", crate::t!(Key::MakeRepo))
-                                    .text_color(tokens.accent)
-                                    .on_click(cx.listener(|panel, _, window, cx| {
-                                        if let Some(view) = panel.view.upgrade() {
-                                            view.update(cx, |view, cx| view.make_repo(window, cx));
-                                        }
-                                    })),
-                            ),
-                    )
-                    .into_any_element();
-            }
             RepoState::Ready(overview) => overview.clone(),
+            state => {
+                let state = state.clone();
+                return root
+                    .child(self.no_overview(&state, cloud, &tokens, cx))
+                    .into_any_element();
+            }
         };
         let installed = read.git_installed();
         let error = read.error().map(str::to_owned);
-        let cloud = read.book_folder(cx).as_deref().and_then(repo::cloud_service);
-        let can_move = installed && overview.busy.is_none();
         let rows: Vec<_> = (overview.listed())
             .map(|change| {
                 let words = change_words(change, read.in_conflict(&change.path, cx));
                 ui::change_row(&tokens, read.title_of(&change.path, &change.name, cx), words).into_any_element()
             })
             .collect();
-        let now = super::history::now_ms() / 1000;
-        let history: Vec<_> = (overview.log.iter())
-            .map(|commit| {
-                ui::commit_row(&tokens, commit.summary.clone(), dates::short(commit.time, now)).into_any_element()
-            })
-            .collect();
-        let branch_rows: Vec<_> = if self.branches_open {
-            (overview.branches.iter().enumerate())
-                .map(|(at, branch)| self.branch_row(at, branch, &tokens, can_move, cx).into_any_element())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let can_push = installed && overview.remote.is_some();
-        let can_pull = can_push && !matches!(overview.sync, repo::Sync::NotPushed);
+        let can_move = installed && overview.busy.is_none();
         root.children(cloud.map(|service| {
             ui::accent_line(&tokens, crate::t!(Key::CloudWarning, service = service)).pt(tokens::SPACE_2)
         }))
         .children((!installed).then(|| ui::quiet_line(&tokens, crate::t!(Key::GitMissing)).pt(tokens::SPACE_2)))
         .children(
-            overview
-                .busy
-                .as_ref()
+            (overview.busy.as_ref())
                 .map(|operation| ui::accent_line(&tokens, crate::t!(Key::BusyElsewhere, operation = operation))),
         )
-        .child(ui::group_label(&tokens, crate::t!(Key::BranchGroup)))
-        .child(self.picker(&tokens, &overview, cx))
-        .when(self.branches_open, |root| {
-            root.child(
-                div()
-                    .flex_none()
-                    .pt(tokens::SPACE_1)
-                    .flex()
-                    .flex_col()
-                    .children(branch_rows),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .pt(tokens::SPACE_1)
-                    .child(Self::field(&self.new_branch)),
-            )
-        })
-        .children(overview.merging.as_ref().map(|message| {
-            div()
-                .flex_none()
-                .pt(tokens::SPACE_2)
-                .flex()
-                .flex_col()
-                .child(ui::accent_line(
-                    &tokens,
-                    crate::t!(Key::MergingBanner, message = message),
-                ))
-                .child(ui::quiet_line(&tokens, crate::t!(Key::ConflictsOnLine)))
-                .when(installed, |banner| {
-                    banner.child(div().flex_none().flex().justify_end().px(tokens::SPACE_3).child(
-                        ui::button(&tokens, "git-abort", crate::t!(Key::AbortMerge)).on_click(cx.listener(
-                            |panel, _, window, cx| {
-                                if let Some(view) = panel.view.upgrade() {
-                                    view.update(cx, |view, cx| view.abort_merge(window, cx));
-                                }
-                            },
-                        )),
-                    ))
-                })
-        }))
-        .child(ui::group_label(&tokens, crate::t!(Key::ChangesGroup)))
-        .when(rows.is_empty(), |root| {
-            root.child(ui::quiet_line(&tokens, crate::t!(Key::NothingChanged)))
-        })
-        .children(rows)
-        .child(div().flex_none().pt(tokens::SPACE_2).child(Self::field(&self.message)))
-        .children(error.map(|error| ui::accent_line(&tokens, error).pt(tokens::SPACE_2)))
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .justify_end()
-                .flex_wrap()
-                .gap(tokens::SPACE_1)
-                .px(tokens::SPACE_3)
-                .pt(tokens::SPACE_2)
-                .when(can_pull, |row| {
-                    row.child(
-                        ui::button(&tokens, "git-pull", crate::t!(Key::Pull)).on_click(cx.listener(
-                            |panel, _, window, cx| {
-                                if let Some(view) = panel.view.upgrade() {
-                                    view.update(cx, |view, cx| view.pull(window, cx));
-                                }
-                            },
-                        )),
-                    )
-                })
-                .when(can_push, |row| {
-                    row.child(
-                        ui::button(&tokens, "git-push", crate::t!(Key::Push)).on_click(cx.listener(
-                            |panel, _, window, cx| {
-                                if let Some(view) = panel.view.upgrade() {
-                                    view.update(cx, |view, cx| view.push(window, cx));
-                                }
-                            },
-                        )),
-                    )
-                })
-                .child(
-                    ui::button(&tokens, "git-commit", crate::t!(Key::Commit))
-                        .when(
-                            overview.has_something_to_commit() && !self.message.read(cx).text().trim().is_empty(),
-                            |button| button.text_color(tokens.accent),
-                        )
-                        .on_click(cx.listener(|panel, _, window, cx| panel.commit(false, window, cx))),
-                ),
-        )
-        .child(ui::group_label(&tokens, crate::t!(Key::HistoryGroup)))
-        .when(history.is_empty(), |root| {
-            root.child(ui::quiet_line(&tokens, crate::t!(Key::NoCommits)))
-        })
-        .children(history)
+        .child(self.branches(&overview, can_move, &tokens, cx))
+        .children((overview.merging.as_ref()).map(|message| Self::merge_banner(message, installed, &tokens, cx)))
+        .child(self.changes(rows, &overview, installed, error, &tokens, cx))
+        .child(history(&overview, &tokens))
         .child(div().flex_none().h(tokens::SPACE_3))
         .into_any_element()
     }
