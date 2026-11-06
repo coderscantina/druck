@@ -274,7 +274,8 @@ impl MaterialPanel {
             .filter(|item| item.kind == *kind && matches(item) && !used.iter().any(|seen| seen.id == item.id));
         for (at, item) in rest.enumerate() {
             rows.push(Row {
-                group: (at == 0).then(|| kind_label(*kind)),
+                // The header already names the kind, so its label only separates it from the used ones.
+                group: (at == 0 && !used.is_empty()).then(|| kind_label(*kind)),
                 id: item.id.clone(),
                 end: None,
             });
@@ -342,12 +343,7 @@ impl MaterialPanel {
         }
         match self.current_item(cx) {
             Some(item) => {
-                let paragraphs = item.paragraphs();
-                let Some(paragraph) = self.passage.and_then(|at| paragraphs.get(at)) else {
-                    return;
-                };
-                let items = self.material.read(cx).items().clone();
-                if let Some((_, id)) = mentions(paragraph, &items, &item.id).into_iter().next() {
+                if let Some(id) = self.followed(&item, cx) {
                     self.follow_item(&id, cx);
                 }
             }
@@ -357,6 +353,16 @@ impl MaterialPanel {
                 }
             }
         }
+    }
+
+    /// The first source the open item's chosen passage names, which Return follows.
+    fn followed(&self, item: &Item, cx: &App) -> Option<String> {
+        let paragraph = item.paragraphs().into_iter().nth(self.passage?)?;
+        let items = self.material.read(cx).items();
+        mentions(&paragraph, items, &item.id)
+            .into_iter()
+            .next()
+            .map(|(_, id)| id)
     }
 
     fn insert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -486,7 +492,7 @@ impl MaterialPanel {
         }
         div()
             .flex_none()
-            .h(tokens::MATERIAL_TRAIL_HEIGHT)
+            .h(tokens::SECTION_HEIGHT)
             .px(tokens::SPACE_2)
             .flex()
             .items_center()
@@ -903,7 +909,14 @@ impl MaterialPanel {
             .into_any_element()
     }
 
-    fn foot(&self, tokens: &Tokens) -> impl IntoElement + use<> {
+    /// The keys of the verbs that act now: Insert and Pin once something is chosen, Open once there is a row to open or
+    /// a passage that names a source.
+    fn foot(&self, window: &Window, tokens: &Tokens, cx: &App) -> impl IntoElement + use<> {
+        let chosen = self.chosen(window, cx).is_some();
+        let opens = match (self.jumping(window, cx), self.current_item(cx)) {
+            (false, Some(item)) => self.followed(&item, cx).is_some(),
+            _ => chosen,
+        };
         div()
             .flex_none()
             .h(tokens::MATERIAL_ROW_HEIGHT)
@@ -915,9 +928,10 @@ impl MaterialPanel {
             .border_color(tokens.divider)
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_faint)
-            .child(crate::t!(Key::KeyOpen))
-            .child(crate::t!(Key::KeyInsert))
-            .child(crate::t!(Key::KeyPin))
+            .when(opens, |foot| foot.child(crate::t!(Key::KeyOpen)))
+            .when(chosen, |foot| {
+                foot.child(crate::t!(Key::KeyInsert)).child(crate::t!(Key::KeyPin))
+            })
     }
 
     /// Chooses the probe's theme by name, for screenshots.
@@ -993,6 +1007,6 @@ impl Render for MaterialPanel {
                     .border_color(tokens.divider)
                     .child(self.arriving(content)),
             )
-            .child(self.foot(&tokens))
+            .child(self.foot(window, &tokens, cx))
     }
 }

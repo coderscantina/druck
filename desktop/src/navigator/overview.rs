@@ -385,7 +385,7 @@ impl Navigator {
                     .children(elements),
             )
             .when(crate::shell::ui::more_below(&scroll), |overview| {
-                overview.child(crate::shell::ui::foot_fade_on(tokens.canvas).bottom(tokens::FOOTER_HEIGHT))
+                overview.child(foot_fade(tokens, &scroll))
             })
             .child(
                 div()
@@ -406,6 +406,29 @@ impl Navigator {
                     .child(hint(tokens, crate::t!(Key::HintEscape), crate::t!(Key::HintBack))),
             )
     }
+}
+
+/// The fade over the foot while more is below: solid ground over the whole line of cards the foot cuts, so a line is
+/// either whole or gone, and a fade over the gap above it.
+fn foot_fade(tokens: &Tokens, scroll: &ScrollHandle) -> gpui::Div {
+    let solid: gpui::Hsla = tokens.canvas.into();
+    let foot = scroll.bounds().bottom() - scroll.offset().y;
+    let cut = (scroll.bounds_for_item(scroll.bottom_item()))
+        .filter(|line| line.top() < foot && line.bottom() > foot)
+        .map_or(Pixels::ZERO, |line| foot - line.top());
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom(tokens::FOOTER_HEIGHT)
+        .flex()
+        .flex_col()
+        .child(div().h(tokens::SPACE_3).bg(gpui::linear_gradient(
+            tokens::FADE_DOWN,
+            gpui::linear_color_stop(solid.opacity(tokens::CLEAR), 0.),
+            gpui::linear_color_stop(solid, 1.),
+        )))
+        .child(div().h(cut).bg(solid))
 }
 
 /// What every part of the overview is drawn with.

@@ -228,8 +228,9 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
 
 /// `DRUCK_POINTER=file` plays a pointer script through the window's own event path, so hover, rest, and clicks run as
 /// a hand would make them, without the window being key. A line is `move X Y`, `glide X0 Y0 X1 Y1 MS` (moves at 60 Hz
-/// for that long), `click X Y`, `key NAME` (a key with no modifiers but Shift, such as `right` or `shift-tab`), `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in
-/// the window, from its top left.
+/// for that long), `click X Y`, `key NAME` (a key after any of `cmd-`, `alt-`, and `shift-`, such as `right`, `shift-tab`,
+/// or `cmd-alt-2`), `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in the window,
+/// from its top left.
 fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
     let Some(script) = var("DRUCK_POINTER").and_then(|path| std::fs::read_to_string(path).ok()) else {
         return;
@@ -286,12 +287,16 @@ fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
                 }
                 (Some("key"), _) => {
                     let name = words.get(1).copied().unwrap_or_default();
-                    let (shift, key) = name.strip_prefix("shift-").map_or((false, name), |key| (true, key));
+                    let (held, key) = name.rsplit_once('-').unwrap_or(("", name));
+                    let held = |modifier| held.split('-').any(|word| word == modifier);
+                    let modifiers = gpui::Modifiers {
+                        platform: held("cmd"),
+                        alt: held("alt"),
+                        shift: held("shift"),
+                        ..Default::default()
+                    };
                     let keystroke = gpui::Keystroke {
-                        modifiers: gpui::Modifiers {
-                            shift,
-                            ..Default::default()
-                        },
+                        modifiers,
                         key: key.to_owned(),
                         key_char: None,
                     };

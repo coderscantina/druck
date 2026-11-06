@@ -15,15 +15,10 @@ pub fn more_below(scroll: &ScrollHandle) -> bool {
     most > tokens::HAIRLINE && -offset < most
 }
 
-/// The fade over the foot of a list on the panel colour that has more below. Its parent is `relative`.
+/// The fade over the foot of a list on the panel colour that has more below, ending in a band of solid ground so a row
+/// the edge cuts shows no cut glyphs. Its parent is `relative`.
 pub fn foot_fade(tokens: &Tokens) -> gpui::Div {
-    foot_fade_on(tokens.panel)
-}
-
-/// The fade over the foot of a list on `ground` that has more below, ending in a band of solid ground so a row the
-/// edge cuts shows no cut glyphs. Its parent is `relative`.
-pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
-    let solid: Hsla = ground.into();
+    let solid: Hsla = tokens.panel.into();
     let clear = solid.opacity(tokens::CLEAR);
     let height = tokens::VERSIONS_ROW_HEIGHT + tokens::LIST_FOOT_COVER;
     div()

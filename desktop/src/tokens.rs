@@ -517,8 +517,7 @@ pub const MATERIAL_EDGE: Pixels = px(24.);
 pub const MATERIAL_EDGE_BAND: Pixels = px(120.);
 pub const MATERIAL_TICK_LIT: (Pixels, f32) = (px(48.), 0.9);
 pub const MATERIAL_REST: std::time::Duration = std::time::Duration::from_millis(350);
-/// The trail's header, and the longest an earlier place's name stands before it is cut.
-pub const MATERIAL_TRAIL_HEIGHT: Pixels = px(38.);
+/// The longest an earlier place's name stands in the trail before it is cut.
 pub const MATERIAL_TRAIL_STEP: Pixels = px(96.);
 pub const MATERIAL_TRAIL_ARROW: Pixels = px(10.);
 /// An item's text in the book's face at a small size, and an image or a table at the panel's width.

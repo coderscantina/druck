@@ -589,8 +589,6 @@ impl Render for SidebarView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .border_l_1()
-                    .border_color(tokens.divider)
                     .cursor_pointer()
                     .hover(|button| button.bg(tokens.raised))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::NewSection)))

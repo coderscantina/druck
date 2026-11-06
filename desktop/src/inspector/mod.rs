@@ -302,11 +302,7 @@ impl InspectorView {
             .relative()
             .flex_none()
             // As tall as the panel's header row, so the header's divider meets the active tab's foot.
-            .h(if self.write {
-                tokens::MATERIAL_TRAIL_HEIGHT
-            } else {
-                tokens::SECTION_HEIGHT
-            })
+            .h(tokens::SECTION_HEIGHT)
             .flex()
             .items_center()
             .justify_center()
