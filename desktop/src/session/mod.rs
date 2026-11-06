@@ -106,7 +106,9 @@ pub struct Chapter {
     /// The buffer's revision that is on disk.
     saved: u64,
     pub view: ChapterView,
+    /// What the text said about itself at the buffer's revision `outline_at`. Rows catch up on a pause.
     outline: Outline,
+    outline_at: u64,
 }
 
 impl Chapter {
@@ -122,6 +124,25 @@ impl Chapter {
             saved,
             view: ChapterView::default(),
             outline,
+            outline_at: saved,
+        }
+    }
+
+    /// Reads the outline again from the text, returning whether it changed.
+    fn read_outline(&mut self) -> bool {
+        let new = outline(self.buffer.text());
+        self.outline_at = self.buffer.revision();
+        let changed = new != self.outline;
+        self.outline = new;
+        changed
+    }
+
+    /// The outline of the text as it is now, read again only if the text changed since it was last read.
+    fn current_outline(&self) -> std::borrow::Cow<'_, Outline> {
+        if self.outline_at == self.buffer.revision() {
+            std::borrow::Cow::Borrowed(&self.outline)
+        } else {
+            std::borrow::Cow::Owned(outline(self.buffer.text()))
         }
     }
 
@@ -597,23 +618,25 @@ impl Session {
         contents
     }
 
-    /// The title a chapter's row shows.
-    /// The title a chapter of the book takes from its heading, for a file that is one. Other files have none.
-    pub fn chapter_title(&self, path: &Path) -> Option<String> {
-        let chapter = self.chapters.get(&self.chapter_of_file(path)?)?;
-        (chapter.group == Group::Book)
-            .then(|| chapter.outline.title.clone())
-            .flatten()
-    }
-
+    /// A chapter's name from its text as it is now, which the rows only catch up with on a pause.
     pub fn title_of(&self, id: ChapterId) -> String {
         self.chapters
             .get(&id)
-            .map(|chapter| self.row(id, chapter).title)
+            .map(|chapter| self.title(chapter, &chapter.current_outline()))
             .unwrap_or_default()
     }
 
     fn row(&self, id: ChapterId, chapter: &Chapter) -> Row {
+        Row {
+            id,
+            title: self.title(chapter, &chapter.outline),
+            kind: chapter.outline.kind,
+            number: None,
+            broken: matches!(chapter.read, Read::Missing | Read::Failed(_)),
+        }
+    }
+
+    fn title(&self, chapter: &Chapter, outline: &Outline) -> String {
         let stem = || {
             chapter
                 .path
@@ -621,21 +644,14 @@ impl Session {
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default()
         };
-        let title = match chapter.group {
+        match chapter.group {
             Group::Notes | Group::Research => self.note_title(chapter),
             Group::Manifest => MANIFEST.to_owned(),
-            Group::Book | Group::NotInBook => match (&chapter.outline.title, &self.kind) {
+            Group::Book | Group::NotInBook => match (&outline.title, &self.kind) {
                 (Some(title), _) => title.clone(),
                 (None, Kind::Single { .. }) => FRONT_MATTER.to_owned(),
                 (None, Kind::Project { .. }) => title_from_file(&stem()),
             },
-        };
-        Row {
-            id,
-            title,
-            kind: chapter.outline.kind,
-            number: None,
-            broken: matches!(chapter.read, Read::Missing | Read::Failed(_)),
         }
     }
 
@@ -824,7 +840,7 @@ impl Session {
             chapter.saved = buffer.revision();
             chapter.buffer = buffer;
             chapter.read = read;
-            chapter.outline = outline(chapter.buffer.text());
+            chapter.read_outline();
             let synced = Synced::new(chapter.buffer.text(), chapter.read == Read::Done);
             self.synced.insert(path.clone(), synced);
         }
@@ -841,19 +857,13 @@ impl Session {
         };
         chapter.buffer.transact(kind, edits, before, after, Instant::now())?;
         chapter.view.selection = after;
-        chapter.outline = outline(chapter.buffer.text());
+        chapter.read_outline();
         Ok(())
     }
 
     /// Reads a chapter's title and kind again after its text changed. Returns whether the sidebar should change.
     pub fn refresh_outline(&mut self, id: ChapterId) -> bool {
-        let chapter = self.known_mut(id);
-        let new = outline(chapter.buffer.text());
-        if new == chapter.outline {
-            return false;
-        }
-        chapter.outline = new;
-        true
+        self.known_mut(id).read_outline()
     }
 
     /// Whether any text in the session differs from its file.

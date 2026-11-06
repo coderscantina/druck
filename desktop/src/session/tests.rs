@@ -840,3 +840,27 @@ fn a_written_chapter_ends_in_one_line_break_and_its_buffer_keeps_what_was_typed(
         "A # Three {-}\n\nThird chapter text.\n"
     );
 }
+
+#[test]
+fn a_title_comes_from_the_text_as_it_is_now() {
+    let (folder, mut session) = project("title-now");
+    let path = folder.0.join("manuscript/two.md");
+    let two = session.chapter_of_file(&path).expect("two");
+    let base = folder.read("manuscript/two.md");
+    let restored = "<!-- notes -->\n\n# Restored title\n\n## A section\n\nText.\n";
+    session.restore_text(&path, &base, restored).expect("restores");
+    assert_eq!(session.title_of(two), "Restored title");
+    session.set_active(two);
+    let start = restored.find("Restored").expect("title");
+    let selection = Caret::caret(start);
+    (session.active_buffer_mut())
+        .transact(
+            EditKind::Typing,
+            vec![Edit::new(start..start + "Restored".len(), "Typed")],
+            selection,
+            selection,
+            std::time::Instant::now(),
+        )
+        .expect("edit");
+    assert_eq!(session.title_of(two), "Typed title");
+}

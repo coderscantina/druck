@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use druck::input::MANIFEST;
 
-use super::outline::outline;
 use super::{Chapter, ChapterId, Group, Kind, MANUSCRIPT, NOTES, RESEARCH, Read, Session};
 use crate::persist::atomic::{self, Outcome, content_hash};
 use crate::persist::merge::{edits_between, map_offset};
@@ -387,7 +386,7 @@ impl Session {
             let blocks = Blocks::parse(chapter.buffer.text());
             (blocks.index_at(start), offset)
         });
-        chapter.outline = outline(chapter.buffer.text());
+        chapter.read_outline();
         if chapter.read != Read::Later {
             chapter.read = Read::Done;
         }

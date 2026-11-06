@@ -858,10 +858,13 @@ impl Versions {
         self.persist.read(cx).has_conflict_in(path)
     }
 
-    /// A chapter's name for a list: the book's title for it, or its path.
-    /// How a list names a changed file: a chapter of the book by its title, anything else by its path in the book.
+    /// How a list names a changed file: a chapter of the book by its title, as the Binder names it, anything else by
+    /// its path in the book.
     fn title_of(&self, path: &Path, name: &str, cx: &App) -> String {
-        (self.session(cx).chapter_title(path)).unwrap_or_else(|| name.to_owned())
+        let session = self.session(cx);
+        (session.chapter_of_file(path))
+            .filter(|id| session.book().contains(id))
+            .map_or_else(|| name.to_owned(), |id| session.title_of(id))
     }
 
     fn book_folder(&self, cx: &App) -> Option<PathBuf> {
