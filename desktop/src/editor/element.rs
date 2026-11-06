@@ -35,7 +35,8 @@ impl Galley {
     }
 }
 
-/// Where this frame's rows of text stand down the window, so a card over the text can end its cover at one.
+/// Where this frame's rows of text stand down the window, so a card over the text can end its cover at one. The
+/// blank between two blocks holds no text, so it is no row here.
 pub struct TextRows(Vec<(Pixels, Pixels)>);
 
 impl Global for TextRows {}
@@ -43,12 +44,17 @@ impl Global for TextRows {}
 impl TextRows {
     fn of(frame: &Frame) -> Self {
         let rows = frame.blocks.iter().flat_map(|block| {
-            block.layout.lines.iter().flat_map(move |line| {
-                (0..line.rows.len()).map(move |row| {
-                    let top = block.top + line.y + line.line_height * row as f32;
-                    (top, top + line.line_height)
+            block
+                .layout
+                .lines
+                .iter()
+                .filter(|line| !line.skipped)
+                .flat_map(move |line| {
+                    (0..line.rows.len()).map(move |row| {
+                        let top = block.top + line.y + line.line_height * row as f32;
+                        (top, top + line.line_height)
+                    })
                 })
-            })
         });
         Self(rows.collect())
     }

@@ -542,6 +542,11 @@ impl TicksView {
     ) -> gpui::Stateful<gpui::Div> {
         let editor = self.editor.read(cx);
         let book_face = editor.body_font();
+        // While the pointer lights a row other than the caret's, the title and the caret's row step down to the
+        // normal row style, so the lit row is the one strongest.
+        let away = lit
+            .and_then(|lit| entries.get(lit))
+            .is_some_and(|entry| !matches!(entry, Entry::Heading { current: true, .. }));
         let rows: Vec<_> = entries
             .iter()
             .enumerate()
@@ -568,8 +573,8 @@ impl TicksView {
                 match entry {
                     Entry::Part(name) => row.text_color(tokens.text_quiet).child(name.clone()),
                     Entry::Title(name) => row
-                        .text_color(tokens.text)
-                        .font_weight(FontWeight::BOLD)
+                        .text_color(if away { tokens.text_quiet } else { tokens.text })
+                        .when(!away, |row| row.font_weight(FontWeight::BOLD))
                         .child(name.clone()),
                     Entry::Chapter(id, name) => row
                         .role(Role::ListItem)
@@ -588,7 +593,8 @@ impl TicksView {
                     Entry::Heading {
                         level, title, current, ..
                     } => {
-                        let first = *level == 1;
+                        let first = *level == 1 && (is_lit || !away);
+                        let caret = *current && !away;
                         let width = tokens::TICK_WIDTHS[usize::from((*level).clamp(1, 3)) - 1];
                         let indent = tokens::OUTLINE_INDENT * f32::from(level.saturating_sub(2));
                         row.role(Role::ListItem)
@@ -612,10 +618,8 @@ impl TicksView {
                                     .left(tokens::TICK_LEFT)
                                     .h(if is_lit { px(2.) } else { tokens::TICK_HEIGHT })
                                     .rounded(px(1.))
-                                    .bg(if *current {
+                                    .bg(if caret || is_lit {
                                         tokens.text
-                                    } else if is_lit {
-                                        tokens.text_quiet
                                     } else {
                                         tokens.text_faint
                                     })

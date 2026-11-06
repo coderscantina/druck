@@ -288,9 +288,9 @@ impl SettingsWindow {
         cx.notify();
     }
 
-    /// Puts the accent in use in its field.
+    /// Puts the accent the author chose in its field, not the darker one the tokens may draw on a light surface.
     fn show_accent(&mut self, cx: &mut Context<Self>) {
-        let shown = hex(rgba_u32(Tokens::get(cx).accent));
+        let shown = hex(get(cx).accent.unwrap_or(ACCENTS[0]));
         let same = self.accent.read(cx).text() == shown;
         if !same {
             self.accent.update(cx, |field, cx| field.set_value(shown, true, cx));

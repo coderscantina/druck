@@ -40,13 +40,15 @@ pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
 }
 
 /// Fades Write's text out under the bottom edge of a card that covers it, so no line shows cut there, as the pane's
-/// foot does: the rest of a row the edge crosses is covered, and the fade starts below it. It stands before the card
-/// in a parent that holds both, so the card's shadow stays over it.
+/// foot does: the rest of a row the edge crosses is covered, and the fade starts below it. When no row crosses the
+/// edge, nothing is drawn. It stands before the card in a parent that holds both, so the card's shadow stays over it.
 pub fn fade_under_card(tokens: &Tokens) -> gpui::Div {
     let solid: Hsla = tokens.canvas.into();
     let paint = move |bounds: Bounds<Pixels>, _: (), window: &mut Window, cx: &mut App| {
         let foot = bounds.top();
-        let cut = crate::editor::TextRows::end_of_row_at(foot, cx).unwrap_or(foot);
+        let Some(cut) = crate::editor::TextRows::end_of_row_at(foot, cx) else {
+            return;
+        };
         let width = bounds.size.width;
         window.paint_quad(fill(Bounds::new(bounds.origin, size(width, cut - foot)), solid));
         let fade = Bounds::new(point(bounds.left(), cut), size(width, tokens::TEXT_FADE_HEIGHT));

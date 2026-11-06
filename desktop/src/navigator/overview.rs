@@ -630,6 +630,7 @@ impl Desk<'_> {
                     .gap(tokens::NAV_DESK_NUMBER_GAP)
                     .font_family(self.font.clone())
                     .text_size(tokens::NAV_DESK_CARD_TITLE)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .line_height(tokens::NAV_DESK_TITLE_LEADING)
                     .children(entry.row.number.map(|number| {
                         div()
