@@ -1482,8 +1482,18 @@ impl EditorView {
         (range.start + line.display.to_source(display), upstream)
     }
 
+    /// The caret's rectangle. On a blank line lower than the body's, such as the one after a table, it keeps the body's
+    /// height from the line's top, so it reaches into the room above the next block and not into the one before.
     fn caret_bounds(&mut self, window: &Window) -> Option<Bounds<Pixels>> {
-        self.offset_bounds(self.selection.head, self.upstream, window)
+        let caret = self.offset_bounds(self.selection.head, self.upstream, window)?;
+        let body = self.style.body_size * self.style.leading;
+        let list = self.blocks.as_slice();
+        let blank =
+            (list.get(self.blocks.index_at(self.selection.head))).is_some_and(|block| block.kind == BlockKind::Blank);
+        if self.source || !blank || caret.size.height >= body {
+            return Some(caret);
+        }
+        Some(Bounds::new(caret.origin, size(caret.size.width, body)))
     }
 
     /// The window rectangle of a caret at `offset`, if its block is on screen.
