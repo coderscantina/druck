@@ -39,6 +39,8 @@ actions!(
         OptionsLeft,
         OptionsRight,
         OptionsAccept,
+        /// Steps the chosen value of the ghost's table options, or acts as [`OptionsAccept`] elsewhere.
+        OptionsToggle,
         /// Gives the keys back to the line, or to the slash menu.
         OptionsBack,
         OptionsUnwrap,
@@ -69,7 +71,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("left", OptionsLeft, context),
         KeyBinding::new("right", OptionsRight, context),
         KeyBinding::new("enter", OptionsAccept, context),
-        KeyBinding::new("space", OptionsAccept, context),
+        KeyBinding::new("space", OptionsToggle, context),
         KeyBinding::new("escape", OptionsBack, context),
         KeyBinding::new("cmd-backspace", OptionsUnwrap, context),
     ]);
@@ -349,6 +351,11 @@ impl EditorView {
         }
     }
 
+    /// Forgets where the last frame's second columns stood, before laying out again.
+    pub(super) fn clear_column_shifts(&mut self) {
+        self.directives.shifted.clear();
+    }
+
     /// Lays out a run whose top is at window `y`, adding its blocks to what is on screen. Returns its height.
     pub(super) fn lay_out_run(&mut self, run: Range<usize>, y: Pixels, window: &Window) -> Pixels {
         let RunPlaces { places, height } = self.run_places(run, window);
@@ -356,8 +363,6 @@ impl EditorView {
             self.visible.push((index, y + dy));
             if dx > px(0.) {
                 self.directives.shifted.insert(index, dx);
-            } else {
-                self.directives.shifted.remove(&index);
             }
         }
         height

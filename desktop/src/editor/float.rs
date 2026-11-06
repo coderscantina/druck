@@ -678,7 +678,7 @@ impl EditorView {
         };
         if matches!(action, Action::Insert(slash::Standalone::ListTable))
             && let Some(ghost) = self.directives.ghost_table.take()
-            && ghost != super::directives::GhostTable::default()
+            && ghost.options != super::directives::GhostTable::default().options
         {
             with_table_options(&mut command, &ghost.options.opening_line());
         }

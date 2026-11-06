@@ -1416,6 +1416,7 @@ impl EditorView {
         let mut retried = false;
         loop {
             self.visible.clear();
+            self.clear_column_shifts();
             let mut y = viewport.top() - self.scroll.offset;
             let mut index = self.scroll.block;
             while index < block_count && y < viewport.bottom() {
@@ -1726,6 +1727,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::options_left))
             .on_action(cx.listener(Self::options_right))
             .on_action(cx.listener(Self::options_accept))
+            .on_action(cx.listener(Self::options_toggle))
             .on_action(cx.listener(Self::options_back))
             .on_action(cx.listener(Self::options_unwrap))
             .on_action(cx.listener(Self::full_width_from_caret))

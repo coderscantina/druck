@@ -13,7 +13,7 @@ use super::edits::{self, Align};
 use super::strings::Key;
 use super::{
     FullWidthFromCaret, GhostOptions, GhostTable, Kind, OptionsAccept, OptionsBack, OptionsDown, OptionsFocus,
-    OptionsLeft, OptionsRight, OptionsUnwrap, OptionsUp,
+    OptionsLeft, OptionsRight, OptionsToggle, OptionsUnwrap, OptionsUp,
 };
 use crate::editor::commands::slash::{Action, Standalone};
 use crate::editor::element::{Frame, FrameBlock};
@@ -471,6 +471,16 @@ impl EditorView {
     }
 
     pub(in crate::editor) fn options_accept(&mut self, _: &OptionsAccept, window: &mut Window, cx: &mut Context<Self>) {
+        // Return on the ghost's options inserts the table with them, as Return in the menu does.
+        if let Some(ghost) = self.directives.ghost_table.as_mut().filter(|ghost| ghost.keys) {
+            ghost.keys = false;
+            self.menu_accept(&crate::editor::MenuAccept, window, cx);
+            return;
+        }
+        self.options_toggle(&OptionsToggle, window, cx);
+    }
+
+    pub(in crate::editor) fn options_toggle(&mut self, _: &OptionsToggle, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ghost) = self.directives.ghost_table.as_mut().filter(|ghost| ghost.keys) {
             let column = ghost.column;
             if ghost.row == 0 {
@@ -648,7 +658,8 @@ impl EditorView {
         let end = |text: SharedString| {
             div()
                 .ml_auto()
-                .flex_none()
+                .min_w_0()
+                .truncate()
                 .text_size(tokens::TEXT_SMALL)
                 .text_color(tokens.text_faint)
                 .child(text)
@@ -708,7 +719,7 @@ impl EditorView {
                     .hover(|row| row.bg(tokens.raised))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| this.act(index, None, window, cx)))
-                    .child(end(words.clone().into()).min_w_0().truncate())
+                    .child(end(words.clone().into()))
                     .into_any_element(),
                 Row::Unwrap => row_base(index, crate::t!(Key::Unwrap).into(), "icons/directive-unwrap.svg")
                     .cursor_pointer()
