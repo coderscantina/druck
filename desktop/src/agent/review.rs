@@ -358,7 +358,9 @@ impl AgentView {
     /// there, then from the disk. Nothing of the author's is in it, since it has no text left.
     fn remove_created_file(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let listed = relative(&self.base, path);
-        let manifest = self.editor.read(cx).session().manifest_path();
+        let session = self.editor.read(cx).session();
+        let manifest = session.manifest_path();
+        let on_screen = session.chapter_of_file(path) == Some(session.active());
         if let Some(manifest) = manifest
             && let Ok(mine) = std::fs::read_to_string(&manifest)
         {
@@ -399,6 +401,13 @@ impl AgentView {
             );
         });
         crate::persist::forget_copy(path, cx);
+        // The chapter on screen went, so the text goes back to where Next came from, not to the book's first chapter.
+        if let Some(chapter) = self.left_by_next.filter(|_| on_screen)
+            && self.editor.read(cx).session().chapter(chapter).is_some()
+        {
+            self.editor
+                .update(cx, |editor, cx| editor.show_chapter(chapter, window, cx));
+        }
     }
 
     /// Rejects a passage and asks the agent for another go at it.
@@ -462,6 +471,7 @@ impl AgentView {
         else {
             return;
         };
+        self.left_by_next = Some(active);
         let first = (0..=self.conversation.current_turn().unwrap_or(0)).find_map(|turn| {
             let changes = self.conversation.changes(turn)?;
             let file = changes.files.iter().find(|file| file.chapter == Some(next))?;

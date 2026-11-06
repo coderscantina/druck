@@ -248,6 +248,8 @@ pub struct AgentView {
     applied_notes: Vec<review::AppliedNote>,
     /// Changes the author took back since the last turn, for the next one to hear.
     rejections: Vec<String>,
+    /// The chapter Next last left, which the text goes back to if a reject takes away the chapter Next went to.
+    left_by_next: Option<ChapterId>,
     /// The setup lines were opened after they folded.
     setup_open: bool,
     turn_start: Option<TurnStart>,
@@ -404,6 +406,7 @@ impl AgentView {
             replying: None,
             applied_notes: Vec::new(),
             rejections: Vec::new(),
+            left_by_next: None,
             setup_open: false,
             turn_start: None,
             approvals_seen: 0,
