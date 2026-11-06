@@ -64,6 +64,7 @@ impl EditorView {
         self.rich.atoms = rich::atoms(self.session.active_buffer().text(), &self.blocks);
         self.read_directives();
         review::shift(&mut self.review, &mut self.advice, &splice);
+        self.pins.shift(&splice);
     }
 
     pub(super) fn replace_selection(

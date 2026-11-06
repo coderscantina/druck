@@ -66,6 +66,7 @@ pub use keys::*;
 use keys::{CONTEXT, MENU_CONTEXT};
 use layout::{BlockLayout, Column, GalleyStyle, ShapeRequest, shape_block};
 use margin::ChapterNotes;
+pub use margin::{PinCard, PinClicked, PinGroup, PinVerb, bind_pin_keys};
 use trace::Trace;
 
 /// Mounts what this slice shows around the text: the chapter's notes, and the rich blocks' tabs.
@@ -191,6 +192,8 @@ pub struct EditorView {
     review: Vec<review::Passage>,
     /// An agent's notes beside the active chapter.
     advice: Vec<review::Advice>,
+    /// Material pinned to the active chapter's paragraphs.
+    pins: margin::Pins,
     /// The passage a conflict on the line at the foot is about.
     conflict_mark: Option<Range<usize>>,
     /// Where that passage's rows stood in the last frame, in the window, when any were on screen.
@@ -376,6 +379,7 @@ impl EditorView {
             marked: None,
             review: Vec::new(),
             advice: Vec::new(),
+            pins: margin::Pins::default(),
             conflict_mark: None,
             conflict_rows: None,
             conflict_room: px(0.),
@@ -1440,7 +1444,7 @@ impl EditorView {
     }
 
     fn set_viewport(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
-        let notes = !self.advice.is_empty() || (!self.source && self.has_later_comment());
+        let notes = !self.advice.is_empty() || (!self.source && (self.has_later_comment() || self.pins.want_margin()));
         let column = Column::place(bounds, self.measure(), notes);
         if column.text_width != self.column.text_width {
             for slot in &self.slots {
@@ -1728,6 +1732,7 @@ impl Render for EditorView {
             .key_context(context)
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::next_pin))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::delete_word_left))
             .on_action(cx.listener(Self::delete_word_right))

@@ -31,6 +31,7 @@ mod gate {
 }
 mod inspector;
 mod launch;
+mod material;
 mod navigator;
 mod open_urls;
 mod palette;

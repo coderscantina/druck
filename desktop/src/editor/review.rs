@@ -260,7 +260,7 @@ impl EditorView {
     }
 
     /// The window height a visible offset's block starts at, with its line's own height added for a block of many lines.
-    fn first_line_top(&self, offset: usize) -> Option<Pixels> {
+    pub(super) fn first_line_top(&self, offset: usize) -> Option<Pixels> {
         let index = self.blocks.index_at(offset);
         let (_, top) = self.visible.iter().find(|(visible, _)| *visible == index)?;
         let layout = self.slots[index].layout.as_ref()?;
@@ -347,6 +347,7 @@ impl EditorView {
     pub(super) fn forget_review(&mut self) {
         self.review.clear();
         self.advice.clear();
+        self.pins.clear();
         self.open_comments.clear();
         self.comment_focus.clear();
     }

@@ -56,11 +56,16 @@ pub enum Tab {
     Git,
     Proof,
     Export,
+    /// Write's tabs: supporting material. See `crate::material`.
+    Research,
+    Notes,
+    Probes,
 }
 
 impl Tab {
     const TOP: [Self; 4] = [Self::Details, Self::Styles, Self::Fonts, Self::Images];
     const BOTTOM: [Self; 4] = [Self::Agent, Self::Git, Self::Proof, Self::Export];
+    const WRITE: [Self; 3] = [Self::Research, Self::Notes, Self::Probes];
 
     /// The tab of this name. For screenshots.
     #[cfg(any(debug_assertions, feature = "measure"))]
@@ -68,6 +73,7 @@ impl Tab {
         Self::TOP
             .into_iter()
             .chain(Self::BOTTOM)
+            .chain(Self::WRITE)
             .find(|tab| tab.id().strip_prefix("tab-") == Some(name))
     }
 
@@ -81,6 +87,9 @@ impl Tab {
             Self::Git => "tab-git",
             Self::Export => "tab-export",
             Self::Agent => "tab-agent",
+            Self::Research => "tab-research",
+            Self::Notes => "tab-notes",
+            Self::Probes => "tab-probes",
         }
     }
 
@@ -94,6 +103,9 @@ impl Tab {
             Self::Git => "icons/git.svg",
             Self::Export => "icons/export.svg",
             Self::Agent => "icons/agent.svg",
+            Self::Research => "icons/book.svg",
+            Self::Notes => "icons/notes.svg",
+            Self::Probes => "icons/probe.svg",
         }
     }
 
@@ -107,12 +119,18 @@ impl Tab {
             Self::Git => Key::TabGit,
             Self::Export => Key::TabExport,
             Self::Agent => Key::TabAgent,
+            Self::Research => Key::TabResearch,
+            Self::Notes => Key::TabNotes,
+            Self::Probes => Key::TabProbes,
         })
     }
 }
 
 pub struct InspectorView {
     active: Tab,
+    /// The rail stands in Write, with Write's tabs and their own active one.
+    write: bool,
+    write_active: Tab,
     /// The view each tab shows. A tab shows on the rail once its slice has mounted a panel with [`Self::mount`].
     panels: HashMap<Tab, AnyView>,
     /// Tabs that want the author's eye while another tab is open, shown as a dot on the rail.
@@ -152,6 +170,8 @@ impl InspectorView {
         ];
         Self {
             active: Tab::Details,
+            write: false,
+            write_active: Tab::Research,
             panels: HashMap::from([(Tab::Styles, index.clone().into()), (Tab::Fonts, fonts.clone().into())]),
             attention: HashSet::new(),
             #[cfg(any(debug_assertions, feature = "measure"))]
@@ -201,13 +221,44 @@ impl InspectorView {
 
     /// Shows a tab.
     pub fn show(&mut self, tab: Tab, cx: &mut Context<Self>) {
-        self.active = tab;
+        self.show_quietly(tab, cx);
         cx.emit(TabShown(tab));
+    }
+
+    /// Shows a tab without telling its panel, which has already been given what to show.
+    pub fn show_quietly(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        if Tab::WRITE.contains(&tab) {
+            self.write_active = tab;
+        } else {
+            self.active = tab;
+        }
         cx.notify();
     }
 
+    /// Publish's active tab.
     pub fn active(&self) -> Tab {
         self.active
+    }
+
+    /// Whether Write's rail shows one of its own tabs.
+    pub fn active_is_material(&self) -> bool {
+        Tab::WRITE.contains(&self.write_active)
+    }
+
+    /// Puts the rail in Write, with its tabs, or back in Publish. Publish's active tab is told again, so what follows it,
+    /// such as the proof marks, is right.
+    pub fn set_write(&mut self, write: bool, cx: &mut Context<Self>) {
+        if self.write != write {
+            self.write = write;
+            if !write {
+                cx.emit(TabShown(self.active));
+            }
+            cx.notify();
+        }
+    }
+
+    fn shown_tab(&self) -> Tab {
+        if self.write { self.write_active } else { self.active }
     }
 
     /// Shows a style's place in the Style tab: its own section, or its row's detail.
@@ -242,7 +293,7 @@ impl InspectorView {
 
     fn rail_button(&self, tab: Tab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx);
-        let active = tab == self.active;
+        let active = tab == self.shown_tab();
         let attention = self.attention.contains(&tab) && !active;
         div()
             .id(tab.id())
@@ -285,7 +336,12 @@ impl Render for InspectorView {
                 .filter(|tab| self.panels.contains_key(tab) && (*tab != Tab::Agent || agent_on))
                 .collect()
         };
-        let (top, bottom) = (mounted(&Tab::TOP), mounted(&Tab::BOTTOM));
+        let (top, bottom) = if self.write {
+            (mounted(&Tab::WRITE), Vec::new())
+        } else {
+            (mounted(&Tab::TOP), mounted(&Tab::BOTTOM))
+        };
+        let shown = self.shown_tab();
         let top: Vec<_> = top.into_iter().map(|tab| self.rail_button(tab, cx)).collect();
         let bottom: Vec<_> = bottom.into_iter().map(|tab| self.rail_button(tab, cx)).collect();
         let tokens = Tokens::get(cx);
@@ -295,16 +351,16 @@ impl Render for InspectorView {
             .tab_index(tokens::TAB_PANEL)
             .tab_stop(false)
             .role(Role::TabPanel)
-            .aria_label(self.active.label())
-            .flex_none()
-            .w(tokens::INSPECTOR_WIDTH)
+            .aria_label(shown.label())
+            .when(self.write, |panel| panel.flex_1().min_w_0())
+            .when(!self.write, |panel| panel.flex_none().w(tokens::INSPECTOR_WIDTH))
             .flex()
             .flex_col()
             .bg(tokens.panel)
             .border_l_1()
             .border_color(tokens.divider);
-        let panel = panel.when(self.active == Tab::Styles, |panel| panel.children(self.picker.clone()));
-        let panel = panel.children(self.panels.get(&self.active).cloned());
+        let panel = panel.when(shown == Tab::Styles, |panel| panel.children(self.picker.clone()));
+        let panel = panel.children(self.panels.get(&shown).cloned());
         let rail = div()
             .id("inspector-rail")
             .tab_group()
@@ -321,7 +377,12 @@ impl Render for InspectorView {
             .border_color(tokens.divider)
             .child(div().flex().flex_col().children(top))
             .child(div().flex().flex_col().children(bottom));
-        div().flex_none().h_full().flex().child(panel).child(rail)
+        div()
+            .when(self.write, |root| root.size_full())
+            .when(!self.write, |root| root.flex_none().h_full())
+            .flex()
+            .child(panel)
+            .child(rail)
     }
 }
 

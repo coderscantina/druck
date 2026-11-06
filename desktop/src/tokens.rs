@@ -440,6 +440,46 @@ pub const TAB_RIGHT: isize = 4;
 /// A control that cannot be used right now.
 pub const DISABLED_OPACITY: f32 = 0.4;
 
+/// Pins in the right margin: a rule for one, shorter rules stacked for several, at most this many, standing this far
+/// below the paragraph's first line's top, and the count beside them while they are folded.
+pub const PIN_RULE: Pixels = px(14.);
+pub const PIN_RULE_SHORT: Pixels = px(8.);
+pub const PIN_RULE_GAP: Pixels = px(3.);
+pub const PIN_RULES_SHOWN: usize = 4;
+pub const PIN_RULE_TOP: Pixels = px(7.);
+pub const PIN_COUNT_TEXT: Pixels = px(10.);
+/// The open stack of pins: its header and foot, its line, and the excerpt in the book's face, cut to a few lines.
+pub const PIN_HEADER_HEIGHT: Pixels = px(28.);
+pub const PIN_LINE_HEIGHT: Pixels = px(16.);
+pub const PIN_EXCERPT_TEXT: Pixels = px(13.);
+pub const PIN_EXCERPT_LINE: Pixels = px(19.);
+pub const PIN_EXCERPT_LINES: usize = 6;
+/// The material panel in Write, wider than Publish's for reading, and how narrow it gets before it gives way.
+pub const MATERIAL_PANEL_WIDTH: Pixels = px(336.);
+pub const MATERIAL_PANEL_MIN_WIDTH: Pixels = px(280.);
+/// The faint tick at Write's right edge, the strip the pointer rests on to open the rail, and how long it rests. The
+/// strip stands left of the text's scrollbar, so a drag on the scrollbar never opens the rail.
+pub const MATERIAL_TICK: (Pixels, Pixels) = (px(3.), px(32.));
+pub const MATERIAL_TICK_INSET: Pixels = px(4.);
+pub const MATERIAL_TICK_OPACITY: f32 = 0.45;
+pub const MATERIAL_EDGE: Pixels = px(14.);
+pub const MATERIAL_REST: std::time::Duration = std::time::Duration::from_millis(350);
+/// The trail's header, and the longest an earlier place's name stands before it is cut.
+pub const MATERIAL_TRAIL_HEIGHT: Pixels = px(38.);
+pub const MATERIAL_TRAIL_STEP: Pixels = px(96.);
+pub const MATERIAL_TRAIL_ARROW: Pixels = px(10.);
+/// An item's text in the book's face at a small size, and an image or a table at the panel's width.
+pub const MATERIAL_READING_TEXT: Pixels = px(15.);
+pub const MATERIAL_READING_LINE: Pixels = px(23.);
+pub const MATERIAL_IMAGE_HEIGHT: Pixels = px(180.);
+pub const MATERIAL_TABLE_ROWS: usize = 40;
+pub const MATERIAL_ROW_HEIGHT: Pixels = px(28.);
+/// The library card: its width, its results' column, its panes' height, and its preview's image.
+pub const LIBRARY_WIDTH: Pixels = px(680.);
+pub const LIBRARY_RESULTS_WIDTH: Pixels = px(372.);
+pub const LIBRARY_PANES_HEIGHT: Pixels = px(236.);
+pub const LIBRARY_IMAGE_HEIGHT: Pixels = px(112.);
+
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;

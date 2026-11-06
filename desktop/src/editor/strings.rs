@@ -70,5 +70,10 @@ crate::strings! {
         PlaceholderCell => ("Cell", "Zelle"),
         PlaceholderCaption => ("Caption", "Bildunterschrift"),
         PlaceholderFootnote => ("Footnote text.", "Text der Fußnote."),
+        Pinned => ("{count} pinned", "{count} angeheftet"),
+        PinNextKey => ("\u{2325}\u{2193} Next pin", "\u{2325}\u{2193} Nächste"),
+        PinInsertKey => ("\u{21e7}\u{21a9} Insert", "\u{21e7}\u{21a9} Einfügen"),
+        PinOpen => ("Open", "Öffnen"),
+        Unpin => ("Unpin", "Lösen"),
     }
 }
