@@ -257,8 +257,13 @@ impl Hub {
             }
         };
         let finished = matches!(state, RunState::Done { .. });
+        let failed = matches!(state, RunState::Failed);
         self.exports.panel.update(cx, |panel, cx| panel.set_run(state, cx));
         self.refresh_report(cx);
+        // The export's errors are the report's first group, so its first error is why it did not run.
+        if failed && !self.problem_places.is_empty() {
+            self.go_to_problem(0, window, cx);
+        }
         self.refresh_export(window, cx);
         // The run button that had the keys is gone. An author who went on to the text keeps them there.
         let in_the_text = self.parts.editor.read(cx).focus_handle(cx).contains_focused(window, cx)

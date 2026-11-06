@@ -125,6 +125,7 @@ crate::strings! {
         LineNumber => ("Line {line}", "Zeile {line}"),
         ProjectSection => ("Project", "Projekt"),
         ExportFailed => ("Export \"{name}\" failed", "Export \u{201e}{name}\u{201c} fehlgeschlagen"),
+        ExportGroup => ("Export \"{name}\"", "Export \u{201e}{name}\u{201c}"),
         Dismiss => ("Dismiss", "Schließen"),
 
         // Export

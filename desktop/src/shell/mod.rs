@@ -36,7 +36,6 @@ pub mod ui;
 
 use std::path::Path;
 
-use druck::diagnostic::Diagnostic;
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window,
     prelude::*,
@@ -478,16 +477,13 @@ impl Hub {
         if preview.is_specimen() {
             return;
         }
-        let mut errors: Vec<Diagnostic> = preview.diagnostics().to_vec();
+        let errors = preview.diagnostics();
         // Warnings of pages that are no longer the latest text say nothing.
-        let warnings = if errors.is_empty() {
-            preview.warnings().to_vec()
-        } else {
-            Vec::new()
-        };
-        let notice = self.exports.failure.as_ref().map(|(name, failed)| {
-            errors.extend(failed.iter().cloned());
-            crate::t!(Key::ExportFailed, name = name)
+        let warnings = if errors.is_empty() { preview.warnings() } else { &[] };
+        let notice = (self.exports.failure.as_ref()).map(|(name, _)| crate::t!(Key::ExportFailed, name = name));
+        let refused = (self.exports.failure.as_ref()).map(|(name, errors)| report::Refused {
+            title: crate::t!(Key::ExportGroup, name = name),
+            errors,
         });
         let session = self.parts.editor.read(cx).session();
         let title = session.details().title.clone();
@@ -496,10 +492,18 @@ impl Hub {
         } else {
             title.as_str()
         };
-        let report = report::build(session, &errors, &warnings, &self.facts.all(), general, &|page| {
-            let (file, offset) = preview.first_place(page)?;
-            session.locate(&file, offset)
-        });
+        let report = report::build(
+            session,
+            errors,
+            warnings,
+            refused,
+            &self.facts.all(),
+            general,
+            &|page| {
+                let (file, offset) = preview.first_place(page)?;
+                session.locate(&file, offset)
+            },
+        );
         let marks = report.marks();
         let problems: Vec<Problem> = report
             .entries()

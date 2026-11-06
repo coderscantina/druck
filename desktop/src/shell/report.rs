@@ -185,16 +185,34 @@ fn entry(
     )
 }
 
-/// The report for the engine's `errors` and `warnings` and the placeholders in the cache. `general` names the section of
-/// what belongs to no chapter. `page_place` says where a page's first text is written.
+/// Why an export did not run: its errors, which the report lists first under `title`, so the author sees them before
+/// the pages' own problems.
+pub struct Refused<'a> {
+    pub title: String,
+    pub errors: &'a [Diagnostic],
+}
+
+/// The report for the engine's `errors` and `warnings`, an export that was `refused`, and the placeholders in the cache.
+/// `general` names the section of what belongs to no chapter. `page_place` says where a page's first text is written.
 pub fn build(
     session: &Session,
     errors: &[Diagnostic],
     warnings: &[Diagnostic],
+    refused: Option<Refused>,
     facts: &HashMap<ChapterId, Facts>,
     general: &str,
     page_place: &dyn Fn(usize) -> Option<(ChapterId, usize)>,
 ) -> Report {
+    let mut sections = Vec::new();
+    if let Some(refused) = refused {
+        sections.push(Section {
+            chapter: None,
+            title: refused.title,
+            entries: (refused.errors.iter())
+                .map(|error| entry(session, error, page_place).1)
+                .collect(),
+        });
+    }
     let mut loose = Vec::new();
     let mut by_chapter: HashMap<ChapterId, Vec<Entry>> = HashMap::new();
     for diagnostic in errors.iter().chain(warnings) {
@@ -216,7 +234,6 @@ pub fn build(
             });
         }
     }
-    let mut sections = Vec::new();
     if !loose.is_empty() {
         sections.push(Section {
             chapter: None,
@@ -287,7 +304,9 @@ mod tests {
     fn entries_group_by_chapter_in_book_order_with_a_click_target() {
         let (dir, session) = project("group");
         let problems = [warning(&session, "two.md", 5), warning(&session, "two.md", 3)];
-        let report = build(&session, &[], &problems, &facts_of(&session), "Project", &|_| None);
+        let report = build(&session, &[], &problems, None, &facts_of(&session), "Project", &|_| {
+            None
+        });
         let titles: Vec<_> = report.sections.iter().map(|section| section.title.as_str()).collect();
         assert_eq!(titles, ["One", "Two"]);
         let two = &report.sections[1];
@@ -305,12 +324,13 @@ mod tests {
     fn a_dot_says_error_over_placeholder_and_a_page_warning_says_nothing() {
         let (dir, session) = project("marks");
         let book = session.book().to_vec();
-        let open = build(&session, &[], &[], &facts_of(&session), "Project", &|_| None);
+        let open = build(&session, &[], &[], None, &facts_of(&session), "Project", &|_| None);
         assert_eq!(open.marks(), HashMap::from([(book[0], Mark::Placeholder)]));
         let both = build(
             &session,
             &[],
             &[warning(&session, "one.md", 1)],
+            None,
             &facts_of(&session),
             "Project",
             &|_| None,
@@ -333,7 +353,7 @@ mod tests {
         let mut theme = Diagnostic::error("unknown property");
         theme.source = Some(Source::Theme(session.base_dir().join("theme.json")));
         theme.location = Some(Location { line: 4, column: 2 });
-        let report = build(&session, &[theme], &[], &HashMap::new(), "Project", &|_| None);
+        let report = build(&session, &[theme], &[], None, &HashMap::new(), "Project", &|_| None);
         assert_eq!(report.sections[0].chapter, None);
         assert_eq!(report.sections[0].entries[0].message, "theme.json:4: Unknown property");
         assert!(report.marks().is_empty());
@@ -347,12 +367,40 @@ mod tests {
         let mut short = Diagnostic::error("page 3 ends short");
         short.severity = Severity::Warning;
         short.page = Some(2);
-        let report = build(&session, &[], &[short], &HashMap::new(), "Project", &|page| {
+        let report = build(&session, &[], &[short], None, &HashMap::new(), "Project", &|page| {
             (page == 2).then_some((two, 7))
         });
         assert_eq!(report.sections[0].chapter, Some(two));
         let entry = &report.sections[0].entries[0];
         assert_eq!((entry.page, entry.place), (Some(2), Some((two, 7))));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_refused_exports_errors_come_first_with_their_places() {
+        let (dir, session) = project("refused");
+        let mut image = Diagnostic::error("export \"print\" is final, but this image is not there: a.png");
+        image.source = Some(Source::Document(session.base_dir().join("manuscript/two.md")));
+        image.location = Some(Location { line: 5, column: 1 });
+        let refused = Refused {
+            title: "Export \"print\"".to_owned(),
+            errors: &[image],
+        };
+        let warnings = [warning(&session, "one.md", 1)];
+        let report = build(
+            &session,
+            &[],
+            &warnings,
+            Some(refused),
+            &facts_of(&session),
+            "Project",
+            &|_| None,
+        );
+        let titles: Vec<_> = report.sections.iter().map(|section| section.title.as_str()).collect();
+        assert_eq!(titles, ["Export \"print\"", "One"]);
+        let first = report.entries().next().expect("an entry");
+        assert_eq!(first.kind, Kind::Error);
+        assert_eq!(first.place.map(|(id, _)| id), Some(session.book()[1]));
         fs::remove_dir_all(dir).ok();
     }
 
