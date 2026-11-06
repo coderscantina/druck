@@ -57,8 +57,6 @@ pub struct MergeResumed;
 
 impl EventEmitter<MergeResumed> for PersistView {}
 
-/// The view the conflict keys go to.
-
 /// Binds the keys of the conflict prompt. They work wherever the focus is, as the prompt never takes it.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([

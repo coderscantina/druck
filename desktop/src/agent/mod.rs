@@ -86,8 +86,6 @@ const TURN_GRACE: Duration = Duration::from_millis(500);
 /// The models the selector offers, as the CLI's own `--model` aliases. The first is the CLI's own choice.
 const MODELS: [Option<&str>; 4] = [None, Some("haiku"), Some("sonnet"), Some("opus")];
 
-/// The view `Cmd+J` and [`unreviewed_changes`] go to: the open document's.
-
 /// Mounts the conversation as a tab of the inspector rail, and what shows over the text.
 pub fn mount(
     parts: &Parts,
