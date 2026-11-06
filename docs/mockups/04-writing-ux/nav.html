@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navigation boards</title>
+<link rel="stylesheet" href="druck.css">
+<style>
+.state { font-size: 11px; color: var(--faint); margin: 6px 0 -4px; }
+.ptr { position: absolute; width: 14px; height: 20px; z-index: 9; }
+.ptr path { fill: var(--text); stroke: var(--canvas); stroke-width: 1.2; stroke-linejoin: round; }
+
+/* Heading ticks, shared by the three topology boards. */
+.zone { position: absolute; left: 0; top: 0; bottom: 0; width: 36px; z-index: 3; }
+.t { position: absolute; left: 12px; height: 1.5px; background: color-mix(in srgb, var(--faint) 70%, transparent); transform: translateY(-50%); border-radius: 1px; }
+.t.l1 { width: 16px; } .t.l2 { width: 12px; } .t.l3 { width: 8px; }
+.t.cur { background: var(--text); }
+.tt { position: absolute; left: 48px; transform: translateY(-50%); white-space: nowrap; font: 12px/16px var(--ui); color: var(--faint); background: var(--canvas); padding: 0 4px; border-radius: 4px; box-shadow: 0 0 8px 6px var(--canvas); z-index: 4; }
+.tt.hov { font-size: 13px; color: var(--quiet); }
+.tt.far { color: color-mix(in srgb, var(--faint) 55%, transparent); }
+
+/* tick-b: scroll map. */
+.bracket { position: absolute; left: 7px; width: 4px; border: 1px solid color-mix(in srgb, var(--faint) 60%, transparent); border-right: 0; border-radius: 2px 0 0 2px; }
+.mapend { position: absolute; left: 14px; width: 3px; height: 1px; background: color-mix(in srgb, var(--faint) 40%, transparent); }
+.lad { position: absolute; transform: translateY(-50%); white-space: nowrap; font: 11.5px/16px var(--ui); color: var(--quiet); background: var(--canvas); padding: 0 4px; border-radius: 4px; box-shadow: 0 0 8px 6px var(--canvas); z-index: 4; }
+.lad small { font-size: 10px; color: var(--faint); margin-left: 5px; }
+.lad.hov { color: var(--text); }
+
+/* tick-c: unfold. */
+.col.dim { opacity: .45; }
+.wash { position: absolute; left: 0; top: 0; bottom: 0; width: 264px; background: linear-gradient(to right, var(--canvas) 78%, transparent); z-index: 2; }
+.ol { position: absolute; left: 0; z-index: 3; width: 252px; }
+.ol div { height: 24px; display: flex; align-items: center; white-space: nowrap; font: 13.5px/1 var(--book); color: var(--quiet); position: relative; }
+.ol .part { font: 11px var(--ui); color: var(--faint); }
+.ol .sib { color: var(--faint); }
+.ol .ch { color: var(--text); font-weight: 700; }
+.ol .hov { color: var(--text); }
+.ol .mark::before { content: ""; position: absolute; left: 26px; top: 11px; width: 8px; height: 1.5px; background: var(--text); }
+.today .t { width: 10px; }
+.today .t.cur { width: 18px; }
+
+/* files-a: spine shelf. */
+.hint { position: absolute; left: 20px; right: 20px; bottom: 6px; display: flex; gap: 16px; align-items: flex-end; }
+.hint .g { display: flex; gap: 3px; }
+.hint i { display: block; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 40%, transparent); }
+.hint i.cur { background: color-mix(in srgb, var(--text) 70%, transparent); }
+.fade { position: absolute; left: 0; right: 0; bottom: 0; height: 148px; background: linear-gradient(to bottom, transparent, var(--canvas) 34%); z-index: 2; }
+.shelf { position: absolute; left: 20px; right: 20px; bottom: 0; height: 112px; display: flex; gap: 16px; align-items: flex-end; padding-bottom: 10px; z-index: 3; }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.spines { display: flex; gap: 3px; align-items: flex-end; border-bottom: 1px solid color-mix(in srgb, var(--text) 22%, transparent); padding: 0 0 0; height: 70px; }
+.sp { height: 60px; background: var(--field); border: 1px solid var(--divider); border-bottom: 0; border-radius: 3px 3px 0 0; position: relative; padding: 13px 6px 0; overflow: visible; flex: none; }
+.sp::before { content: ""; position: absolute; left: 4px; right: 4px; top: 4px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 50%, transparent); }
+.sp.rev::before { background: var(--quiet); }
+.sp.fin::before { background: var(--text); }
+.sp .n { font: 15px/1 var(--book); color: var(--quiet); display: block; }
+.sp .ti { font: 10.5px/1.2 var(--ui); color: var(--faint); display: block; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp .v { writing-mode: vertical-rl; transform: rotate(180deg); font: 10px/1 var(--ui); color: var(--faint); position: absolute; left: 50%; bottom: 6px; margin-left: -5px; white-space: nowrap; max-height: 46px; overflow: hidden; text-overflow: ellipsis; }
+.sp.cur { background: var(--raised); transform: translateY(-6px); box-shadow: var(--float-shadow); border-bottom: 1px solid var(--divider); border-radius: 3px; }
+.sp.cur .n, .sp.cur .ti { color: var(--text); }
+.sp.hov { background: var(--raised); }
+.sp.hov .n { color: var(--text); }
+.sp .dot { position: absolute; right: 5px; top: 10px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.sp.loose { background: transparent; border-style: dashed; border-color: color-mix(in srgb, var(--faint) 60%, transparent); }
+.sp.loose::before { display: none; }
+.glabel { font-size: 11px; color: var(--faint); white-space: nowrap; height: 14px; }
+.flat { height: 13px; border: 1px solid var(--divider); background: var(--field); border-radius: 2px; font: 9.5px/11px var(--ui); color: var(--faint); padding: 0 5px; white-space: nowrap; }
+.aside { display: flex; flex-direction: column; gap: 6px; margin-left: 8px; padding-left: 16px; border-left: 1px solid var(--divider); }
+.aside .spines { gap: 6px; border-bottom-style: dashed; }
+.stack { display: flex; flex-direction: column; gap: 2px; align-self: flex-end; }
+.tip { position: absolute; bottom: 68px; left: 50%; transform: translateX(-50%); width: 204px; padding: 8px 10px; z-index: 5; }
+.tip .h { font-weight: 600; }
+.tip .m { font-size: 12px; color: var(--quiet); margin-top: 2px; }
+.tip .p { font-size: 12px; color: var(--accent); margin-top: 2px; }
+
+/* files-b: desk overview. */
+.desk { padding: 36px 48px 0; width: 100%; }
+.desk .head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+.desk .head b { font: 700 24px/1.2 var(--book); }
+.desk .head span { font-size: 12px; color: var(--faint); }
+.drow { display: grid; grid-template-columns: 140px repeat(4, 1fr); column-gap: 16px; margin-bottom: 12px; }
+.dlab { font: 14px/1.3 var(--book); color: var(--quiet); padding-top: 10px; }
+.dlab small { display: block; font: 11px/1.5 var(--ui); color: var(--faint); }
+.dc { height: 84px; border-top: 1px solid var(--divider); padding: 9px 10px 0; display: flex; flex-direction: column; }
+.dc .dt { font: 15px/1.25 var(--book); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc .dt i { font-style: normal; color: var(--faint); margin-right: 6px; }
+.dc .fl { font: 12.5px/1.35 var(--book); color: var(--quiet); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dc .ft { margin-top: auto; padding-bottom: 8px; display: flex; font-size: 11px; color: var(--faint); }
+.dc .ft span:last-child { margin-left: auto; }
+.dc .ft .bad { color: var(--accent); }
+.dc.focus { background: var(--raised); border-top-color: transparent; border-radius: 8px; }
+.dc.set { border-top: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent); }
+.dc.set .dt { color: var(--quiet); }
+.dc.list { border-top: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent); font-size: 12px; color: var(--quiet); gap: 4px; }
+.dc.list div { display: flex; }
+.dc.list div span { margin-left: auto; color: var(--faint); font-size: 11px; }
+.keys { position: absolute; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; gap: 24px; font-size: 11px; color: var(--faint); }
+.keys b { font-weight: 500; color: var(--quiet); margin-right: 5px; }
+
+/* files-c: path bar and columns. */
+.path { position: absolute; left: 76px; top: 0; height: 28px; display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--faint); }
+.path span { padding: 1px 6px; border-radius: 4px; }
+.path span.on { background: var(--raised); color: var(--text); }
+.path svg { width: 8px; height: 8px; }
+.path svg path { fill: none; stroke: color-mix(in srgb, var(--faint) 70%, transparent); stroke-width: 1.3; }
+.miller { position: absolute; left: 64px; top: 4px; display: flex; flex-direction: column; z-index: 5; overflow: hidden; }
+.mcols { display: flex; }
+.mc { padding: 6px 0; border-right: 1px solid var(--divider); }
+.mc:last-child { border-right: 0; }
+.mc .row { white-space: nowrap; margin: 0 6px; border-radius: 4px; padding: 0 8px; color: var(--quiet); }
+.mc .row .ic { font-size: 10px; }
+.mc .row.path-on { background: color-mix(in srgb, var(--raised) 55%, transparent); color: var(--text); }
+.mc .row.on { color: var(--text); }
+.mc .row .chev { margin-left: auto; color: var(--faint); font-size: 11px; }
+.mc .row .chev + .chev { margin-left: 0; }
+.mc .sub { padding-left: 22px; }
+.mc .cur::after { content: ""; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--text); flex: none; }
+.mc .divider { margin: 5px 14px; }
+.prev { width: 232px; padding: 14px 16px; font: 13px/1.5 var(--book); color: var(--quiet); }
+.prev b { display: block; font: 700 16px/1.25 var(--book); color: var(--text); margin-bottom: 8px; }
+.prev p { margin: 0 0 6px; }
+.prev .m { font: 11px var(--ui); color: var(--faint); margin-top: 10px; }
+.mfoot { border-top: 1px solid var(--divider); height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 14px; font-size: 11px; color: var(--faint); }
+.mfoot b { font-weight: 500; color: var(--quiet); margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<template id="bridge">
+  <h2>The bridge at Golling</h2>
+  <p>The bridge at Golling stood where the Salzach leaves its gorge and spreads into the basin, a timber span of eleven bays on stone piers. In 1392 the archbishop's men counted 4 860 loads across it between Easter and Martinmas, nearly all of them salt in barrels of two and a half Zentner <span class="chip">Klein 1998, 41</span>.</p>
+  <p class="indent">Every carter paid twice, once for the bridge and once for the road beyond it, and the two payments went to different purses. The bridge toll was fixed at four Kreuzer a wagon. The road toll rose and fell with the weight of the load, which is why the toll house kept a beam scale of its own, drawn in <span class="chip">Figure 5.2</span>.<span class="caret"></span></p>
+  <h3>What a toll collector earned</h3>
+  <p>The collector at Golling was paid in kind as much as in coin. His contract of 1418 grants him twelve Gulden a year, a cart of firewood, and one Kuffe of salt for every hundred loads he wrote into the book <span class="chip">Hofer 2004, 112</span>.</p>
+</template>
+
+<!-- Topic 1: the current file's headings -->
+
+<section class="board" id="tick-a">
+  <div class="cap"><b>Lens.</b> One tick per heading of the open chapter, its length set by the level, so the strip reads as the chapter's outline at a glance. On hover the ticks near the pointer grow like a dock and their titles surface in the margin, the hovered one clearest, so the pointer reads the outline without opening anything. The section holding the caret stays in full ink.</div>
+  <div class="state">At rest</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <i class="t l1" style="top:191px"></i>
+        <i class="t l2 cur" style="top:201px"></i>
+        <i class="t l3" style="top:211px"></i>
+        <i class="t l2" style="top:221px"></i>
+        <i class="t l3" style="top:231px"></i>
+        <i class="t l3" style="top:241px"></i>
+        <i class="t l2" style="top:251px"></i>
+        <i class="t l2" style="top:261px"></i>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">On hover, pointer over A tariff for every load</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <i class="t l1" style="top:174px"></i>
+        <i class="t cur" style="top:186px;width:14px"></i>
+        <i class="t" style="top:204px;width:12px"></i>
+        <i class="t" style="top:226px;width:24px;height:2px;background:var(--quiet)"></i>
+        <i class="t" style="top:248px;width:12px"></i>
+        <i class="t" style="top:266px;width:10px"></i>
+        <i class="t l2" style="top:278px"></i>
+        <i class="t l2" style="top:288px"></i>
+      </div>
+      <span class="tt far" style="top:186px">The bridge at Golling</span>
+      <span class="tt" style="top:204px">What a toll collector earned</span>
+      <span class="tt hov" style="top:226px">A tariff for every load</span>
+      <span class="tt" style="top:248px">Exemptions</span>
+      <span class="tt far" style="top:266px">Smuggling</span>
+      <svg class="ptr" style="left:22px;top:224px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="tick-b">
+  <div class="cap"><b>Scroll map.</b> Each tick sits at its heading's real place in the chapter, by word offset, and a faint bracket marks the stretch on screen, so the strip doubles as a scrollbar with landmarks. On hover the ticks become a ladder of titles with each section's word count, which shows where the chapter is long or thin. Where a and c answer "what is in here", this answers "how far along am I and how much is left".</div>
+  <div class="state">At rest</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <div class="bracket" style="top:80px;height:72px"></div>
+        <i class="t l1" style="top:48px;left:14px;width:12px"></i>
+        <i class="t cur" style="top:86px;left:14px;width:9px"></i>
+        <i class="t" style="top:142px;left:14px;width:6px"></i>
+        <i class="t" style="top:177px;left:14px;width:9px"></i>
+        <i class="t" style="top:226px;left:14px;width:6px"></i>
+        <i class="t" style="top:254px;left:14px;width:6px"></i>
+        <i class="t" style="top:320px;left:14px;width:9px"></i>
+        <i class="t" style="top:371px;left:14px;width:9px"></i>
+        <i class="mapend" style="top:404px"></i>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">On hover, pointer over A tariff for every load</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <div class="bracket" style="top:80px;height:72px"></div>
+        <i class="t" style="top:48px;left:14px;width:16px"></i>
+        <i class="t cur" style="top:86px;left:14px;width:12px"></i>
+        <i class="t" style="top:142px;left:14px;width:8px"></i>
+        <i class="t" style="top:177px;left:14px;width:16px;height:2px;background:var(--text)"></i>
+        <i class="t" style="top:226px;left:14px;width:8px"></i>
+        <i class="t" style="top:254px;left:14px;width:8px"></i>
+        <i class="t" style="top:320px;left:14px;width:12px"></i>
+        <i class="t" style="top:371px;left:14px;width:12px"></i>
+        <i class="mapend" style="top:404px"></i>
+      </div>
+      <span class="lad" style="top:48px;left:34px">Tolls and tariffs<small>420 words</small></span>
+      <span class="lad" style="top:86px;left:34px;color:var(--text)">The bridge at Golling<small>610 words</small></span>
+      <span class="lad" style="top:142px;left:46px">What a toll collector earned<small>380</small></span>
+      <span class="lad hov" style="top:177px;left:34px">A tariff for every load<small>540 words</small></span>
+      <span class="lad" style="top:226px;left:46px">Exemptions<small>310</small></span>
+      <span class="lad" style="top:254px;left:46px">Smuggling<small>720</small></span>
+      <span class="lad" style="top:320px;left:34px">The Emperor's cut<small>560 words</small></span>
+      <span class="lad" style="top:371px;left:34px">Back at Golling<small>360 words</small></span>
+      <svg class="ptr" style="left:26px;top:175px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="tick-c">
+  <div class="cap"><b>Unfold.</b> At rest the strip is today's quiet ticks, one per heading. On hover it unfolds in place into the chapter's outline, set in the book face like the book's own contents, with the neighbouring chapters as single lines above and below, and the text dims a little to give it room. Moving to the next chapter is the same gesture as moving to the next section.</div>
+  <div class="state">At rest</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone today">
+        <i class="t" style="top:196px"></i>
+        <i class="t cur" style="top:204.5px"></i>
+        <i class="t" style="top:213px"></i>
+        <i class="t" style="top:221.5px"></i>
+        <i class="t" style="top:230px"></i>
+        <i class="t" style="top:238.5px"></i>
+        <i class="t" style="top:247px"></i>
+        <i class="t" style="top:255.5px"></i>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">On hover, pointer over A tariff for every load</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="wash"></div>
+      <div class="ol" style="top:84px">
+        <div class="part" style="padding-left:28px">Part II, The road</div>
+        <div class="sib" style="padding-left:28px">4 Over the passes</div>
+        <div class="ch" style="padding-left:28px">5 Tolls and tariffs</div>
+        <div class="mark" style="padding-left:42px">The bridge at Golling</div>
+        <div style="padding-left:56px">What a toll collector earned</div>
+        <div class="hov" style="padding-left:42px">A tariff for every load</div>
+        <div style="padding-left:56px">Exemptions</div>
+        <div style="padding-left:56px">Smuggling</div>
+        <div style="padding-left:42px">The Emperor's cut</div>
+        <div style="padding-left:42px">Back at Golling</div>
+        <div class="sib" style="padding-left:28px">6 The river route</div>
+        <div class="sib" style="padding-left:28px">7 Winter crossing</div>
+      </div>
+      <svg class="ptr" style="left:196px;top:212px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="col dim" data-p="bridge"></div>
+    </div>
+  </div>
+</section>
+
+<!-- Topic 2: the file structure -->
+
+<section class="board" id="files-a">
+  <div class="cap"><b>Spine shelf.</b> The book stands as spines along the bottom edge, each as wide as its chapter is long, grouped by part, with the open chapter pulled forward. It rises when the pointer reaches the edge or on Cmd+\, a spine drags to a new place, the bar on top is the draft state (faint draft, grey revised, ink final), and the accent dot means open placeholders. At 40 chapters the spines narrow to their numbers with titles on hover, and a minimum width of 16 px keeps 40 targets in one row; files outside the book lie flat at the right end, loose drafts on a dashed shelf and research and notes as stacks that open a list.</div>
+  <div class="state">At rest, the shelf's trace along the bottom edge</div>
+  <div class="win" style="height:440px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge"></div>
+      <div class="hint">
+        <div class="g"><i style="width:16px"></i><i style="width:26px"></i></div>
+        <div class="g"><i style="width:74px"></i><i style="width:66px"></i><i style="width:59px"></i></div>
+        <div class="g"><i style="width:76px"></i><i class="cur" style="width:75px"></i><i style="width:66px"></i><i style="width:58px"></i></div>
+        <div class="g"><i style="width:79px"></i><i style="width:62px"></i><i style="width:50px"></i></div>
+        <div class="g"><i style="width:25px"></i><i style="width:16px"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="state">Revealed, pointer over 9 The ledger</div>
+  <div class="win" style="height:520px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge"></div>
+      <div class="fade"></div>
+      <div class="shelf">
+        <div class="grp">
+          <div class="glabel"></div>
+          <div class="spines">
+            <div class="sp fin" style="width:16px"><span class="v">Title</span></div>
+            <div class="sp rev" style="width:26px"><span class="v">Preface</span></div>
+          </div>
+        </div>
+        <div class="grp">
+          <div class="glabel">Part I, Under the mountain</div>
+          <div class="spines">
+            <div class="sp fin" style="width:74px"><span class="n">1</span><span class="ti">The mine at Hallstatt</span></div>
+            <div class="sp fin" style="width:66px"><span class="n">2</span><span class="ti">Brine and fire</span></div>
+            <div class="sp rev" style="width:59px"><span class="n">3</span><span class="ti">The carriers</span></div>
+          </div>
+        </div>
+        <div class="grp">
+          <div class="glabel">Part II, The road</div>
+          <div class="spines">
+            <div class="sp rev" style="width:76px"><span class="n">4</span><span class="ti">Over the passes</span></div>
+            <div class="sp cur" style="width:75px"><span class="n">5</span><span class="ti">Tolls and tariffs</span></div>
+            <div class="sp rev" style="width:66px"><span class="n">6</span><span class="ti">The river route</span></div>
+            <div class="sp" style="width:58px"><span class="n">7</span><span class="ti">Winter crossing</span></div>
+          </div>
+        </div>
+        <div class="grp">
+          <div class="glabel">Part III, The markets</div>
+          <div class="spines">
+            <div class="sp" style="width:79px"><span class="n">8</span><span class="ti">Venice weighs everything</span></div>
+            <div class="sp hov" style="width:62px"><span class="n">9</span><span class="ti">The ledger</span><i class="dot"></i>
+              <div class="tip float"><div class="h">9 The ledger</div><div class="m">3 240 words, 17 pages, draft</div><div class="p">2 open placeholders</div></div>
+            </div>
+            <div class="sp" style="width:50px"><span class="n">10</span><span class="ti">Decline</span></div>
+          </div>
+        </div>
+        <div class="grp">
+          <div class="glabel"></div>
+          <div class="spines">
+            <div class="sp" style="width:25px"><span class="v">Notes</span></div>
+            <div class="sp fin" style="width:16px"><span class="v">Bibliography</span></div>
+          </div>
+        </div>
+        <div class="grp aside">
+          <div class="glabel">Not in book</div>
+          <div class="spines">
+            <div class="sp loose" style="width:24px"><span class="v">Old ending</span></div>
+            <div class="stack">
+              <div class="flat">Style probes 4</div>
+              <div class="flat">Notes 3</div>
+              <div class="flat">Research 16</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <svg class="ptr" style="left:714px;top:440px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="files-b">
+  <div class="cap"><b>Desk overview.</b> Cmd+Escape or a pinch zooms out of the text to the whole manuscript, laid out like the book's contents page: one entry per file in reading order, grouped by part, each with its first line, length and state. Arrows move the focus, a drag reorders, Return zooms back into the entry under focus. At 40 chapters the parts wrap into more rows and the page scrolls, typing a title filters it, and the focused entry stays in view; files outside the book are set aside after the back matter, the loose draft as an entry and research, notes and probes as one list.</div>
+  <div class="win" style="height:680px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="desk">
+        <div class="head"><b>The Salt Road</b><span>Ines Hartmann, 37 508 words, 203 pages</span></div>
+
+        <div class="drow">
+          <div class="dlab">Front matter</div>
+          <div class="dc"><div class="dt">Title</div><div class="fl">The Salt Road. A history of the Alpine salt trade, by Ines Hartmann</div><div class="ft"><span>40 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt">Preface</div><div class="fl">This book began with a receipt, a scrap of paper from 1611 that a farmer near Bad Aussee kept in his Bible.</div><div class="ft"><span>1 210 words</span><span>Revised</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part I<small>Under the mountain</small></div>
+          <div class="dc"><div class="dt"><i>1</i>The mine at Hallstatt</div><div class="fl">Before there was a town at Hallstatt there was the mountain, and inside it the salt.</div><div class="ft"><span>3 820 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt"><i>2</i>Brine and fire</div><div class="fl">Rock salt is too impure to sell, so the miners flooded their galleries and let the water do the work.</div><div class="ft"><span>3 410 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt"><i>3</i>The carriers</div><div class="fl">The men who carried salt out of the valley called themselves Säumer, after the pack saddle.</div><div class="ft"><span>3 105 words</span><span>Revised</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part II<small>The road</small></div>
+          <div class="dc"><div class="dt"><i>4</i>Over the passes</div><div class="fl">There were four ways south over the Tauern, and every one of them closed in November.</div><div class="ft"><span>3 960 words</span><span>Revised</span></div></div>
+          <div class="dc focus"><div class="dt"><i>5</i>Tolls and tariffs</div><div class="fl">Salt paid for the road it travelled on, and for most of the roads it never saw.</div><div class="ft"><span>3 900 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt"><i>6</i>The river route</div><div class="fl">Downstream from Hallein the Salzach does the carrying, as long as the water stays high.</div><div class="ft"><span>3 412 words</span><span>Revised</span></div></div>
+          <div class="dc"><div class="dt"><i>7</i>Winter crossing</div><div class="fl">In January 1573 a train of forty sledges left Radstadt in a snowfall that lasted three days.</div><div class="ft"><span>2 980 words</span><span>Draft</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part III<small>The markets</small></div>
+          <div class="dc"><div class="dt"><i>8</i>Venice weighs everything</div><div class="fl">At the Fondaco del Sal every barrel was weighed twice, once on arrival and once on sale.</div><div class="ft"><span>4 120 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt"><i>9</i>The ledger</div><div class="fl">The ledger of the Salzamt survives in nineteen volumes, bound in calf and badly foxed.</div><div class="ft"><span>3 240 words</span><span class="bad">2 open</span></div></div>
+          <div class="dc"><div class="dt"><i>10</i>Decline</div><div class="fl">Sea salt from the Adriatic was cheaper by a third, and by 1750 the carriers knew it.</div><div class="ft"><span>2 611 words</span><span>Draft</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Back matter</div>
+          <div class="dc"><div class="dt">Notes</div><div class="fl">Abbreviations follow the catalogue of the Salzburg provincial archive.</div><div class="ft"><span>1 180 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt">Bibliography</div><div class="fl">Built from sources.bib, 112 entries.</div><div class="ft"><span>520 words</span><span>Final</span></div></div>
+          <div class="dc set"><div class="dt">Old ending</div><div class="fl">The road ends where it began, at the mouth of the mine above the lake.</div><div class="ft"><span>840 words</span><span>Not in book</span></div></div>
+          <div class="dc list"><div>Research<span>16 files</span></div><div>Notes<span>3 files</span></div><div>Style probes<span>4 files</span></div></div>
+        </div>
+      </div>
+      <div class="keys"><span><b>Return</b>open Tolls and tariffs</span><span><b>Drag</b>reorder</span><span><b>Type</b>filter</span><span><b>Cmd+Escape</b>back to the text</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="files-c">
+  <div class="cap"><b>Path bar and columns.</b> A breadcrumb in the title bar says where the caret is, part, chapter and section, and stays faint while you type. Clicking any segment opens Miller columns at that level, parts, chapters and headings, driven by the arrow keys, with the chosen chapter's opening lines in the last column, so moving between files and moving between sections is one gesture. At 40 chapters the parts column keeps the chapter column short and type to select jumps within it; files outside the book sit at the bottom of the parts column under a divider, one column away and never mixed with the chapters.</div>
+  <div class="state">At rest</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>
+      <div class="path"><span>Part II</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span>5 Tolls and tariffs</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span>The bridge at Golling</span></div>
+      <div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">After clicking 5 Tolls and tariffs, focus in the chapters column</div>
+  <div class="win" style="height:440px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>
+      <div class="path"><span>Part II</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span class="on">5 Tolls and tariffs</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span>The bridge at Golling</span></div>
+      <div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="miller card">
+        <div class="mcols">
+          <div class="mc" style="width:216px">
+            <div class="row"><span class="ic">&#9643;</span>Front matter<span class="chev">2</span></div>
+            <div class="row"><span class="ic">&#9643;</span>Part I, Under the mountain</div>
+            <div class="row path-on"><span class="ic">&#9643;</span>Part II, The road</div>
+            <div class="row"><span class="ic">&#9643;</span>Part III, The markets</div>
+            <div class="row"><span class="ic">&#9643;</span>Back matter<span class="chev">2</span></div>
+            <div class="divider"></div>
+            <div class="row"><span class="ic">&#9675;</span>Not in book<span class="chev">1</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Research<span class="chev">16</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Notes<span class="chev">3</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Style probes<span class="chev">4</span></div>
+          </div>
+          <div class="mc" style="width:196px">
+            <div class="row"><span class="ic">4</span>Over the passes<span class="chev">3 960</span></div>
+            <div class="row on"><span class="ic">5</span>Tolls and tariffs<span class="chev">3 900</span></div>
+            <div class="row"><span class="ic">6</span>The river route<span class="chev">3 412</span></div>
+            <div class="row"><span class="ic">7</span>Winter crossing<span class="chev">2 980</span></div>
+          </div>
+          <div class="mc" style="width:228px">
+            <div class="row cur">The bridge at Golling</div>
+            <div class="row sub">What a toll collector earned</div>
+            <div class="row">A tariff for every load</div>
+            <div class="row sub">Exemptions</div>
+            <div class="row sub">Smuggling</div>
+            <div class="row">The Emperor's cut</div>
+            <div class="row">Back at Golling</div>
+          </div>
+          <div class="prev">
+            <b>5 Tolls and tariffs</b>
+            <p>Salt paid for the road it travelled on, and for most of the roads it never saw. Between Hallein and the Brenner a barrel passed eleven toll houses.</p>
+            <p>At each one a man with a book and a scale took his share in Kreuzer.</p>
+            <div class="m">3 900 words, 21 pages, draft</div>
+          </div>
+        </div>
+        <div class="mfoot"><span><b>Arrows</b>move</span><span><b>Return</b>open</span><span><b>Type</b>select by title</span><span><b>Esc</b>close</span></div>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+const src = document.getElementById('bridge').innerHTML;
+document.querySelectorAll('.col[data-p]').forEach(c => { c.innerHTML = src; });
+</script>
+</body>
+</html>

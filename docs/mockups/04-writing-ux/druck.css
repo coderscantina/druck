@@ -1,0 +1,97 @@
+/* Druck desktop tokens, copied from desktop/src/tokens.rs. Light and dark follow prefers-color-scheme. */
+:root {
+  --canvas: #161616;
+  --pages-canvas: #161616;
+  --panel: #1c1c1c;
+  --raised: #2a2a2a;
+  --field: #232323;
+  --divider: #303030;
+  --sheet: #f7f7f5;
+  --text: #ededed;
+  --quiet: #a6a6a6;
+  --faint: #6f6f6f;
+  --accent: #e06c4f;
+  --link: #8fb4dc;
+  --error: #e5766b;
+  --added: #6fcf8a;
+  --removed: #e5766b;
+  --float-shadow: 0 4px 6px -1px rgb(0 0 0 / .35), 0 2px 4px -2px rgb(0 0 0 / .35);
+  --card-shadow: 0 10px 15px -3px rgb(0 0 0 / .4), 0 4px 6px -4px rgb(0 0 0 / .4);
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --mono: Menlo, "SF Mono", monospace;
+  --book: "Iowan Old Style", "Palatino", Georgia, serif;
+  --small: 11px;
+  --body: 13px;
+  --radius: 6px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --canvas: #fbfbfb;
+    --pages-canvas: #d6d6d6;
+    --panel: #f3f3f3;
+    --raised: #e6e6e6;
+    --field: #ffffff;
+    --divider: #dedede;
+    --sheet: #ffffff;
+    --text: #1b1b1b;
+    --quiet: #5e5e5e;
+    --faint: #8f8f8f;
+    --accent: #b54226;
+    --link: #2f5d8a;
+    --error: #b5442c;
+    --added: #1f7a3d;
+    --removed: #b42318;
+    --float-shadow: 0 4px 6px -1px rgb(0 0 0 / .1), 0 2px 4px -2px rgb(0 0 0 / .1);
+    --card-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1);
+    color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--pages-canvas); color: var(--text); font: var(--body)/1.45 var(--ui); -webkit-font-smoothing: antialiased; }
+body { padding: 32px; display: flex; flex-direction: column; gap: 40px; align-items: flex-start; }
+
+/* A board: one variant, captured on its own. */
+.board { display: flex; flex-direction: column; gap: 10px; }
+.board > .cap { font-size: 12px; color: var(--quiet); max-width: 1080px; }
+.board > .cap b { color: var(--text); font-weight: 600; }
+
+/* The window. */
+.win { width: 1080px; height: 640px; background: var(--canvas); border: 1px solid var(--divider); border-radius: 10px; overflow: hidden; position: relative; display: flex; flex-direction: column; box-shadow: var(--card-shadow); }
+.titlebar { height: 28px; flex: none; display: flex; align-items: center; justify-content: center; position: relative; }
+.lights { position: absolute; left: 9px; top: 9px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--raised); display: block; }
+.modes { display: flex; background: var(--field); border-radius: 5px; padding: 2px; gap: 2px; font-size: 12px; }
+.modes span { padding: 1px 10px; border-radius: 4px; color: var(--quiet); }
+.modes span.on { background: var(--raised); color: var(--text); }
+.body { flex: 1; display: flex; position: relative; min-height: 0; }
+
+/* The text column in the theme's type at 125 percent. */
+.col { width: 600px; margin: 0 auto; padding: 44px 0 80px; font: 18px/1.5 var(--book); position: relative; }
+.col h1 { font-size: 30px; line-height: 1.2; font-weight: 700; margin: 6px 0 18px; }
+.col h2 { font-size: 23px; line-height: 1.25; font-weight: 700; margin: 26px 0 10px; }
+.col h3 { font-size: 19px; font-weight: 700; margin: 20px 0 8px; }
+.col p { margin: 0 0 12px; }
+.col .indent { text-indent: 1.4em; margin: 0; }
+.caret { display: inline-block; width: 1.5px; height: 1.15em; background: var(--accent); vertical-align: -0.2em; margin: 0 -0.75px; }
+.sel { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.wc { position: absolute; right: 18px; bottom: 10px; font-size: 11px; color: var(--faint); }
+
+/* Floats and cards. */
+.float { background: var(--panel); border: 1px solid var(--divider); border-radius: var(--radius); box-shadow: var(--float-shadow); font: var(--body)/1.4 var(--ui); color: var(--text); }
+.card { background: var(--panel); border: 1px solid var(--divider); border-radius: 8px; box-shadow: var(--card-shadow); font: var(--body)/1.4 var(--ui); color: var(--text); }
+.label { font-size: 11px; font-weight: 600; color: var(--quiet); letter-spacing: .02em; }
+.quiet { color: var(--quiet); }
+.faint { color: var(--faint); }
+.row { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 13px; }
+.row.on { background: var(--raised); }
+.row .ic { color: var(--faint); width: 16px; text-align: center; flex: none; }
+.row.on .ic { color: var(--text); }
+.row .end { margin-left: auto; color: var(--faint); font-size: 11px; }
+.btn { height: 22px; padding: 0 9px; border: 1px solid var(--divider); border-radius: 4px; display: inline-flex; align-items: center; font-size: 12px; color: var(--quiet); background: transparent; }
+.btn.go { color: var(--accent); }
+.kbd { font: 11px var(--ui); color: var(--faint); }
+.chip { font: 0.82em/1 var(--ui); padding: 2px 5px; border-radius: 3px; background: color-mix(in srgb, var(--link) 12%, transparent); color: var(--link); vertical-align: 0.08em; }
+.divider { height: 1px; background: var(--divider); }
+.field { height: 30px; background: var(--field); border-radius: 5px; display: flex; align-items: center; padding: 0 10px; font-size: 13px; }

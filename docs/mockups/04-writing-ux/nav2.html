@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navigation boards, round 2</title>
+<link rel="stylesheet" href="druck.css">
+<style>
+/* Shade and highlight for depth, built from the theme's own greys. */
+:root { --shade: var(--canvas); --hi: var(--text); --sw-on: color-mix(in srgb, var(--quiet) 26%, var(--raised)); --sw-knob: var(--text); }
+@media (prefers-color-scheme: light) {
+  :root { --shade: var(--text); --hi: var(--sheet); --sw-on: var(--quiet); --sw-knob: var(--sheet); }
+}
+
+.state { font-size: 11px; color: var(--faint); margin: 6px 0 -4px; }
+.ptr { position: absolute; width: 14px; height: 20px; z-index: 9; }
+.ptr path { fill: var(--text); stroke: var(--canvas); stroke-width: 1.2; stroke-linejoin: round; }
+
+/* tick-mix: lens at rest and on approach, unfold on rest. */
+.zone { position: absolute; left: 0; top: 0; bottom: 0; width: 36px; z-index: 3; }
+.t { position: absolute; left: 12px; height: 1.5px; background: color-mix(in srgb, var(--faint) 70%, transparent); transform: translateY(-50%); border-radius: 1px; }
+.t.l1 { width: 16px; } .t.l2 { width: 12px; } .t.l3 { width: 8px; }
+.t.cur { background: var(--text); }
+.t.hov { height: 2px; background: var(--quiet); }
+.tt { position: absolute; left: 46px; transform: translateY(-50%); white-space: nowrap; font: 12px/16px var(--ui); color: var(--quiet); background: var(--canvas); padding: 0 4px; border-radius: 4px; box-shadow: 0 0 8px 6px var(--canvas); z-index: 4; }
+.col.dim { opacity: .62; }
+.wash { position: absolute; left: 0; top: 0; bottom: 0; width: 236px; background: linear-gradient(to right, var(--canvas) 80%, transparent); z-index: 2; }
+.uf { position: absolute; left: 0; width: 260px; z-index: 3; }
+.uf div { height: 20px; position: relative; display: flex; align-items: center; padding-left: 36px; white-space: nowrap; font: 13px/1 var(--book); color: var(--quiet); }
+.uf div .t { top: 50%; }
+.uf .sub { padding-left: 48px; }
+.uf .part { font: 11px var(--ui); color: var(--faint); }
+.uf .sib { color: var(--faint); }
+.uf .ch { color: var(--text); font-weight: 700; }
+.uf .hov { color: var(--text); }
+
+/* files-system: path bar, columns, desk with a drag. */
+.path { position: absolute; left: 76px; top: 0; height: 28px; display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--faint); }
+.path span { padding: 1px 6px; border-radius: 4px; }
+.path span.on { background: var(--raised); color: var(--text); }
+.path span.book { color: var(--quiet); }
+.path svg { width: 8px; height: 8px; }
+.path svg path { fill: none; stroke: color-mix(in srgb, var(--faint) 70%, transparent); stroke-width: 1.3; }
+.miller { position: absolute; left: 64px; top: 4px; display: flex; flex-direction: column; z-index: 5; overflow: hidden; }
+.mcols { display: flex; }
+.mc { padding: 6px 0; border-right: 1px solid var(--divider); }
+.mc:last-child { border-right: 0; }
+.mc .row { white-space: nowrap; margin: 0 6px; border-radius: 4px; padding: 0 8px; color: var(--quiet); }
+.mc .row .ic { font-size: 10px; }
+.mc .row.path-on { background: color-mix(in srgb, var(--raised) 55%, transparent); color: var(--text); }
+.mc .row.on { color: var(--text); }
+.mc .row .chev { margin-left: auto; color: var(--faint); font-size: 11px; }
+.mc .sub { padding-left: 22px; }
+.mc .cur::after { content: ""; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--text); flex: none; }
+.mc .divider { margin: 5px 14px; }
+.prev { width: 232px; padding: 14px 16px; font: 13px/1.5 var(--book); color: var(--quiet); }
+.prev b { display: block; font: 700 16px/1.25 var(--book); color: var(--text); margin-bottom: 8px; }
+.prev p { margin: 0 0 6px; }
+.prev .m { font: 11px var(--ui); color: var(--faint); margin-top: 10px; }
+.mfoot { border-top: 1px solid var(--divider); height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 14px; font-size: 11px; color: var(--faint); }
+.mfoot b { font-weight: 500; color: var(--quiet); margin-right: 4px; }
+.mfoot .over { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--quiet); font-size: 12px; }
+.mfoot .over b { margin: 0 0 0 4px; font-size: 11px; color: var(--faint); font-weight: 400; }
+.mfoot .ov { width: 10px; height: 10px; }
+.mfoot .ov rect { fill: none; stroke: var(--faint); stroke-width: 1; }
+
+.desk { padding: 36px 48px 0; width: 100%; }
+.desk .head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+.desk .head b { font: 700 24px/1.2 var(--book); }
+.desk .head span { font-size: 12px; color: var(--faint); }
+.drow { display: grid; grid-template-columns: 140px repeat(4, 1fr); column-gap: 16px; margin-bottom: 12px; position: relative; }
+.dlab { font: 14px/1.3 var(--book); color: var(--quiet); padding-top: 10px; }
+.dlab small { display: block; font: 11px/1.5 var(--ui); color: var(--faint); }
+.dc { height: 84px; border-top: 1px solid var(--divider); padding: 9px 10px 0; display: flex; flex-direction: column; }
+.dc .dt { font: 15px/1.25 var(--book); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc .dt i { font-style: normal; color: var(--faint); margin-right: 6px; }
+.dc .fl { font: 12.5px/1.35 var(--book); color: var(--quiet); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dc .ft { margin-top: auto; padding-bottom: 8px; display: flex; font-size: 11px; color: var(--faint); }
+.dc .ft span:last-child { margin-left: auto; }
+.dc .ft .bad { color: var(--accent); }
+.dc.set { border-top: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent); }
+.dc.set .dt { color: var(--quiet); }
+.dc.list { border-top: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent); font-size: 12px; color: var(--quiet); gap: 4px; }
+.dc.list div { display: flex; }
+.dc.list div span { margin-left: auto; color: var(--faint); font-size: 11px; }
+.dc.gone { opacity: .32; }
+.drop { position: absolute; top: -4px; width: 2px; height: 92px; border-radius: 1px; background: var(--accent); }
+.lift { position: absolute; width: 195px; height: 84px; z-index: 6; border-top: 0; }
+.keys { position: absolute; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; gap: 24px; font-size: 11px; color: var(--faint); }
+.keys b { font-weight: 500; color: var(--quiet); margin-right: 5px; }
+
+/* spine-cool: the shelf. */
+.trace, .shelf { position: absolute; left: 0; right: 0; display: flex; justify-content: center; align-items: flex-end; }
+.trace { bottom: 6px; z-index: 3; }
+.foot-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--canvas) 60%); z-index: 2; }
+.trace .pg { display: flex; gap: 2px; }
+.trace .pg i { display: block; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 38%, transparent); }
+.trace .pg i.cur { background: color-mix(in srgb, var(--text) 70%, transparent); }
+.trace .end { width: 6px; margin: 0 9px; height: 6px; background: linear-gradient(to right, transparent 2px, color-mix(in srgb, var(--faint) 45%, transparent) 2px 3px, transparent 3px); }
+.trace .aside { margin-left: 28px; }
+
+.fade { position: absolute; left: 0; right: 0; bottom: 0; height: 250px; background: linear-gradient(to bottom, transparent, var(--canvas) 26%); z-index: 2; }
+.shelf { bottom: 0; height: 196px; padding-bottom: 12px; z-index: 3; }
+.shelf .pg { display: flex; flex-direction: column; align-items: center; }
+.bks { display: flex; gap: 2px; align-items: flex-end; height: 148px; position: relative; }
+.plank { position: absolute; left: 20px; right: 20px; bottom: 38px; height: 1px; background: color-mix(in srgb, var(--text) 20%, transparent); }
+.plank::after { content: ""; position: absolute; left: 0; right: 0; top: 1px; height: 8px; background: linear-gradient(to bottom, color-mix(in srgb, var(--shade) 14%, transparent), transparent); }
+.pl { height: 26px; padding-top: 10px; font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+.bk { height: 126px; position: relative; flex: none; border-radius: 2px 2px 1px 1px; background-color: var(--raised);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--shade) 22%, transparent), transparent 22%, color-mix(in srgb, var(--hi) 7%, transparent) 42%, transparent 64%, color-mix(in srgb, var(--shade) 18%, transparent)),
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--hi) 3%, transparent) 0 1px, transparent 1px 3px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--shade) 10%, transparent); }
+.bk.short { height: 112px; }
+.bk .vt { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; font: 12px/15px var(--book); color: var(--quiet); height: 78px; overflow: hidden; text-align: start; }
+.bk.short .vt { height: 78px; font-size: 11px; white-space: nowrap; }
+.bk .no { position: absolute; bottom: 9px; left: 0; right: 0; text-align: center; font: 11px/1 var(--book); color: var(--faint); }
+.bk.fin::before, .bk.fin::after, .bk.rev::before, .bk.rev::after { content: ""; position: absolute; left: 3px; right: 3px; height: 1px; background: color-mix(in srgb, var(--shade) 26%, transparent); }
+.bk.fin::before { top: 6px; box-shadow: 0 3px 0 color-mix(in srgb, var(--shade) 26%, transparent); }
+.bk.fin::after { bottom: 25px; box-shadow: 0 3px 0 color-mix(in srgb, var(--shade) 26%, transparent); }
+.bk.rev::before { top: 7px; }
+.bk.rev::after { bottom: 26px; }
+.bk.short.fin::after, .bk.short.rev::after { bottom: 7px; }
+.bk.draft { background-color: color-mix(in srgb, var(--raised) 62%, var(--canvas)); }
+.bk.draft .vt { color: var(--faint); }
+.bk.cur { background-color: color-mix(in srgb, var(--raised) 82%, var(--hi)); box-shadow: var(--float-shadow), inset 0 0 0 1px color-mix(in srgb, var(--shade) 12%, transparent); margin-bottom: -4px; z-index: 2; }
+.bk.cur .vt { color: var(--text); }
+.bk.cur .no { color: var(--quiet); }
+.bk.hov { transform: translateY(-5px); }
+.bk.hov .vt { color: var(--text); }
+.bk .dot { position: absolute; top: 12px; left: 50%; margin-left: -2.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.bk.hov .vt { top: 22px; height: 72px; }
+.bk.loose { background: transparent; box-shadow: none; border: 1px dashed color-mix(in srgb, var(--faint) 55%, transparent); transform-origin: 0 100%; transform: rotate(-7deg); margin-left: 6px; }
+.bk.loose .vt { color: var(--faint); }
+.end { width: 6px; height: 138px; margin: 0 9px; flex: none; align-self: flex-start; border-radius: 1px 1px 0 0;
+  background: linear-gradient(to right, color-mix(in srgb, var(--faint) 50%, var(--raised)), color-mix(in srgb, var(--faint) 28%, var(--raised))); }
+.shelf .end { margin-top: 12px; }
+.aside { margin-left: 28px; }
+.flats { display: flex; flex-direction: column; gap: 2px; margin-left: 10px; }
+.flat { height: 15px; border-radius: 1px; background-color: color-mix(in srgb, var(--raised) 70%, var(--canvas)); background-image: linear-gradient(to bottom, color-mix(in srgb, var(--hi) 6%, transparent), transparent 50%, color-mix(in srgb, var(--shade) 14%, transparent)); font: 10px/15px var(--book); color: var(--faint); padding: 0 6px; white-space: nowrap; }
+.tip { position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); width: 212px; padding: 8px 10px; z-index: 5; }
+.tip .h { font: 700 14px/1.3 var(--book); }
+.tip .m { font-size: 12px; color: var(--quiet); margin-top: 3px; }
+.tip .p { font-size: 12px; color: var(--accent); margin-top: 1px; }
+.tip .k { font-size: 11px; color: var(--faint); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--divider); }
+
+/* Settings window. */
+.stitle { font-size: 12px; color: var(--quiet); }
+.side { width: 208px; flex: none; border-right: 1px solid var(--divider); padding: 8px 8px 0; display: flex; flex-direction: column; }
+.side .field { height: 28px; color: var(--faint); margin-bottom: 8px; }
+.side .row { border-radius: 4px; color: var(--quiet); }
+.side .row.on { color: var(--text); }
+.side .file { margin-top: auto; padding: 12px 10px; font-size: 12px; color: var(--quiet); }
+.rows { flex: 1; padding: 14px 28px 0; }
+.rows .label { margin-bottom: 4px; }
+.srow { display: flex; align-items: center; gap: 24px; padding: 10px 0; border-bottom: 1px solid var(--divider); }
+.srow:last-child { border-bottom: 0; }
+.srow .tx { flex: 1; min-width: 0; }
+.srow .lb { font-size: 13px; }
+.srow .ds { font-size: 12px; color: var(--quiet); margin-top: 1px; }
+.sw { width: 30px; height: 17px; border-radius: 4px; position: relative; flex: none; border: 1px solid var(--divider); }
+.sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 3px; background: var(--faint); }
+.sw.on { background: var(--sw-on); border-color: transparent; }
+.sw.on::after { left: auto; right: 1px; background: var(--sw-knob); }
+.seg { display: flex; background: var(--field); border-radius: 5px; padding: 2px; gap: 2px; font-size: 12px; }
+.seg span { padding: 1px 10px; border-radius: 4px; color: var(--quiet); }
+.seg span.on { background: var(--raised); color: var(--text); }
+</style>
+</head>
+<body>
+
+<template id="bridge">
+  <h2>The bridge at Golling</h2>
+  <p>The bridge at Golling stood where the Salzach leaves its gorge and spreads into the basin, a timber span of eleven bays on stone piers. In 1392 the archbishop's men counted 4 860 loads across it between Easter and Martinmas, nearly all of them salt in barrels of two and a half Zentner <span class="chip">Klein 1998, 41</span>.</p>
+  <p class="indent">Every carter paid twice, once for the bridge and once for the road beyond it, and the two payments went to different purses. The bridge toll was fixed at four Kreuzer a wagon. The road toll rose and fell with the weight of the load, which is why the toll house kept a beam scale of its own, drawn in <span class="chip">Figure 5.2</span>.<span class="caret"></span></p>
+  <h3>What a toll collector earned</h3>
+  <p>The collector at Golling was paid in kind as much as in coin. His contract of 1418 grants him twelve Gulden a year, a cart of firewood, and one Kuffe of salt for every hundred loads he wrote into the book <span class="chip">Hofer 2004, 112</span>.</p>
+</template>
+
+<!-- Topic 1: the current file's headings -->
+
+<section class="board" id="tick-mix">
+  <div class="cap"><b>Lens, then unfold.</b> One strip with two depths: at rest it is Lens's compact ticks, one per heading, the section holding the caret in full ink; as the pointer comes near, the ticks under it grow like a dock and only the nearest title surfaces; when the pointer rests on the strip, every tick unfolds in place into its own line of the outline, with the part and the neighbouring chapters above and below, and a click jumps. Round 1 scored Unfold 9 with "Mixture of lens and unfold" and Scroll map 2 for being "too spacious", so this keeps Unfold's outline, adds Lens's approach, and sets both at 8 and 20 px steps.</div>
+  <div class="state">At rest</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <i class="t l1" style="top:168px"></i>
+        <i class="t l2 cur" style="top:176px"></i>
+        <i class="t l3" style="top:184px"></i>
+        <i class="t l2" style="top:192px"></i>
+        <i class="t l3" style="top:200px"></i>
+        <i class="t l3" style="top:208px"></i>
+        <i class="t l2" style="top:216px"></i>
+        <i class="t l2" style="top:224px"></i>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">Approaching, pointer near A tariff for every load</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="zone">
+        <i class="t" style="top:162px;width:17px"></i>
+        <i class="t cur" style="top:171px;width:14px"></i>
+        <i class="t" style="top:181px;width:13px"></i>
+        <i class="t hov" style="top:194px;width:22px"></i>
+        <i class="t" style="top:207px;width:13px"></i>
+        <i class="t" style="top:217px;width:10px"></i>
+        <i class="t" style="top:226px;width:13px"></i>
+        <i class="t l2" style="top:234px"></i>
+      </div>
+      <span class="tt" style="top:194px">A tariff for every load</span>
+      <svg class="ptr" style="left:30px;top:200px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">Unfolded, pointer resting on A tariff for every load</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="wash"></div>
+      <div class="uf" style="top:84px">
+        <div class="part">Part II, The road</div>
+        <div class="sib">4 Over the passes</div>
+        <div class="ch"><i class="t l1"></i>5 Tolls and tariffs</div>
+        <div><i class="t l2 cur"></i>The bridge at Golling</div>
+        <div class="sub"><i class="t l3"></i>What a toll collector earned</div>
+        <div class="hov"><i class="t l2 hov"></i>A tariff for every load</div>
+        <div class="sub"><i class="t l3"></i>Exemptions</div>
+        <div class="sub"><i class="t l3"></i>Smuggling</div>
+        <div><i class="t l2"></i>The Emperor's cut</div>
+        <div><i class="t l2"></i>Back at Golling</div>
+        <div class="sib">6 The river route</div>
+      </div>
+      <svg class="ptr" style="left:150px;top:190px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="col dim" data-p="bridge"></div>
+    </div>
+  </div>
+</section>
+
+<!-- Topic 2: the file structure -->
+
+<section class="board" id="files-system">
+  <div class="cap"><b>Path and desk.</b> One system with two zoom levels: the path bar and its columns stay the everyday way to move between files and sections, and a quiet Overview at the columns' foot, or Cmd+Escape from anywhere, zooms out to the desk, where the whole book can be read at a glance and reordered. Round 1 rated both 9 and said of the desk "offer this for overview/ordering", so the desk is no longer a second way to navigate but the one place where order changes, with a drag dropping where the 2 px accent line shows, the same rule as everywhere else in the app.</div>
+  <div class="state">Everyday, after clicking 5 Tolls and tariffs in the path</div>
+  <div class="win" style="height:440px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>
+      <div class="path"><span>Part II</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span class="on">5 Tolls and tariffs</span><svg viewBox="0 0 8 8"><path d="M2.5 1 L5.5 4 L2.5 7"/></svg><span>The bridge at Golling</span></div>
+      <div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="miller card">
+        <div class="mcols">
+          <div class="mc" style="width:216px">
+            <div class="row"><span class="ic">&#9643;</span>Front matter<span class="chev">2</span></div>
+            <div class="row"><span class="ic">&#9643;</span>Part I, Under the mountain</div>
+            <div class="row path-on"><span class="ic">&#9643;</span>Part II, The road</div>
+            <div class="row"><span class="ic">&#9643;</span>Part III, The markets</div>
+            <div class="row"><span class="ic">&#9643;</span>Back matter<span class="chev">2</span></div>
+            <div class="divider"></div>
+            <div class="row"><span class="ic">&#9675;</span>Not in book<span class="chev">1</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Research<span class="chev">16</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Notes<span class="chev">3</span></div>
+            <div class="row"><span class="ic">&#9675;</span>Style probes<span class="chev">4</span></div>
+          </div>
+          <div class="mc" style="width:196px">
+            <div class="row"><span class="ic">4</span>Over the passes<span class="chev">3 960</span></div>
+            <div class="row on"><span class="ic">5</span>Tolls and tariffs<span class="chev">3 900</span></div>
+            <div class="row"><span class="ic">6</span>The river route<span class="chev">3 412</span></div>
+            <div class="row"><span class="ic">7</span>Winter crossing<span class="chev">2 980</span></div>
+          </div>
+          <div class="mc" style="width:228px">
+            <div class="row cur">The bridge at Golling</div>
+            <div class="row sub">What a toll collector earned</div>
+            <div class="row">A tariff for every load</div>
+            <div class="row sub">Exemptions</div>
+            <div class="row sub">Smuggling</div>
+            <div class="row">The Emperor's cut</div>
+            <div class="row">Back at Golling</div>
+          </div>
+          <div class="prev">
+            <b>5 Tolls and tariffs</b>
+            <p>Salt paid for the road it travelled on, and for most of the roads it never saw. Between Hallein and the Brenner a barrel passed eleven toll houses.</p>
+            <p>At each one a man with a book and a scale took his share in Kreuzer.</p>
+            <div class="m">3 900 words, 21 pages, draft</div>
+          </div>
+        </div>
+        <div class="mfoot"><span><b>Arrows</b>move</span><span><b>Return</b>open</span><span><b>Type</b>select by title</span><span><b>Esc</b>close</span><span class="over"><svg class="ov" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="3.5" height="3.5" rx="0.6"/><rect x="6" y="0.5" width="3.5" height="3.5" rx="0.6"/><rect x="0.5" y="6" width="3.5" height="3.5" rx="0.6"/><rect x="6" y="6" width="3.5" height="3.5" rx="0.6"/></svg>Overview<b>Cmd+Escape</b></span></div>
+      </div>
+      <div class="col" data-p="bridge"></div>
+    </div>
+  </div>
+  <div class="state">Overview, after clicking Overview at the columns' foot, dragging 7 Winter crossing into Part III</div>
+  <div class="win" style="height:680px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>
+      <div class="path"><span class="on">Overview</span></div>
+      <div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="desk">
+        <div class="head"><b>The Salt Road</b><span>Ines Hartmann, 37 508 words, 203 pages</span></div>
+
+        <div class="drow">
+          <div class="dlab">Front matter</div>
+          <div class="dc"><div class="dt">Title</div><div class="fl">The Salt Road. A history of the Alpine salt trade, by Ines Hartmann</div><div class="ft"><span>40 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt">Preface</div><div class="fl">This book began with a receipt, a scrap of paper from 1611 that a farmer near Bad Aussee kept in his Bible.</div><div class="ft"><span>1 210 words</span><span>Revised</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part I<small>Under the mountain</small></div>
+          <div class="dc"><div class="dt"><i>1</i>The mine at Hallstatt</div><div class="fl">Before there was a town at Hallstatt there was the mountain, and inside it the salt.</div><div class="ft"><span>3 820 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt"><i>2</i>Brine and fire</div><div class="fl">Rock salt is too impure to sell, so the miners flooded their galleries and let the water do the work.</div><div class="ft"><span>3 410 words</span><span>Final</span></div></div>
+          <div class="dc"><div class="dt"><i>3</i>The carriers</div><div class="fl">The men who carried salt out of the valley called themselves Säumer, after the pack saddle.</div><div class="ft"><span>3 105 words</span><span>Revised</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part II<small>The road</small></div>
+          <div class="dc"><div class="dt"><i>4</i>Over the passes</div><div class="fl">There were four ways south over the Tauern, and every one of them closed in November.</div><div class="ft"><span>3 960 words</span><span>Revised</span></div></div>
+          <div class="dc"><div class="dt"><i>5</i>Tolls and tariffs</div><div class="fl">Salt paid for the road it travelled on, and for most of the roads it never saw.</div><div class="ft"><span>3 900 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt"><i>6</i>The river route</div><div class="fl">Downstream from Hallein the Salzach does the carrying, as long as the water stays high.</div><div class="ft"><span>3 412 words</span><span>Revised</span></div></div>
+          <div class="dc gone"><div class="dt"><i>7</i>Winter crossing</div><div class="fl">In January 1573 a train of forty sledges left Radstadt in a snowfall that lasted three days.</div><div class="ft"><span>2 980 words</span><span>Draft</span></div></div>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Part III<small>The markets</small></div>
+          <div class="dc"><div class="dt"><i>8</i>Venice weighs everything</div><div class="fl">At the Fondaco del Sal every barrel was weighed twice, once on arrival and once on sale.</div><div class="ft"><span>4 120 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt"><i>9</i>The ledger</div><div class="fl">The ledger of the Salzamt survives in nineteen volumes, bound in calf and badly foxed.</div><div class="ft"><span>3 240 words</span><span class="bad">2 open</span></div></div>
+          <div class="dc"><div class="dt"><i>10</i>Decline</div><div class="fl">Sea salt from the Adriatic was cheaper by a third, and by 1750 the carriers knew it.</div><div class="ft"><span>2 611 words</span><span>Draft</span></div></div>
+          <i class="drop" style="left:357px"></i>
+        </div>
+
+        <div class="drow">
+          <div class="dlab">Back matter</div>
+          <div class="dc"><div class="dt">Notes</div><div class="fl">Abbreviations follow the catalogue of the Salzburg provincial archive.</div><div class="ft"><span>1 180 words</span><span>Draft</span></div></div>
+          <div class="dc"><div class="dt">Bibliography</div><div class="fl">Built from sources.bib, 112 entries.</div><div class="ft"><span>520 words</span><span>Final</span></div></div>
+          <div class="dc set"><div class="dt">Old ending</div><div class="fl">The road ends where it began, at the mouth of the mine above the lake.</div><div class="ft"><span>840 words</span><span>Not in book</span></div></div>
+          <div class="dc list"><div>Research<span>16 files</span></div><div>Notes<span>3 files</span></div><div>Style probes<span>4 files</span></div></div>
+        </div>
+      </div>
+      <div class="dc card lift" style="left:378px;top:338px"><div class="dt"><i>7</i>Winter crossing</div><div class="fl">In January 1573 a train of forty sledges left Radstadt in a snowfall that lasted three days.</div><div class="ft"><span>2 980 words</span><span>Draft</span></div></div>
+      <svg class="ptr" style="left:402px;top:366px" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+      <div class="keys"><span><b>Release</b>move, becomes 8 in Part III</span><span><b>Esc</b>cancel the move</span><span><b>Return</b>open the focused chapter</span><span><b>Cmd+Escape</b>back to the text</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="spine-cool">
+  <div class="cap"><b>Bookshelf, optional.</b> A Writing setting, off by default, puts the book on a shelf along the window's bottom edge: bound spines in the theme's greys, each as wide as its chapter is long, titles set upright in the book face, parts held between bookends, the open chapter pulled forward and the loose draft leaning at the end. Round 1 heard "I like the book shelf, but it should be optional and cool", so it moved behind a switch and gained depth from grey gradients alone, with the draft state as binding bands (two when final, one when revised, none in draft) and the accent kept for the open placeholders in 9.</div>
+  <div class="state">At rest, with the shelf switched on: its trace along the bottom edge</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge" style="height:338px;overflow:hidden;padding-bottom:0"></div>
+      <div class="foot-fade"></div>
+      <div class="trace" data-shelf="trace"></div>
+    </div>
+  </div>
+  <div class="state">Revealed at the bottom edge, pointer on 9 The ledger</div>
+  <div class="win" style="height:520px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge"></div>
+      <div class="fade"></div>
+      <div class="shelf" data-shelf="shelf"></div>
+      <svg class="ptr" id="shelf-ptr" style="left:0;top:0" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+    </div>
+  </div>
+  <div class="state">Where it is switched on: Settings, Writing</div>
+  <div class="win" style="height:436px;width:820px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><span class="stitle">Settings</span></div>
+    <div class="body">
+      <div class="side">
+        <div class="field">Search settings</div>
+        <div class="row">Appearance</div>
+        <div class="row on">Writing</div>
+        <div class="row">Publishing</div>
+        <div class="row">Language and spelling</div>
+        <div class="row">Agent</div>
+        <div class="row">Keys</div>
+        <div class="file">Open settings.json</div>
+      </div>
+      <div class="rows">
+        <div class="label">Writing</div>
+        <div class="srow"><div class="tx"><div class="lb">Line length</div><div class="ds">The book's measure, or your own.</div></div><div class="seg"><span class="on">Book</span><span>66 characters</span></div></div>
+        <div class="srow"><div class="tx"><div class="lb">Typewriter scrolling</div><div class="ds">Keeps the current line at the same height.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Dim other paragraphs</div><div class="ds">Keeps only the current paragraph in full ink.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Toolbar on selection</div><div class="ds">Marks and lists over selected text. The keys work either way.</div></div><i class="sw on"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Binder</div><div class="ds">A slim contents list on the left, on Cmd+\.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Bookshelf</div><div class="ds">Chapters as spines along the bottom edge, on Cmd+Shift+\.</div></div><i class="sw on"></i></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const src = document.getElementById('bridge').innerHTML;
+document.querySelectorAll('.col[data-p]').forEach(c => { c.innerHTML = src; });
+
+// The book's files: [number, title, words, state, flags]. Width follows the word count.
+const book = [
+  { part: '', short: true, files: [['', 'Title', 40, 'fin'], ['', 'Preface', 1210, 'rev']] },
+  { part: 'Part I, Under the mountain', files: [[1, 'The mine at Hallstatt', 3820, 'fin'], [2, 'Brine and fire', 3410, 'fin'], [3, 'The carriers', 3105, 'rev']] },
+  { part: 'Part II, The road', files: [[4, 'Over the passes', 3960, 'rev'], [5, 'Tolls and tariffs', 3900, 'draft', 'cur'], [6, 'The river route', 3412, 'rev'], [7, 'Winter crossing', 2980, 'draft']] },
+  { part: 'Part III, The markets', files: [[8, 'Venice weighs everything', 4120, 'draft'], [9, 'The ledger', 3240, 'draft', 'hov'], [10, 'Decline', 2611, 'draft']] },
+  { part: '', short: true, files: [['', 'Notes', 1180, 'draft'], ['', 'Bibliography', 520, 'fin']] },
+];
+const width = words => Math.round(18 + words * 0.011);
+
+function trace() {
+  const groups = book.map(g => '<div class="pg">' + g.files.map(f =>
+    `<i class="${f[4] === 'cur' ? 'cur' : ''}" style="width:${width(f[2])}px"></i>`).join('') + '</div>');
+  return groups.join('<i class="end"></i>') + '<div class="pg aside"><i style="width:26px"></i><i style="width:24px;margin-left:10px"></i></div>';
+}
+
+function shelf() {
+  const groups = book.map(g => {
+    const spines = g.files.map(([no, title, words, state, flag]) => {
+      const cls = ['bk', state, g.short ? 'short' : '', flag || ''].join(' ');
+      const tip = flag === 'hov'
+        ? `<div class="tip float"><div class="h">${no} ${title}</div><div class="m">3 240 words, 17 pages, draft</div><div class="p">2 open placeholders</div><div class="k">Click to open, drag to move</div></div><i class="dot"></i>`
+        : '';
+      return `<div class="${cls}" style="width:${width(words)}px">${tip}<span class="vt">${title}</span>${no === '' ? '' : `<span class="no">${no}</span>`}</div>`;
+    }).join('');
+    return `<div class="pg"><div class="bks">${spines}</div><div class="pl">${g.part}</div></div>`;
+  });
+  const aside = `<div class="pg aside"><div class="bks"><div class="bk loose" style="width:28px"><span class="vt">Old ending</span></div><div class="flats"><div class="flat" style="width:72px">Style probes 4</div><div class="flat" style="width:58px">Notes 3</div><div class="flat" style="width:80px">Research 16</div></div></div><div class="pl">Not in book</div></div>`;
+  return '<div class="plank"></div>' + groups.join('<i class="end"></i>') + aside;
+}
+
+document.querySelectorAll('[data-shelf]').forEach(el => { el.innerHTML = el.dataset.shelf === 'trace' ? trace() : shelf(); });
+
+// Put the pointer on the hovered spine.
+const hov = document.querySelector('.shelf .bk.hov');
+const ptr = document.getElementById('shelf-ptr');
+const body = ptr.parentElement.getBoundingClientRect();
+const r = hov.getBoundingClientRect();
+ptr.style.left = (r.left - body.left + r.width / 2 - 2) + 'px';
+ptr.style.top = (r.top - body.top + 70) + 'px';
+</script>
+</body>
+</html>

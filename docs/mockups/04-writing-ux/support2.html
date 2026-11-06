@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Supporting material, combined</title>
+<link rel="stylesheet" href="druck.css">
+<style>
+  .i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  .i.s { width: 14px; height: 14px; }
+  .state { font-size: 11px; color: var(--faint); margin: 6px 0 -4px; }
+  .win .body { overflow: hidden; }
+  .main { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+  .col.top { padding-top: 32px; }
+  .ghost { color: var(--quiet); }
+  .ghost .chip { opacity: .75; }
+  .scan { border-radius: 2px; background: color-mix(in srgb, var(--quiet) 16%, var(--canvas)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+  .scan svg { display: block; width: 100%; height: 100%; }
+  .row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .row .path { color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .row .end { white-space: nowrap; }
+  .btn { white-space: nowrap; gap: 6px; }
+  .btn .kbd { font-size: 10px; }
+  .tbar { position: absolute; display: flex; align-items: center; gap: 2px; padding: 3px; z-index: 3; }
+  .ti { height: 24px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border-radius: 4px; font-size: 12px; color: var(--quiet); white-space: nowrap; }
+  .ti.go { color: var(--accent); }
+  .ti.hover { background: var(--raised); }
+  .tsep { width: 1px; height: 16px; background: var(--divider); margin: 0 2px; }
+  .lk { color: var(--link); }
+
+  /* The rail: tick at rest, icon tabs, one panel joined to the raised tab. */
+  .hint { position: absolute; right: 4px; top: 50%; width: 3px; height: 32px; margin-top: -16px; border-radius: 2px; background: color-mix(in srgb, var(--faint) 45%, transparent); }
+  .rail { width: 40px; flex: none; background: var(--canvas); border-left: 1px solid var(--divider); padding-top: 33px; display: flex; flex-direction: column; }
+  .tab { height: 36px; display: flex; align-items: center; justify-content: center; color: var(--faint); }
+  .tab.on { background: var(--panel); color: var(--text); margin-left: -1px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+  .rpanel { width: 336px; flex: none; background: var(--panel); border-left: 1px solid var(--divider); display: flex; flex-direction: column; font: var(--body)/1.4 var(--ui); position: relative; }
+
+  /* Open items as slim tabs on the panel's top edge. */
+  .strip { height: 34px; flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; background: var(--canvas); border-bottom: 1px solid var(--divider); }
+  .stab { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; color: var(--faint); border: 1px solid var(--divider); border-bottom: none; border-radius: 6px 6px 0 0; background: var(--canvas); white-space: nowrap; max-width: 84px; min-width: 0; }
+  .stab span { overflow: hidden; text-overflow: ellipsis; }
+  .stab.on { background: var(--panel); color: var(--text); height: 27px; margin-bottom: -1px; max-width: none; flex: none; }
+  .stab.on .x { color: var(--faint); margin-left: 2px; }
+  .stab.add { padding: 0 5px; border-color: transparent; background: transparent; flex: none; }
+  .stab.add.open { background: var(--raised); border-color: var(--divider); color: var(--text); }
+
+  /* The open item: header, then reading text in the book face. */
+  .sh { padding: 14px 16px 12px; border-bottom: 1px solid var(--divider); }
+  .sh .t { font-weight: 600; font-size: 13px; }
+  .sh .m { font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .sh .rel { font-size: 11px; color: var(--quiet); margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+  .sh .rel .i { color: var(--faint); }
+  .sh .acts { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+  .sh .tt { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: -2px; }
+  .sb { padding: 14px 16px; font: 15px/1.55 var(--book); color: var(--quiet); position: relative; }
+  .sb p { margin: 0 0 10px; }
+  .sb .sel { color: var(--text); }
+  .sb.essay { font: 14px/1.65 var(--ui); }
+  .sb.essay h4 { font: 600 17px/1.3 var(--ui); color: var(--text); margin: 0 0 10px; letter-spacing: -.01em; }
+  .seg { display: inline-flex; background: var(--field); border-radius: 5px; padding: 2px; gap: 2px; font-size: 12px; }
+  .seg span { white-space: nowrap; padding: 1px 8px; border-radius: 4px; color: var(--quiet); }
+  .seg span.on { background: var(--raised); color: var(--text); }
+  .note { font: 11px/1.45 var(--ui); color: var(--faint); padding: 0 16px; }
+
+  /* Open material: one list, grouped, same verbs as pins and the library. */
+  .picker { position: absolute; width: 300px; z-index: 4; padding: 4px 0 0; overflow: hidden; }
+  .picker .field { height: 28px; margin: 0 4px 4px; gap: 8px; padding: 0 8px; color: var(--faint); }
+  .picker .field .kbd { margin-left: auto; }
+  .picker .g { font-size: 11px; color: var(--quiet); padding: 6px 10px 2px; }
+  .picker .row .btn { margin-left: auto; height: 20px; padding: 0 7px; font-size: 11px; }
+
+  /* Pins: a short rule at rest, a group of rules when a passage holds several. */
+  .pp { position: relative; }
+  .stub { position: absolute; left: calc(100% + 32px); top: 7px; width: 1px; height: 14px; background: var(--divider); }
+  .stubs { position: absolute; left: calc(100% + 32px); top: 7px; display: flex; flex-direction: column; gap: 3px; }
+  .stubs i { display: block; width: 1px; height: 8px; background: var(--divider); }
+  .narrow .stub, .narrow .stubs { left: calc(100% + 16px); }
+  .stubs b { position: absolute; left: 6px; top: 8px; font: 10px/1 var(--ui); color: var(--faint); }
+
+  .pgroup { position: absolute; left: calc(100% + 20px); top: -6px; width: 200px; z-index: 2; font: 11px/16px var(--ui); overflow: hidden; }
+  .pgroup .gh { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; color: var(--quiet); font-weight: 600; border-bottom: 1px solid var(--divider); }
+  .pgroup .gh .i { color: var(--faint); }
+  .pgroup .gh .up { margin-left: auto; }
+  .pe { padding: 8px 12px; border-bottom: 1px solid var(--divider); }
+  .pe .ph { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+  .pe .ph .i { color: var(--faint); }
+  .pe .m { color: var(--faint); margin-top: 1px; }
+  .pe .bk { font: 13px/1.5 var(--book); color: var(--quiet); margin: 6px 0 8px; }
+  .pe .bk .sel { color: var(--text); }
+  .pe .acts { display: flex; gap: 6px; }
+  .pr { height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; color: var(--quiet); border-bottom: 1px solid var(--divider); }
+  .pr .i { color: var(--faint); }
+  .pr .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .pr .end { margin-left: auto; color: var(--faint); white-space: nowrap; }
+  .pr .thumb { margin-left: auto; width: 32px; height: 20px; flex: none; }
+  .pgroup .gf { height: 26px; display: flex; align-items: center; gap: 10px; padding: 0 12px; color: var(--faint); }
+  .pgroup .gf b { font-weight: 400; color: var(--quiet); margin-right: 3px; }
+
+  /* The library card on Cmd Shift O. */
+  .lib { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: 680px; z-index: 5; overflow: hidden; }
+  .lib .q { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 14px; border-bottom: 1px solid var(--divider); }
+  .lib .q .i { color: var(--faint); }
+  .lib .q .kbd { margin-left: auto; }
+  .filters { display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--divider); }
+  .fc { height: 22px; padding: 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 4px; font-size: 12px; color: var(--quiet); }
+  .fc .n { color: var(--faint); font-size: 11px; }
+  .fc.on { background: var(--raised); color: var(--text); }
+  .fc.sep { width: 1px; padding: 0; margin: 3px 4px; background: var(--divider); }
+  .panes { display: flex; height: 236px; }
+  .results { width: 372px; flex: none; padding: 4px 0; border-right: 1px solid var(--divider); }
+  .results .row { padding: 0 14px; }
+  .results .row .path { margin-left: 2px; }
+  .prev { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; }
+  .prev .scan { height: 112px; }
+  .prev .t { font-weight: 600; margin-top: 10px; }
+  .prev .m { font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .prev .acts { display: flex; gap: 6px; margin-top: auto; }
+  .foot { height: 32px; display: flex; align-items: center; gap: 16px; padding: 0 14px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--faint); }
+  .foot b { font-weight: 400; color: var(--quiet); margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute;color:var(--faint)" aria-hidden="true">
+  <defs>
+    <pattern id="tally" width="44" height="36" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".8">
+        <path d="M8 9v16M13 8v17M18 9v15M23 8v16M5 20l21-8"/>
+      </g>
+    </pattern>
+    <pattern id="tally-s" width="16" height="14" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".8">
+        <path d="M3 3v7M5 3v7M7 3v7M9 3v7M2 8l8-3"/>
+      </g>
+    </pattern>
+  </defs>
+  <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 2.5h5.5L12 5v8.5H4z M9.5 2.5V5H12 M6 8h4 M6 10.5h4"/></symbol>
+  <symbol id="i-notes" viewBox="0 0 16 16"><path d="M3.5 4h9 M3.5 7h9 M3.5 10h9 M3.5 13h5"/></symbol>
+  <symbol id="i-book" viewBox="0 0 16 16"><path d="M2.5 3.5H6A2 2 0 0 1 8 5.5v8a1.5 1.5 0 0 0-1.5-1.5h-4z M13.5 3.5H10a2 2 0 0 0-2 2v8a1.5 1.5 0 0 1 1.5-1.5h4z"/></symbol>
+  <symbol id="i-probe" viewBox="0 0 16 16"><path d="M8 2.5l3.5 4.5L8 13.5 4.5 7z M8 7.5v2.5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><circle cx="6" cy="6.5" r="1"/><path d="M3 11.5l3.5-3 2.5 2 2-1.5 2.5 2"/></symbol>
+  <symbol id="i-table" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><path d="M2.5 6.5h11 M2.5 9.5h11 M6.5 3.5v9"/></symbol>
+  <symbol id="i-bib" viewBox="0 0 16 16"><path d="M3.5 5.5h3.5v3H5.5L4 11.5z M9 5.5h3.5v3H11l-1.5 3z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M5 5l6 6 M11 5l-6 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9 M3.5 8h9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3 M7.5 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1 M8.5 11.5l-1 1A2.5 2.5 0 0 1 4 9l1-1"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16"><path d="M6 2.5h4l-.5 4 2 2v1h-7v-1l2-2z M8 9.5v4"/></symbol>
+</svg>
+
+<section class="board" id="sup-mix">
+  <div class="cap"><b>Combined.</b> The Write rail is the container, as in sup-a ("rail/icons but with better contents of second sheet"): hidden at rest, it opens at the right edge or on ⌥⌘M and holds sup-b's open-item tabs, item header, book-face reading and Open material list, without a second sheet ("no second sheet, but the content is great"). Pins from sup-c stay in the margin, and a passage can now hold several ("allow additional pinned references"); while the panel is open they fold to gutter markers so the text keeps its 600 px measure. Every surface uses the same verbs on the same keys: ⏎ Open, ⇧⏎ the kind's insert (Quote with citation, Insert as figure, Insert passage), ⌘⏎ Pin here.</div>
+
+  <div class="state">At rest: the text, a short rule for each pin, a stacked rule where a passage holds several, and the faint tick at the right edge</div>
+  <div class="win" style="height:480px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="main">
+        <div class="col">
+          <h1>5 Tolls and tariffs</h1>
+          <h2>The bridge at Golling</h2>
+          <div class="pp"><p>In 1612 the bridge at Golling still charged by the load, not by the carrier. A horse with two sacks paid four Kreuzer at the gate on the Salzach side, and two more if the salt was bound for Bavaria rather than for the archbishop's own markets <span class="chip">Klein 1998, 41</span>.<span class="caret"></span></p><span class="stub"></span></div>
+          <h3>What a toll collector earned</h3>
+          <div class="pp"><p>His wage was fixed and small: twelve Gulden a year, a house by the gate, and four cords of firewood. What made the post worth having was the rounding. A load of three and a half Zentner was written as four, and the half Zentner's toll went into a second purse that no ledger names.</p><span class="stubs"><i></i><i></i><i></i></span></div>
+        </div>
+      </div>
+      <div class="hint"></div>
+    </div>
+  </div>
+
+  <div class="state">Caret in a passage with three pins: the group opens as one stack, the first pin expanded, ⌥↓ steps to the next</div>
+  <div class="win" style="height:520px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="main">
+        <div class="col top">
+          <div class="pp"><p>In 1612 the bridge at Golling still charged by the load, not by the carrier. A horse with two sacks paid four Kreuzer at the gate on the Salzach side, and two more if the salt was bound for Bavaria <span class="chip">Klein 1998, 41</span>.</p><span class="stub"></span></div>
+          <h3>What a toll collector earned</h3>
+          <div class="pp"><p>His wage was fixed and small: twelve Gulden a year, a house by the gate, and four cords of firewood. What made the post worth having was the rounding. A load of three and a half Zentner was written as four, and the half Zentner's toll went into a second purse that no ledger names.<span class="caret"></span></p>
+            <div class="pgroup float">
+              <div class="gh"><svg class="i s"><use href="#i-pin"/></svg>3 pinned<svg class="i s up"><use href="#i-up"/></svg></div>
+              <div class="pe">
+                <div class="ph"><svg class="i s"><use href="#i-doc"/></svg>interview-salzmann.md</div>
+                <div class="m">Hallein, 14 March 2024</div>
+                <div class="bk">But look at the strokes on the boards. <span class="sel">They did not steal from the archbishop. They rounded, and the rounding always went their way.</span></div>
+                <div class="acts"><span class="btn go">Quote with citation</span><span class="btn">Open</span></div>
+              </div>
+              <div class="pr"><svg class="i s"><use href="#i-image"/></svg><span class="name">golling-toll-1612.jpg</span><span class="scan thumb"><svg><rect width="100%" height="100%" fill="url(#tally-s)"/></svg></span></div>
+              <div class="pr"><svg class="i s"><use href="#i-table"/></svg><span class="name">Horse, two sacks</span><span class="end">4 Kr</span></div>
+              <div class="gf"><span><b>⌥↓</b>Next pin</span><span><b>⇧⏎</b>Insert</span></div>
+            </div>
+          </div>
+          <h2>A tariff for every load</h2>
+          <div class="pp"><p>By 1620 the tariff ran to eleven classes, from fine table salt in barrels to the coarse Fuder sold to tanners. The steepest rate fell on salt leaving by the Pass Lueg road.</p><span class="stub"></span></div>
+        </div>
+      </div>
+      <div class="hint"></div>
+    </div>
+  </div>
+
+  <div class="state">Rail open on Research with the interview and a passage selected: the panel widens to 336 px for reading, the text keeps its measure, and the pins fold to markers in the gutter</div>
+  <div class="win" style="height:540px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="main narrow">
+        <div class="col top">
+          <h3 style="margin-top:0">What a toll collector earned</h3>
+          <div class="pp"><p>His wage was fixed and small: twelve Gulden a year, a house by the gate, and four cords of firewood. What made the post worth having was the rounding. A load of three and a half Zentner was written as four, and the half Zentner's toll went into a second purse that no ledger names.</p><span class="stubs"><i></i><i></i><i></i><b>3</b></span></div>
+          <p>Salzmann, who spent forty years with the Golling account books, puts it plainly: <span class="ghost">“They did not steal from the archbishop. They rounded, and the rounding always went their way” <span class="chip">Salzmann 2024</span></span><span class="caret"></span></p>
+          <h2>A tariff for every load</h2>
+          <div class="pp"><p>By 1620 the tariff ran to eleven classes, from fine table salt in barrels to the coarse Fuder sold to tanners. The steepest rate fell on salt leaving by the Pass Lueg road.</p><span class="stub"></span></div>
+        </div>
+      </div>
+      <div class="rpanel">
+        <div class="strip">
+          <div class="stab add"><svg class="i s"><use href="#i-plus"/></svg></div>
+          <div class="stab on"><svg class="i s"><use href="#i-doc"/></svg><span>interview-salzmann</span><svg class="i s x"><use href="#i-x"/></svg></div>
+          <div class="stab"><svg class="i s"><use href="#i-image"/></svg><span>golling-toll-1612.jpg</span></div>
+          <div class="stab"><svg class="i s"><use href="#i-table"/></svg><span>tariff-tables.csv</span></div>
+        </div>
+        <div class="sh">
+          <div class="t">Interview with Anna Salzmann</div>
+          <div class="m">research/interview-salzmann.md · Hallein, 14 March 2024</div>
+          <div class="rel"><svg class="i s"><use href="#i-link"/></svg><span>Cited twice here: <span class="lk">The bridge at Golling</span>, <span class="lk">Smuggling</span></span></div>
+        </div>
+        <div class="sb">
+          <p>How much did a collector actually take?</p>
+          <p>Less than people think, and more than the archbishop knew. The wage was a pittance. But look at the strokes on the boards. <span class="sel">They did not steal from the archbishop. They rounded, and the rounding always went their way.</span></p>
+          <div class="tbar float" style="left:16px;top:226px">
+            <span class="ti go hover">Quote with citation<span class="kbd">⇧⏎</span></span>
+            <span class="tsep"></span>
+            <span class="ti">Pin here<span class="kbd">⌘⏎</span></span>
+          </div>
+          <p style="margin-top:42px">Is that in the books?</p>
+          <p>Only as a pattern. Every load at Golling between 1608 and 1615 ends on a whole Zentner. Nature is not that tidy.</p>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="tab on"><svg class="i"><use href="#i-book"/></svg></div>
+        <div class="tab"><svg class="i"><use href="#i-notes"/></svg></div>
+        <div class="tab"><svg class="i"><use href="#i-probe"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="state">Rail on Probes, a probe set in Essay beside the book face; the plus tab drops the Open material list, grouped the same way in every tab</div>
+  <div class="win" style="height:540px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="main narrow">
+        <div class="col top">
+          <h2 style="margin-top:0">Back at Golling</h2>
+          <div class="pp"><p>The bridge is concrete now, and the gate is a bus stop. Nothing at the crossing says what was paid here, or by whom, or how the half Zentner was always written as a whole one.<span class="caret"></span></p><span class="stub"></span></div>
+          <p>Walk ten minutes upstream and the old road is still there, cut into the bank above the Salzach, wide enough for one horse and its two sacks.</p>
+        </div>
+      </div>
+      <div class="picker float" style="right:380px;top:34px">
+        <div class="field"><svg class="i s"><use href="#i-search"/></svg>Open material<span class="kbd">⌘⇧O searches all</span></div>
+        <div class="g">Mentioned in this chapter</div>
+        <div class="row"><svg class="i ic"><use href="#i-table"/></svg><span class="name">tariff-tables.csv</span><span class="end">Table 5.1</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-image"/></svg><span class="name">map-salzach-1640.png</span><span class="end">Figure 5.2</span></div>
+        <div class="g">Research</div>
+        <div class="row on"><svg class="i ic"><use href="#i-image"/></svg><span class="name">golling-gate-1615.jpg</span><span class="btn">Insert as figure</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-doc"/></svg><span class="name">letters-hallein-1609.md</span></div>
+        <div class="g">Notes</div>
+        <div class="row"><svg class="i ic"><use href="#i-notes"/></svg><span class="name">timeline.md</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-notes"/></svg><span class="name">open-questions.md</span><span class="end">3 open</span></div>
+        <div class="g">Probes</div>
+        <div class="row"><svg class="i ic"><use href="#i-probe"/></svg><span class="name">carriers-first-person.md</span></div>
+        <div class="foot"><span><b>⏎</b>Open</span><span><b>⇧⏎</b>Insert</span><span><b>⌘⏎</b>Pin here</span></div>
+      </div>
+      <div class="rpanel">
+        <div class="strip">
+          <div class="stab add open"><svg class="i s"><use href="#i-plus"/></svg></div>
+          <div class="stab on"><svg class="i s"><use href="#i-probe"/></svg><span>golling-present</span><svg class="i s x"><use href="#i-x"/></svg></div>
+          <div class="stab"><svg class="i s"><use href="#i-probe"/></svg><span>carriers-first-person</span></div>
+        </div>
+        <div class="sh">
+          <div class="tt"><span class="t">Golling, present tense</span><span class="seg"><span>Book theme</span><span class="on">Essay</span></span></div>
+          <div class="m">Probe · notes/probes/golling-present.md · 64 words</div>
+          <div class="acts"><span class="btn go">Insert passage</span><span class="btn">Pin here</span></div>
+        </div>
+        <div class="sb essay">
+          <h4>The gate at first light</h4>
+          <p>The gate is shut before first light. The collector counts by lantern, chalk in his right hand, and the horses steam in the cold while their carriers argue about the half Zentner. He writes four. He always writes four.</p>
+        </div>
+        <div class="note">Set in Essay: system sans at 14 px, open leading. The chapter beside it keeps The Salt Road's book face.</div>
+      </div>
+      <div class="rail">
+        <div class="tab"><svg class="i"><use href="#i-book"/></svg></div>
+        <div class="tab"><svg class="i"><use href="#i-notes"/></svg></div>
+        <div class="tab on"><svg class="i"><use href="#i-probe"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="state">⌘⇧O from the text: the library searches everything and pins the choice to the paragraph at the caret, with the same verbs and keys</div>
+  <div class="win" style="height:540px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="main">
+        <div class="col top">
+          <h3 style="margin-top:0">Smuggling</h3>
+          <div class="pp"><p>The boards themselves survive. One, from the winter of 1612, shows a column of strokes that stops halfway down, a week in which the bridge took no salt at all.<span class="caret"></span></p><span class="stub"></span></div>
+          <p>Nobody was charged. The collector that winter was the Pfleger's nephew, and the Pass Lueg road, two hours south, took twice its usual load.</p>
+        </div>
+      </div>
+      <div class="lib card" style="top:146px">
+        <div class="q"><svg class="i"><use href="#i-search"/></svg><span>golling<span class="caret"></span></span><span class="kbd">41 items · 8 match</span></div>
+        <div class="filters">
+          <span class="fc on">All</span>
+          <span class="fc">This chapter <span class="n">9</span></span>
+          <span class="fc sep"></span>
+          <span class="fc">Research <span class="n">9</span></span>
+          <span class="fc">Notes <span class="n">6</span></span>
+          <span class="fc">Probes <span class="n">5</span></span>
+          <span class="fc sep"></span>
+          <span class="fc">Images <span class="n">14</span></span>
+          <span class="fc">Tables <span class="n">2</span></span>
+          <span class="fc">Sources <span class="n">86</span></span>
+        </div>
+        <div class="panes">
+          <div class="results">
+            <div class="row on"><svg class="i ic"><use href="#i-image"/></svg><span class="name">golling-toll-1612.jpg</span><span class="end">Pinned in 5</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-image"/></svg><span class="name">golling-gate-1615.jpg</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-doc"/></svg><span class="name">interview-salzmann.md</span><span class="end">Pinned in 5</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-table"/></svg><span class="name">tariff-tables.csv</span><span class="path">row 4</span><span class="end">Pinned in 5</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-bib"/></svg><span class="name">Klein 1998, Die Maut zu Golling</span><span class="end">Cited 3</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-notes"/></svg><span class="name">timeline.md</span><span class="path">1612</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-notes"/></svg><span class="name">open-questions.md</span></div>
+            <div class="row"><svg class="i ic"><use href="#i-probe"/></svg><span class="name">golling-present.md</span><span class="end">Probe</span></div>
+          </div>
+          <div class="prev">
+            <div class="scan"><svg><rect width="100%" height="100%" fill="url(#tally)"/></svg></div>
+            <div class="t">golling-toll-1612.jpg</div>
+            <div class="m">research/hallstatt-archive-scans · 2480 × 1650</div>
+            <div class="m">Pinned with 2 others at What a toll collector earned</div>
+            <div class="acts"><span class="btn go">Pin here</span><span class="btn">Insert as figure</span><span class="btn">Open</span></div>
+          </div>
+        </div>
+        <div class="foot"><span><b>⌘⏎</b>Pin here</span><span><b>⇧⏎</b>Insert</span><span><b>⏎</b>Open in the rail</span><span><b>⌘1 to 6</b>Filter by kind</span></div>
+      </div>
+      <div class="hint"></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

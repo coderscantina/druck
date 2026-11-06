@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navigation boards, round 3</title>
+<link rel="stylesheet" href="druck.css">
+<style>
+:root { --sw-on: color-mix(in srgb, var(--quiet) 26%, var(--raised)); --sw-knob: var(--text); --rule: color-mix(in srgb, var(--text) 22%, transparent); }
+@media (prefers-color-scheme: light) {
+  :root { --sw-on: var(--quiet); --sw-knob: var(--sheet); }
+}
+
+.state { font-size: 11px; color: var(--faint); margin: 6px 0 -4px; }
+.ptr { position: absolute; width: 14px; height: 20px; z-index: 9; }
+.ptr path { fill: var(--text); stroke: var(--canvas); stroke-width: 1.2; stroke-linejoin: round; }
+
+/* Trace and shelf share one row: same widths, same gaps, centred, so the trace is the shelf seen from far. */
+.trace, .shelf { position: absolute; left: 0; right: 0; display: flex; justify-content: center; }
+.trace { bottom: 10px; z-index: 3; }
+.foot-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--canvas) 60%); z-index: 2; }
+.fade { position: absolute; left: 0; right: 0; bottom: 0; height: 168px; background: linear-gradient(to bottom, transparent, var(--canvas) 38%); z-index: 2; }
+.shelf { bottom: 0; z-index: 3; padding-bottom: 12px; }
+.row3 { position: relative; display: flex; align-items: flex-end; gap: 16px; }
+
+.tg, .bks { display: flex; gap: 2px; align-items: flex-end; }
+.tg i { display: block; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 38%, transparent); }
+.tg i.cur { background: color-mix(in srgb, var(--text) 70%, transparent); }
+.trace .tg.aside { margin-left: 8px; padding-left: 16px; border-left: 1px solid color-mix(in srgb, var(--faint) 30%, transparent); }
+.trace .tg.aside i { background: color-mix(in srgb, var(--faint) 24%, transparent); }
+
+/* One baseline under every spine, labels hang below it. */
+.shelf .row3::after { content: ""; position: absolute; left: 0; right: 0; bottom: 21px; height: 1px; background: var(--rule); }
+.pg { display: flex; flex-direction: column; }
+.bks { border-bottom: 1px solid transparent; position: relative; z-index: 1; }
+.pl { height: 14px; margin-top: 6px; font-size: 11px; line-height: 14px; color: var(--faint); white-space: nowrap; }
+.pg.a, .pg.b, .pg.d, .pg.e { --h: 72px; } .pg.c { --h: 80px; }
+
+.bk { height: var(--h); flex: none; position: relative; background: var(--field); border: 1px solid var(--divider); border-bottom: 0; border-radius: 2px 2px 0 0; padding: 10px 6px 0; transition: transform .12s ease-out; }
+.bk::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--faint) 45%, transparent); }
+.bk.rev::before { background: var(--quiet); }
+.bk.fin::before { background: var(--text); }
+.bk .no { display: block; font: 15px/16px var(--book); color: var(--quiet); }
+.bk .ti { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 4px; font: 10.5px/12px var(--ui); color: var(--faint); }
+.bk.short { padding: 0; }
+.bk.short .ti { position: absolute; left: 50%; bottom: 6px; margin: 0 0 0 -6px; width: 12px; max-height: 60px; display: block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-size: 10px; line-height: 12px; }
+.bk.cur { background: var(--raised); transform: translateY(-6px); box-shadow: var(--float-shadow); border-bottom: 1px solid var(--divider); border-radius: 2px; }
+.bk.cur .no, .bk.cur .ti { color: var(--text); }
+.bk.hov { background: var(--raised); transform: translateY(-3px); }
+.bk.hov .no { color: var(--text); }
+.bk.hov .ti { color: var(--quiet); }
+.bk .dot { position: absolute; right: 5px; top: 9px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.bk.loose { background: transparent; border-style: dashed; border-color: color-mix(in srgb, var(--faint) 60%, transparent); }
+.bk.loose::before { display: none; }
+
+.aside3 { margin-left: 8px; padding-left: 16px; border-left: 1px solid var(--divider); }
+.aside3 .bks { gap: 8px; }
+.flats { display: flex; flex-direction: column; gap: 2px; }
+.flat { width: 88px; height: 14px; border: 1px solid var(--divider); background: var(--field); border-radius: 2px; font: 10px/12px var(--ui); color: var(--faint); padding: 0 5px; white-space: nowrap; }
+
+.tip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: 204px; padding: 8px 10px; z-index: 5; }
+.tip .h { font-weight: 600; }
+.tip .m { font-size: 12px; color: var(--quiet); margin-top: 2px; }
+.tip .p { font-size: 12px; color: var(--accent); margin-top: 2px; }
+.tip .k { font-size: 11px; color: var(--faint); margin-top: 6px; }
+
+/* Settings window. */
+.stitle { font-size: 12px; color: var(--quiet); }
+.side { width: 208px; flex: none; border-right: 1px solid var(--divider); padding: 8px 8px 0; display: flex; flex-direction: column; }
+.side .field { height: 28px; color: var(--faint); margin-bottom: 8px; }
+.side .row { border-radius: 4px; color: var(--quiet); }
+.side .row.on { color: var(--text); }
+.side .file { margin-top: auto; padding: 12px 10px; font-size: 12px; color: var(--quiet); }
+.rows { flex: 1; padding: 14px 28px 0; }
+.rows .label { margin-bottom: 4px; }
+.srow { display: flex; align-items: center; gap: 24px; padding: 10px 0; border-bottom: 1px solid var(--divider); }
+.srow:last-child { border-bottom: 0; }
+.srow .tx { flex: 1; min-width: 0; }
+.srow .lb { font-size: 13px; }
+.srow .ds { font-size: 12px; color: var(--quiet); margin-top: 1px; }
+.sw { width: 30px; height: 17px; border-radius: 4px; position: relative; flex: none; border: 1px solid var(--divider); }
+.sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 3px; background: var(--faint); }
+.sw.on { background: var(--sw-on); border-color: transparent; }
+.sw.on::after { left: auto; right: 1px; background: var(--sw-knob); }
+.seg { display: flex; background: var(--field); border-radius: 5px; padding: 2px; gap: 2px; font-size: 12px; }
+.seg span { padding: 1px 10px; border-radius: 4px; color: var(--quiet); }
+.seg span.on { background: var(--raised); color: var(--text); }
+</style>
+</head>
+<body>
+
+<template id="bridge">
+  <h2>The bridge at Golling</h2>
+  <p>The bridge at Golling stood where the Salzach leaves its gorge and spreads into the basin, a timber span of eleven bays on stone piers. In 1392 the archbishop's men counted 4 860 loads across it between Easter and Martinmas, nearly all of them salt in barrels of two and a half Zentner <span class="chip">Klein 1998, 41</span>.</p>
+  <p class="indent">Every carter paid twice, once for the bridge and once for the road beyond it, and the two payments went to different purses. The bridge toll was fixed at four Kreuzer a wagon. The road toll rose and fell with the weight of the load, which is why the toll house kept a beam scale of its own, drawn in <span class="chip">Figure 5.2</span>.<span class="caret"></span></p>
+  <h3>What a toll collector earned</h3>
+  <p>The collector at Golling was paid in kind as much as in coin. His contract of 1418 grants him twelve Gulden a year, a cart of firewood, and one Kuffe of salt for every hundred loads he wrote into the book <span class="chip">Hofer 2004, 112</span>.</p>
+</template>
+
+<section class="board" id="spine-abstract">
+  <div class="cap"><b>Bookshelf, abstract.</b> Flat grey spines on one baseline, as wide as their chapters are long and behind a Writing setting that is off by default, answer round 1's "I like the book shelf, but it should be optional and cool" and round 2's "The more abstract version was way better" by getting their polish from proportion, alignment and a three pixel lift on hover, with no material drawn at all.</div>
+  <div class="state">At rest, with the bookshelf switched on: its trace along the bottom edge</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge" style="height:336px;overflow:hidden;padding-bottom:0"></div>
+      <div class="foot-fade"></div>
+      <div class="trace" data-shelf="trace"></div>
+    </div>
+  </div>
+  <div class="state">Revealed at the bottom edge, pointer on 9 The ledger</div>
+  <div class="win" style="height:520px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body">
+      <div class="col" data-p="bridge"></div>
+      <div class="fade"></div>
+      <div class="shelf" data-shelf="shelf"></div>
+      <svg class="ptr" id="shelf-ptr" style="left:0;top:0" viewBox="0 0 14 20"><path d="M1.5 1.5 L1.5 16 L5 12.6 L7.5 18.2 L9.7 17.2 L7.3 11.8 L12 11.8 Z"/></svg>
+    </div>
+  </div>
+  <div class="state">Settings, Writing: off until switched on</div>
+  <div class="win" style="height:436px;width:820px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><span class="stitle">Settings</span></div>
+    <div class="body">
+      <div class="side">
+        <div class="field">Search settings</div>
+        <div class="row">Appearance</div>
+        <div class="row on">Writing</div>
+        <div class="row">Publishing</div>
+        <div class="row">Language and spelling</div>
+        <div class="row">Agent</div>
+        <div class="row">Keys</div>
+        <div class="file">Open settings.json</div>
+      </div>
+      <div class="rows">
+        <div class="label">Writing</div>
+        <div class="srow"><div class="tx"><div class="lb">Line length</div><div class="ds">The book's measure, or your own.</div></div><div class="seg"><span class="on">Book</span><span>66 characters</span></div></div>
+        <div class="srow"><div class="tx"><div class="lb">Typewriter scrolling</div><div class="ds">Keeps the current line at the same height.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Dim other paragraphs</div><div class="ds">Keeps only the current paragraph in full ink.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Toolbar on selection</div><div class="ds">Marks and lists over selected text. The keys work either way.</div></div><i class="sw on"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Binder</div><div class="ds">A slim contents list on the left, on Cmd+\.</div></div><i class="sw"></i></div>
+        <div class="srow"><div class="tx"><div class="lb">Bookshelf</div><div class="ds">Chapters as spines along the bottom edge, on Cmd+Shift+\.</div></div><i class="sw"></i></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const src = document.getElementById('bridge').innerHTML;
+document.querySelectorAll('.col[data-p]').forEach(c => { c.innerHTML = src; });
+
+// [number, title, words, state, flag]. Width follows the word count.
+const book = [
+  { cls: 'a', short: true, files: [['', 'Title', 40, 'fin'], ['', 'Preface', 1210, 'rev']] },
+  { cls: 'b', part: 'Part I, Under the mountain', files: [[1, 'The mine at Hallstatt', 3820, 'fin'], [2, 'Brine and fire', 3410, 'fin'], [3, 'The carriers', 3105, 'rev']] },
+  { cls: 'c', part: 'Part II, The road', files: [[4, 'Over the passes', 3960, 'rev'], [5, 'Tolls and tariffs', 3900, 'draft', 'cur'], [6, 'The river route', 3412, 'rev'], [7, 'Winter crossing', 2980, 'draft']] },
+  { cls: 'd', part: 'Part III, The markets', files: [[8, 'Venice weighs everything', 4120, 'draft'], [9, 'The ledger', 3240, 'draft', 'hov'], [10, 'Decline', 2611, 'draft']] },
+  { cls: 'e', short: true, files: [['', 'Notes', 1180, 'draft'], ['', 'Bibliography', 520, 'fin']] },
+];
+const width = words => Math.round(16 + words * 0.014);
+
+function trace() {
+  const groups = book.map(g => '<div class="tg">' + g.files.map(f =>
+    `<i class="${f[4] === 'cur' ? 'cur' : ''}" style="width:${width(f[2])}px"></i>`).join('') + '</div>');
+  return '<div class="row3">' + groups.join('') + '<div class="tg aside"><i style="width:24px"></i></div></div>';
+}
+
+function shelf() {
+  const groups = book.map(g => {
+    const spines = g.files.map(([no, title, words, state, flag]) => {
+      const cls = ['bk', state, g.short ? 'short' : '', flag || ''].join(' ');
+      const tip = flag === 'hov'
+        ? `<div class="tip float"><div class="h">${no} ${title}</div><div class="m">3 240 words, 17 pages, draft</div><div class="p">2 open placeholders</div><div class="k">Click to open, drag to move</div></div><i class="dot"></i>`
+        : '';
+      return `<div class="${cls}" style="width:${width(words)}px">${tip}${no === '' ? '' : `<span class="no">${no}</span>`}<span class="ti">${title}</span></div>`;
+    }).join('');
+    return `<div class="pg ${g.cls}"><div class="bks">${spines}</div><div class="pl">${g.part || ''}</div></div>`;
+  });
+  const aside = `<div class="pg aside3" style="--h:72px"><div class="bks"><div class="bk loose short" style="width:28px"><span class="ti">Old ending</span></div><div class="flats"><div class="flat">Style probes 4</div><div class="flat">Notes 3</div><div class="flat">Research 16</div></div></div><div class="pl">Not in book</div></div>`;
+  return '<div class="row3">' + groups.join('') + aside + '</div>';
+}
+
+document.querySelectorAll('[data-shelf]').forEach(el => { el.innerHTML = el.dataset.shelf === 'trace' ? trace() : shelf(); });
+
+const hov = document.querySelector('.shelf .bk.hov');
+const ptr = document.getElementById('shelf-ptr');
+const body = ptr.parentElement.getBoundingClientRect();
+const r = hov.getBoundingClientRect();
+ptr.style.left = (r.left - body.left + r.width / 2 - 2) + 'px';
+ptr.style.top = (r.top - body.top + 50) + 'px';
+</script>
+</body>
+</html>

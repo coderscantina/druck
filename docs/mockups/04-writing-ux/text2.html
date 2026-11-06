@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Text boards two</title>
+<link rel="stylesheet" href="druck.css">
+<style>
+.wl { font-size: 11px; color: var(--faint); margin: 6px 0 -4px 2px; }
+.win .col { padding-top: 30px; }
+.col > :first-child { margin-top: 0; }
+.ab { position: absolute; z-index: 5; }
+svg.i { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; vertical-align: -2px; flex: none; }
+.mk { color: var(--faint); }
+.fence { color: var(--faint); }
+.hint { position: absolute; right: 18px; bottom: 10px; font-size: 11px; color: var(--faint); }
+.fig { height: 84px; border-radius: 4px; background: color-mix(in srgb, var(--text) 6%, transparent); display: flex; align-items: center; justify-content: center; color: var(--faint); }
+.fig svg.i { width: 20px; height: 20px; }
+.capt { font: 14px/1.4 var(--book); color: var(--quiet); margin: 6px 0 14px; }
+.seg { display: inline-flex; background: var(--field); border-radius: 4px; padding: 2px; gap: 2px; }
+.seg span { height: 18px; padding: 0 7px; border-radius: 3px; font-size: 12px; color: var(--quiet); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.seg span.on { background: var(--raised); color: var(--text); }
+.seg span.focus { box-shadow: 0 0 0 1px var(--quiet); }
+.grp { height: 24px; display: flex; align-items: flex-end; padding: 0 10px 4px; }
+.row.off { color: var(--faint); }
+.foot { padding: 8px 10px 9px; font-size: 12px; color: var(--quiet); line-height: 1.45; }
+.foot b { color: var(--text); font-weight: 500; }
+.sel-line { display: flex; gap: 6px; align-items: center; }
+
+/* Slash menu with a preview pane. */
+.slash { display: flex; width: 470px; overflow: hidden; }
+.slash .list { width: 214px; padding: 4px 0; border-right: 1px solid var(--divider); flex: none; }
+.slash .pv { flex: 1; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mini { background: var(--sheet); border-radius: 3px; height: 92px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; position: relative; box-shadow: 0 0 0 1px var(--divider); }
+.mini i { display: block; height: 3px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 45%, transparent); }
+.mini .tb { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 3px 6px; margin-top: 3px; }
+.mini .tb b { height: 4px; border-radius: 1px; background: color-mix(in srgb, var(--faint) 80%, transparent); }
+.mini .tb b.r { justify-self: end; width: 60%; }
+.mini .tb i.r { justify-self: end; width: 50%; }
+.mini .tb i { height: 3px; }
+.opt { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--quiet); }
+.opt > span:first-child { width: 46px; flex: none; }
+.src { font: 11px/1.4 var(--ui); color: var(--faint); }
+
+/* dir-a: margin brackets. */
+.blk { position: relative; }
+.blk > .brk { position: absolute; left: -30px; top: 7px; bottom: 14px; width: 6px; border: 1px solid color-mix(in srgb, var(--faint) 70%, transparent); border-right: 0; border-radius: 2px 0 0 2px; }
+.blk .blk > .brk { left: -20px; top: 2px; bottom: 16px; }
+.blk > .bn { position: absolute; right: calc(100% + 42px); top: 4px; font: 11px/16px var(--ui); color: var(--faint); white-space: nowrap; }
+.blk > .bn.on { color: var(--text); }
+.blk > .brk.on { border-color: var(--quiet); }
+.blk.pbk { height: 12px; margin: -2px 0 6px; }
+.blk.pbk > .brk { top: 5px; bottom: auto; height: 0; width: 12px; border: 0; border-top: 1px solid color-mix(in srgb, var(--faint) 70%, transparent); border-radius: 0; }
+.blk.pbk > .bn { top: -2px; }
+
+/* dir-b: show the intent. */
+.cols2 { columns: 2; column-gap: 28px; }
+.cols2 p { margin: 0 0 12px; }
+.keepbox { position: relative; border: 1px solid color-mix(in srgb, var(--faint) 35%, transparent); border-radius: 6px; margin: 4px -14px 14px; padding: 4px 13px 0; }
+.keepbox > .kg { position: absolute; top: -9px; right: 10px; padding: 0 4px; background: var(--canvas); color: var(--faint); line-height: 14px; }
+.keepbox h3 { margin-top: 6px; }
+.pgap { position: relative; height: 58px; margin: 6px -48px 8px; }
+.pgap::before { content: ""; position: absolute; left: 0; right: 0; top: 14px; border-top: 1px solid var(--divider); }
+.pgap .band { position: absolute; left: 0; right: 0; top: 15px; height: 26px; background: color-mix(in srgb, var(--text) 4%, transparent); border-bottom: 1px solid var(--divider); display: flex; align-items: center; justify-content: center; font: 11px var(--ui); color: var(--faint); gap: 6px; }
+.strip { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 8px; }
+.strip .sep { width: 1px; height: 16px; background: var(--divider); }
+.strip .nm { font-size: 12px; color: var(--text); display: flex; gap: 6px; align-items: center; }
+.ghostb { opacity: .42; }
+.ghost-tb { width: 100%; border-collapse: collapse; font: 16px/1.4 var(--book); margin: 2px 0 12px; }
+.ghost-tb th, .ghost-tb td { padding: 3px 0; border-bottom: 1px solid var(--divider); text-align: left; font-weight: 400; }
+.ghost-tb th { font-weight: 700; }
+.ghost-tb .r { text-align: right; }
+
+/* Placeholders. */
+.vc { white-space: nowrap; background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 3px; padding: 1px 3px; margin: 0 -1px; }
+.vc.err { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.nv { font: 11px var(--ui); margin-left: 4px; }
+.todo { font: 13px/1.4 var(--ui); color: var(--quiet); background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 3px; padding: 2px 6px; vertical-align: 1px; }
+.todo b { font-weight: 600; color: var(--text); margin-right: 3px; }
+.nt { font: 13px/1 var(--ui); display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 6px 0 4px; border-radius: 3px; border: 1px solid var(--divider); background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--quiet); vertical-align: 1px; }
+.nt svg.i { width: 11px; height: 11px; color: var(--faint); vertical-align: 0; }
+.nt.err { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.nt.err svg.i { color: var(--accent); }
+.nt.hov { color: var(--text); border-color: var(--faint); }
+.nt.td { color: var(--quiet); }
+.gv { white-space: nowrap; text-decoration: underline dotted color-mix(in srgb, var(--faint) 80%, transparent); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.gv.err { color: var(--accent); text-decoration-color: var(--accent); }
+.gtodo { color: var(--quiet); text-decoration: underline dotted color-mix(in srgb, var(--faint) 80%, transparent); text-underline-offset: 4px; }
+.gh { color: var(--faint); }
+.row .nm { font-size: 13px; }
+.row .val { margin-left: auto; color: var(--quiet); font-size: 12px; }
+.row .val.no { color: var(--faint); }
+.row.on .val { color: var(--text); }
+.tip { padding: 6px 9px; font-size: 12px; white-space: nowrap; }
+.tip b { font-weight: 500; }
+.wide { display: flex; width: 560px; overflow: hidden; }
+.wide .list { width: 270px; padding: 4px 0; border-right: 1px solid var(--divider); }
+.wide .det { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.det .big { font: 22px/1.2 var(--book); color: var(--text); }
+.det p { margin: 0; font-size: 12px; color: var(--quiet); line-height: 1.5; }
+.m { font-weight: 700; color: var(--text); }
+
+/* dir-mix: brackets name the structure, the text shows the effect. */
+.mix .cols2 p:last-child { margin-bottom: 12px; }
+.mix .pgap { margin: 6px 0 8px; }
+.blk.pg > .brk { top: 28px; bottom: auto; height: 0; width: 12px; border: 0; border-top: 1px solid color-mix(in srgb, var(--faint) 70%, transparent); border-radius: 0; }
+.blk.pg > .bn { top: 20px; }
+.mopt { width: 168px; padding: 8px 10px 9px; display: flex; flex-direction: column; gap: 4px; }
+.mopt .seg { align-self: flex-start; }
+.mopt .label { margin-top: 2px; }
+
+/* Combined completion. */
+.anc { position: relative; }
+.anc > .ab { left: 0; top: 30px; }
+.wide.cmp .list { width: 262px; }
+.row.off .nm { color: var(--faint); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cols" viewBox="0 0 16 16"><rect x="2.5" y="3" width="4.5" height="10" rx="1"/><rect x="9" y="3" width="4.5" height="10" rx="1"/></symbol>
+  <symbol id="i-full" viewBox="0 0 16 16"><rect x="2" y="5.5" width="12" height="5" rx="1"/><path d="M2.5 2.5h4M9.5 2.5h4M2.5 13.5h4M9.5 13.5h4"/></symbol>
+  <symbol id="i-keep" viewBox="0 0 16 16"><path d="M5.5 2.5H3v11h2.5M10.5 2.5H13v11h-2.5M6 6h4M6 8h4M6 10h2.5"/></symbol>
+  <symbol id="i-bottom" viewBox="0 0 16 16"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M5.5 11h5"/></symbol>
+  <symbol id="i-break" viewBox="0 0 16 16"><path d="M3.5 2v3.5h9V2M3.5 14v-3.5h9V14M1.5 8h2M6.5 8h3M12.5 8h2"/></symbol>
+  <symbol id="i-table" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 6.5h12M6.5 6.5V13M2 9.75h12"/></symbol>
+  <symbol id="i-toc" viewBox="0 0 16 16"><path d="M3 4h10M5 8h8M5 12h8"/></symbol>
+  <symbol id="i-bib" viewBox="0 0 16 16"><path d="M3 2.5h7.5a2 2 0 0 1 2 2v9H5a2 2 0 0 1-2-2zM3 11.5a2 2 0 0 1 2-2h7.5"/></symbol>
+  <symbol id="i-note" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 7.5v3M8 5.3v.1"/></symbol>
+  <symbol id="i-unwrap" viewBox="0 0 16 16"><path d="M4.5 3H2.5v10h2M11.5 3h2v10h-2M6 8h4M7.5 6.5 6 8l1.5 1.5M8.5 6.5 10 8l-1.5 1.5"/></symbol>
+  <symbol id="i-jump" viewBox="0 0 16 16"><path d="M5 4h7v7M12 4l-8 8"/></symbol>
+  <symbol id="i-brace" viewBox="0 0 16 16"><path d="M6 2.5c-1.4 0-2 .7-2 2V6c0 1-.5 2-1.5 2 1 0 1.5 1 1.5 2v1.5c0 1.3.6 2 2 2M10 2.5c1.4 0 2 .7 2 2V6c0 1 .5 2 1.5 2-1 0-1.5 1-1.5 2v1.5c0 1.3-.6 2-2 2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M5 6.5l3 3 3-3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="10" rx="1"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 16 16"><path d="M3.5 13V8M8 13V3.5M12.5 13V6"/></symbol>
+  <symbol id="i-img" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2.5 11.5 6 8l3 3 2-2 2.5 2.5"/><circle cx="10.5" cy="6" r="1"/></symbol>
+  <symbol id="i-balance" viewBox="0 0 16 16"><path d="M3 3v10M13 3v10M5.5 5h2M5.5 8h2M5.5 11h2M8.5 5h2M8.5 8h2M8.5 11h2"/></symbol>
+</svg>
+
+<section class="board mix" id="dir-mix">
+  <div class="cap"><b>Brackets with intent.</b> Round 1 rated Margin brackets and Show the intent 8 each with "Mixture of brackets and intent", so Write now draws the effect while the margin bracket names it, and the bracket replaces round 1's enclosure, page label and option strip so each fact is shown once.</div>
+
+  <div class="wl">At rest</div>
+  <div class="win" style="height:680px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <div class="blk"><span class="brk"></span><span class="bn">Two columns</span>
+        <div class="cols2" lang="en"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge, and a pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3.</p></div>
+        <div class="blk"><span class="brk"></span><span class="bn">Full width</span>
+          <div class="fig"><svg class="i"><use href="#i-img"/></svg></div>
+          <div class="capt">Figure 5.2 The tariff board at Golling, as the bridge clerk copied it in 1561.</div>
+        </div>
+        <div class="cols2" lang="en"><p>Carriers who came back empty paid nothing, which is why the daybook shows so many return loads of grain, iron and wine <span class="chip">Klein 1998, 41</span>, all of them weighed and none of them taxed.</p></div>
+      </div>
+      <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+        <h3>Exemptions</h3>
+        <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all, a privilege the carriers stretched as far as any clerk would let them.</p>
+      </div>
+      <div class="blk pg"><span class="brk"></span><span class="bn">New page</span><div class="pgap"><div class="band"></div></div></div>
+      <h2>The Emperor's cut</h2>
+    </div></div>
+  </div>
+
+  <div class="wl">Caret on the fence line: the source line opens, the name lights, its options float under the name</div>
+  <div class="win" style="height:400px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <div class="blk"><span class="brk on" style="top:9px"></span><span class="bn on" style="top:6px">Two columns</span>
+        <p class="fence" style="margin-bottom:6px">::: columns<span class="caret"></span></p>
+        <div class="cols2" lang="en"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge, and a pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3.</p></div>
+        <div class="blk"><span class="brk"></span><span class="bn">Full width</span>
+          <div class="fig"><svg class="i"><use href="#i-img"/></svg></div>
+          <div class="capt">Figure 5.2 The tariff board at Golling, as the bridge clerk copied it in 1561.</div>
+        </div>
+      </div>
+      <div class="float ab" style="left:-228px; top:96px; width:262px; padding:4px 0">
+        <div class="row"><svg class="i ic"><use href="#i-cols"/></svg><span>Kind</span><span style="margin-left:auto" class="seg"><span class="on">Columns</span><span>Keep</span><span>Bottom</span></span></div>
+        <div class="row on"><svg class="i ic"><use href="#i-full"/></svg>Full width from the caret<span class="end">⇧⌘↵</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-jump"/></svg>Go to full width part<span class="end">Figure 5.2</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-unwrap"/></svg>Unwrap, keep the text<span class="end">⌘⌫</span></div>
+        <div class="divider" style="margin:4px 0"></div>
+        <div class="foot">Changes rewrite the fence lines, never the text between them. Esc returns to the line.</div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="wl">Inserting: arrowing through the / menu ghosts the effect into the text with its bracket and name, and the name carries the options Tab will reach</div>
+  <div class="win" style="height:520px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <p>The clerk at Golling kept his rates on a single board, and the daybook repeats them every spring with only the coins changed. Nobody needed to read to pay.</p>
+      <p>The board was painted in two colours, salt in white and everything else in black, so that a carrier could find his own fare at a glance:</p>
+      <p style="margin-bottom:8px">/<span class="caret"></span></p>
+      <div class="ghostb">
+        <div class="blk"><span class="brk" style="top:4px; bottom:16px"></span><span class="bn" style="top:1px">Table</span>
+          <table class="ghost-tb">
+            <tr><th style="width:50%">Load</th><th class="r">Zentner</th><th class="r">Kreuzer</th></tr>
+            <tr><td>Fuder of salt</td><td class="r">8</td><td class="r">6</td></tr>
+            <tr><td>Pack horse</td><td class="r">2</td><td class="r">2</td></tr>
+            <tr><td>Cart of iron</td><td class="r">6</td><td class="r">4</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="float ab mopt" style="left:-210px; top:300px">
+        <span class="label">Align</span><span class="seg"><span class="on">Left</span><span>Right</span><span>Right</span></span>
+        <span class="label">Widths</span><span class="seg"><span class="on">2</span><span>1</span><span>1</span></span>
+      </div>
+      <div class="float ab" style="left:-1px; top:5px; width:248px; padding:4px 0">
+        <div class="row"><svg class="i ic"><use href="#i-cols"/></svg>Two columns</div>
+        <div class="row"><svg class="i ic"><use href="#i-keep"/></svg>Keep together</div>
+        <div class="row"><svg class="i ic"><use href="#i-bottom"/></svg>Bottom of page</div>
+        <div class="row"><svg class="i ic"><use href="#i-break"/></svg>Page break</div>
+        <div class="row on"><svg class="i ic"><use href="#i-table"/></svg>Table<span class="end">rows from the list</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-toc"/></svg>Contents</div>
+        <div class="divider" style="margin:4px 0"></div>
+        <div class="foot" style="padding:4px 10px 6px">↵ inserts the ghost, Tab sets its options</div>
+      </div>
+    </div></div>
+  </div>
+</section>
+
+<section class="board" id="ph-chips2">
+  <div class="cap"><b>Chips, completed from the ghost.</b> Value chips keep their round 1 display, and typing now completes inline as a ghost that leads into the two-pane card, because Mike noted "Menu from ghost" on chips and ghosts and called the name tokens card "the best in class".</div>
+
+  <div class="wl">At rest</div>
+  <div class="win" style="height:440px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This book follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice. It runs to <span class="vc">37 508</span> words, about <span class="vc">2 h 45 min</span> of reading, and nearly all of it was written in the archive at Bad Ischl over two winters. <span class="todo"><b>To do</b>thank the Salzmann family once they confirm the quotes</span></p>
+      <p>A note on measures: weights are in Zentner, about 56 kilograms, and money in Kreuzer, sixty to the gulden <span class="chip">Klein 1998, 12</span>.</p>
+      <p>This first edition of <span class="vc">The Salt Road</span>, <span class="vc err">subtitle<span class="nv">no value</span></span>, was set in Iowan Old Style.</p>
+      <p style="text-align:right"><span class="vc">Ines Hartmann</span>, Hallstatt, <span class="vc">2026</span></p>
+    </div></div>
+  </div>
+
+  <div class="wl">Caret inside a chip: the source opens in place, the value moves to a hint above</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This book follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice. It runs to <span class="vc" style="position:relative"><span class="mk">{</span>wo<span class="caret"></span>rds<span class="mk">}</span><span class="float tip ab" style="left:-4px; bottom:30px">37 508 <span class="faint">· Statistics, updates as you write</span></span></span> words, about <span class="vc">2 h 45 min</span> of reading, and nearly all of it was written in the archive at Bad Ischl over two winters. <span class="todo"><b>To do</b>thank the Salzmann family once they confirm the quotes</span></p>
+      <p>This first edition of <span class="vc">The Salt Road</span>, <span class="vc err">subtitle<span class="nv">no value</span></span>, was set in Iowan Old Style.</p>
+    </div></div>
+  </div>
+
+  <div class="wl">Typing {wo: the best match completes as a ghost after the caret, Tab takes it; the card below lists every name with its live value and explains the chosen one</div>
+  <div class="win" style="height:580px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This first edition of <span class="vc">The Salt Road</span> follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice, and nearly all of it was written in the archive at Bad Ischl over two winters.</p>
+      <div style="margin:0 0 12px">The finished text runs to <span class="anc">{wo<span class="caret"></span><span class="gh">rds}</span> <span class="kbd">Tab</span>
+        <span class="float ab wide cmp">
+          <div class="list">
+            <div class="grp label">Statistics</div>
+            <div class="row on"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm"><span class="m">wo</span>rds</span><span class="val">37 508</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">reading-time</span><span class="val no">2 h 45 min</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">sentences</span><span class="val no">2 214</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">paragraphs</span><span class="val no">812</span></div>
+            <div class="grp label">Book</div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">title</span><span class="val no">The Salt Road</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">subtitle</span><span class="val no">no value</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">author</span><span class="val no">Ines Hartmann</span></div>
+            <div class="grp label">Date</div>
+            <div class="row off"><svg class="i ic"><use href="#i-cal"/></svg><span class="nm">year</span><span class="val no">2026</span></div>
+            <div style="height:4px"></div>
+          </div>
+          <div class="det">
+            <div class="label">Statistics</div>
+            <div style="font-size:13px; color:var(--text)">Words</div>
+            <div class="big">37 508</div>
+            <p>Words in the body text, so notes and the bibliography do not count. Updates as you write.</p>
+            <div class="divider" style="margin:6px 0"></div>
+            <p>Tab takes the ghost after the caret. ↑↓ choose another name, the ghost follows.</p>
+            <p class="faint">Writes {words}</p>
+            <div style="margin-top:auto; display:flex; justify-content:flex-end"><span class="btn go">Insert ↵</span></div>
+          </div>
+        </span></span></div>
+    </div></div>
+  </div>
+</section>
+
+<section class="board" id="ph-ghost2">
+  <div class="cap"><b>Ghost values, completed from the ghost.</b> Values keep round 1's plain text with a faint dotted underline, and typing now completes inline as a ghost that leads into the two-pane card, because Mike noted "Menu from ghost" on chips and ghosts and called the name tokens card "the best in class".</div>
+
+  <div class="wl">At rest</div>
+  <div class="win" style="height:440px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This book follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice. It runs to <span class="gv">37 508</span> words, about <span class="gv">2 h 45 min</span> of reading, and nearly all of it was written in the archive at Bad Ischl over two winters. <span class="gtodo">Thank the Salzmann family once they confirm the quotes.</span></p>
+      <p>A note on measures: weights are in Zentner, about 56 kilograms, and money in Kreuzer, sixty to the gulden <span class="chip">Klein 1998, 12</span>.</p>
+      <p>This first edition of <span class="gv">The Salt Road</span>, <span class="gv err">{subtitle}</span>, was set in Iowan Old Style.</p>
+      <p style="text-align:right"><span class="gv">Ines Hartmann</span>, Hallstatt, <span class="gv">2026</span></p>
+    </div></div>
+  </div>
+
+  <div class="wl">Caret inside: the value turns back into its source, the note shows it is a note</div>
+  <div class="win" style="height:420px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This book follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice. It runs to <span class="mk">{</span>wo<span class="caret"></span>rds<span class="mk">}</span><span class="faint" style="font:11px var(--ui); margin-left:4px">37 508</span> words, about <span class="gv">2 h 45 min</span> of reading, and nearly all of it was written in the archive at Bad Ischl over two winters. <span class="mk">{todo: </span><span class="quiet">thank the Salzmann family once they confirm the quotes</span><span class="mk">}</span></p>
+      <p>This first edition of <span class="gv">The Salt Road</span>, <span class="gv err">{subtitle}</span>, was set in Iowan Old Style.</p>
+    </div></div>
+  </div>
+
+  <div class="wl">Typing {wo: the best match completes as a ghost after the caret, Tab takes it; the card below lists every name with its live value and explains the chosen one</div>
+  <div class="win" style="height:580px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h1>Preface</h1>
+      <p>This first edition of <span class="gv">The Salt Road</span> follows salt for six hundred kilometres, from the mine at Hallstatt to the great scales in Venice, and nearly all of it was written in the archive at Bad Ischl over two winters.</p>
+      <div style="margin:0 0 12px">The finished text runs to <span class="anc">{wo<span class="caret"></span><span class="gh">rds}</span> <span class="kbd">Tab</span>
+        <span class="float ab wide cmp">
+          <div class="list">
+            <div class="grp label">Statistics</div>
+            <div class="row on"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm"><span class="m">wo</span>rds</span><span class="val">37 508</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">reading-time</span><span class="val no">2 h 45 min</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">sentences</span><span class="val no">2 214</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bars"/></svg><span class="nm">paragraphs</span><span class="val no">812</span></div>
+            <div class="grp label">Book</div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">title</span><span class="val no">The Salt Road</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">subtitle</span><span class="val no">no value</span></div>
+            <div class="row off"><svg class="i ic"><use href="#i-bib"/></svg><span class="nm">author</span><span class="val no">Ines Hartmann</span></div>
+            <div class="grp label">Date</div>
+            <div class="row off"><svg class="i ic"><use href="#i-cal"/></svg><span class="nm">year</span><span class="val no">2026</span></div>
+            <div style="height:4px"></div>
+          </div>
+          <div class="det">
+            <div class="label">Statistics</div>
+            <div style="font-size:13px; color:var(--text)">Words</div>
+            <div class="big">37 508</div>
+            <p>Words in the body text, so notes and the bibliography do not count. Updates as you write.</p>
+            <div class="divider" style="margin:6px 0"></div>
+            <p>Tab takes the ghost after the caret. ↑↓ choose another name, the ghost follows.</p>
+            <p class="faint">Writes {words}</p>
+            <div style="margin-top:auto; display:flex; justify-content:flex-end"><span class="btn go">Insert ↵</span></div>
+          </div>
+        </span></span></div>
+    </div></div>
+  </div>
+</section>
+
+</body>
+</html>
