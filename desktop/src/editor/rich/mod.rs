@@ -400,7 +400,7 @@ fn is_label_form(label: &str) -> bool {
 }
 
 /// The command that takes `at` out and writes a figure as a block of its own: in place of a block `at` empties, or after
-/// the block it stands in. The caret goes to the figure's start.
+/// the block it ends in. The caret goes to the figure's start.
 pub fn image_command(text: &str, blocks: &Blocks, at: Range<usize>, new: &str) -> Command {
     let eol = line_ending(text);
     let index = blocks.index_at(at.start);
@@ -433,7 +433,9 @@ pub fn image_command(text: &str, blocks: &Blocks, at: Range<usize>, new: &str) -
             selection: Selection::caret(start),
         };
     }
-    let (insert, in_insert) = block_insert(text, blocks, index, new, eol);
+    // After the block the selection ends in, so the figure lands after what the selection took out.
+    let last = blocks.index_at(at.end.saturating_sub(1).max(at.start));
+    let (insert, in_insert) = block_insert(text, blocks, last, new, eol);
     let edits = vec![Edit::new(at, ""), insert];
     let start = moved(edits[1].range.start, &edits, Bias::Before) + in_insert;
     Command {

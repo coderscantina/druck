@@ -9,7 +9,7 @@ use gpui::{AnyElement, Context, Entity, MouseDownEvent, Window, div};
 
 use super::{CONTEXT, RichFloat, card, small_button};
 use crate::editor::commands::marks::{self, Mark};
-use crate::editor::commands::normalized;
+use crate::editor::commands::{normalized, selection_after};
 use crate::editor::float::Float;
 use crate::editor::rich::{Key, facts, footnotes};
 use crate::editor::{EditorView, ToggleBold, ToggleItalic, ToggleStrike, ToggleUnderline};
@@ -63,8 +63,6 @@ impl EditorView {
         self.rich.refresh(&self.session);
         let replaced = slash.unwrap_or_else(|| self.selection.range());
         let text = self.session.active_buffer().text();
-        // Brackets that touch would read as a link.
-        let spaced = text[..replaced.start].ends_with(']');
         let chapter = self.session.active_chapter();
         let stem = chapter
             .path()
@@ -73,7 +71,7 @@ impl EditorView {
         let facts = facts::scan(text);
         let label = footnotes::next_label(&stem, &facts, &self.rich.book.note_labels);
         let placeholder = crate::t!(Key::FootnotePlaceholder);
-        let (command, _) = footnotes::insert(
+        let note = footnotes::insert(
             text,
             &self.blocks,
             &facts,
@@ -83,21 +81,14 @@ impl EditorView {
             self.rich.book.keeping,
         );
         let active = self.session.active();
-        let reference_at = replaced.start + usize::from(spaced);
-        let length = label.len() + "[^]".len();
-        let mut edits = command.edits;
-        let mut selection = command.selection;
-        if spaced {
-            edits[0].text.insert(0, ' ');
-            selection = Selection::caret(selection.head + 1);
-        }
-        match self.write_rich(active, edits, Some(selection), window, cx) {
+        let selection = note.command.selection;
+        match self.write_rich(active, note.command.edits, Some(selection), window, cx) {
             Ok(()) => {
                 self.autoscroll = true;
                 self.rich.refresh(&self.session);
-                self.open_note_with(&label, reference_at..reference_at + length, true, window, cx);
+                self.open_note_with(&label, note.reference, true, window, cx);
             }
-            Err(why) => self.notify_rich(reference_at, why, false, cx),
+            Err(why) => self.notify_rich(replaced.start, why, false, cx),
         }
     }
 
@@ -223,7 +214,8 @@ impl EditorView {
             let mut edits = vec![reference];
             edits.extend(definition);
             let edits = normalized(edits, self.session.active_buffer().text());
-            let after = Selection::caret(note.reference.start);
+            // A definition kept above the reference moves it back.
+            let after = selection_after(Selection::caret(note.reference.start), &edits);
             self.write_rich(active, edits, Some(after), window, cx)
         } else {
             self.write_rich(

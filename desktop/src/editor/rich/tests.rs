@@ -12,7 +12,7 @@ use super::*;
 use crate::editor::commands::normalized;
 use crate::preview::job::Typesetter;
 use crate::session::Session;
-use crate::source::{Buffer, EditKind};
+use crate::source::{Buffer, EditKind, Selection};
 
 const CORPUS: &str = "Development/books/ttp404-gott-nicht-gefunden/buch-1-ttp404/manuscript";
 const CORPUS_BIB: &str = "Development/books/ttp404-gott-nicht-gefunden/literatur.bib";
@@ -151,9 +151,10 @@ fn a_new_note_follows_the_pattern_and_renders_and_undoes() {
     );
     assert!(!rich.book.numbers.contains_key(&label));
     let at = text.find("Ohne").expect("found");
-    let (command, body) = footnotes::insert(&text, &blocks, &facts, at..at, &label, "Größe »ß«.", rich.book.keeping);
+    let note = footnotes::insert(&text, &blocks, &facts, at..at, &label, "Größe »ß«.", rich.book.keeping);
+    let command = note.command;
     let result = round_trip(&text, &command.edits);
-    assert_eq!(&result[body], "Größe »ß«.");
+    assert_eq!(&result[note.body], "Größe »ß«.");
     assert_eq!(
         result,
         "# Drei\n\nReferenz auf fernen Text.[^k03-fern] [^k03-1]Ohne eigene Texte.\n\n[^k03-1]: Größe »ß«.\n"
@@ -162,6 +163,34 @@ fn a_new_note_follows_the_pattern_and_renders_and_undoes() {
         .edit_chapter(id, command.edits, EditKind::Discrete)
         .expect("valid");
     renders(&session).expect("the new note renders");
+}
+
+#[test]
+fn rich_insertions_put_the_caret_on_what_they_wrote() {
+    // An image over a selection that runs into the next paragraph lands after that paragraph.
+    let text = "One two.\n\nThree four.\n\nFive.\n";
+    let blocks = Blocks::parse(text);
+    let at = text.find("two").expect("found")..text.find(" four").expect("found");
+    let figure = images::write("a.png", "", "", images::Placement::Here);
+    let command = image_command(text, &blocks, at, &figure);
+    let result = round_trip(text, &command.edits);
+    assert_eq!(result, "One  four.\n\n![](a.png)\n\nFive.\n");
+    assert!(result[command.selection.head..].starts_with("!["));
+    // Taking out a note whose text stands above its reference puts the caret where the reference was.
+    let text = "One.\n\n[^b]: B.\n\nTwo[^b].\n";
+    let reference = text.find("[^b].").expect("found");
+    let definition = facts::scan(text).definitions.remove(0);
+    let edits = normalized(
+        vec![
+            Edit::new(reference..reference + 4, ""),
+            footnotes::remove_definition(text, &Blocks::parse(text), &definition),
+        ],
+        text,
+    );
+    let after = crate::editor::commands::selection_after(Selection::caret(reference), &edits);
+    let result = round_trip(text, &edits);
+    assert_eq!(result, "One.\n\nTwo.\n");
+    assert_eq!(&result[..after.head], "One.\n\nTwo");
 }
 
 #[test]
@@ -649,9 +678,9 @@ fn on_every_chapter_of_the_book_each_note_reads_writes_and_comes_back() {
         let at = paragraph.range.end - 1;
         let at = text.floor_char_boundary(at);
         let keeping = footnotes::keeping(&blocks).or(Some(footnotes::Keeping::AtEnd));
-        let (command, body) = footnotes::insert(text, &blocks, &facts, at..at, &label, "Größe.", keeping);
-        let result = round_trip(text, &command.edits);
-        assert_eq!(&result[body], "Größe.", "{name}");
+        let note = footnotes::insert(text, &blocks, &facts, at..at, &label, "Größe.", keeping);
+        let result = round_trip(text, &note.command.edits);
+        assert_eq!(&result[note.body], "Größe.", "{name}");
         // Every block but the ones written stays as it was.
         let reference = format!("[^{label}]");
         let definition = format!("[^{label}]: Größe.");
@@ -736,7 +765,7 @@ fn the_books_project_renders_with_each_kind_of_rich_edit() {
     let at = at + text[at..].find(' ').expect("a space");
     let label = footnotes::next_label("13-k02", &facts_now, &rich.book.note_labels);
     assert!(label.starts_with("k02-"), "{label}");
-    let (command, _) = footnotes::insert(
+    let command = footnotes::insert(
         &text,
         &blocks,
         &facts_now,
@@ -744,7 +773,8 @@ fn the_books_project_renders_with_each_kind_of_rich_edit() {
         &label,
         "Größe »ß«.",
         rich.book.keeping,
-    );
+    )
+    .command;
     let before = check::problems_now(&session);
     assert_eq!(check::refusal(&session, id, &command.edits, &before), None);
     round_trip(&text, &command.edits);

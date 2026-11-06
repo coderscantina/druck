@@ -214,8 +214,16 @@ fn definition_edit(text: &str, blocks: &Blocks, facts: &Facts, at: usize, new: &
     }
 }
 
-/// The new note's reference at `replaced`, with its definition where the text keeps them. Returns the command, as one
-/// undo step, and where the note's text lands in the text after it.
+/// A new note's command, as one undo step, and where its parts land in the text after it.
+pub struct NewNote {
+    pub command: Command,
+    /// The reference, `[^label]`.
+    pub reference: Range<usize>,
+    /// The note's text.
+    pub body: Range<usize>,
+}
+
+/// The new note's reference at `replaced`, with its definition where the text keeps them.
 pub fn insert(
     text: &str,
     blocks: &Blocks,
@@ -224,21 +232,38 @@ pub fn insert(
     label: &str,
     body: &str,
     book_keeping: Option<Keeping>,
-) -> (Command, Range<usize>) {
-    let reference = format!("[^{label}]");
+) -> NewNote {
+    // Brackets that touch would read as a link.
+    let space = if text[..replaced.start].ends_with(']') { " " } else { "" };
+    let reference = format!("{space}[^{label}]");
     let keeping = keeping(blocks).or(book_keeping).unwrap_or(Keeping::BelowBlock);
     let lead = format!("[^{label}]: ");
     let new = format!("{lead}{body}");
     let definition = definition_edit(text, blocks, facts, replaced.start, &new, keeping);
-    // The reference's edit comes first in the text unless the definition was placed before it, which a reference in a
-    // definition's own block cannot do.
-    let selection = Selection::caret(replaced.start + reference.len());
-    let definition_at = definition.range.start;
-    let shift = reference.len() as isize - replaced.len() as isize;
     let in_edit = definition.text.find(&lead).unwrap_or(0) + lead.len();
-    let body_start = definition_at.wrapping_add_signed(shift) + in_edit;
-    let edits = vec![Edit::new(replaced, reference), definition];
-    (Command { edits, selection }, body_start..body_start + body.len())
+    // The definition lands before the reference when the chapter keeps its notes above it, as for a paragraph written
+    // after them. The order is the one the edits apply in, so a tie keeps the reference first.
+    let definition_first = (definition.range.start, definition.range.end) < (replaced.start, replaced.end);
+    let (reference_at, body_start) = if definition_first {
+        (replaced.start + definition.text.len(), definition.range.start + in_edit)
+    } else {
+        (
+            replaced.start,
+            definition.range.start - replaced.len() + reference.len() + in_edit,
+        )
+    };
+    let reference_edit = Edit::new(replaced, reference.clone());
+    let edits = if definition_first {
+        vec![definition, reference_edit]
+    } else {
+        vec![reference_edit, definition]
+    };
+    let selection = Selection::caret(reference_at + reference.len());
+    NewNote {
+        command: Command { edits, selection },
+        reference: reference_at + space.len()..reference_at + reference.len(),
+        body: body_start..body_start + body.len(),
+    }
 }
 
 /// The edit that adds a definition for a reference that has none.
@@ -373,9 +398,11 @@ mod tests {
         let insert_at = |text: &str, at: usize, usual| {
             let blocks = Blocks::parse(text);
             let facts = scan(text);
-            let (command, body) = insert(text, &blocks, &facts, at..at, "n", "Größe", usual);
-            let result = applied(text, &command.edits);
-            assert_eq!(&result[body], "Größe");
+            let note = insert(text, &blocks, &facts, at..at, "n", "Größe", usual);
+            let result = applied(text, &note.command.edits);
+            assert_eq!(&result[note.body], "Größe");
+            assert_eq!(&result[note.reference.clone()], "[^n]");
+            assert_eq!(note.command.selection.head, note.reference.end);
             result
         };
         let tail = "One[^a].\n\nTwo.\n\nThree[^b].\n\n[^a]: A.\n\n[^b]: B.\n";
@@ -386,6 +413,12 @@ mod tests {
         assert_eq!(
             insert_at(tail, tail.find("Three").expect("found") + 10, None),
             "One[^a].\n\nTwo.\n\nThree[^b].[^n]\n\n[^a]: A.\n\n[^b]: B.\n\n[^n]: Größe\n"
+        );
+        // A paragraph written after the notes: the reference, the caret, and the note's text all move past the new one.
+        let after = "One[^a] two[^b].\n\n[^a]: A.\n\n[^b]: B.\n\nAfter [@key]\n";
+        assert_eq!(
+            insert_at(after, after.find("[@key]").expect("found") + 6, None),
+            "One[^a] two[^b].\n\n[^a]: A.\n\n[^b]: B.\n\n[^n]: Größe\n\nAfter [@key] [^n]\n"
         );
         let below = "One[^a].\n\n[^a]: A.\n\nTwo.\n\nThree.\n";
         assert_eq!(
