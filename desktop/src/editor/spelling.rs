@@ -78,6 +78,7 @@ pub fn prose_of(kind: BlockKind, text: &str) -> Option<Prose> {
             | SpanKind::Citation
             | SpanKind::CrossReference
             | SpanKind::FootnoteReference
+            | SpanKind::Placeholder
             | SpanKind::Comment => left_out.push(span.range),
             // A placeholder's words are prose, and its `{todo:` and closing brace are not.
             SpanKind::Todo => {

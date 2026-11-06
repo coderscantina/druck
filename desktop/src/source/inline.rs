@@ -36,8 +36,10 @@ pub enum SpanKind {
     Underline,
     /// `[x]{.smallcaps}`
     SmallCaps,
-    /// `{todo: x}`, which shows as written.
+    /// `{todo: x}`: its markers are `{todo:` with the spaces after it, and `}`.
     Todo,
+    /// `{name}`, read by the engine's rule for placeholder names. Whether the name is known is the view's question.
+    Placeholder,
 }
 
 /// One inline construct: `range` holds all of it, `open` and `close` its markers at either end. A span whose markers
@@ -303,7 +305,8 @@ fn reference_label(text: &str) -> Option<usize> {
     (name > 0).then_some(prefix.len() + name)
 }
 
-/// Adds `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, and `{todo: x}` in `gap`, paired as the engine does.
+/// Adds `^x^`, `~x~`, `[x]{.underline}`, `[x]{.smallcaps}`, `{todo: x}`, and `{name}` in `gap`, paired as the engine
+/// does.
 fn source_marks(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &mut Vec<InlineSpan>) {
     let mut at = gap.start;
     while at < gap.end {
@@ -339,15 +342,16 @@ fn source_marks(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &
             b'{' if text[at + 1..].starts_with("todo:") && !marks::escaped(text, at) => marks::todo_close(text, at)
                 .filter(|close| *close < gap.end)
                 .map(|close| {
-                    let range = at..close + 1;
-                    spans.push(InlineSpan {
-                        kind: SpanKind::Todo,
-                        open: range.start..range.start,
-                        close: range.end..range.end,
-                        range: range.clone(),
-                    });
+                    let note = at + "{todo:".len();
+                    let words = note + text[note..close].len() - text[note..close].trim_start().len();
+                    push_span(spans, SpanKind::Todo, at, words, close, close + 1);
                     close + 1
                 }),
+            b'{' if !marks::escaped(text, at) => marks::field_name(&text[at + 1..gap.end]).map(|name| {
+                let close = at + 1 + name;
+                push_span(spans, SpanKind::Placeholder, at, at + 1, close, close + 1);
+                close + 1
+            }),
             _ => None,
         };
         at = step.unwrap_or(at + 1);
@@ -534,7 +538,21 @@ mod tests {
                 (Subscript, "~b~", "~", "~"),
                 (Underline, "[u]{.underline}", "[", "]{.underline}"),
                 (SmallCaps, "[s]{.smallcaps}", "[", "]{.smallcaps}"),
-                (Todo, "{todo: c}", "", ""),
+                (Todo, "{todo: c}", "{todo: ", "}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_placeholders_by_the_engines_rule_for_names() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("{words} {meta.offer} {wrods} {.lead} {a, b} \\{year} {1x} `{code}`"),
+            [
+                (Placeholder, "{words}", "{", "}"),
+                (Placeholder, "{meta.offer}", "{", "}"),
+                (Placeholder, "{wrods}", "{", "}"),
+                (Code, "`{code}`", "`", "`"),
             ]
         );
     }

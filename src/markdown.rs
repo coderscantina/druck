@@ -1612,7 +1612,7 @@ impl<'a> Builder<'a> {
                     continue;
                 }
                 let Some(length) =
-                    field_name(&text[index + 1..]).filter(|_| escapes.is_multiple_of(2) && index >= start)
+                    marks::field_name(&text[index + 1..]).filter(|_| escapes.is_multiple_of(2) && index >= start)
                 else {
                     continue;
                 };
@@ -2591,18 +2591,6 @@ fn column_align(align: Alignment) -> Option<ColumnAlign> {
         Alignment::Center => Some(ColumnAlign::Center),
         Alignment::Right => Some(ColumnAlign::Right),
     }
-}
-
-/// The length of the placeholder name in `{name}` when `text` starts after the brace: a letter, then
-/// letters, digits, `-`, `_`, and `.`. Other braces, such as `{.name}` and `{span=2}`, are text.
-fn field_name(text: &str) -> Option<usize> {
-    let length = text.find('}')?;
-    let name = &text[..length];
-    let valid = name.starts_with(|c: char| c.is_ascii_alphabetic())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    valid.then_some(length)
 }
 
 /// The number of cells a table row's source line holds, counting unescaped pipes. One leading and

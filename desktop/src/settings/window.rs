@@ -7,7 +7,7 @@ use gpui::{
     Window, WindowBounds, WindowKind, WindowOptions, div, point, px, rgb, size, svg,
 };
 
-use super::file::{Appearance, LineLength, Settings, hex, parse_hex};
+use super::file::{Appearance, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
 use super::strings::Key;
 use super::{Store, change, file_path, get, open_file, problem};
 use crate::a11y::Control as _;
@@ -69,6 +69,7 @@ enum Control {
     Accent,
     LineLength,
     Language,
+    Placeholders,
     Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
 }
 
@@ -127,6 +128,12 @@ const ROWS: &[Row] = &[
         label: Key::Bookshelf,
         hint: Key::BookshelfHint,
         control: Control::Switch(|s| s.bookshelf, |s, on| s.bookshelf = on),
+    },
+    Row {
+        category: Category::Writing,
+        label: Key::Placeholders,
+        hint: Key::PlaceholdersHint,
+        control: Control::Placeholders,
     },
     Row {
         category: Category::Publishing,
@@ -452,6 +459,22 @@ impl SettingsWindow {
                     ],
                     settings.language,
                     |settings, value| settings.language = value,
+                    tokens,
+                    cx,
+                )
+                .into_any_element(),
+            Control::Placeholders => self
+                .segments(
+                    "placeholders",
+                    vec![
+                        (PlaceholderDisplay::Chip, crate::t!(Key::PlaceholdersChip).to_owned()),
+                        (
+                            PlaceholderDisplay::Underline,
+                            crate::t!(Key::PlaceholdersUnderline).to_owned(),
+                        ),
+                    ],
+                    settings.placeholders,
+                    |settings, value| settings.placeholders = value,
                     tokens,
                     cx,
                 )

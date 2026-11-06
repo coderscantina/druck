@@ -184,6 +184,23 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
             });
         });
     }
+    // `DRUCK_CARET="{wo|rds}"` puts the caret where the `|` stands in the first such text, and `DRUCK_TYPE` then types
+    // its letters through the input path, as keys would.
+    if let Some(marked) = var("DRUCK_CARET") {
+        let editor = parts.editor.clone();
+        window.on_next_frame(move |window, cx| {
+            editor.update(cx, |editor, cx| {
+                let bar = marked.find('|').unwrap_or(marked.len());
+                let found = marked.replacen('|', "", 1);
+                if let Some(at) = editor.text().find(&found) {
+                    editor.select_for_screenshot(at + bar..at + bar, window, cx);
+                }
+                for letter in var("DRUCK_TYPE").unwrap_or_default().chars() {
+                    editor.replace_text_in_range(None, &letter.to_string(), window, cx);
+                }
+            });
+        });
+    }
     // `DRUCK_SLIP` opens a slip on a paragraph with these words once there are pages.
     if let Some(words) = var("DRUCK_SLIP") {
         let mut words = Some(words);

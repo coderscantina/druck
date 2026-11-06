@@ -288,6 +288,8 @@ impl EntityInputHandler for EditorView {
         self.edit(kind, vec![Edit::new(range, new_text)], after, None, window, cx);
         if typed_slash {
             self.open_slash(at, cx);
+        } else if kind == EditKind::Typing {
+            self.open_completion(cx);
         }
     }
 

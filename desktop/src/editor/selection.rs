@@ -23,6 +23,7 @@ impl EditorView {
         }
         self.autoscroll = true;
         self.follow_slash();
+        self.follow_completion();
         self.restart_blink(window, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();

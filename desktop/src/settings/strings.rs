@@ -24,6 +24,7 @@ crate::strings! {
         OneObject => ("the file should hold one object", "die Datei sollte ein Objekt enthalten"),
         WantedSwitch => ("true or false", "true oder false"),
         WantedAppearance => ("\"system\", \"dark\", or \"light\"", "\"system\", \"dark\" oder \"light\""),
+        WantedPlaceholders => ("\"chip\" or \"underline\"", "\"chip\" oder \"underline\""),
         WantedAccent => ("a color such as \"#2f8fb8\"", "eine Farbe wie \"#2f8fb8\""),
         WantedLanguage => ("\"system\", \"english\", or \"german\"", "\"system\", \"english\" oder \"german\""),
         WantedLineLength => (
@@ -64,6 +65,13 @@ crate::strings! {
             "Auszeichnungen und Listen über dem markierten Text. Die Tasten gehen immer."
         ),
         Binder => ("Binder", "Binder"),
+        Placeholders => ("Placeholders", "Platzhalter"),
+        PlaceholdersHint => (
+            "How a value such as the word count shows in the text.",
+            "Wie ein Wert wie die Wortzahl im Text steht."
+        ),
+        PlaceholdersChip => ("Chip", "Feld"),
+        PlaceholdersUnderline => ("Dotted line", "Punktlinie"),
         WarningMarks => ("Warning marks", "Warnungen markieren"),
         WarningMarksHint => (
             "Mark typesetting warnings on the pages with the Proof tab closed.",

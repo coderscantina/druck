@@ -598,8 +598,12 @@ impl Hub {
             .and_then(|found| found.statistics)
             .map(|statistics| statistics.words);
         let book = self.facts.book_words(session);
+        let statistics = self.facts.book_statistics(session);
         self.footer.update(cx, |footer, cx| footer.set(chapter, book, cx));
         self.refresh_shelf(cx);
+        self.parts
+            .editor
+            .update(cx, |editor, cx| editor.set_book_statistics(statistics, cx));
     }
 
     // Diagnostics

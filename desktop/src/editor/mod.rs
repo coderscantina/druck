@@ -17,6 +17,7 @@ mod keys;
 mod layout;
 mod margin;
 mod place;
+pub(crate) mod placeholders;
 pub mod review;
 pub(crate) mod rich;
 mod scrollbar;
@@ -39,6 +40,8 @@ use gpui::{
     KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString,
     Subscription, Task, UTF16Selection, Window, div, point, px, size,
 };
+
+use druck::editor::statistics::Statistics;
 
 use crate::preview::BookType;
 use crate::session::{ChapterId, ChapterView, Session};
@@ -263,6 +266,12 @@ pub struct EditorView {
     caret_by_keys: bool,
     /// Misspelled words. See [`spelling`].
     spelling: spelling::Spelling,
+    /// What placeholders show. See [`placeholders`].
+    placeholder_values: placeholders::Values,
+    /// The book's statistics, which the shell counts on a thread.
+    book_statistics: Option<Statistics>,
+    /// The `{` whose completion Escape closed, which stays closed while that name is typed.
+    completion_dismissed: Option<usize>,
     /// The newest revision and body style painted, and when each first was.
     #[cfg(any(debug_assertions, feature = "measure"))]
     painted_revision: (u64, Instant),
@@ -307,6 +316,7 @@ struct Writing {
     typewriter: bool,
     dim: bool,
     toolbar: bool,
+    placeholders: placeholders::Display,
 }
 
 impl Writing {
@@ -317,6 +327,7 @@ impl Writing {
             typewriter: settings.typewriter,
             dim: settings.dim_paragraphs,
             toolbar: settings.selection_toolbar,
+            placeholders: settings.placeholders,
         }
     }
 }
@@ -407,6 +418,9 @@ impl EditorView {
             gutter_pinned: false,
             caret_by_keys: false,
             spelling: spelling::Spelling::new(cx, &spelling_folder),
+            placeholder_values: placeholders::Values::default(),
+            book_statistics: None,
+            completion_dismissed: None,
             #[cfg(any(debug_assertions, feature = "measure"))]
             painted_revision: (0, Instant::now()),
             #[cfg(any(debug_assertions, feature = "measure"))]
@@ -418,6 +432,26 @@ impl EditorView {
         view.restart_blink(window, cx);
         view.refresh_rich(window, cx);
         view
+    }
+
+    /// Takes the statistics of the whole book, counted by the engine, which placeholders show.
+    pub fn set_book_statistics(&mut self, statistics: Option<Statistics>, cx: &mut Context<Self>) {
+        self.book_statistics = statistics;
+        self.refresh_placeholder_values(cx);
+    }
+
+    /// Reads what placeholders show again: the book's settings, its statistics, and the day.
+    fn refresh_placeholder_values(&mut self, cx: &mut Context<Self>) {
+        let values = placeholders::Values::new(
+            self.session.settings(),
+            self.book_statistics,
+            &self.session.details().language,
+        );
+        if values != self.placeholder_values {
+            self.placeholder_values = values;
+            self.renew_completion_names();
+            cx.notify();
+        }
     }
 
     /// The document, for reading.
@@ -439,6 +473,7 @@ impl EditorView {
         if before != (self.session.active(), self.session.active_buffer().revision()) {
             self.adopt_active(window, cx);
         }
+        self.refresh_placeholder_values(cx);
         cx.emit(SessionChanged);
         cx.notify();
         result
@@ -919,6 +954,7 @@ impl EditorView {
     fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
         if self.grab.take().is_some() {
             self.drag_scroll = None;
+        } else if self.dismiss_completion() {
         } else if !matches!(self.float, Float::None) {
             self.float = Float::None;
         } else {
@@ -1196,14 +1232,36 @@ impl EditorView {
             (start < end).then(|| start - block.range.start..end - block.range.start)
         });
         let width = self.column.text_width;
-        let mut chips = if self.source || collapsed || whole_atom.is_some() || syntax.spans.is_empty() {
+        let mut chips = if self.source || collapsed || whole_atom.is_some() {
             Vec::new()
         } else {
             let caret = self
                 .reveal_offset()
                 .filter(|at| self.blocks.index_at(*at) == index)
                 .map(|at| at - block.range.start);
-            self.rich.chips(block_text, &syntax.spans, caret)
+            let mut chips = self.rich.chips(block_text, &syntax.spans, caret);
+            chips.extend(placeholders::chips(
+                block.kind,
+                block_text,
+                &syntax.spans,
+                caret,
+                &self.placeholder_values,
+                self.writing.placeholders,
+            ));
+            if let Some((at, ghost)) = self
+                .completion_ghost()
+                .filter(|(at, _)| self.blocks.index_at(*at) == index)
+            {
+                let at = at - block.range.start;
+                chips.push(display::Chip {
+                    range: at..at,
+                    text: ghost,
+                    look: display::ChipLook::Ghost,
+                    atomic: false,
+                });
+            }
+            chips.sort_by_key(|chip| chip.range.start);
+            chips
         };
         if !self.review.is_empty() && !collapsed && whole_atom.is_none() {
             chips.extend(self.review_chips(&block.range, block_text, &hidden, &chips));
@@ -1581,7 +1639,7 @@ impl Render for EditorView {
         if !self.float_takes_keys() {
             context.add(CONTEXT);
         }
-        if self.menu_is_open() {
+        if self.menu_is_open() || self.is_completing() {
             context.add(MENU_CONTEXT);
         }
         // Only why the chapter cannot be read. The text is nearly all there is.
@@ -1629,6 +1687,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::menu_up))
             .on_action(cx.listener(Self::menu_down))
             .on_action(cx.listener(Self::menu_accept))
+            .on_action(cx.listener(Self::menu_complete))
             .on_action(cx.listener(|this, _: &ToggleBold, window, cx| this.toggle_mark(Mark::Bold, window, cx)))
             .on_action(cx.listener(|this, _: &ToggleItalic, window, cx| this.toggle_mark(Mark::Italic, window, cx)))
             .on_action(

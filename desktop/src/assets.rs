@@ -7,6 +7,8 @@ use gpui::{AssetSource, Result, SharedString};
 const FILES: &[(&str, &[u8])] = &[
     ("icons/article.svg", include_bytes!("../assets/icons/article.svg")),
     ("icons/book.svg", include_bytes!("../assets/icons/book.svg")),
+    ("icons/calendar.svg", include_bytes!("../assets/icons/calendar.svg")),
+    ("icons/statistics.svg", include_bytes!("../assets/icons/statistics.svg")),
     ("icons/close.svg", include_bytes!("../assets/icons/close.svg")),
     ("icons/contents.svg", include_bytes!("../assets/icons/contents.svg")),
     ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),

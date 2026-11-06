@@ -7,7 +7,7 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels,
-    Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
+    SharedString, Style, TextAlign, TextRun, Window, div, fill, point, px, relative, size,
 };
 
 use super::display::ChipLook;
@@ -15,6 +15,7 @@ use super::float::prepaint_float;
 use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
 use super::layout::{BlockLayout, Column};
 use super::margin::{Wanted, flow};
+use super::placeholders::{self, Display};
 use super::{EditorView, Scrollbar};
 use crate::source::BlockKind;
 use crate::tokens::{self, Tokens};
@@ -79,6 +80,14 @@ pub struct Frame {
     removed: Hsla,
     body_size: Pixels,
     body_font: gpui::Font,
+    accent: Hsla,
+    faint: Hsla,
+    /// How placeholders' values show.
+    placeholders: Display,
+    /// The value of the placeholder the caret is in, over where it stands.
+    hint: Option<(Bounds<Pixels>, String)>,
+    /// The style of the block the caret is in, far out in the left margin: its first line's top and height, and the name.
+    style_name: Option<(Pixels, Pixels, String)>,
 }
 
 impl IntoElement for Galley {
@@ -198,6 +207,13 @@ impl Element for Galley {
         });
         for (element, spot) in floats {
             prepaint_float(element, spot, window, cx);
+        }
+        let colors = Tokens::get(cx).clone();
+        if let Some((target, text)) = frame.hint.take() {
+            prepaint_hint(target, text, bounds, &colors, window, cx);
+        }
+        if let Some((top, height, name)) = frame.style_name.take() {
+            prepaint_style_name(&frame.column, top, height, name, &colors, window, cx);
         }
         frame
     }
@@ -332,18 +348,30 @@ impl Galley {
 
 fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window) {
     let column = &frame.column;
+    let dotted = frame.placeholders == Display::Underline;
     for line in &block.layout.lines {
         for (chip, look) in &line.chips {
-            let color = match look {
-                ChipLook::Mark => continue,
-                ChipLook::Label => frame.link.opacity(tokens::CHIP_TINT),
-                ChipLook::Error => frame.error.opacity(tokens::CHIP_ERROR_TINT),
-                ChipLook::Removed => frame.removed.opacity(tokens::REVIEW_TINT),
-            };
             let bounds = Bounds::new(
                 point(column.text_left + chip.origin.x, block.top + chip.origin.y),
                 chip.size,
             );
+            let color = match look {
+                ChipLook::Mark | ChipLook::NoteLabel | ChipLook::Ghost => continue,
+                ChipLook::Value | ChipLook::Note if dotted => {
+                    paint_dots(bounds, frame.faint, window);
+                    continue;
+                }
+                ChipLook::Open if dotted => {
+                    paint_dots(bounds, frame.accent, window);
+                    continue;
+                }
+                ChipLook::Label => frame.link.opacity(tokens::CHIP_TINT),
+                ChipLook::Error => frame.error.opacity(tokens::CHIP_ERROR_TINT),
+                ChipLook::Removed => frame.removed.opacity(tokens::REVIEW_TINT),
+                ChipLook::Value => frame.ink.opacity(tokens::PLACEHOLDER_TINT),
+                ChipLook::Open => frame.accent.opacity(tokens::CHIP_ERROR_TINT),
+                ChipLook::Note => frame.ink.opacity(tokens::NOTE_TINT),
+            };
             window.paint_quad(fill(bounds, color).corner_radii(tokens::BOX_RADIUS));
         }
     }
@@ -368,6 +396,84 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
         }
         _ => {}
     }
+}
+
+/// A faint dotted line along the foot of a chip's box, under the words.
+fn paint_dots(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
+    let y = bounds.bottom() - tokens::HAIRLINE;
+    let mut x = bounds.left() + tokens::HAIR_GAP;
+    while x + tokens::HAIRLINE <= bounds.right() - tokens::HAIR_GAP {
+        window.paint_quad(fill(
+            Bounds::new(point(x, y), size(tokens::HAIRLINE, tokens::HAIRLINE)),
+            color,
+        ));
+        x += tokens::DOT_STEP;
+    }
+}
+
+/// The small hint over a placeholder the caret is in, above its line, or below it at the top of the text.
+fn prepaint_hint(
+    target: Bounds<Pixels>,
+    text: String,
+    area: Bounds<Pixels>,
+    colors: &Tokens,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut element = div()
+        .px(tokens::SPACE_2)
+        .py(tokens::SPACE_1)
+        .rounded(tokens::RADIUS)
+        .bg(colors.panel)
+        .border_1()
+        .border_color(colors.divider)
+        .shadow(tokens::float_shadow())
+        .font_family(tokens::FONT_UI)
+        .text_size(tokens::TEXT_SMALL)
+        .text_color(colors.text_quiet)
+        .whitespace_nowrap()
+        .child(SharedString::from(text))
+        .into_any_element();
+    let wanted = element.layout_as_root(AvailableSpace::min_size(), window, cx);
+    let above = target.top() - wanted.height - tokens::FLOAT_GAP;
+    let y = if above >= area.top() {
+        above
+    } else {
+        target.bottom() + tokens::FLOAT_GAP
+    };
+    let x = target.left().min(area.right() - wanted.width).max(area.left());
+    window.defer_draw(element, point(x, y), 1, None);
+}
+
+/// A block's style name, one faint word that ends clear of the block gutter's icons and starts clear of the heading
+/// ticks. Where the margin has no room for it, it does not show.
+fn prepaint_style_name(
+    column: &Column,
+    top: Pixels,
+    height: Pixels,
+    name: String,
+    colors: &Tokens,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut element = div()
+        .h(height)
+        .flex()
+        .items_center()
+        .font_family(tokens::FONT_UI)
+        .text_size(tokens::TEXT_SMALL)
+        .text_color(colors.text_faint)
+        .whitespace_nowrap()
+        .child(SharedString::from(name))
+        .into_any_element();
+    let wanted = element.layout_as_root(AvailableSpace::min_size(), window, cx);
+    let right = column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET - tokens::STYLE_NAME_GAP;
+    let left = right - wanted.width;
+    // Clear of the heading ticks at the pane's left edge too.
+    if left < column.viewport.left() + tokens::TICK_ZONE_WIDTH {
+        return;
+    }
+    window.defer_draw(element, point(left, top), 1, None);
 }
 
 fn paint_block_text(block: &FrameBlock, frame: &Frame, window: &mut Window, cx: &mut App) {
@@ -491,6 +597,8 @@ impl EditorView {
             None
         };
         self.markers = self.comment_markers(&blocks);
+        let hint = self.placeholder_hint(&blocks);
+        let style_name = self.style_name_at_caret(&blocks);
         Frame {
             column,
             blocks,
@@ -521,7 +629,39 @@ impl EditorView {
             removed: self.style.removed,
             body_size: self.style.body_size,
             body_font: self.style.body.clone(),
+            accent: self.style.accent,
+            faint: self.style.faint,
+            placeholders: self.writing.placeholders,
+            hint,
+            style_name,
         }
+    }
+
+    /// The hint over the placeholder the caret stands inside, with where its source shows.
+    fn placeholder_hint(&self, blocks: &[FrameBlock]) -> Option<(Bounds<Pixels>, String)> {
+        if self.source || !self.selection.is_empty() {
+            return None;
+        }
+        let text = self.session.active_buffer().text();
+        let (range, name) = placeholders::placeholder_at(text, &self.blocks, self.selection.head)?;
+        let kind = self.blocks.as_slice()[self.blocks.index_at(range.start)].kind;
+        let target = *self.range_rectangles(range, blocks, false).first()?;
+        Some((target, placeholders::hint(kind, &name, &self.placeholder_values)))
+    }
+
+    /// The style name of the block the caret is in, beside its first line, while that block is on screen.
+    fn style_name_at_caret(&self, blocks: &[FrameBlock]) -> Option<(Pixels, Pixels, String)> {
+        if self.source {
+            return None;
+        }
+        let index = self.blocks.index_at(self.selection.head);
+        let (block, _) = blocks
+            .iter()
+            .zip(&self.visible)
+            .find(|(_, (visible, _))| *visible == index)?;
+        let line = block.layout.lines.iter().find(|line| line.height > px(0.))?;
+        let name = placeholders::style_name(self.session.active_buffer().text(), &self.blocks, index)?;
+        Some((block.top + line.y, line.line_height, name))
     }
 
     /// The rectangles that cover `selection` in the visible blocks. `past_chip` starts them after removed words standing

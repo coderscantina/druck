@@ -16,9 +16,10 @@ use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::notes;
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
 use super::place::{self, Rect};
+use super::placeholders::card::Completion;
 use super::rich::view::RichFloat;
 use super::strings::Key;
-use super::{EditorView, MenuAccept, MenuDown, MenuUp};
+use super::{EditorView, MenuAccept, MenuComplete, MenuDown, MenuUp};
 use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::session::TEMPLATES;
@@ -34,6 +35,8 @@ pub(super) enum Float {
     Link(Link),
     /// What the rich blocks float: a note's text, a picker, a table's grid, a figure's card, and what they have to say.
     Rich(RichFloat),
+    /// Completing a placeholder's name, with the keys in the text.
+    Complete(Completion),
 }
 
 pub(super) struct Menu {
@@ -202,7 +205,7 @@ impl EditorView {
         match &self.float {
             Float::Link(_) => true,
             Float::Rich(float) => float.takes_keys(),
-            Float::None | Float::Menu(_) => false,
+            Float::None | Float::Menu(_) | Float::Complete(_) => false,
         }
     }
 
@@ -577,14 +580,25 @@ impl EditorView {
     }
 
     pub(super) fn menu_up(&mut self, _: &MenuUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.menu_move(false, cx);
+        if !self.completion_move(false, cx) {
+            self.menu_move(false, cx);
+        }
     }
 
     pub(super) fn menu_down(&mut self, _: &MenuDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.menu_move(true, cx);
+        if !self.completion_move(true, cx) {
+            self.menu_move(true, cx);
+        }
+    }
+
+    pub(super) fn menu_complete(&mut self, _: &MenuComplete, window: &mut Window, cx: &mut Context<Self>) {
+        self.accept_completion(window, cx);
     }
 
     pub(super) fn menu_accept(&mut self, _: &MenuAccept, window: &mut Window, cx: &mut Context<Self>) {
+        if self.accept_completion(window, cx) {
+            return;
+        }
         if let Float::Menu(menu) = &self.float {
             let selected = menu.selected;
             self.choose(selected, window, cx);
@@ -903,6 +917,18 @@ impl EditorView {
                 )]
             }
             Float::Rich(_) => self.rich_float(area, window, cx).into_iter().collect(),
+            Float::Complete(_) => {
+                let Some(caret) = caret else {
+                    return Vec::new();
+                };
+                // As tall as the room on the roomier side of the caret, so the card never covers the line it completes.
+                let below = viewport.bottom() - caret.bottom();
+                let above = caret.top() - viewport.top();
+                let room = below.max(above) - tokens::FLOAT_GAP * 2.;
+                self.completion_card(room, cx)
+                    .map(|card| vec![(card, Spot::Caret(caret, area))])
+                    .unwrap_or_default()
+            }
         }
     }
 }
