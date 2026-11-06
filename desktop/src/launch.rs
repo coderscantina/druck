@@ -126,7 +126,7 @@ impl Render for LaunchView {
                 let icon = match starter.slug {
                     "book" => "icons/book.svg",
                     "paper" => "icons/contents.svg",
-                    _ => "icons/file.svg",
+                    _ => "icons/article.svg",
                 };
                 Self::row(
                     &tokens,
