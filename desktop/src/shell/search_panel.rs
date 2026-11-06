@@ -299,7 +299,7 @@ impl Render for SearchPanel {
             .top(tokens::SECTION_HEIGHT)
             .left(tokens::SPACE_4)
             .w(card_width(window.viewport_size().width))
-            // A short window shortens the list, so the card's foot stays in it.
+            // The list grows to the window's foot, and a short window shortens it, so the card's foot stays in it.
             .max_h(window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::SECTION_HEIGHT - tokens::SPACE_4)
             .flex()
             .flex_col()
@@ -386,7 +386,6 @@ impl Render for SearchPanel {
                             div()
                                 .id("search-results")
                                 .min_h_0()
-                                .max_h(tokens::SEARCH_RESULTS_HEIGHT)
                                 .overflow_y_scroll()
                                 .track_scroll(&self.scroll)
                                 .children(rows),

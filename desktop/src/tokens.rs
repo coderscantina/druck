@@ -216,7 +216,6 @@ pub const SEARCH_CARD_WIDTH: Pixels = px(440.);
 pub const COMMIT_SYMBOL_WIDTH: Pixels = px(18.);
 /// The search card narrows to this in a small window, so the text keeps its least width beside it.
 pub const SEARCH_CARD_MIN_WIDTH: Pixels = px(280.);
-pub const SEARCH_RESULTS_HEIGHT: Pixels = px(340.);
 pub const SEARCH_HIT_Y: Pixels = px(3.);
 pub const SEARCH_LINE_WIDTH: Pixels = px(34.);
 /// The find bar, and its count of hits.
