@@ -33,7 +33,7 @@ The window's title is the book's title, or the file's or folder's name while it 
 ## Write
 
 - By default, on a bare page, only the text and the mode switch show. No sheet, no gutter at rest, no footer.
-- Chapter ticks stand at the left edge, one short faint line per chapter, the current one longer and in full ink. Hovering opens the contents as a card over the edge, as wide as its longest title between 240 and 360 px. A tick never marks a page problem.
+- Heading ticks stand at the left edge, one per heading of the open chapter, their length by level, compact at 8 px steps, the section holding the caret in full ink. As the pointer comes near, the ticks under it grow as the Dock does and only the nearest title shows. When the pointer rests on the strip, it unfolds in place into the chapter's outline in the book face at a small size, 20 px rows, with the part and the neighbouring chapters as single lines above and below, the hovered heading in full ink and the text dimmed a little. A click jumps there, also to another chapter. A tick never marks a page problem. Settled on 2026-11-06 from the [writing UX ratings](#writing-ux-ratings-2026-11-06), not built yet: it replaces one tick per chapter with the contents as a card.
 - The text ends above the foot line, so nothing of it shows beside what the line says.
 - The word count is faint at the bottom right, with a thin space between thousands. It hides while typing, and when the text or its margin would reach it. The saving state shows only when something is wrong.
 - `Cmd+\` shows the Binder, described below. Settings shows the same value.
@@ -66,6 +66,15 @@ A separate window after Zed's: categories on the left, Appearance, Writing, Publ
 
 Section labels, field labels, and rows keep the mockups' hierarchy: a small section label, then quiet field labels, then values. Inspector panels start with the small section label on a divider, then quiet field labels above their fields. A detail view starts with a quiet back link before its title.
 
+## Moving through the book
+
+Settled on 2026-11-06 from the [writing UX ratings](#writing-ux-ratings-2026-11-06), not built yet.
+
+- A path bar at the title bar's left names where the caret is: part, chapter, and section. It is faint while typing. A click on a segment opens columns over the text at that level: parts, then chapters with word counts, then headings, and the chosen chapter's opening lines last. Arrow keys walk them, typing selects by title, Return opens, Escape closes. Files not in the book, research, notes, and style probes stand at the foot of the parts column under a divider.
+- The overview is the one place where the book's order changes. The columns' foot holds a quiet Overview, and `Cmd+Escape` opens it from anywhere. It lays the book out like its contents page: one entry per file in reading order, grouped by part, each with its title, first line, word count, and state, and files outside the book set aside after the back matter. A dragged entry drops where a 2 px accent line shows. Return opens the focused entry.
+
+- The bookshelf is a Writing setting, "Bookshelf", off by default, on `Cmd+Shift+\`. It shows the book as flat grey spines on one baseline along the window's bottom edge, each as wide as its chapter is long, with its number and short title, the front and back matter as narrow spines with upright titles, parts labelled below the line, the open chapter lifted 6 px, and the files not in the book at the right end. No material is drawn: no gradients, texture, or bookends. At rest only a faint trace of it stands at the edge, and the text ends above it. It rises when the pointer reaches the edge or on its key. A hovered spine lifts 3 px with a card of its title, words, pages, and any open placeholders in the accent color, the only accent on the shelf. A click opens the chapter, and a drag moves it, dropping at a 2 px accent line.
+
 ## Binder
 
 The Binder is the old sidebar, 216 px, on `Cmd+\`.
@@ -96,6 +105,7 @@ The Binder is the old sidebar, 216 px, on `Cmd+\`.
 - A hidden comment takes no room, and a small speech mark stands right of the type icon on the row it was on. For a comment block it stands beside the next block that shows. Clicking it shows the comment in the flow, in the quiet color.
 - A selection shows its text clean, with no markers revealed. Blank gaps between blocks show no selection.
 - A label or style closing a heading or paragraph, such as `{#sec:intro}`, stays hidden until the caret is inside it.
+- Marks and styles show only as their effect: no markers at rest. The caret inside a mark opens that mark's source and nothing else. While the caret is in a paragraph with a custom style, or in a heading, its style's name, such as "Epigraph" or "Heading 1", stands as one faint word far out in the left margin. Settled on 2026-11-06, not built yet.
 - On a blank line lower than a line of text, such as the one after a table, the caret keeps the body's line height from the line's top.
 - The scrollbar is a 6 px thumb in the pane's right edge, faint, and stronger when the pointer is over it.
 - The source view uses one monospace on the same surface with no block backgrounds. Markers, comments, directives, and front matter are in the quiet color, headings bold, and code in the link color.
@@ -119,6 +129,14 @@ The Binder is the old sidebar, 216 px, on `Cmd+\`.
 - A table at rest shows as a grid in the text, with a paragraph's gap, `PARAGRAPH_GAP`, above its caption and below its last rule, as a figure has: its caption above it, a rule above and below the header and below the last row, thin rules between rows, the header bold, and the columns' alignment. A click opens the editing grid over it at the same place, a card with its tools above, then its cells, then caption, label, and placement. As it opens and as its cell moves, the view scrolls so the card stands inside it. One field moves between the cells, and the others show their Markdown as written.
 - A figure at rest shows centered, at most as wide as the column and three quarters of that tall, with its caption centred below, and keeps a paragraph's gap, `PARAGRAPH_GAP`, above it and below its caption. A click opens its card below the image and its caption, which the card edits, and the view scrolls to show it. A missing file is a tinted box with the error color's message.
 - What is refused says why in the accent color, inside the float that asked, in the engine's words. A deleted reference offers to remove its note's text in a small card at the caret, which takes no focus and leaves with the next edit.
+
+### Directives
+
+Settled on 2026-11-06, not built yet. Write draws what a directive means: `columns` as two columns, `full-width` across both, `keep` as plain text, and `page-break` as a gap between two sheet edges. A thin bracket in the left margin spans each directive's content with its quiet name at the top, "Two columns", "Full width", "Kept together", "New page", and is the only label: no enclosure and no strip over the text. The caret on a fence line opens the line as source, lights the name, and opens the options under it: the kind, Full width from the caret, Go to the full-width part, and Unwrap, which keeps the text. Options rewrite the fence lines, never the text between them. The slash menu lists the directives and, while one is chosen, draws its effect into the text as a ghost with its bracket, whose name carries the options Tab reaches, such as a table's align and widths.
+
+### Placeholders
+
+Settled on 2026-11-06, not built yet. A placeholder shows its value. How is a setting under Writing, and both ways ship: a quiet chip, or plain text with a faint dotted underline. The caret inside turns it back into its source, with the value in a small hint. One without a value, or with an unknown name, shows its source in the accent color. Typing `{` and a few letters shows the best name as a faint ghost after the caret, which Tab takes, and a two-pane card under it: names grouped as Statistics, Book, and Date with their live values on the left, dimmed when they do not match, and the chosen name on the right with its value large, what it counts, what it writes, and Insert in accent text.
 
 ### Selection
 
@@ -146,6 +164,18 @@ The keys: `Cmd+1` and `Cmd+2` for the modes, `Cmd+\` for the Binder, `Cmd+P` for
 - The conflict card keeps a space between struck words and the words that replace them, as the timeline does.
 - A note about a kept copy names its folder, `kept`, with a quiet Show in Finder link to the copy. The palette's Show kept versions opens the book's folder of them at any time, or says there is none yet.
 - What fails beside saving shows on the same line until it is over: a folder that cannot be watched, a recovery copy that cannot be restored or written, a change that cannot be merged, a chapter list that cannot be written, local history that cannot be kept, a new project that could not become a repo, the app's own state that cannot be saved, theme fonts Write cannot use, and an agent conversation that cannot be kept for the next start or earlier ones that cannot be read, and unsaved text that came back without the repo's merge state.
+
+## Supporting material
+
+Settled on 2026-11-06 from the [writing UX ratings](#writing-ux-ratings-2026-11-06), not built yet. Research, notes, and style probes live in `research/` and `notes/` and are never built.
+
+- **The rail in Write.** Publish's rail comes to Write with the tabs Research, Notes, and Probes, hidden at rest but for a faint tick at the right edge. It opens while the pointer rests at the right edge or on its key, and leaves when the author types. The text keeps its measure first and narrows to `TEXT_MIN_WIDTH` before the panel gives way.
+- **One column with a trail.** The panel shows one thing at a time: a kind's list, or one item. Its header has a back arrow and a trail of the last three places, such as Research, then an interview, then a scan, cut at their ends. `Cmd+[` and `Cmd+]` walk it as a browser does. Following a source an item names, such as a scan an interview mentions, adds it to the trail. There are no tabs. Under the header a field filters the list and jumps to any item by name, on `Cmd+L`: focused, it lists recent items first, then matches.
+- **A kind's list** puts what this chapter uses first, "Used in this chapter", each with where: a section, Figure 5.2, Table 5.1, or a count of citations, then the rest of the kind.
+- **An item** has a header with its title, path, date, and "Cited twice here:" with links to the sections, then its text in the book face at a small size. A probe adds a choice of the book's theme or another one, and sets its passage in the chosen theme's type.
+- **The verbs are the same everywhere**, in the panel, on a pin, and in the library: Return opens, Shift+Return inserts what the kind inserts, Quote with citation, Insert as figure, Insert as table, or Insert passage, and `Cmd+Return` pins to the paragraph at the caret. The insert has accent text.
+- **Margin pins.** Material can be pinned to a paragraph. At rest a pin is a short rule in the right margin, and a paragraph with several shows them as one stack. With the caret in that paragraph they open in the margin's one flow as "3 pinned", the first expanded with its excerpt and verbs, the rest as one line each, and `Option+Down` steps through them. While the rail's panel is open, pins fold to their gutter markers with their count.
+- **The library** on `Cmd+Shift+O` is a card under the caret's paragraph that searches all material, filters by kind, This chapter, Notes, Research, Probes, Images, Tables, and Sources, previews the chosen item, and offers Pin here in accent text, the kind's insert, and Open in the rail.
 
 ## Rail panels
 
@@ -190,3 +220,14 @@ The panel's section label is Export. It lists each named export as a collapsed c
 - The timeline covers the window below the title bar. The marks stand evenly along the strip, oldest at the left and now at the right, since a time scale would crush a day's ticks against years of commits. The line above the text names the chapter, the moment, and what the mark is, with Restore passage, in accent text since Enter does it, and Restore chapter at its right end. Its keys: left and right walk the marks, Option with them walks the commits, Home and End go to the ends, up and down choose a passage, Enter restores the passage, Command+Enter the chapter, and Escape closes.
 - A word difference is against the text as it is now: what that version held and now is gone is struck through on the `removed` tint, and what has been added since is on the `added` tint. The chosen passage has a thin accent line under it.
 - The first commit in a folder with no repo asks once, in the card. From then on the card says so in one quiet line, with the same button. A folder in iCloud or Dropbox has the warning in the accent color in the card and the panel, and a new project there says it once at the window's foot.
+
+## Writing UX ratings, 2026-11-06
+
+The owner rated HTML variants in two rounds on 2026-11-06, scoring 1 to 10 with a bar of 8 and no open note. What won is in the sections above. What lost, with the owner's words:
+
+- **Directives:** margin brackets alone and the effect alone each scored 8 with "Mixture of brackets and intent", and the mix scored 9. Region cards, a filled block with its options on the header, scored 4.
+- **Placeholders:** value chips, name tokens, and ghost values each scored 8. The menu came from the ghost ("Menu from ghost"), and the name tokens' two-pane card was "the best in class". With that menu, chips and ghost values scored 10 each, "Both are great, turn into settings". Showing the name as a token in the text lost.
+- **Inline style:** effect only scored 8. Tools at the selection with all markers on Option scored 7. A style column beside the text, as a story editor has, scored 2.
+- **Ticks:** unfold scored 9, "Mixture of lens and unfold", and the mix 9. Lens alone scored 7. Ticks placed by their word offset with a ladder of titles scored 2, "too spacious".
+- **Files:** the path bar and columns and the overview each scored 9, the overview "for overview/ordering", and together 9. The bookshelf scored 8 in its first abstract form, "should be optional and cool", 5 drawn as real books with gradients and bookends, "The more abstract version was way better", and 9 abstract behind a setting. A spine shelf always on and a realistic shelf lost.
+- **Supporting material:** round 1 scored a Write rail 7, a second sheet 9, and pins in the margin 9, all "combine all three faithfully and easy": "no second sheet, but the content is great", and "allow additional pinned references". The combination scored 7 for its open-item tabs: "Improve navigation in Rail, Tabbed is not good!" Round 3 scored one column with a trail 9, a panel that follows the caret 7, and the items as marks in the rail 6. A second sheet beside the manuscript and tabs in the panel lost.
