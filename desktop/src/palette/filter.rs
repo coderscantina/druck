@@ -1,5 +1,5 @@
-//! What the palette's field finds, without gpui: every letter of the query, in order, with what reads most like the query
-//! first.
+//! What the palette's field finds, without gpui: the query as one piece, or in pieces that each start a word, in order,
+//! with what reads most like the query first. Letters scattered through a word never count.
 
 /// `text` as the palette compares it: lower case, with ß as ss and umlauts as their base letters, so a German title is
 /// found from a keyboard without them.
@@ -31,15 +31,31 @@ pub fn score(query: &str, text: &str) -> Option<usize> {
             2
         });
     }
-    let mut letters = text.char_indices();
-    let mut spread = 0;
-    let mut last = None;
-    for wanted in query.chars() {
-        let (at, _) = letters.find(|(_, letter)| *letter == wanted)?;
-        spread += last.map_or(0, |last| at - last);
-        last = Some(at);
+    let words: Vec<&str> = (text.split(|letter: char| !letter.is_alphanumeric()))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let query: String = query.chars().filter(|letter| !letter.is_whitespace()).collect();
+    word_starts(&query, &words).map(|used| 3 + used)
+}
+
+/// How few words it takes for `query`'s pieces to start successive words, in order, or `None` if they cannot.
+fn word_starts(query: &str, words: &[&str]) -> Option<usize> {
+    if query.is_empty() {
+        return Some(0);
     }
-    Some(3 + spread)
+    (0..words.len()).find_map(|first| {
+        let word = words[first];
+        let shared = (query.char_indices().zip(word.chars()))
+            .take_while(|((_, wanted), letter)| wanted == letter)
+            .map(|((at, wanted), _)| at + wanted.len_utf8())
+            .last()?;
+        // The longest piece first, so the fewest words are used.
+        (1..=shared)
+            .rev()
+            .filter(|end| query.is_char_boundary(*end))
+            .find_map(|end| word_starts(&query[end..], &words[first + 1..]))
+            .map(|used| used + 1)
+    })
 }
 
 /// The indices of the texts that hold `query`, best first. Equal ones keep their order, so an empty query keeps them all.
@@ -78,10 +94,15 @@ mod tests {
     }
 
     #[test]
-    fn letters_in_order_are_enough_and_tighter_is_better() {
-        assert_eq!(ranked("zsp", CHAPTERS), [2]);
-        assert_eq!(ranked("ab", ["a..b", "a......b"]), [0, 1]);
-        assert!(score("xyz", "Prolog").is_none());
+    fn pieces_must_start_words_and_scattered_letters_do_not_count() {
+        assert_eq!(ranked("tant", CHAPTERS), [3]);
+        assert_eq!(ranked("teil ant", CHAPTERS), [3]);
+        assert_eq!(ranked("zi", CHAPTERS), [2]);
+        assert!(score("zsp", "Zwischenspiel I").is_none());
+        assert!(score("bug", "archiv/agentischer-ueberarbeitungsplan").is_none());
+        assert_eq!(score("aup", "archiv/agentischer-ueberarbeitungsplan"), None);
+        assert_eq!(score("agu", "archiv/agentischer-ueberarbeitungsplan"), Some(5));
+        assert_eq!(score("grube", "Größe über"), Some(5));
     }
 
     #[test]
