@@ -95,6 +95,18 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Sixth review note
+
+On 2026-11-06 the sixth review's findings went in, except F4 and the walk order of F2, which wait for the owner. The choices are in [decisions](DECISIONS.md#2026-11-06-sixth-review-findings), and [the design](DESIGN.md) follows them. F17 was applied in part: the final check still asks the resolver for images, since the `ImageNotFound` warnings only exist after a layout. PNGs of the visual fixes are in `.captures/fixes-review-6-2026-11-06` beside the repo.
+
+Typing **meets the target**, key handler to paint: 11.4 ms median, 18.9 ms p95, 360 keys, on a temp copy of `buch-1-ttp404` made a project through the launch card, release with fat LTO and `--features measure`, `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25 DRUCK_GATE_THEME_EDITS=0`, load about 3. Not judged: from when a key was due, 15.8 ms median.
+
+Evidence by captures on that copy, keys by PID, with a sandboxed `XDG_CONFIG_HOME`, the owner's shared themes copied into it, and `DRUCK_DATA_DIR`: a real `git merge` of `p2` that changed another sentence of the same line, quit with `Cmd+Q` and reopened with the same conflict line, the file holding their side and `git status` still `UU`; after Keep mine and a reopen, no conflict; a final export refused by an open placeholder, with its error first and looked at; a push refused by a local bare remote, in German; search hits for "Gnade"; find matches tinted with the bar in the margin; the section dialog at the gutter and the shared theme question beside the rail; Publish at 720 by 480 in German with "Einpassen" whole; the table card's row; the figure's room and caption; no underline under `todo`; the palette in both languages with "Show kept versions" and its note; "COVER" over "Kein Cover"; the running heads' row in German; the caret after a table; and the article icon.
+
+Not verified: an agent's struck words in the text (F12), which need a live turn, covered by a test of the display line; the timeline's struck words, covered by a test; the same-sentence case of F1, which takes the same path as the one captured; light appearance captures of the new tints; and the walk keys after a refused export, which wait for the owner's decision.
+
+Follow-ups: Escape still does not reach the new section dialog after the palette opened over it, seen again here. A wrapped figure caption keeps its rows at the left.
+
 ### Fifth review note
 
 On 2026-11-06 the fifth review's findings went in, with the owner's decisions on F2's missing files, F3's Command+Up, F15, and F19's category. The choices are in [decisions](DECISIONS.md#2026-11-06-fifth-review-findings), and [the design](DESIGN.md) follows them. The engine changed for F2: in the app, a missing image, bibliography, or static font file is a warning with something standing in, and only a final export refuses. The CLI still treats each as an error, since the stand-ins are the opt-in `Missing::StandIn` of a job. PNGs of the visual fixes are in `.captures/fixes-review-5-2026-11-06` beside the repo.
