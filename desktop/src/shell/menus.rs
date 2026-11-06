@@ -37,6 +37,7 @@ actions!(
         CloseDocument,
         ToggleBinder,
         FocusBinder,
+        ToggleBookshelf,
         ToggleSpelling,
         ToggleTypewriter,
         ToggleDim,
@@ -81,6 +82,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-[", PreviousProblem, None),
         KeyBinding::new("cmd-\\", ToggleBinder, None),
         KeyBinding::new("cmd-alt-1", FocusBinder, None),
+        KeyBinding::new("cmd-shift-\\", ToggleBookshelf, None),
         KeyBinding::new("cmd-alt-0", FocusEditor, None),
         KeyBinding::new("ctrl-cmd-2", ShowStyles, None),
         KeyBinding::new("ctrl-cmd-3", ShowFonts, None),
@@ -223,6 +225,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
                 item(Key::ToggleBinder, ToggleBinder)
             },
             item(Key::FocusBinder, FocusBinder),
+            item(Key::ToggleBookshelf, ToggleBookshelf),
             item(Key::FocusEditor, FocusEditor),
             MenuItem::separator(),
             item(Key::CommitCard, ShowCommitCard),

@@ -57,6 +57,8 @@ pub struct Settings {
     pub dim_paragraphs: bool,
     pub selection_toolbar: bool,
     pub binder: bool,
+    /// The chapters as spines along the window's bottom edge, see `bookshelf`.
+    pub bookshelf: bool,
     /// Typesetting warnings stay marked on the pages with the Proof tab closed, for a proof pass.
     pub warning_marks: bool,
     pub spelling: bool,
@@ -75,6 +77,7 @@ impl Default for Settings {
             dim_paragraphs: false,
             selection_toolbar: true,
             binder: false,
+            bookshelf: false,
             warning_marks: false,
             spelling: true,
             agent: false,
@@ -175,6 +178,7 @@ const FIELDS: &[Field] = &[
     switch!("dim_other_paragraphs", dim_paragraphs),
     switch!("selection_toolbar", selection_toolbar),
     switch!("binder", binder),
+    switch!("bookshelf", bookshelf),
     switch!("warning_marks", warning_marks),
     switch!("spelling", spelling),
     switch!("agent", agent),

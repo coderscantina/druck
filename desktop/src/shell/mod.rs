@@ -285,6 +285,7 @@ pub fn install(cx: &mut App) {
         with_hub(cx, Hub::binder_toggled);
     });
     cx.on_action(|_: &menus::FocusBinder, cx| with_hub(cx, Hub::focus_binder));
+    cx.on_action(|_: &menus::ToggleBookshelf, cx| with_hub(cx, Hub::toggle_shelf));
     cx.on_action(|_: &menus::ToggleSpelling, cx| settings::change(cx, |s| s.spelling = !s.spelling));
     cx.on_action(|_: &menus::ToggleTypewriter, cx| settings::change(cx, |s| s.typewriter = !s.typewriter));
     cx.on_action(|_: &menus::ToggleDim, cx| settings::change(cx, |s| s.dim_paragraphs = !s.dim_paragraphs));
@@ -470,6 +471,7 @@ impl Hub {
         self.refresh_report(cx);
         self.refresh_facts(cx);
         self.refresh_export(window, cx);
+        self.refresh_shelf(cx);
     }
 
     fn session_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -545,6 +547,9 @@ impl Hub {
         if marks != self.marks {
             self.marks.clone_from(&marks);
             self.parts
+                .shelf
+                .update(cx, |shelf, cx| shelf.set_marks(marks.clone(), cx));
+            self.parts
                 .ticks
                 .update(cx, |ticks, cx| ticks.set_marks(marks.clone(), cx));
             self.parts
@@ -591,6 +596,7 @@ impl Hub {
             .map(|statistics| statistics.words);
         let book = self.facts.book_words(session);
         self.footer.update(cx, |footer, cx| footer.set(chapter, book, cx));
+        self.refresh_shelf(cx);
     }
 
     // Diagnostics
@@ -727,6 +733,44 @@ impl Hub {
         {
             self.focus_editor(window, cx);
         }
+    }
+
+    /// Raises the bookshelf with the keys, or puts it away. Only in Write, and while the setting has it on.
+    fn toggle_shelf(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut write = false;
+        self.with_workspace(cx, |workspace, _| write = workspace.mode() == Mode::Write);
+        if write && settings::get(cx).bookshelf {
+            self.parts.shelf.update(cx, |shelf, cx| shelf.toggle(window, cx));
+        }
+    }
+
+    /// Gives the bookshelf each chapter's words and open placeholders, and its pages from the last layout.
+    fn refresh_shelf(&mut self, cx: &mut Context<Self>) {
+        let session = self.parts.editor.read(cx).session();
+        let in_project = matches!(session.kind(), crate::session::Kind::Project { .. });
+        let pages = if in_project {
+            self.parts.preview.read(cx).pages_by_file()
+        } else {
+            std::collections::HashMap::new()
+        };
+        let figures = (session.book().iter().copied())
+            .chain([session.active()])
+            .map(|id| {
+                let found = self.facts.get(id);
+                let figures = crate::bookshelf::Figures {
+                    words: found
+                        .and_then(|found| found.statistics)
+                        .map(|statistics| statistics.words),
+                    todos: found.map_or(0, |found| found.todos.len()),
+                    pages: session
+                        .chapter(id)
+                        .and_then(|chapter| pages.get(chapter.path()))
+                        .copied(),
+                };
+                (id, figures)
+            })
+            .collect();
+        self.parts.shelf.update(cx, |shelf, cx| shelf.set_figures(figures, cx));
     }
 
     fn focus_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {

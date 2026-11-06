@@ -4,6 +4,7 @@ mod a11y;
 mod agent;
 mod app;
 mod assets;
+mod bookshelf;
 mod editor;
 #[cfg(any(debug_assertions, feature = "measure"))]
 mod gate;

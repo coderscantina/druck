@@ -119,6 +119,41 @@ pub const TICK_HEIGHT: Pixels = px(1.5);
 pub const TICK_ROW: Pixels = px(8.5);
 pub const TICK_ZONE_WIDTH: Pixels = px(36.);
 pub const TICK_OPACITY: f32 = 0.65;
+/// The bookshelf. A spine is as wide as its chapter is long: this much plus [`SPINE_WORD_WIDTH`] per word, and never
+/// under [`SPINE_MIN_WIDTH`], which keeps its number legible and lets 40 chapters stand in the narrowest window. A spine
+/// stops growing at [`SPINE_MAX_WIDTH`]. Too many words for the window shrink every spine's share of words alike.
+pub const SPINE_MIN_WIDTH: f32 = 14.;
+pub const SPINE_WORD_WIDTH: f32 = 0.014;
+pub const SPINE_MAX_WIDTH: f32 = 120.;
+/// Between spines of one group, and between groups.
+pub const SPINE_GAP: f32 = 2.;
+pub const SHELF_GROUP_GAP: f32 = 16.;
+/// The least width of the group of files not in the book, which its label "Not in book" needs.
+pub const SHELF_LOOSE_MIN_WIDTH: f32 = 84.;
+/// The room after the last chapter of the book that takes a dropped spine to the end.
+pub const SHELF_END_SLOT: f32 = 12.;
+pub const SPINE_HEIGHT: Pixels = px(72.);
+/// How far the open chapter's spine stands above the baseline, and a hovered one.
+pub const SPINE_LIFT_OPEN: Pixels = px(6.);
+pub const SPINE_LIFT_HOVER: Pixels = px(3.);
+/// A spine needs this much width to show its title beside its number.
+pub const SPINE_TITLE_MIN_WIDTH: f32 = 44.;
+/// The room under the baseline for a part's label.
+pub const SHELF_LABEL_HEIGHT: Pixels = px(20.);
+/// The raised shelf: its spines, labels, and lift, then a fade into the text above.
+pub const SHELF_HEIGHT: Pixels = px(116.);
+pub const SHELF_FADE_HEIGHT: Pixels = px(28.);
+/// The strip at the window's bottom edge where the pointer raises the shelf.
+pub const SHELF_EDGE_HEIGHT: Pixels = px(8.);
+/// The trace at rest: a hairline per chapter, as wide as its spine, above the window's edge.
+pub const TRACE_HEIGHT: Pixels = px(2.);
+pub const TRACE_BOTTOM: Pixels = px(3.);
+pub const TRACE_OPACITY: f32 = 0.5;
+pub const TRACE_OPEN_OPACITY: f32 = 0.7;
+/// The baseline the spines stand on.
+pub const SHELF_RULE_OPACITY: f32 = 0.4;
+/// The hover card over a spine.
+pub const SPINE_CARD_WIDTH: Pixels = px(204.);
 /// The contents card that opens from the ticks.
 pub const CONTENTS_CARD_WIDTH: Pixels = px(240.);
 /// The widest the contents card grows for its longest title.

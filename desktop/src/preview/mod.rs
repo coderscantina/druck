@@ -536,6 +536,14 @@ impl PreviewView {
         proof::first_place(&self.layout.as_ref()?.laid, page)
     }
 
+    /// The pages of the last layout that open with text of each file.
+    pub fn pages_by_file(&self) -> std::collections::HashMap<PathBuf, usize> {
+        self.layout
+            .as_ref()
+            .map(|layout| proof::pages_by_file(&layout.laid))
+            .unwrap_or_default()
+    }
+
     /// The page a run of text containing `needle` is on, and shows it.
     #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn show_text(&mut self, needle: &str, cx: &mut Context<Self>) -> Option<usize> {

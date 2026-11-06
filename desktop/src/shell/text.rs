@@ -103,6 +103,7 @@ crate::strings! {
         NextProblem => ("Next problem", "Nächstes Problem"),
         PreviousProblem => ("Previous problem", "Voriges Problem"),
         FocusBinder => ("Go to the Binder", "Zum Binder"),
+        ToggleBookshelf => ("Bookshelf", "Bücherregal"),
         Minimize => ("Minimize", "Im Dock ablegen"),
         WindowZoom => ("Zoom", "Zoomen"),
         HelpWeb => ("Druck documentation", "Druck-Dokumentation"),

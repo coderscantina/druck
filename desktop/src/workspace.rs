@@ -19,6 +19,7 @@ use gpui::{
 };
 
 use crate::a11y::Control as _;
+use crate::bookshelf::{BookshelfView, ShelfEvent};
 use crate::editor::{CaretMoved, EditorView, Save, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::details::{DetailsEdit, DetailsPanel};
 use crate::inspector::{
@@ -182,6 +183,7 @@ pub struct Parts {
     pub preview: Entity<PreviewView>,
     pub sidebar: Entity<SidebarView>,
     pub ticks: Entity<TicksView>,
+    pub shelf: Entity<BookshelfView>,
     pub inspector: Entity<InspectorView>,
 }
 
@@ -229,6 +231,7 @@ impl Workspace {
         let inspector = cx.new(|cx| InspectorView::new(theme, dirs, window, cx));
         let sidebar = cx.new(|cx| SidebarView::new(window, cx));
         let ticks = cx.new(|_| TicksView::new());
+        let shelf = cx.new(|cx| BookshelfView::new(window, cx));
         let model = inspector.read(cx).model().clone();
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
@@ -312,6 +315,7 @@ impl Workspace {
             cx.subscribe_in(&ticks, window, |workspace, _, event, window, cx| {
                 workspace.sidebar_event(event, window, cx);
             }),
+            cx.subscribe_in(&shelf, window, Self::shelf_event),
             cx.subscribe_in(&details, window, Self::details_event),
             cx.subscribe_in(&dialog, window, Self::dialog_event),
         ];
@@ -320,6 +324,7 @@ impl Workspace {
             preview,
             sidebar,
             ticks,
+            shelf,
             inspector,
         };
         let mut slots = Slots::default();
@@ -366,6 +371,9 @@ impl Workspace {
     pub fn show(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
         let changed = self.mode != mode;
         self.mode = mode;
+        if changed {
+            self.parts.shelf.update(cx, |shelf, cx| shelf.close(cx));
+        }
         if mode == Mode::Publish {
             self.request_if_changed(cx);
         } else {
@@ -444,6 +452,9 @@ impl Workspace {
         if window.window_title() != title {
             window.set_window_title(&title);
         }
+        self.parts.shelf.update(cx, |shelf, cx| {
+            shelf.set_contents(data.contents.clone(), data.active, cx)
+        });
         self.parts
             .ticks
             .update(cx, |ticks, cx| ticks.set_data(data.clone(), cx));
@@ -728,6 +739,20 @@ impl Workspace {
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Details, cx));
             }
+        }
+    }
+
+    fn shelf_event(
+        &mut self,
+        _: &Entity<BookshelfView>,
+        event: &ShelfEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ShelfEvent::Select(id) => self.sidebar_event(&SidebarEvent::Select(*id), window, cx),
+            ShelfEvent::Move(id, place) => self.sidebar_event(&SidebarEvent::Move(*id, *place), window, cx),
+            ShelfEvent::Closed => self.focus_main(window, cx),
         }
     }
 
@@ -1064,6 +1089,7 @@ impl Render for Workspace {
                     .children(self.slots.right.iter().map(|panel| panel.view.clone()))
                     .children(rail),
             )
+            .children((self.mode == Mode::Write && settings::get(cx).bookshelf).then(|| self.parts.shelf.clone()))
             .children(self.slots.overlays.clone())
     }
 }

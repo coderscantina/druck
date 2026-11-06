@@ -70,6 +70,11 @@ crate::strings! {
             "Satzwarnungen auf den Seiten markieren, auch wenn die Korrektur zu ist."
         ),
         BinderHint => ("A slim contents list on the left, on Cmd+\\.", "Eine schmale Inhaltsliste links, auf Cmd+\\."),
+        Bookshelf => ("Bookshelf", "Bücherregal"),
+        BookshelfHint => (
+            "Chapters as spines along the bottom edge, on Cmd+Shift+\\.",
+            "Kapitel als Buchrücken am unteren Rand, auf Cmd+Umschalt+\\."
+        ),
 
         Language => ("Language", "Sprache"),
         LanguageHint => ("The app's own words. A book's language is in the book.", "Die Wörter der App. Die Sprache eines Buchs steht im Buch."),
