@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 use futures::StreamExt as _;
 use gpui::prelude::*;
 use gpui::{
-    AnyWindowHandle, App, Context, Entity, EventEmitter, FontWeight, Global, KeyBinding, MouseButton, SharedString,
-    Subscription, Task, WeakEntity, Window, actions, div,
+    AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FontWeight, Global, KeyBinding, MouseButton, Pixels,
+    SharedString, Subscription, Task, WeakEntity, Window, actions, div,
 };
 
 use self::atomic::Outcome;
@@ -37,7 +37,7 @@ use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
 use crate::session::disk::Outgoing;
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
-use crate::workspace::{Parts, Slots};
+use crate::workspace::{Parts, Slots, TextColumn};
 
 actions!(persist, [KeepMine, TakeTheirs, SeeBoth, ShowKeptCopies]);
 
@@ -1032,13 +1032,31 @@ impl Render for PersistView {
                 (Some(branch), false) => crate::t!(Key::OverlapBranch, name = name, branch = branch),
                 (None, false) => format!("{name} {}", crate::t!(Key::Overlap)),
             };
+            // Clear of the passage's rows: in the right margin when it fits there, otherwise the text scrolls the
+            // passage above it. In Publish the pages show no passage.
+            let column = cx.try_global::<TextColumn>().copied().unwrap_or_default();
+            let in_margin = (!column.rail)
+                .then(|| self.editor.read(cx).conflict_card_left(tokens::CONFLICT_CARD_WIDTH))
+                .flatten()
+                .map(|left| left - column.left);
+            let keep_above = (!column.rail && in_margin.is_none()).then(|| {
+                let editor = self.editor.clone();
+                gpui::canvas(
+                    move |card: Bounds<Pixels>, _, cx| {
+                        editor.update(cx, |editor, cx| editor.keep_conflict_above(card.top(), cx));
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
+            });
             let theirs = self.passage.as_ref().map(|passage| {
                 let font = self.editor.read(cx).body_font();
                 div()
                     .id("conflict-theirs")
                     .absolute()
                     .bottom_full()
-                    .left(tokens::SPACE_3)
+                    .left(in_margin.unwrap_or(tokens::SPACE_3))
                     .w(tokens::CONFLICT_CARD_WIDTH)
                     .max_h(tokens::SLIP_TEXT_MAX_HEIGHT)
                     .overflow_y_scroll()
@@ -1058,6 +1076,7 @@ impl Render for PersistView {
                         &font,
                         &tokens,
                     ))
+                    .children(keep_above)
             });
             return root
                 .relative()

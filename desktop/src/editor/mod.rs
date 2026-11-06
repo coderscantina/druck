@@ -188,6 +188,10 @@ pub struct EditorView {
     advice: Vec<review::Advice>,
     /// The passage a conflict on the line at the foot is about.
     conflict_mark: Option<Range<usize>>,
+    /// Where that passage's rows stood in the last frame, in the window, when any were on screen.
+    conflict_rows: Option<Bounds<Pixels>>,
+    /// Room the view may go past the chapter's end, so the passage can stand above the conflict's card.
+    conflict_room: Pixels,
     /// The find bar's matches in the open chapter, tinted where they show.
     find_matches: Vec<Range<usize>>,
     /// The card that floats under the selection while it has the keys.
@@ -358,6 +362,8 @@ impl EditorView {
             review: Vec::new(),
             advice: Vec::new(),
             conflict_mark: None,
+            conflict_rows: None,
+            conflict_room: px(0.),
             find_matches: Vec::new(),
             selection_prompt: None,
             goal_x: None,
@@ -605,9 +611,38 @@ impl EditorView {
     /// Marks the passage of the open chapter a conflict is about, or nothing.
     pub fn set_conflict_mark(&mut self, mark: Option<Range<usize>>, cx: &mut Context<Self>) {
         if self.conflict_mark != mark {
+            if mark.is_none() {
+                self.conflict_rows = None;
+                self.conflict_room = px(0.);
+            }
             self.conflict_mark = mark;
             cx.notify();
         }
+    }
+
+    /// Where a card `width` wide about the conflict stands in the right margin, as a window x, when it fits there
+    /// beside the text, so it covers none of the passage's rows.
+    pub fn conflict_card_left(&self, width: Pixels) -> Option<Pixels> {
+        let text_right = self.column.text_left + self.column.text_width;
+        (self.column.viewport.right() - text_right - tokens::SPACE_4 * 2. >= width)
+            .then_some(text_right + tokens::SPACE_4)
+    }
+
+    /// Scrolls the conflict's passage up until it ends above `top`, a window y where its card starts. A passage taller
+    /// than the room left keeps its first line in view.
+    pub fn keep_conflict_above(&mut self, top: Pixels, cx: &mut Context<Self>) {
+        let Some(rows) = self.conflict_rows else {
+            return;
+        };
+        let view = self.column.viewport;
+        let room = tokens::SPACE_4;
+        let delta = (rows.bottom() - (top - room)).min(rows.top() - (view.top() + room));
+        if delta < px(1.) {
+            return;
+        }
+        self.conflict_room = self.conflict_room.max(view.bottom() - top + room);
+        self.scroll_by(delta);
+        cx.notify();
     }
 
     /// Tints the find bar's `matches` in the open chapter, or none.
@@ -1324,7 +1359,7 @@ impl EditorView {
             viewport.top() + viewport.size.height * tokens::TYPEWRITER_AT + tokens::TEXT_MARGIN_Y
         } else {
             viewport.bottom()
-        } - self.float_room;
+        } - self.float_room.max(self.conflict_room);
         let mut retried = false;
         loop {
             self.visible.clear();

@@ -63,7 +63,6 @@ pub struct Frame {
     pub(super) gutter_shown: bool,
     scrollbar: Option<Scrollbar>,
     scrollbar_strong: bool,
-    floats: Vec<AnyElement>,
     /// The images of visible figures, drawn inside the text's bounds.
     images: Vec<AnyElement>,
     /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
@@ -197,10 +196,9 @@ impl Element for Galley {
             }
             element
         });
-        frame.floats = floats
-            .into_iter()
-            .map(|(element, origin)| prepaint_float(element, origin, window, cx))
-            .collect();
+        for (element, spot) in floats {
+            prepaint_float(element, spot, window, cx);
+        }
         frame
     }
 
@@ -301,9 +299,6 @@ impl Element for Galley {
                 view.update(cx, |view, cx| view.mouse_up(event, window, cx));
             }
         });
-        for float in &mut frame.floats {
-            float.paint(window, cx);
-        }
         self.view.update(cx, |view, _| {
             view.trace.painted();
             #[cfg(any(debug_assertions, feature = "measure"))]
@@ -468,10 +463,11 @@ impl EditorView {
             .flat_map(|anchor| self.range_rectangles(anchor, &blocks, true))
             .map(rule_under)
             .collect();
-        let conflict_lines = (self.conflict_mark.clone().into_iter())
+        let conflict_rows: Vec<_> = (self.conflict_mark.clone().into_iter())
             .flat_map(|mark| self.range_rectangles(mark, &blocks, true))
-            .map(rule_under)
             .collect();
+        self.conflict_rows = (conflict_rows.iter().copied()).reduce(|all, row| all.union(&row));
+        let conflict_lines = conflict_rows.into_iter().map(rule_under).collect();
         let on_screen = (self.visible.first().zip(self.visible.last())).map(|((first, _), (last, _))| {
             let list = self.blocks.as_slice();
             list[*first].range.start..list[*last].range.end
@@ -512,7 +508,6 @@ impl EditorView {
             gutter_shown: self.gutter_shown || self.grab.is_some(),
             scrollbar: self.scrollbar,
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
-            floats: Vec::new(),
             images: Vec::new(),
             margin: None,
             review: Vec::new(),
