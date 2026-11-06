@@ -76,6 +76,10 @@ impl EditorView {
             head: target,
         };
         self.set_selection(selection, upstream, window, cx);
+        // Command+Up shows the chapter from its top, so the folded note line stands where it does on opening.
+        if matches!(motion_kind, Motion::DocStart) && !self.writing.typewriter {
+            self.scroll = super::START_OF_CHAPTER;
+        }
         self.goal_x = new_goal;
         self.trace.handled(started);
     }
