@@ -95,6 +95,18 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Fifth review note
+
+On 2026-11-06 the fifth review's findings went in, with the owner's decisions on F2's missing files, F3's Command+Up, F15, and F19's category. The choices are in [decisions](DECISIONS.md#2026-11-06-fifth-review-findings), and [the design](DESIGN.md) follows them. The engine changed for F2: a missing image, bibliography, or static font file is a warning with something standing in, and only a final export refuses. PNGs of the visual fixes are in `.captures/fixes-review-5-2026-11-06` beside the repo.
+
+Typing **meets the target**, key handler to paint: 11.4 ms median, 19.0 ms p95, 360 keys, on a temp copy of `buch-1-ttp404` made a project through the launch card, release with fat LTO and `--features measure`, `DRUCK_GATE=1 DRUCK_GATE_REFRESHES=25 DRUCK_GATE_THEME_EDITS=0`, load about 1.4, Write at its new 125 percent. Not judged: from when a key was due, 16.1 ms median.
+
+Evidence by captures on temp copies, keys by PID, with a sandboxed `XDG_CONFIG_HOME`, the owner's shared themes copied into it, and `DRUCK_DATA_DIR`: a missing image's box on its page with 207 pages set, the empty state in German with Show in text and Write keeping the theme's type, the grid and figure card scrolled into view, Control+Tab unfolding the chapter note with its room and Escape folding it, Command+Up on the title, no gap in source view after a find in a note, the commit card's draft kept through Escape and the timeline and committed with `Cmd+Enter`, the card and palette centred on the text column beside the Binder, the search card at the gutter and at 720 by 480, a live switch to German in `settings.json`, the Publishing category, aligned history rows, the section dialog's fade, "bug" in the palette, proof rows by place, and the contact sheet returning to its spread.
+
+Not verified: a pointer, so Show in text and the empty state's buttons, which are not Tab stops, and the click paths in general. Reject all after Next (F16) and the chat card (F21), which need a live agent turn. The three new problem lines (F24), which were not caused for real. The German timeline label (F10), covered by its test only. EPUB output with a missing file, whose warnings are not printed.
+
+Follow-ups: Escape did not close the new section dialog once, when the palette opened over it. The empty state's buttons are not Tab stops. EPUB renders do not print stand-in warnings.
+
 ### Fourth review note
 
 On 2026-11-05 the fourth review's findings went in, with the owner's decisions on F3, F9, F12, F13's markers, F14's Commit colour, and F16. The choices are in [decisions](DECISIONS.md#2026-11-05-fourth-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-review-4-2026-11-05` beside the repo.
