@@ -29,6 +29,8 @@ pub(super) struct Exporting {
     pub panel: Entity<ExportPanel>,
     /// Why the last export failed, with its errors, for the diagnostics panel.
     pub failure: Option<(String, Vec<Diagnostic>)>,
+    /// What the book's diagnostics were when the last export failed. The panel says it failed until they change.
+    pub failed_with: Option<u64>,
     /// Why the last change to the exports did not take.
     edit_error: Option<String>,
     running: Option<Running>,
@@ -39,6 +41,7 @@ impl Exporting {
         Self {
             panel,
             failure: None,
+            failed_with: None,
             edit_error: None,
             running: None,
         }
@@ -152,6 +155,7 @@ impl Hub {
         let stage = Arc::new(AtomicU8::new(0));
         let started = Instant::now();
         self.exports.failure = None;
+        self.exports.failed_with = None;
         self.refresh_report(cx);
         self.exports.panel.update(cx, |panel, cx| {
             panel.set_run(
@@ -250,6 +254,8 @@ impl Hub {
                     Target::Epub => "EPUB".to_owned(),
                 };
                 self.exports.failure = Some((name, errors));
+                let preview = self.parts.preview.read(cx);
+                self.exports.failed_with = Some(seen(preview.diagnostics(), preview.warnings()));
                 self.parts
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
@@ -278,5 +284,30 @@ impl Hub {
                 .panel
                 .update(cx, |panel, cx| panel.focus_result(window, cx));
         }
+    }
+}
+
+/// A fingerprint of the book's diagnostics: what each says and where.
+pub(super) fn seen(errors: &[Diagnostic], warnings: &[Diagnostic]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for diagnostic in errors.iter().chain(warnings) {
+        diagnostic.message.hash(&mut hasher);
+        (diagnostic.location.map(|at| (at.line, at.column)), diagnostic.page).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_diagnostics_seen_change_with_what_one_says() {
+        let before = [Diagnostic::error("no entry has the key `x`")];
+        let after = [Diagnostic::error("no entry has the key `y`")];
+        assert_eq!(seen(&before, &[]), seen(&before.clone(), &[]));
+        assert_ne!(seen(&before, &[]), seen(&after, &[]));
+        assert_ne!(seen(&before, &[]), seen(&[], &[]));
     }
 }

@@ -480,6 +480,13 @@ impl Hub {
             return;
         }
         let errors = preview.diagnostics();
+        // The export panel's failure line goes once the book's diagnostics change, as the cause may be fixed.
+        if (self.exports.failed_with).is_some_and(|failed| failed != exporting::seen(errors, preview.warnings())) {
+            self.exports.failed_with = None;
+            self.exports.panel.update(cx, |panel, cx| panel.forget_failure(cx));
+        }
+        let preview = self.parts.preview.read(cx);
+        let errors = preview.diagnostics();
         // Warnings of pages that are no longer the latest text say nothing.
         let warnings = if errors.is_empty() { preview.warnings() } else { &[] };
         let notice = (self.exports.failure.as_ref()).map(|(name, _)| crate::t!(Key::ExportFailed, name = name));

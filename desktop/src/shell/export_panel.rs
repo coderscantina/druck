@@ -141,6 +141,13 @@ impl ExportPanel {
         cx.notify();
     }
 
+    /// Takes away the line that says the last run failed.
+    pub fn forget_failure(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.run, RunState::Failed) {
+            self.set_run(RunState::Idle, cx);
+        }
+    }
+
     /// Gives the keys to the first run button, once it has been drawn.
     pub fn focus_first_run(&self, window: &mut Window, cx: &mut Context<Self>) {
         cx.on_next_frame(window, |panel, window, cx| window.focus(&panel.first_run, cx));
@@ -277,16 +284,18 @@ impl ExportPanel {
                                 .flex()
                                 .gap(tokens::SPACE_2)
                                 .child(
-                                    ui::button(tokens, "open-file", crate::t!(Key::OpenFile))
+                                    ui::small_button(tokens, "open-file", crate::t!(Key::OpenFile))
                                         .track_focus(&self.open_file)
                                         .ring_while_focused(tokens)
                                         .on_click(
                                             cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Open(open.clone()))),
                                         ),
                                 )
-                                .child(ui::button(tokens, "reveal-file", crate::t!(Key::RevealFile)).on_click(
-                                    cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Reveal(reveal.clone()))),
-                                )),
+                                .child(
+                                    ui::small_button(tokens, "reveal-file", crate::t!(Key::RevealFile)).on_click(
+                                        cx.listener(move |_, _, _, cx| cx.emit(ExportEvent::Reveal(reveal.clone()))),
+                                    ),
+                                ),
                         )
                         .into_any_element(),
                 )
@@ -332,7 +341,7 @@ impl ExportPanel {
                         .child(self.progress(*stage, tokens)),
                 )
                 .child(
-                    ui::button(
+                    ui::small_button(
                         tokens,
                         SharedString::from(format!("cancel-{id}")),
                         crate::t!(Key::ExportCancel),
@@ -343,7 +352,7 @@ impl ExportPanel {
         }
         let busy = self.is_running();
         let first = self.first_runner().as_deref() == Some(id.as_str());
-        ui::button(tokens, SharedString::from(format!("run-{id}")), label)
+        ui::small_button(tokens, SharedString::from(format!("run-{id}")), label)
             .when(!busy, |button| button.text_color(tokens.accent))
             .when(first, |button| {
                 button.track_focus(&self.first_run).ring_while_focused(tokens)
