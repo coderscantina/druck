@@ -14,6 +14,11 @@ pub struct RunStyle {
     pub link: bool,
     pub strike: bool,
     pub underline: bool,
+    pub superscript: bool,
+    pub subscript: bool,
+    pub small_caps: bool,
+    /// The words of a `{todo: x}`, a note to the author.
+    pub note: bool,
     /// A visible marker, a reference, or a comment.
     pub quiet: bool,
     /// Marked text of an input method.
@@ -33,6 +38,16 @@ pub enum ChipLook {
     Error,
     /// Words an agent took out, which stand for no source.
     Removed,
+    /// A placeholder's value.
+    Value,
+    /// A placeholder that has no value here, showing its source.
+    Open,
+    /// The words of a `{todo: x}`, which stay text. Not a chip: only its look.
+    Note,
+    /// The label in front of a todo's words, which stands for no source.
+    NoteLabel,
+    /// What completing a placeholder would add after the caret, which stands for no source.
+    Ghost,
 }
 
 /// A run of a block's source that shows as other text. `range` is relative to the block, on one line.
@@ -170,14 +185,25 @@ pub fn hidden_ranges(
             hidden.push(marker.range.clone());
         }
     }
+    // Only the innermost marks the caret touches open: a mark inside another opens its own source and nothing else.
+    let touches = |span: &InlineSpan| caret.is_some_and(|caret| span.range.start <= caret && caret <= span.range.end);
+    let innermost = |span: &InlineSpan| {
+        !syntax.spans.iter().any(|inner| {
+            inner.range != span.range
+                && span.range.start <= inner.range.start
+                && inner.range.end <= span.range.end
+                && touches(inner)
+        })
+    };
     for span in &syntax.spans {
-        let revealed = caret.is_some_and(|caret| span.range.start <= caret && caret <= span.range.end);
+        let revealed = touches(span) && innermost(span);
         if !revealed {
             if span.kind == SpanKind::Comment {
                 if !show_comments {
                     hidden.push(span.range.clone());
                 }
-            } else {
+            } else if span.kind != SpanKind::Placeholder {
+                // A placeholder keeps its braces: at rest a chip stands over all of it.
                 hidden.push(span.open.clone());
                 hidden.push(span.close.clone());
             }
@@ -220,8 +246,11 @@ fn span_style(kind: SpanKind, style: &mut RunStyle) {
         SpanKind::Link => style.link = true,
         SpanKind::Strike => style.strike = true,
         SpanKind::Underline => style.underline = true,
-        SpanKind::Todo => style.bold = true,
-        SpanKind::Superscript | SpanKind::Subscript | SpanKind::SmallCaps => {}
+        SpanKind::Todo => style.note = true,
+        SpanKind::Superscript => style.superscript = true,
+        SpanKind::Subscript => style.subscript = true,
+        SpanKind::SmallCaps => style.small_caps = true,
+        SpanKind::Placeholder => {}
         SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::CrossReference | SpanKind::Comment => {
             style.quiet = true;
         }
@@ -342,6 +371,8 @@ fn display_line(
             MarkerKind::Number => Some(text[marker.range.clone()].trim_end().to_owned()),
             MarkerKind::Heading | MarkerKind::Quote => None,
         });
+    shown_chips.extend(note_ranges(&runs));
+    shown_chips.sort_by_key(|(range, _)| range.start);
     let inside_hidden = line.is_empty()
         && hidden
             .iter()
@@ -356,6 +387,22 @@ fn display_line(
         bullet,
         nesting,
     }
+}
+
+/// Where a todo's label and words show on a line, as displayed offsets.
+fn note_ranges(runs: &[(usize, RunStyle)]) -> Vec<(Range<usize>, ChipLook)> {
+    let mut ranges: Vec<(Range<usize>, ChipLook)> = Vec::new();
+    let mut at = 0;
+    for (len, style) in runs {
+        if style.note || style.chip == Some(ChipLook::NoteLabel) {
+            match ranges.last_mut() {
+                Some((range, _)) if range.end == at => range.end += len,
+                _ => ranges.push((at..at + len, ChipLook::Note)),
+            }
+        }
+        at += len;
+    }
+    ranges
 }
 
 fn push_run(runs: &mut Vec<(usize, RunStyle)>, run: (usize, RunStyle)) {
@@ -494,6 +541,43 @@ mod tests {
         assert_eq!(show(BlockKind::Paragraph, text, Some(8))[0].text, "a b c");
         assert_eq!(show(HEADING, "# Title\n", None)[0].text, "Title");
         assert_eq!(show(HEADING, "# Title\n", Some(3))[0].text, "# Title");
+    }
+
+    #[test]
+    fn the_caret_in_a_mark_inside_another_opens_only_its_own_markers() {
+        let text = "**a *b* c**";
+        assert_eq!(show(BlockKind::Paragraph, text, Some(6))[0].text, "a *b* c");
+        assert_eq!(show(BlockKind::Paragraph, text, Some(9))[0].text, "**a b c**");
+        assert_eq!(show(BlockKind::Paragraph, "[*x*](u)", Some(2))[0].text, "*x*");
+    }
+
+    #[test]
+    fn a_todo_shows_its_words_as_a_note_until_the_caret_is_in_it() {
+        let text = "a {todo: check} b";
+        let line = &show(BlockKind::Paragraph, text, None)[0];
+        assert_eq!(line.text, "a check b");
+        assert_eq!(line.chips, [(2..7, ChipLook::Note)]);
+        assert_eq!(show(BlockKind::Paragraph, text, Some(10))[0].text, text);
+    }
+
+    #[test]
+    fn scripts_and_small_capitals_are_flagged_for_the_font() {
+        let line = &show(BlockKind::Paragraph, "3^rd^ H~2~O [Hof]{.smallcaps}", None)[0];
+        assert_eq!(line.text, "3rd H2O Hof");
+        let flagged = |pick: fn(&RunStyle) -> bool| -> String {
+            let mut at = 0;
+            let mut found = String::new();
+            for (len, style) in &line.runs {
+                if pick(style) {
+                    found.push_str(&line.text[at..at + len]);
+                }
+                at += len;
+            }
+            found
+        };
+        assert_eq!(flagged(|style| style.superscript), "rd");
+        assert_eq!(flagged(|style| style.subscript), "2");
+        assert_eq!(flagged(|style| style.small_caps), "Hof");
     }
 
     #[test]

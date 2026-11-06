@@ -293,6 +293,22 @@ pub const MISSPELLED_TINT: f32 = 0.6;
 /// A chip's tint, and that of a chip the book cannot resolve.
 pub const CHIP_TINT: f32 = 0.12;
 pub const CHIP_ERROR_TINT: f32 = 0.14;
+/// Behind a placeholder's value shown as a chip, and behind a todo, in the text color.
+pub const PLACEHOLDER_TINT: f32 = 0.08;
+pub const NOTE_TINT: f32 = 0.05;
+/// The dotted line under a placeholder's value: a dot of a hairline every this many pixels.
+pub const DOT_STEP: Pixels = px(3.);
+/// The card that completes a placeholder: its list of names, the chosen name's side, and its height.
+pub const COMPLETION_LIST_WIDTH: Pixels = px(262.);
+pub const COMPLETION_DETAIL_WIDTH: Pixels = px(240.);
+pub const COMPLETION_HEIGHT: Pixels = px(300.);
+/// A group's label in that list, and the widest a value at a row's end gets.
+pub const COMPLETION_GROUP_HEIGHT: Pixels = px(22.);
+pub const COMPLETION_VALUE_WIDTH: Pixels = px(110.);
+/// The chosen name's value, large, in the book's type.
+pub const COMPLETION_VALUE_SIZE: Pixels = px(22.);
+/// Between a block's style name, far out in the left margin, and the block gutter's icons.
+pub const STYLE_NAME_GAP: Pixels = px(20.);
 /// The scrollbar's thumb, at rest and under the pointer.
 pub const THUMB_FAINT: f32 = 0.4;
 pub const THUMB_STRONG: f32 = 0.8;

@@ -70,6 +70,7 @@ actions!(
         MenuUp,
         MenuDown,
         MenuAccept,
+        MenuComplete,
     ]
 );
 
@@ -157,5 +158,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", MenuUp, context),
         KeyBinding::new("down", MenuDown, context),
         KeyBinding::new("enter", MenuAccept, context),
+        // Takes a placeholder's ghost. In other menus it does nothing, as in the text.
+        KeyBinding::new("tab", MenuComplete, context),
     ]);
 }

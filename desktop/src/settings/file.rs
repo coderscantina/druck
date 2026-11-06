@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::strings::Key;
+pub use crate::editor::placeholders::Display as PlaceholderDisplay;
 use crate::persist::atomic;
 use crate::shell::strings::LanguageSetting;
 use crate::theme_file::patch;
@@ -62,6 +63,8 @@ pub struct Settings {
     pub spelling: bool,
     /// The writing partner: Claude Code, spawned on request. Off leaves no trace on screen and spawns nothing.
     pub agent: bool,
+    /// How a placeholder's value shows in Write.
+    pub placeholders: PlaceholderDisplay,
 }
 
 impl Default for Settings {
@@ -78,6 +81,7 @@ impl Default for Settings {
             warning_marks: false,
             spelling: true,
             agent: false,
+            placeholders: PlaceholderDisplay::Chip,
         }
     }
 }
@@ -178,6 +182,23 @@ const FIELDS: &[Field] = &[
     switch!("warning_marks", warning_marks),
     switch!("spelling", spelling),
     switch!("agent", agent),
+    Field {
+        key: "placeholders",
+        read: |settings, value| {
+            settings.placeholders = match value.as_str() {
+                Some("chip") => PlaceholderDisplay::Chip,
+                Some("underline") => PlaceholderDisplay::Underline,
+                _ => return Err(wanted("placeholders", crate::t!(Key::WantedPlaceholders))),
+            };
+            Ok(())
+        },
+        write: |settings| {
+            json!(match settings.placeholders {
+                PlaceholderDisplay::Chip => "chip",
+                PlaceholderDisplay::Underline => "underline",
+            })
+        },
+    },
 ];
 
 fn wanted(key: &str, what: &str) -> String {

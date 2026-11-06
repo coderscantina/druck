@@ -4,8 +4,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, SharedString, StrikethroughStyle, TextAlign,
-    TextRun, UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, size,
+    Bounds, Font, FontFeatures, FontStyle, FontWeight, Hsla, LineLayout, Pixels, SharedString, StrikethroughStyle,
+    TextAlign, TextRun, UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, size,
 };
 
 use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
@@ -33,6 +33,10 @@ pub struct GalleyStyle {
     pub error: Hsla,
     /// Behind words an agent took out.
     pub removed: Hsla,
+    /// A placeholder without a value.
+    pub accent: Hsla,
+    /// What completing would add.
+    pub faint: Hsla,
 }
 
 fn font_of(face: &Face) -> Font {
@@ -64,6 +68,8 @@ impl GalleyStyle {
             code_background: tokens.raised.into(),
             error: tokens.error.into(),
             removed: tokens.removed.into(),
+            accent: tokens.accent.into(),
+            faint: tokens.text_faint.into(),
         };
         style.set_colors(tokens);
         style
@@ -77,6 +83,8 @@ impl GalleyStyle {
         self.rule = tokens.divider.into();
         self.code_background = tokens.raised.into();
         self.error = tokens.error.into();
+        self.accent = tokens.accent.into();
+        self.faint = tokens.text_faint.into();
     }
 
     /// Takes the theme's type.
@@ -201,22 +209,27 @@ impl GalleyStyle {
 
     fn run(&self, base: &LineStyle, len: usize, style: RunStyle, dim: bool) -> TextRun {
         let family = if style.code { &self.mono } else { &base.font };
+        let bold = style.bold || style.chip == Some(ChipLook::NoteLabel);
         let font = Font {
-            weight: if style.bold { FontWeight::BOLD } else { base.font.weight },
+            weight: if bold { FontWeight::BOLD } else { base.font.weight },
             style: if style.italic {
                 FontStyle::Italic
             } else {
                 base.font.style
             },
+            features: features(style).unwrap_or_else(|| family.features.clone()),
             ..family.clone()
         };
         let color = if let Some(look) = style.chip {
             match look {
                 ChipLook::Mark | ChipLook::Label => self.link,
                 ChipLook::Error => self.error,
-                ChipLook::Removed => base.color,
+                ChipLook::Open => self.accent,
+                ChipLook::Note => self.quiet,
+                ChipLook::Ghost => self.faint,
+                ChipLook::Removed | ChipLook::Value | ChipLook::NoteLabel => base.color,
             }
-        } else if style.quiet {
+        } else if style.quiet || style.note {
             self.quiet
         } else if style.link {
             self.link
@@ -606,6 +619,21 @@ const CHIP_PAD: Pixels = tokens::HAIR_GAP;
 const CHIP_INSET: f32 = 0.08;
 
 /// The boxes behind a line's chips. A chip that wraps has one per row.
+/// The font's own small capitals, superscripts, and subscripts, the OpenType `smcp`, `sups`, and `subs` features. A font
+/// without them shows the letters as they are: a run carries no size or shift of its own.
+fn features(style: RunStyle) -> Option<FontFeatures> {
+    let wanted: Vec<(String, u32)> = [
+        (style.small_caps, "smcp"),
+        (style.superscript, "sups"),
+        (style.subscript, "subs"),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, tag)| (tag.to_owned(), 1))
+    .collect();
+    (!wanted.is_empty()).then(|| FontFeatures(Arc::new(wanted)))
+}
+
 fn chip_boxes(
     display: &DisplayLine,
     shaped: &WrappedLine,

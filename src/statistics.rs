@@ -60,6 +60,14 @@ const ORDINAL_NOUNS_DE: &[&str] = &[
 const WORDS_PER_MINUTE_EN: usize = 228;
 const WORDS_PER_MINUTE_DE: usize = 179;
 
+/// The silent reading speed of `lang` in words per minute.
+pub(crate) fn words_per_minute(lang: Lang) -> usize {
+    match lang {
+        Lang::En => WORDS_PER_MINUTE_EN,
+        Lang::De => WORDS_PER_MINUTE_DE,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Statistics {
     pub chars: usize,
@@ -87,11 +95,7 @@ impl Statistics {
 
     /// The reading time in whole minutes, rounded up, at least 1 for a document with words.
     pub fn reading_time(&self, lang: Lang) -> usize {
-        let speed = match lang {
-            Lang::En => WORDS_PER_MINUTE_EN,
-            Lang::De => WORDS_PER_MINUTE_DE,
-        };
-        self.words.div_ceil(speed)
+        self.words.div_ceil(words_per_minute(lang))
     }
 }
 

@@ -559,6 +559,11 @@ impl Session {
         &self.details
     }
 
+    /// The settings as last read, which placeholders take their values from. `None` while they cannot be read.
+    pub fn settings(&self) -> Option<&FrontMatter> {
+        self.settings.as_ref().ok()
+    }
+
     /// Why the document's settings cannot be read.
     pub fn problem(&self) -> Option<&str> {
         self.settings.as_ref().err().map(String::as_str)

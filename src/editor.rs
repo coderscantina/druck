@@ -72,6 +72,57 @@ pub mod statistics {
     }
 }
 
+/// Placeholders in the text: Write shows the value a render writes, from the same names, counts, and dates.
+pub mod placeholders {
+    use crate::config::theme::Lang;
+
+    pub use crate::config::template::Placeholder;
+    pub use crate::date::Date;
+    /// The length of a placeholder name after `{`, by the parser's rule.
+    pub use crate::markdown::marks::field_name;
+    pub use crate::statistics::Statistics;
+
+    fn lang(code: &str) -> Lang {
+        if code == "de" { Lang::De } else { Lang::En }
+    }
+
+    /// A count as the text shows it, grouped by thousands for `lang`: "12,480" or "12.480".
+    pub fn count(n: usize, lang_code: &str) -> String {
+        crate::layout::fields::grouped(n, lang(lang_code))
+    }
+
+    /// `{reading-time}` in whole minutes, at the speed for `lang`.
+    pub fn reading_time(statistics: &Statistics, lang_code: &str) -> usize {
+        statistics.reading_time(lang(lang_code))
+    }
+
+    /// The words a minute `{reading-time}` reads at in `lang`.
+    pub fn words_per_minute(lang_code: &str) -> usize {
+        crate::statistics::words_per_minute(lang(lang_code))
+    }
+
+    /// `{build-date}`: the day written out for `lang`.
+    pub fn long_date(date: Date, lang_code: &str) -> String {
+        date.long(lang(lang_code))
+    }
+
+    /// The default theme's `draft` label for `lang`, the value of `{draft}` in a draft.
+    pub fn draft_label(lang_code: &str) -> String {
+        let theme = crate::config::layer::default_theme_value();
+        let code = if lang_code == "de" { "de" } else { "en" };
+        theme["labels"][code]["draft"].as_str().unwrap_or_default().to_owned()
+    }
+
+    /// The day a render run now would use: `SOURCE_DATE_EPOCH`'s, or the clock's in UTC.
+    pub fn today() -> Option<Date> {
+        match crate::resource::source_date() {
+            Ok(Some(date)) => Some(date),
+            Ok(None) => crate::resource::clock_date().ok(),
+            Err(_) => None,
+        }
+    }
+}
+
 /// What the galley's rich blocks ask of the engine, so a chip, a picker, or a refused edit says what the pages say.
 pub mod rich {
     use std::collections::HashMap;

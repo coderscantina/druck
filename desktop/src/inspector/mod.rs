@@ -11,7 +11,7 @@ mod running_heads;
 mod source_view;
 mod strings;
 mod style_index;
-mod style_property;
+pub(crate) mod style_property;
 mod styles;
 mod theme_tokens;
 pub(crate) mod widgets;

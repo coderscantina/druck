@@ -118,6 +118,23 @@ impl Cache {
         self.read.iter().map(|(id, (_, facts))| (*id, facts.clone())).collect()
     }
 
+    /// The statistics of the whole book, once every chapter of it has been counted. Each counts block by block, so the
+    /// book's are the sum of its chapters'.
+    pub fn book_statistics(&self, session: &Session) -> Option<Statistics> {
+        let mut book = Statistics::default();
+        for id in session.book() {
+            let chapter = self.get(*id)?.statistics?;
+            book.chars += chapter.chars;
+            book.chars_no_spaces += chapter.chars_no_spaces;
+            book.words += chapter.words;
+            book.sentences += chapter.sentences;
+            book.paragraphs += chapter.paragraphs;
+            book.figures += chapter.figures;
+            book.tables += chapter.tables;
+        }
+        Some(book)
+    }
+
     /// The words of the whole book, once every chapter of it has been counted.
     pub fn book_words(&self, session: &Session) -> Option<usize> {
         session

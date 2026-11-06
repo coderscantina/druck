@@ -137,7 +137,7 @@ fn walk(blocks: &[Block], visit: &mut impl FnMut(&[Inline])) {
 }
 
 /// `n` with its digits grouped by three from 1,000 on: a comma in English, a full stop in German.
-fn grouped(n: usize, lang: Lang) -> String {
+pub(crate) fn grouped(n: usize, lang: Lang) -> String {
     let separator = match lang {
         Lang::En => ',',
         Lang::De => '.',

@@ -1,5 +1,5 @@
-//! The inline marks that the source closes with its own text, found from the written text alone. The parser and
-//! the desktop editor's source layer both use these, so they pair the same characters.
+//! The inline marks that the source closes with its own text, and placeholder names, found from the written text
+//! alone. The parser and the desktop editor's source layer both use these, so they read the same characters.
 
 /// Whether the character at `offset` has an odd number of backslashes before it.
 pub fn escaped(body: &str, offset: usize) -> bool {
@@ -60,4 +60,16 @@ pub fn todo_close(body: &str, offset: usize) -> Option<usize> {
     let note = offset + "{todo:".len();
     let close = body[note..].find('}')?;
     (!body[note..note + close].contains("\n\n")).then_some(note + close)
+}
+
+/// The length of the placeholder name in `{name}` when `text` starts after the brace: a letter, then
+/// letters, digits, `-`, `_`, and `.`. Other braces, such as `{.name}` and `{span=2}`, are text.
+pub fn field_name(text: &str) -> Option<usize> {
+    let length = text.find('}')?;
+    let name = &text[..length];
+    let valid = name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    valid.then_some(length)
 }
