@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, AnyView, Context, Div, EventEmitter, FontWeight, MouseButton, Pixels, Point, Stateful, div, point, px,
+    AnyElement, AnyView, Context, Div, EventEmitter, FontWeight, MouseButton, Pixels, Point, Stateful, div, point,
 };
 
 use super::EditorView;
@@ -196,11 +196,19 @@ impl EditorView {
             if here.is_empty() {
                 continue;
             }
-            let height = self.slots[*index]
-                .layout
-                .as_ref()
-                .map_or(px(0.), |layout| layout.height);
-            let first = *top + height - tokens::REVIEW_ROW_HEIGHT * here.len() as f32;
+            let Some(layout) = self.slots[*index].layout.as_ref() else {
+                continue;
+            };
+            // Under the last line with text, not a blank line closing the chapter.
+            let text_bottom = (layout.whole.is_none())
+                .then(|| {
+                    (layout.lines.iter().rev())
+                        .find(|line| !line.skipped && !line.display.text.trim().is_empty())
+                        .map(|line| line.y + line.height)
+                })
+                .flatten()
+                .unwrap_or(layout.height - tokens::REVIEW_ROW_HEIGHT * here.len() as f32);
+            let first = *top + text_bottom;
             for (row, passage) in here.iter().enumerate() {
                 let y = first + tokens::REVIEW_ROW_HEIGHT * row as f32 + tokens::REVIEW_ROW_GAP;
                 let element = self.review_row(passage.id, &tokens, cx).into_any_element();
