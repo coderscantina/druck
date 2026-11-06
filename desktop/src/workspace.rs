@@ -108,6 +108,8 @@ pub struct SidePanel {
 pub struct TextColumn {
     pub left: Pixels,
     pub width: Pixels,
+    /// The rail's panel stands at the column's right, as in Publish.
+    pub rail: bool,
 }
 
 impl Global for TextColumn {}
@@ -117,6 +119,17 @@ impl TextColumn {
     pub fn centred(cx: &App, width: Pixels) -> Pixels {
         let column = cx.try_global::<Self>().copied().unwrap_or_default();
         (column.left + (column.width - width) / 2.).max(Pixels::ZERO)
+    }
+
+    /// The left edge of a card `width` wide that asks something, near what asked: beside the Binder, or at the window's
+    /// gutter while it is hidden, and beside the rail's panel in Publish.
+    pub fn asking(cx: &App, width: Pixels) -> Pixels {
+        let column = cx.try_global::<Self>().copied().unwrap_or_default();
+        if column.rail {
+            (column.left + column.width - tokens::SPACE_4 - width).max(Pixels::ZERO)
+        } else {
+            column.left + tokens::SPACE_4
+        }
     }
 }
 
@@ -947,6 +960,7 @@ impl Render for Workspace {
         let column = TextColumn {
             left: binder_width + left,
             width: window_width - binder_width - left - right - rail_width,
+            rail: self.mode == Mode::Publish,
         };
         if cx.try_global::<TextColumn>() != Some(&column) {
             cx.set_global(column);

@@ -262,7 +262,7 @@ impl Render for SectionDialog {
             .occlude()
             .absolute()
             .top(tokens::SPACE_4 * 3.)
-            .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
+            .left(crate::workspace::TextColumn::asking(cx, tokens::DIALOG_WIDTH))
             .w(tokens::DIALOG_WIDTH)
             .flex()
             .flex_col()
