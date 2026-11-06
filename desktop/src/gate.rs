@@ -228,7 +228,7 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
 
 /// `DRUCK_POINTER=file` plays a pointer script through the window's own event path, so hover, rest, and clicks run as
 /// a hand would make them, without the window being key. A line is `move X Y`, `glide X0 Y0 X1 Y1 MS` (moves at 60 Hz
-/// for that long), `click X Y`, `key NAME` (a key with no modifiers, such as `right`), `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in
+/// for that long), `click X Y`, `key NAME` (a key with no modifiers but Shift, such as `right` or `shift-tab`), `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in
 /// the window, from its top left.
 fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
     let Some(script) = var("DRUCK_POINTER").and_then(|path| std::fs::read_to_string(path).ok()) else {
@@ -285,9 +285,14 @@ fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
                     );
                 }
                 (Some("key"), _) => {
+                    let name = words.get(1).copied().unwrap_or_default();
+                    let (shift, key) = name.strip_prefix("shift-").map_or((false, name), |key| (true, key));
                     let keystroke = gpui::Keystroke {
-                        modifiers: gpui::Modifiers::default(),
-                        key: words.get(1).copied().unwrap_or_default().to_owned(),
+                        modifiers: gpui::Modifiers {
+                            shift,
+                            ..Default::default()
+                        },
+                        key: key.to_owned(),
                         key_char: None,
                     };
                     send(
