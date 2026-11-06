@@ -48,6 +48,8 @@ pub struct FigureShape {
     source: Atom,
     file: PathBuf,
     x: Pixels,
+    /// The room above the image, and as much below the caption, so a figure keeps apart from its neighbours.
+    space: Pixels,
     image: Size<Pixels>,
     /// Why there is no image to show.
     problem: Option<BlockLayout>,
@@ -105,7 +107,7 @@ impl Whole {
             .w(figure.image.width)
             .h(figure.image.height)
             .into_any_element();
-        let at = point(origin.x + figure.x, origin.y);
+        let at = point(origin.x + figure.x, origin.y + figure.space);
         window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
             element.prepaint_as_root(
                 at,
@@ -146,7 +148,7 @@ impl GridShape {
 
 impl FigureShape {
     fn paint(&self, origin: Point<Pixels>, frame: &Frame, window: &mut Window, cx: &mut App) {
-        let box_origin = point(origin.x + self.x, origin.y);
+        let box_origin = point(origin.x + self.x, origin.y + self.space);
         if let Some(problem) = &self.problem {
             let bounds = Bounds::new(box_origin, self.image);
             window.paint_quad(
@@ -165,7 +167,7 @@ impl FigureShape {
             paint_lines(
                 caption,
                 origin.x,
-                origin.y + self.image.height + tokens::CAPTION_GAP,
+                box_origin.y + self.image.height + tokens::CAPTION_GAP,
                 frame,
                 window,
                 cx,
@@ -274,18 +276,10 @@ impl EditorView {
                     .fold(px(0.), |a, b| a + b);
                 let room = (covered - tokens::CELL_X * 2.).max(tokens::CELL_MIN_WIDTH);
                 let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, dim, window);
-                let align = grid.aligns.get(column).copied().unwrap_or_default();
-                if matches!(align, Align::Center | Align::Right) {
-                    for line in &mut layout.lines {
-                        if line.rows.len() == 1 {
-                            let slack = room - line.shaped.unwrapped_layout.width;
-                            let shift = if align == Align::Center { slack * 0.5 } else { slack };
-                            line.x += shift;
-                            for (chip, _) in &mut line.chips {
-                                chip.origin.x += shift;
-                            }
-                        }
-                    }
+                match grid.aligns.get(column).copied().unwrap_or_default() {
+                    Align::Center => align_rows(&mut layout, room, 0.5),
+                    Align::Right => align_rows(&mut layout, room, 1.),
+                    _ => {}
                 }
                 height = height.max(layout.height + tokens::CELL_Y * 2.);
                 cells.push(GridCell {
@@ -345,9 +339,14 @@ impl EditorView {
             )
         });
         let caption_text = figure.caption(&text);
-        let caption =
-            (!caption_text.is_empty()).then(|| self.shape_inline(caption_text, width, false, None, dim, window));
-        let height = image.height
+        let caption = (!caption_text.is_empty()).then(|| {
+            let mut caption = self.shape_inline(caption_text, width, false, None, dim, window);
+            align_rows(&mut caption, width, 0.5);
+            caption
+        });
+        let space = self.style.body_size * tokens::PARAGRAPH_GAP;
+        let height = space * 2.
+            + image.height
             + caption
                 .as_ref()
                 .map_or(px(0.), |caption| caption.height + tokens::CAPTION_GAP);
@@ -355,10 +354,25 @@ impl EditorView {
             source: atom.clone(),
             file,
             x: (width - image.width) * 0.5,
+            space,
             image,
             problem,
             caption,
             height,
+        }
+    }
+}
+
+/// Moves each line of one row `fraction` of the way across the slack of `room`: a half centres it, a whole sets it
+/// right. A line that wraps keeps its place, since its rows share one shaping.
+fn align_rows(layout: &mut BlockLayout, room: Pixels, fraction: f32) {
+    for line in &mut layout.lines {
+        if line.rows.len() == 1 {
+            let shift = (room - line.shaped.unwrapped_layout.width) * fraction;
+            line.x += shift;
+            for (chip, _) in &mut line.chips {
+                chip.origin.x += shift;
+            }
         }
     }
 }
