@@ -740,6 +740,11 @@ impl EditorView {
         self.column.text_left
     }
 
+    /// The text's left edge and width across the window, as last drawn.
+    pub fn text_span(&self) -> (Pixels, Pixels) {
+        (self.column.text_left, self.column.text_width)
+    }
+
     /// The theme's body font, for text elsewhere in the book's type.
     pub fn body_font(&self) -> gpui::Font {
         self.style.body.clone()

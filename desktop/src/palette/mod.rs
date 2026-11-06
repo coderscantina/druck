@@ -361,13 +361,14 @@ impl Render for Palette {
             .map(|(at, index)| self.row(at, &self.rows[*index], &tokens, cx).into_any_element())
             .collect();
         let empty = rows.is_empty();
+        let (left, width) = crate::workspace::TextColumn::over_text(cx, tokens::PALETTE_WIDTH);
         div()
             .id("palette")
             .occlude()
             .absolute()
             .top(tokens::PALETTE_TOP)
-            .left(crate::workspace::TextColumn::centred(cx, tokens::PALETTE_WIDTH))
-            .w(tokens::PALETTE_WIDTH)
+            .left(left)
+            .w(width)
             .flex()
             .flex_col()
             .bg(tokens.panel)

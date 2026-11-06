@@ -114,6 +114,8 @@ pub struct TextColumn {
     pub width: Pixels,
     /// The rail's panel stands at the column's right, as in Publish.
     pub rail: bool,
+    /// The text's own left edge and width in Write, once drawn.
+    pub text: Option<(Pixels, Pixels)>,
 }
 
 impl Global for TextColumn {}
@@ -164,6 +166,17 @@ impl TextColumn {
     pub fn centred(cx: &App, width: Pixels) -> Pixels {
         let column = cx.try_global::<Self>().copied().unwrap_or_default();
         (column.left + (column.width - width) / 2.).max(Pixels::ZERO)
+    }
+
+    /// The left edge and width of a card over the text: at least `least` wide, and in Write as wide as the text with a
+    /// little more on each side so no line end shows beside it, centred on the text.
+    pub fn over_text(cx: &App, least: Pixels) -> (Pixels, Pixels) {
+        let column = cx.try_global::<Self>().copied().unwrap_or_default();
+        let Some((text_left, text_width)) = column.text else {
+            return (Self::centred(cx, least), least);
+        };
+        let width = (text_width + tokens::CARD_OVERHANG * 2.).max(least);
+        ((text_left + (text_width - width) / 2.).max(Pixels::ZERO), width)
     }
 
     /// The left edge of a card `width` wide that asks something, near what asked: beside the Binder, or at the window's
@@ -1075,6 +1088,9 @@ impl Render for Workspace {
             left: binder_width + left,
             width: window_width - binder_width - left - right - rail_width,
             rail: self.mode == Mode::Publish,
+            text: (self.mode == Mode::Write)
+                .then(|| self.parts.editor.read(cx).text_span())
+                .filter(|(_, width)| *width > Pixels::ZERO),
         };
         if cx.try_global::<TextColumn>() != Some(&column) {
             cx.set_global(column);

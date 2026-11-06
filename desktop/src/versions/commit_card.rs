@@ -377,13 +377,14 @@ impl Render for CommitCard {
                 ui::accent_line(&tokens, error.to_owned()).into_any_element(),
             );
         }
+        let (left, width) = TextColumn::over_text(cx, tokens::COMMIT_CARD_WIDTH);
         div()
             .id("commit-card")
             .occlude()
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y)
-            .left(TextColumn::centred(cx, tokens::COMMIT_CARD_WIDTH))
-            .w(tokens::COMMIT_CARD_WIDTH)
+            .left(left)
+            .w(width)
             .flex()
             .flex_col()
             .bg(tokens.panel)

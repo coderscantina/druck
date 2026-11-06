@@ -370,7 +370,9 @@ impl Navigator {
                     .bottom(tokens::FOOTER_HEIGHT)
                     .overflow_y_scroll()
                     .track_scroll(&scroll)
-                    .px(margin)
+                    // The drop slot at each line's end stands in the right margin, so the cards centre.
+                    .pl(margin)
+                    .pr((margin - tokens::SPACE_2 - tokens::SPACE_4).max(gpui::Pixels::ZERO))
                     .pt(tokens::NAV_DESK_TOP)
                     .pb(tokens::NAV_DESK_END)
                     .flex()
@@ -433,8 +435,8 @@ impl Desk<'_> {
         };
         div()
             .flex()
-            .items_baseline()
-            .gap(tokens::SPACE_3)
+            .flex_col()
+            .gap(tokens::SPACE_1)
             .pb(tokens::SPACE_3)
             .child(
                 div()

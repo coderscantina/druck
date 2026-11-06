@@ -590,10 +590,11 @@ impl SettingsWindow {
                     }
                 }
             }
-            if !rows.is_empty() {
+            // One category's rows need no label: the list beside them names it already.
+            if !rows.is_empty() && !query.is_empty() {
                 elements.push(Self::group_label(crate::t!(category.label()), tokens).into_any_element());
-                elements.extend(rows);
             }
+            elements.extend(rows);
         }
         elements
     }

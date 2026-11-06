@@ -21,7 +21,7 @@ pub const SPACE_4: Pixels = px(16.);
 /// The smallest the window gets, which every view is laid out to work at.
 pub const WINDOW_MIN_SIZE: (f32, f32) = (720., 480.);
 
-pub const TITLEBAR_HEIGHT: Pixels = px(28.);
+pub const TITLEBAR_HEIGHT: Pixels = px(34.);
 pub const SECTION_HEIGHT: Pixels = px(30.);
 /// The Binder.
 pub const SIDEBAR_WIDTH: Pixels = px(216.);
@@ -196,6 +196,8 @@ pub const SHELF_RULE_OPACITY: f32 = 0.4;
 pub const SPINE_CARD_WIDTH: Pixels = px(204.);
 /// The command palette: one card at the top centre of the window.
 pub const PALETTE_WIDTH: Pixels = px(480.);
+/// How far a card over the text reaches past the text on each side.
+pub const CARD_OVERHANG: Pixels = px(28.);
 pub const PALETTE_TOP: Pixels = px(72.);
 pub const PALETTE_MAX_ROWS: usize = 12;
 /// The settings window.
@@ -212,7 +214,7 @@ pub const SWITCH_KNOB: Pixels = px(13.);
 pub const SWITCH_RADIUS: Pixels = px(4.);
 pub const SWITCH_KNOB_RADIUS: Pixels = px(3.);
 /// Where the window controls stand in a window with its own title bar.
-pub const TRAFFIC_LIGHTS: (f32, f32) = (9., 7.);
+pub const TRAFFIC_LIGHTS: (f32, f32) = (9., 10.);
 /// The thin line around a page in Publish, which a white page on a light surface needs.
 pub const PAGE_EDGE: Pixels = px(1.);
 /// The gap at a spread's gutter, and around sheets on a contact sheet.
@@ -277,7 +279,7 @@ pub const RAIL_DOT_INSET: Pixels = px(10.);
 pub const SWITCH_DOT_INSET: Pixels = px(1.);
 /// The mode switch at the title bar's centre: its labels, a segment's height, and the room either side of a label.
 pub const MODE_TEXT: Pixels = px(13.);
-pub const MODE_HEIGHT: Pixels = px(24.);
+pub const MODE_HEIGHT: Pixels = px(26.);
 pub const MODE_PADDING: Pixels = px(12.);
 /// The bar beside a row that has the keys, and a dragged block's drop line.
 pub const KEY_BAR: Pixels = px(2.);

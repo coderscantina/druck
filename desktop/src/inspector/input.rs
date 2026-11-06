@@ -1263,12 +1263,14 @@ impl Render for TextInput {
         if self.bare {
             return field.child(InputElement { input: cx.entity() });
         }
+        let ring = crate::a11y::ring(tokens);
         let field = field
             .px(tokens::SPACE_2)
             .rounded(tokens::RADIUS)
             .border_1()
             .border_color(if focused { tokens.text_faint } else { tokens.divider })
-            .bg(tokens.field);
+            .bg(tokens.field)
+            .focus_visible(move |style| style.shadow(vec![ring.clone()]));
         if multiline {
             field
                 .py(tokens::SPACE_2)
