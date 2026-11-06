@@ -648,6 +648,7 @@ impl EditorView {
             .collect();
         let placement_button = |id: &'static str, word: &'static str, value: &'static str, cx: &mut Context<Self>| {
             small_button(&tokens, id, word)
+                .h(tokens::FIELD_HEIGHT)
                 .when(placement == value, |button| {
                     button.bg(tokens.raised).text_color(tokens.text)
                 })
@@ -661,7 +662,7 @@ impl EditorView {
         let caption_row = div()
             .flex()
             .flex_wrap()
-            .items_end()
+            .items_start()
             .gap(tokens::SPACE_2)
             .child(
                 div()
