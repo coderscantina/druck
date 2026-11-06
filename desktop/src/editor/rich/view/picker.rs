@@ -525,6 +525,7 @@ impl EditorView {
                 .text_color(tokens.text_faint)
                 .child(crate::t!(match mode {
                     Mode::Citation => Key::NoWorks,
+                    Mode::Reference if self.rich.book.label_set.is_empty() => Key::NoLabelsYet,
                     Mode::Reference => Key::NoLabels,
                 }))
         });

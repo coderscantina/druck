@@ -16,6 +16,10 @@ crate::strings! {
         SearchLabels => ("Search labels and titles", "Marken und Titel suchen"),
         NoWorks => ("No work matches.", "Kein Werk passt."),
         NoLabels => ("No label matches.", "Keine Marke passt."),
+        NoLabelsYet => (
+            "This book has no labels yet. A heading gets one with {#sec:name} at its end.",
+            "Dieses Buch hat noch keine Marken. Eine Überschrift bekommt eine mit {#sec:name} an ihrem Ende."
+        ),
         NoBibliography => ("No bibliography is set. Name one under Details.", "Kein Literaturverzeichnis gesetzt. Unter Details angeben."),
         LocatorLabel => ("Locator", "Fundstelle"),
         LocatorPlaceholder => ("p. 12", "S. 12"),
