@@ -302,13 +302,15 @@ pub const DOT_STEP: Pixels = px(3.);
 pub const COMPLETION_LIST_WIDTH: Pixels = px(262.);
 pub const COMPLETION_DETAIL_WIDTH: Pixels = px(240.);
 pub const COMPLETION_HEIGHT: Pixels = px(300.);
+/// The least it shrinks to in a short window.
+pub const COMPLETION_MIN_HEIGHT: Pixels = px(160.);
 /// A group's label in that list, and the widest a value at a row's end gets.
 pub const COMPLETION_GROUP_HEIGHT: Pixels = px(22.);
 pub const COMPLETION_VALUE_WIDTH: Pixels = px(110.);
 /// The chosen name's value, large, in the book's type.
 pub const COMPLETION_VALUE_SIZE: Pixels = px(22.);
-/// Between a block's style name, far out in the left margin, and the block gutter's icons.
-pub const STYLE_NAME_GAP: Pixels = px(20.);
+/// Between a block's style name, far out in the left margin, and where the block gutter's icon stands.
+pub const STYLE_NAME_GAP: Pixels = px(8.);
 /// The scrollbar's thumb, at rest and under the pointer.
 pub const THUMB_FAINT: f32 = 0.4;
 pub const THUMB_STRONG: f32 = 0.8;

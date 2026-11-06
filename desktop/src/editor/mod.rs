@@ -449,6 +449,7 @@ impl EditorView {
         );
         if values != self.placeholder_values {
             self.placeholder_values = values;
+            self.renew_completion_names();
             cx.notify();
         }
     }

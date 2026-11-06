@@ -144,9 +144,8 @@ impl Values {
         if placeholder.is_page_dependent() {
             return Lookup::PageDependent;
         }
-        let count = |pick: fn(&Statistics) -> usize| match &self.statistics {
-            Some(statistics) => Some(engine::count(pick(statistics), &self.lang)),
-            None => None,
+        let count = |pick: fn(&Statistics) -> usize| {
+            (self.statistics.as_ref()).map(|statistics| engine::count(pick(statistics), &self.lang))
         };
         let text = match &placeholder {
             Placeholder::Title => self.title.clone(),

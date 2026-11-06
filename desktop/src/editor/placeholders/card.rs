@@ -3,7 +3,11 @@
 //! Tab and Return insert, Escape closes until another `{` is typed. The keys stay in the text throughout.
 
 use gpui::prelude::*;
-use gpui::{Context, FontWeight, MouseButton, MouseDownEvent, ScrollHandle, SharedString, Window, div, svg};
+use std::cell::Cell;
+
+use gpui::{
+    Context, FontWeight, MouseButton, MouseDownEvent, Pixels, ScrollHandle, SharedString, Window, div, px, svg,
+};
 
 use super::{Group, Key, Query, Values, best, describe, ghost, insert, matches, query_at, shown};
 use crate::a11y::Control as _;
@@ -18,6 +22,8 @@ pub(in crate::editor) struct Completion {
     /// An index into the names.
     chosen: usize,
     scroll: ScrollHandle,
+    /// The list must scroll to show the chosen name, once.
+    reveal: Cell<bool>,
 }
 
 impl Completion {
@@ -31,6 +37,32 @@ impl Completion {
         &self.names[self.chosen].0
     }
 
+    /// Scrolls the list to the chosen name. The list holds a label before each group's first name.
+    fn reveal_chosen(&mut self) {
+        self.reveal.set(true);
+    }
+
+    /// Scrolls a list `height` tall so the chosen name shows, if it was just chosen. The rows' heights are fixed, so
+    /// this needs no earlier layout: a label stands before each group's first name.
+    fn scroll_to_chosen(&self, height: Pixels) {
+        if !self.reveal.replace(false) {
+            return;
+        }
+        let names = &self.names[..=self.chosen];
+        let labels = 1 + names.windows(2).filter(|pair| pair[0].1 != pair[1].1).count();
+        let top = tokens::COMPLETION_GROUP_HEIGHT * labels as f32 + tokens::MENU_ROW_HEIGHT * self.chosen as f32;
+        let bottom = top + tokens::MENU_ROW_HEIGHT + tokens::SPACE_1 * 2.;
+        let shown = -self.scroll.offset().y;
+        let offset = if top < shown {
+            top
+        } else if bottom > shown + height {
+            bottom - height
+        } else {
+            shown
+        };
+        self.scroll.set_offset(gpui::point(px(0.), -offset));
+    }
+
     /// What the ghost after the caret says.
     pub fn ghost(&self) -> Option<String> {
         ghost(self.chosen_name(), &self.query.typed)
@@ -39,9 +71,9 @@ impl Completion {
 
 fn icon(group: Group) -> &'static str {
     match group {
-        Group::Statistics => "icons/diagnostics.svg",
+        Group::Statistics => "icons/statistics.svg",
         Group::Book => "icons/book.svg",
-        Group::Date => "icons/details.svg",
+        Group::Date => "icons/calendar.svg",
     }
 }
 
@@ -79,12 +111,15 @@ impl EditorView {
         let Some(chosen) = best(&names, &query.typed) else {
             return;
         };
-        self.float = Float::Complete(Completion {
+        let mut completion = Completion {
             query,
             names,
             chosen,
             scroll: ScrollHandle::new(),
-        });
+            reveal: Cell::new(false),
+        };
+        completion.reveal_chosen();
+        self.float = Float::Complete(completion);
         cx.notify();
     }
 
@@ -98,18 +133,35 @@ impl EditorView {
         if query.as_ref().map(|query| query.start) != self.completion_dismissed {
             self.completion_dismissed = None;
         }
+        if !self.is_completing() {
+            return;
+        }
+        let names = self.placeholder_values.names();
         let Float::Complete(completion) = &mut self.float else {
             return;
         };
+        completion.names = names;
         match query.filter(|query| query.start == completion.query.start) {
             Some(query) => match best(&completion.names, &query.typed) {
                 Some(chosen) => {
                     completion.chosen = chosen;
                     completion.query = query;
+                    completion.reveal_chosen();
                 }
                 None => self.float = Float::None,
             },
             None => self.float = Float::None,
+        }
+    }
+
+    /// Lists the names the book has now, after its values changed, keeping the chosen one.
+    pub(in crate::editor) fn renew_completion_names(&mut self) {
+        let names = self.placeholder_values.names();
+        if let Float::Complete(completion) = &mut self.float {
+            let chosen = completion.chosen_name().to_owned();
+            completion.chosen = names.iter().position(|(name, _)| *name == chosen).unwrap_or(0);
+            completion.names = names;
+            completion.reveal_chosen();
         }
     }
 
@@ -137,7 +189,7 @@ impl EditorView {
                 (at + count - 1) % count
             };
             completion.chosen = matching[next];
-            completion.scroll.scroll_to_item(completion.chosen);
+            completion.reveal_chosen();
             cx.notify();
         }
         true
@@ -164,9 +216,11 @@ impl EditorView {
     }
 
     /// The card under the caret.
-    pub(in crate::editor) fn completion_card(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    pub(in crate::editor) fn completion_card(&self, room: Pixels, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let completion = self.completion()?;
         let tokens = Tokens::get(cx).clone();
+        let height = tokens::COMPLETION_HEIGHT.min(room).max(tokens::COMPLETION_MIN_HEIGHT);
+        completion.scroll_to_chosen(height - tokens::CARD_BORDERS);
         let values: &Values = &self.placeholder_values;
         let mut list = Vec::new();
         let mut group = None;
@@ -307,7 +361,7 @@ impl EditorView {
             div()
                 .occlude()
                 .w(tokens::COMPLETION_LIST_WIDTH + tokens::COMPLETION_DETAIL_WIDTH)
-                .h(tokens::COMPLETION_HEIGHT)
+                .h(height)
                 .flex()
                 .rounded(tokens::RADIUS)
                 .bg(tokens.panel)

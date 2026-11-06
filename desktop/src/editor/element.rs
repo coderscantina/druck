@@ -445,8 +445,8 @@ fn prepaint_hint(
     window.defer_draw(element, point(x, y), 1, None);
 }
 
-/// A block's style name, one faint word that ends clear of the block gutter's icons. Where the margin has no room for
-/// it, it does not show.
+/// A block's style name, one faint word that ends clear of the block gutter's icons and starts clear of the heading
+/// ticks. Where the margin has no room for it, it does not show.
 fn prepaint_style_name(
     column: &Column,
     top: Pixels,
@@ -467,9 +467,10 @@ fn prepaint_style_name(
         .child(SharedString::from(name))
         .into_any_element();
     let wanted = element.layout_as_root(AvailableSpace::min_size(), window, cx);
-    let right = column.text_left - tokens::GUTTER_WIDTH - tokens::STYLE_NAME_GAP;
+    let right = column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET - tokens::STYLE_NAME_GAP;
     let left = right - wanted.width;
-    if left < column.viewport.left() + tokens::SPACE_2 {
+    // Clear of the heading ticks at the pane's left edge too.
+    if left < column.viewport.left() + tokens::TICK_ZONE_WIDTH {
         return;
     }
     window.defer_draw(element, point(left, top), 1, None);

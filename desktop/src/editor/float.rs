@@ -917,10 +917,18 @@ impl EditorView {
                 )]
             }
             Float::Rich(_) => self.rich_float(area, window, cx).into_iter().collect(),
-            Float::Complete(_) => match (caret, self.completion_card(cx)) {
-                (Some(caret), Some(card)) => vec![(card, Spot::Caret(caret, area))],
-                _ => Vec::new(),
-            },
+            Float::Complete(_) => {
+                let Some(caret) = caret else {
+                    return Vec::new();
+                };
+                // As tall as the room on the roomier side of the caret, so the card never covers the line it completes.
+                let below = viewport.bottom() - caret.bottom();
+                let above = caret.top() - viewport.top();
+                let room = below.max(above) - tokens::FLOAT_GAP * 2.;
+                self.completion_card(room, cx)
+                    .map(|card| vec![(card, Spot::Caret(caret, area))])
+                    .unwrap_or_default()
+            }
         }
     }
 }
