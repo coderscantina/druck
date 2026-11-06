@@ -87,6 +87,14 @@ pub enum Code {
     },
     /// The bibliography file is not there, so citations show their keys. `file` is the absolute path.
     BibliographyNotFound { file: PathBuf },
+    /// A `{todo:}` placeholder is open, with its text.
+    OpenPlaceholder { text: String },
+    /// An image file the text names is not there. `file` is the path as written.
+    ImageMissing { file: String },
+    /// `export` is final, and `cause` stops it.
+    FinalRefused { export: String, cause: Box<Code> },
+    /// `meta.isbn` is not an ISBN of 10 or 13 digits.
+    InvalidIsbn,
 }
 
 /// The input a diagnostic concerns.

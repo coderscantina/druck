@@ -408,7 +408,13 @@ pub(crate) fn missing_for_final(
                 "export \"{export}\" is final, but this image is not there: {}",
                 file.path
             );
-            let diagnostic = Diagnostic::new(Some(document.source.clone()), message);
+            let cause = Code::ImageMissing {
+                file: file.path.clone(),
+            };
+            let diagnostic = Diagnostic::new(Some(document.source.clone()), message).coded(Code::FinalRefused {
+                export: export.to_owned(),
+                cause: Box::new(cause),
+            });
             errors.push(diagnostic.at(file.at.line, file.at.column));
         }
     }
@@ -416,6 +422,10 @@ pub(crate) fn missing_for_final(
         let mut error = warning.clone();
         error.severity = crate::diagnostic::Severity::Error;
         error.message = format!("export \"{export}\" is final, but {}", warning.message);
+        error.code = (warning.code.clone()).map(|cause| Code::FinalRefused {
+            export: export.to_owned(),
+            cause: Box::new(cause),
+        });
         errors.push(error);
     };
     for warning in &config.warnings {

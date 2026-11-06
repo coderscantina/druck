@@ -27,7 +27,7 @@ use crate::config::resolved::Config;
 use crate::config::source::{InputSource, Origin, Resource};
 use crate::config::theme::{Lang, WideBlock};
 use crate::date::Date;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{Block, Document};
 use crate::image::Image;
 use crate::layout::fields::Fields;
@@ -91,7 +91,11 @@ pub fn write(book: &Book) -> Result<Written, Failure> {
         .into_iter()
         .chain(metadata.authors.iter().map(String::as_str));
     let identifier = package::identifier(&metadata.meta, &seed.collect::<Vec<_>>().join("\n")).map_err(|message| {
-        vec![Diagnostic::new(Some(book.source.clone()), message).property(Some("meta.isbn".to_owned()))]
+        vec![
+            Diagnostic::new(Some(book.source.clone()), message)
+                .property(Some("meta.isbn".to_owned()))
+                .coded(Code::InvalidIsbn),
+        ]
     })?;
 
     let (pictures, mut assets) = images(book);

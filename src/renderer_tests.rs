@@ -589,4 +589,13 @@ fn a_final_export_refuses_what_is_missing() {
             .contains("is final, but this image is not there: assets/gone.png"),
         "{errors:?}"
     );
+    assert_eq!(
+        errors[0].code,
+        Some(crate::diagnostic::Code::FinalRefused {
+            export: "print".to_owned(),
+            cause: Box::new(crate::diagnostic::Code::ImageMissing {
+                file: "assets/gone.png".to_owned()
+            }),
+        })
+    );
 }

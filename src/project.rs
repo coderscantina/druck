@@ -146,7 +146,15 @@ pub fn open_placeholders(content: &document::Document, document: &DocumentFile, 
                 "export \"{export}\" is final, but this placeholder is open: {}",
                 todo.text
             );
-            Diagnostic::new(Some(document.source.clone()), message).at(todo.at.line, todo.at.column)
+            let cause = Code::OpenPlaceholder {
+                text: todo.text.clone(),
+            };
+            Diagnostic::new(Some(document.source.clone()), message)
+                .at(todo.at.line, todo.at.column)
+                .coded(Code::FinalRefused {
+                    export: export.to_owned(),
+                    cause: Box::new(cause),
+                })
         })
         .collect()
 }

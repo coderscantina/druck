@@ -81,6 +81,16 @@ crate::strings! {
             "the bibliography {file} is not there; citations show their keys",
             "die Literaturdatei {file} gibt es nicht; Zitate zeigen ihren Schlüssel"
         ),
+        FinalRefused => (
+            "export \"{export}\" is final, but {cause}",
+            "Export \"{export}\" ist final, aber {cause}"
+        ),
+        OpenPlaceholder => ("this placeholder is open: {text}", "dieser Platzhalter ist offen: {text}"),
+        ImageMissing => ("this image is not there: {file}", "dieses Bild gibt es nicht: {file}"),
+        InvalidIsbn => (
+            "meta.isbn must be an ISBN of 10 or 13 digits, such as 978-3-16-148410-0",
+            "meta.isbn muss eine ISBN mit 10 oder 13 Ziffern sein, etwa 978-3-16-148410-0"
+        ),
         UnknownStyleOf => (
             "unknown style \"{name}\"; the theme's custom styles are {known}",
             "unbekannter Stil \"{name}\"; die eigenen Stile des Themas sind {known}"
@@ -119,7 +129,8 @@ fn decimal(lines: f64) -> String {
 }
 
 /// A diagnostic's message in the language now set: its code's words, or the engine's own with no code. It stands on
-/// its own in a list or a line, so it starts with a capital, where the engine's start lower case. With the book's
+/// its own in a list or a line, so it starts with a capital, where the engine's start lower case, unless it starts with
+/// the key of its property, such as `meta.isbn`, which keeps its spelling. With the book's
 /// folder `base`, the files a code names are given from there, as the Binder knows them, and paths below it in the
 /// engine's own words are shortened the same way.
 pub fn message_in(diagnostic: &Diagnostic, base: Option<&Path>) -> String {
@@ -129,6 +140,9 @@ pub fn message_in(diagnostic: &Diagnostic, base: Option<&Path>) -> String {
             Some(base) => diagnostic.message.replace(&format!("{}/", base.display()), ""),
             None => diagnostic.message.clone(),
         });
+    if (diagnostic.property.as_deref()).is_some_and(|key| words.starts_with(key)) {
+        return words;
+    }
     let mut chars = words.chars();
     chars
         .next()
@@ -205,6 +219,12 @@ fn coded(code: &Code, place: Option<usize>, base: Option<&Path>) -> Option<Strin
         Code::UnknownStyle { name, known } => {
             crate::t!(Key::UnknownStyleOf, name = name, known = known.join(", "))
         }
+        Code::OpenPlaceholder { text } => crate::t!(Key::OpenPlaceholder, text = text),
+        Code::ImageMissing { file } => crate::t!(Key::ImageMissing, file = file),
+        Code::FinalRefused { export, cause } => {
+            crate::t!(Key::FinalRefused, export = export, cause = coded(cause, place, base)?)
+        }
+        Code::InvalidIsbn => crate::t!(Key::InvalidIsbn).to_owned(),
         _ => return None,
     })
 }
@@ -273,6 +293,43 @@ mod tests {
             "Die Literaturdatei ../literatur.bib gibt es nicht; Zitate zeigen ihren Schlüssel"
         );
         set_language(Language::English);
+    }
+
+    #[test]
+    fn a_final_exports_refusals_and_the_isbn_read_in_german() {
+        let _guard = LANGUAGE_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_language(Language::German);
+        let refused = |cause| {
+            message_in(
+                &with_code(Code::FinalRefused {
+                    export: "print".into(),
+                    cause: Box::new(cause),
+                }),
+                Some(Path::new("/books/one")),
+            )
+        };
+        assert_eq!(
+            refused(Code::OpenPlaceholder { text: "Jahr".into() }),
+            "Export \"print\" ist final, aber dieser Platzhalter ist offen: Jahr"
+        );
+        assert_eq!(
+            refused(Code::MissingCitation {
+                file: Path::new("/books/literatur.bib").to_owned(),
+                key: "x".into(),
+            }),
+            "Export \"print\" ist final, aber kein Eintrag in ../literatur.bib hat den Schlüssel `x`"
+        );
+        let mut isbn = with_code(Code::InvalidIsbn);
+        isbn.property = Some("meta.isbn".into());
+        assert_eq!(
+            message_in(&isbn, None),
+            "meta.isbn muss eine ISBN mit 10 oder 13 Ziffern sein, etwa 978-3-16-148410-0"
+        );
+        set_language(Language::English);
+        assert_eq!(
+            refused(Code::ImageMissing { file: "a.png".into() }),
+            "Export \"print\" is final, but this image is not there: a.png"
+        );
     }
 
     #[test]
