@@ -21,7 +21,7 @@ mod place;
 pub(crate) mod placeholders;
 pub mod review;
 pub(crate) mod rich;
-mod scrollbar;
+pub(crate) mod scrollbar;
 mod selection;
 mod spelling;
 mod strings;
@@ -373,7 +373,10 @@ impl EditorView {
             false,
         );
         let focus_subscriptions = vec![
-            cx.on_focus_in(&focus, window, |view, window, cx| view.restart_blink(window, cx)),
+            cx.on_focus_in(&focus, window, |view, window, cx| {
+                view.restart_blink(window, cx);
+                cx.notify();
+            }),
             cx.on_blur(&focus, window, |view, _, cx| {
                 view.blink = Task::ready(());
                 cx.notify();
@@ -1310,14 +1313,20 @@ impl EditorView {
                 .reveal_offset()
                 .filter(|at| self.blocks.index_at(*at) == index)
                 .map(|at| at - block.range.start);
-            hidden_ranges(
+            let mut hidden = hidden_ranges(
                 block.kind,
                 block_text,
                 &syntax,
                 caret,
                 trailing_line,
                 self.slots[index].expanded,
-            )
+            );
+            // A heading's `#` goes with the caret while the keys are elsewhere.
+            if matches!(block.kind, BlockKind::Heading { .. }) && !self.focus.is_focused(window) {
+                hidden.extend(syntax.markers.iter().map(|marker| marker.range.clone()));
+                hidden.sort_by_key(|range| range.start);
+            }
+            hidden
         };
         let marked = self.marked.as_ref().and_then(|marked| {
             let start = marked.start.max(block.range.start);

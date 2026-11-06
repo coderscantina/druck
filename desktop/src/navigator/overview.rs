@@ -387,6 +387,7 @@ impl Navigator {
             .when(crate::shell::ui::more_below(&scroll), |overview| {
                 overview.child(foot_fade(tokens, &scroll))
             })
+            .children(crate::shell::ui::scroll_thumb(tokens, &scroll))
             .child(
                 div()
                     .absolute()

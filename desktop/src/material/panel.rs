@@ -398,30 +398,27 @@ impl MaterialPanel {
     }
 
     fn header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let can_go_back = self.trail.can_go_up();
+        // At the kind's own list there is no level above: the arrow's place stays, empty, so the crumbs never move.
         let back = div()
             .id("material-back")
-            .button(tokens, crate::t!(Key::Back))
             .flex_none()
             .size(tokens::SMALL_BUTTON_HEIGHT)
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(tokens::RADIUS)
-            .when(can_go_back, |button| {
-                button.cursor_pointer().hover(|button| button.bg(tokens.raised))
-            })
-            .child(
-                svg()
-                    .path("icons/chevron-left.svg")
-                    .size(tokens::ICON_SIZE)
-                    .text_color(if can_go_back {
-                        tokens.text_quiet
-                    } else {
-                        tokens.text_faint
-                    }),
-            )
-            .on_click(cx.listener(|panel, _, _, cx| panel.back(cx)));
+            .when(self.trail.can_go_up(), |back| {
+                back.button(tokens, crate::t!(Key::Back))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(tokens::RADIUS)
+                    .cursor_pointer()
+                    .hover(|button| button.bg(tokens.raised))
+                    .child(
+                        svg()
+                            .path("icons/chevron-left.svg")
+                            .size(tokens::ICON_SIZE)
+                            .text_color(tokens.text_quiet),
+                    )
+                    .on_click(cx.listener(|panel, _, _, cx| panel.back(cx)))
+            });
         let crumbs = self.trail.crumbs();
         let last = crumbs.len().saturating_sub(1);
         let mut trail: Vec<AnyElement> = Vec::new();

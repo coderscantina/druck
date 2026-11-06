@@ -15,6 +15,28 @@ pub fn more_below(scroll: &ScrollHandle) -> bool {
     most > tokens::HAIRLINE && -offset < most
 }
 
+/// The thumb of an area that scrolls, as Write draws its own: faint in the area's right edge, stronger under the
+/// pointer. It stands in a parent whose top is the area's. None while everything shows.
+pub fn scroll_thumb(tokens: &Tokens, scroll: &ScrollHandle) -> Option<gpui::Div> {
+    let viewport = f32::from(scroll.bounds().size.height);
+    let content = viewport + f32::from(scroll.max_offset().y);
+    let scrolled = -f32::from(scroll.offset().y);
+    let min = f32::from(tokens::SCROLLBAR_THUMB_MIN);
+    let (top, height) = crate::editor::scrollbar::thumb(scrolled, content, viewport, viewport, min)?;
+    let faint: Hsla = tokens.text_faint.into();
+    Some(
+        div()
+            .absolute()
+            .top(gpui::px(top))
+            .right(tokens::SCROLLBAR_INSET)
+            .w(tokens::SCROLLBAR_WIDTH - tokens::SCROLLBAR_INSET * 2.)
+            .h(gpui::px(height))
+            .rounded(tokens::BOX_RADIUS)
+            .bg(faint.opacity(tokens::THUMB_FAINT))
+            .hover(|thumb| thumb.bg(faint.opacity(tokens::THUMB_STRONG))),
+    )
+}
+
 /// The fade over the foot of a list on the panel colour that has more below, ending in a band of solid ground so a row
 /// the edge cuts shows no cut glyphs. Its parent is `relative`.
 pub fn foot_fade(tokens: &Tokens) -> gpui::Div {

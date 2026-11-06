@@ -116,8 +116,9 @@ impl TicksView {
         let focus = cx.focus_handle();
         let subscriptions = vec![
             cx.observe(editor, |_, _, cx| cx.notify()),
-            cx.on_focus_out(&focus, window, |ticks, _, _, cx| {
-                if ticks.keyed {
+            // The window going to the back reports a focus out too, but the keys come back here with it.
+            cx.on_focus_out(&focus, window, |ticks, _, window, cx| {
+                if ticks.keyed && window.is_window_active() {
                     ticks.fold(cx);
                 }
             }),
