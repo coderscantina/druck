@@ -1,15 +1,20 @@
 //! The overview: the whole book laid out like its contents page, one entry per file in reading order, grouped by part,
 //! each with its title, first line, and words, and the files outside the book set aside after the back matter. It is
 //! the one place where the book's order changes: a dragged entry drops where a 2 px accent line shows, and Option+Up
-//! and Option+Down move the focused one a place. The keys walk the entries, and Return opens the focused one.
+//! and Option+Down move the focused one a place. The keys walk the entries, and Return opens the focused one. A chapter
+//! of the book shows its writing state, which S moves to the next and a click on it chooses from a menu.
 
 use gpui::prelude::*;
-use gpui::{Context, ElementId, FontWeight, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString, Window, div};
+use gpui::{
+    Anchor, Context, ElementId, FontWeight, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString, Window,
+    anchored, deferred, div,
+};
 
 use super::book::{Book, Entry, Place, Shelf};
 use super::strings::Key;
 use super::{Navigator, group_label, grouped, hint};
-use crate::session::ChapterId;
+use crate::session::{ChapterId, status_label};
+use crate::sidebar::SidebarEvent;
 use crate::tokens::{self, Tokens};
 
 /// A file the keys can stop at: a part's opener in its label, or an entry.
@@ -27,6 +32,8 @@ pub struct Overview {
     /// for Up and Down.
     lines: Vec<Vec<(usize, usize)>>,
     scroll: ScrollHandle,
+    /// The open menu of writing states: whose, and which row the keys are on.
+    menu: Option<(ChapterId, usize)>,
 }
 
 /// The stops in reading order: each group's opener, then its entries, then the files not in the book.
@@ -56,6 +63,7 @@ impl Overview {
             focus,
             lines: Vec::new(),
             scroll: ScrollHandle::new(),
+            menu: None,
         }
     }
 
@@ -67,6 +75,9 @@ impl Overview {
             .and_then(|id| self.stops.iter().position(|stop| stop.id == id))
             .unwrap_or(self.focus)
             .min(self.stops.len().saturating_sub(1));
+        self.menu = self
+            .menu
+            .filter(|(id, _)| self.stops.iter().any(|stop| stop.id == *id && stop.place.is_some()));
     }
 
     pub fn step(&mut self, forward: bool) {
@@ -148,7 +159,27 @@ impl Navigator {
         if modifiers.platform || modifiers.control {
             return false;
         }
-        match (event.keystroke.key.as_str(), modifiers.alt) {
+        let key = event.keystroke.key.as_str();
+        if let Some((id, row)) = overview.menu {
+            let rows = self.parts.editor.read(cx).session().statuses().len() + 1;
+            match key {
+                "up" => overview.menu = Some((id, row.checked_sub(1).unwrap_or(rows - 1))),
+                "down" => overview.menu = Some((id, (row + 1) % rows)),
+                "enter" | "space" => self.choose_status(id, row, window, cx),
+                "escape" => overview.menu = None,
+                _ => {}
+            }
+            cx.notify();
+            return true;
+        }
+        if key == "s" && !modifiers.alt && !modifiers.shift {
+            if let Some(Stop { id, place: Some(_) }) = overview.stops.get(overview.focus).copied() {
+                let next = self.parts.editor.read(cx).session().next_status(id);
+                self.workspace_event(SidebarEvent::SetStatus(id, next), window, cx);
+            }
+            return true;
+        }
+        match (key, modifiers.alt) {
             (key @ ("up" | "down"), true) => {
                 if let Some((id, place)) = overview.moved(key == "down") {
                     self.move_to(id, place, window, cx);
@@ -173,6 +204,44 @@ impl Navigator {
             _ => return false,
         }
         true
+    }
+
+    /// Opens the menu of writing states on a chapter's card, with the keys on its current state.
+    fn open_status_menu(&mut self, id: ChapterId, cx: &mut Context<Self>) {
+        let session = self.parts.editor.read(cx).session();
+        let statuses = session.statuses();
+        let current = session.chapter(id).and_then(|chapter| chapter.status());
+        let row = current
+            .and_then(|status| statuses.iter().position(|known| known == status))
+            .unwrap_or(statuses.len());
+        if let super::Shown::Overview(overview) = &mut self.shown {
+            if let Some(at) = overview.stops.iter().position(|stop| stop.id == id) {
+                overview.focus = at;
+            }
+            overview.menu = Some((id, row));
+        }
+        cx.notify();
+    }
+
+    /// Opens the menu of writing states on the focused entry, for screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub(super) fn open_focused_status_menu(&mut self, cx: &mut Context<Self>) {
+        let super::Shown::Overview(overview) = &self.shown else {
+            return;
+        };
+        if let Some(Stop { id, place: Some(_) }) = overview.stops.get(overview.focus).copied() {
+            self.open_status_menu(id, cx);
+        }
+    }
+
+    /// Sets the state at a row of the menu, the last row being none, and closes the menu.
+    fn choose_status(&mut self, id: ChapterId, row: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let super::Shown::Overview(overview) = &mut self.shown {
+            overview.menu = None;
+        }
+        let status = self.parts.editor.read(cx).session().statuses().get(row).cloned();
+        self.workspace_event(SidebarEvent::SetStatus(id, status), window, cx);
+        cx.notify();
     }
 
     /// A click focuses an entry, and a second one opens it.
@@ -211,11 +280,15 @@ impl Navigator {
         let per_line = ((room / (tokens::NAV_DESK_CARD_MIN + tokens::SPACE_4)).floor() as usize)
             .clamp(1, tokens::NAV_DESK_COLUMNS);
         let focused = overview.stops.get(overview.focus).map(|stop| stop.id);
+        let session = self.parts.editor.read(cx).session();
+        let statuses = session.statuses();
         let desk = Desk {
             tokens,
             font: font.clone(),
             focused,
             per_line,
+            statuses,
+            menu: overview.menu,
         };
         let mut lines = Vec::new();
         let mut elements = Vec::new();
@@ -321,6 +394,7 @@ impl Navigator {
                     .text_size(tokens::TEXT_SMALL)
                     .child(hint(tokens, crate::t!(Key::HintReturn), crate::t!(Key::HintOpen)))
                     .child(hint(tokens, "\u{2325}\u{2191}\u{2193}", crate::t!(Key::HintReorder)))
+                    .child(hint(tokens, "S", crate::t!(Key::HintState)))
                     .child(hint(tokens, crate::t!(Key::HintEscape), crate::t!(Key::HintBack))),
             )
     }
@@ -332,6 +406,9 @@ struct Desk<'a> {
     font: SharedString,
     focused: Option<ChapterId>,
     per_line: usize,
+    /// The book's writing states, for the menu.
+    statuses: Vec<String>,
+    menu: Option<(ChapterId, usize)>,
 }
 
 impl Desk<'_> {
@@ -504,11 +581,14 @@ impl Desk<'_> {
         let state = if aside {
             Some(div().child(crate::t!(Key::NotInBook)))
         } else {
-            (open > 0).then(|| {
+            let open = (open > 0).then(|| {
                 div()
                     .text_color(tokens.accent)
                     .child(crate::t!(Key::Open, count = open))
-            })
+            });
+            let status = self.status_word(id, entry.row.status.as_deref(), focused, cx);
+            (open.is_some() || status.is_some())
+                .then(|| div().flex().gap(tokens::SPACE_2).children(status).children(open))
         };
         let card = div()
             .id(ElementId::from(("desk-card", id.number())))
@@ -583,6 +663,82 @@ impl Desk<'_> {
         let place = (!aside).then_some(entry.place).flatten();
         self.cell(ElementId::from(("desk-cell", id.number())), place, cx)
             .child(self.draggable(card, entry))
+    }
+
+    /// A chapter's writing state in the quiet colour, and on the focused card without one a fainter offer to set it. A
+    /// click opens the menu of states below it.
+    fn status_word(
+        &self,
+        id: ChapterId,
+        status: Option<&str>,
+        focused: bool,
+        cx: &mut Context<Navigator>,
+    ) -> Option<gpui::Stateful<gpui::Div>> {
+        let tokens = self.tokens;
+        let (word, color) = match status {
+            Some(status) => (status_label(status), tokens.text_quiet),
+            None if focused || self.menu.is_some_and(|(menu, _)| menu == id) => {
+                (crate::t!(Key::NoState).to_owned(), tokens.text_faint)
+            }
+            None => return None,
+        };
+        let menu = (self.menu.filter(|(menu, _)| *menu == id)).map(|(_, row)| self.status_menu(id, status, row, cx));
+        Some(
+            div()
+                .id(ElementId::from(("desk-status", id.number())))
+                .relative()
+                .text_color(color)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |navigator, _, _, cx| navigator.open_status_menu(id, cx)))
+                .child(word)
+                .children(menu.map(|menu| {
+                    div().absolute().top_full().right_0().child(
+                        deferred(anchored().anchor(Anchor::TopRight).child(menu))
+                            .with_priority(tokens::LAYER_QUESTION + 1),
+                    )
+                })),
+        )
+    }
+
+    /// The book's states and none, the chapter's own or the row the keys are on raised.
+    fn status_menu(
+        &self,
+        id: ChapterId,
+        current: Option<&str>,
+        row: usize,
+        cx: &mut Context<Navigator>,
+    ) -> impl IntoElement + use<> {
+        let tokens = self.tokens;
+        let names = (self.statuses.iter())
+            .map(|status| (status_label(status), current == Some(status.as_str())))
+            .chain([(crate::t!(Key::NoState).to_owned(), current.is_none())]);
+        let rows = names.enumerate().map(|(at, (name, active))| {
+            crate::inspector::widgets::menu_item(tokens, ("desk-state", at), name, None, active)
+                .when(at == row, |item| item.bg(tokens.raised))
+                .on_click(cx.listener(move |navigator, _, window, cx| navigator.choose_status(id, at, window, cx)))
+        });
+        div()
+            .id("desk-status-menu")
+            .occlude()
+            .role(Role::Menu)
+            .min_w(tokens::NAV_DESK_CARD_MIN / 2.)
+            .mt(tokens::SPACE_1)
+            .py(tokens::SPACE_1)
+            .bg(tokens.panel)
+            .border_1()
+            .border_color(tokens.divider)
+            .rounded(tokens::RADIUS)
+            .shadow(tokens::card_shadow())
+            .text_size(tokens::TEXT_BODY)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down_out(cx.listener(|navigator, _, _, cx| {
+                if let super::Shown::Overview(overview) = &mut navigator.shown {
+                    overview.menu = None;
+                }
+                cx.notify();
+            }))
+            .children(rows)
     }
 
     /// Research, notes, and probes, each with how many files it holds.

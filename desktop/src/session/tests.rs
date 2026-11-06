@@ -422,6 +422,71 @@ fn moving_to_the_end_and_to_the_same_place_work() {
 }
 
 #[test]
+fn moves_undo_and_redo_until_the_manifest_changes_outside() {
+    let (folder, mut session) = project("undo-move");
+    let manifest = folder.read("druck.yaml");
+    let three = session.book()[2];
+    session.move_chapter(three, 0).expect("moves");
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(titles(&session.contents().book), ["One", "Two", "Three"]);
+    assert_eq!(
+        folder.read("druck.yaml"),
+        manifest,
+        "comments and order back as written"
+    );
+    assert!(session.redo_move().expect("redoes"));
+    assert_eq!(titles(&session.contents().book), ["Three", "One", "Two"]);
+    assert!(!session.redo_move().expect("nothing to redo"));
+
+    session.read_manifest();
+    assert!(!session.undo_move().expect("an outside read clears the moves"));
+}
+
+#[test]
+fn a_status_is_written_beside_its_chapter_and_cleared_back_to_a_bare_path() {
+    let (folder, mut session) = project("status");
+    let one = session.book()[0];
+    session.set_status(one, Some("revised")).expect("sets");
+    assert_eq!(
+        folder.read("druck.yaml"),
+        "# The book\ntitle: A small book # working title\nlang: en\nchapters:\n  # opening\n  - file: manuscript/one.md\n    status: revised\n  - manuscript/two.md\n  - manuscript/three.md\nexports:\n  print:\n    final: true\n"
+    );
+    let two = session.book()[1];
+    session.move_chapter(two, 0).expect("moves with the status kept");
+    let reopened = Session::open(&folder.0).expect("opens");
+    let statuses: Vec<_> = (reopened.contents().book.into_iter()).map(|row| row.status).collect();
+    assert_eq!(statuses, [None, Some("revised".to_owned()), None]);
+    assert!(
+        session.set_status(one, Some("done")).is_err(),
+        "not one of the book's states"
+    );
+
+    assert_eq!(session.next_status(one).as_deref(), Some("final"));
+    session.set_status(one, None).expect("clears");
+    assert_eq!(session.next_status(one).as_deref(), Some("draft"));
+    assert!(
+        folder
+            .read("druck.yaml")
+            .contains("  # opening\n  - manuscript/one.md\n")
+    );
+}
+
+#[test]
+fn a_book_names_its_own_states_and_the_last_one_wraps_to_none() {
+    let (folder, mut session) = project("own-states");
+    folder.write(
+        "druck.yaml",
+        "statuses: [outline, done]\nchapters:\n  - {file: manuscript/one.md, status: done}\n  - manuscript/two.md\n",
+    );
+    session.read_manifest();
+    assert_eq!(session.statuses(), ["outline", "done"]);
+    let one = session.book()[0];
+    assert_eq!(session.chapter(one).and_then(Chapter::status), Some("done"));
+    assert_eq!(session.next_status(one), None);
+    assert!(session.set_status(one, Some("draft")).is_err());
+}
+
+#[test]
 fn removing_and_adding_moves_between_the_lists_and_keeps_the_file() {
     let (folder, mut session) = project("remove");
     let two = session.book()[1];

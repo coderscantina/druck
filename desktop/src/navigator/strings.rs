@@ -22,6 +22,8 @@ crate::strings! {
         HintEscape => ("Esc", "Esc"),
         HintClose => ("close", "schließt"),
         HintReorder => ("reorder", "verschiebt"),
+        HintState => ("next state", "nächster Stand"),
+        NoState => ("No state", "Kein Stand"),
         HintBack => ("back to the text", "zurück zum Text"),
         Words => ("{count} words", "{count} Wörter"),
         Open => ("{count} open", "{count} offen"),

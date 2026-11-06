@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use druck::editor::engine;
-use druck::editor::resolved_config::FrontMatter;
+use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter};
 use druck::input::{MANIFEST, ThemeDirs};
 use druck::resource::{FileResolver, Origin, Resolver, normalize};
 
@@ -108,6 +108,8 @@ pub struct Chapter {
     /// The path as the manifest lists it, or relative to the project folder.
     listed: String,
     group: Group,
+    /// The writing state the manifest gives a chapter of the book, one of the book's statuses.
+    status: Option<String>,
     buffer: Buffer,
     read: Read,
     /// The buffer's revision that is on disk.
@@ -126,6 +128,7 @@ impl Chapter {
             path,
             listed,
             group,
+            status: None,
             buffer,
             read,
             saved,
@@ -155,6 +158,11 @@ impl Chapter {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The chapter's writing state, when the manifest gives it one.
+    pub fn status(&self) -> Option<&str> {
+        self.status.as_deref()
     }
 
     pub fn group(&self) -> Group {
@@ -199,6 +207,8 @@ pub struct Row {
     pub number: Option<u32>,
     /// The file is listed but missing, or cannot be read.
     pub broken: bool,
+    /// The chapter's writing state in the manifest, as written there.
+    pub status: Option<String>,
 }
 
 /// The sidebar's lists, in order.
@@ -228,6 +238,16 @@ impl Kind {
     }
 }
 
+/// How the app names a writing state: the default ones in the app's language, a book's own as written.
+pub fn status_label(status: &str) -> String {
+    match status {
+        "draft" => crate::t!(Key::StatusDraft).to_owned(),
+        "revised" => crate::t!(Key::StatusRevised).to_owned(),
+        "final" => crate::t!(Key::StatusFinal).to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 pub struct Session {
     kind: Kind,
     chapters: BTreeMap<ChapterId, Chapter>,
@@ -247,6 +267,16 @@ pub struct Session {
     synced: HashMap<PathBuf, Synced>,
     /// Files whose text must not reach the disk yet: a person is deciding about them.
     held: HashSet<PathBuf>,
+    /// The book's orders before each move, for undoing moves, and after each undone one, for redoing them. A change to
+    /// the manifest from outside clears both.
+    moves: Moves,
+}
+
+/// Orders of the book to go back or forward to.
+#[derive(Default)]
+struct Moves {
+    undo: Vec<Vec<ChapterId>>,
+    redo: Vec<Vec<ChapterId>>,
 }
 
 impl Session {
@@ -284,6 +314,7 @@ impl Session {
             resolver: FileResolver::new(),
             synced: HashMap::new(),
             held: HashSet::new(),
+            moves: Moves::default(),
         }
     }
 
@@ -358,25 +389,29 @@ impl Session {
         self.settings = text
             .map_err(|error| crate::t!(Key::CannotReadManifest, manifest = MANIFEST, error = error))
             .and_then(|text| details::parse(&text, &manifest));
-        let listed: Vec<String> = match &self.settings {
+        let listed: Vec<ChapterEntry> = match &self.settings {
             Ok(settings) => (settings.chapters.iter().flatten())
                 .map(|chapter| chapter.value.clone())
                 .collect(),
             Err(_) => Vec::new(),
         };
+        self.moves = Moves::default();
         for id in std::mem::take(&mut self.book) {
             if let Some(chapter) = self.chapters.get_mut(&id) {
                 chapter.group = Group::NotInBook;
+                chapter.status = None;
             }
         }
-        for name in listed {
+        for ChapterEntry { file: name, status } in listed {
             let path = normalize(&dir.join(&name));
             if !path.starts_with(&dir) || self.book.iter().any(|id| self.chapters[id].path == path) {
                 continue; // The engine reports these against the manifest's line.
             }
             let id = self.find_or_read(&path, name, Group::Book);
             self.set_read(id);
-            self.known_mut(id).group = Group::Book;
+            let chapter = self.known_mut(id);
+            chapter.group = Group::Book;
+            chapter.status = status;
             self.book.push(id);
         }
         self.find_files(MANUSCRIPT, Group::NotInBook);
@@ -645,6 +680,7 @@ impl Session {
             kind: chapter.outline.kind,
             number: None,
             broken: matches!(chapter.read, Read::Missing | Read::Failed(_)),
+            status: chapter.status.clone(),
         }
     }
 
@@ -979,14 +1015,26 @@ impl Session {
         }
     }
 
-    /// Writes the current chapter list to `druck.yaml`.
+    /// Writes the current chapter list, with each chapter's status, to `druck.yaml`.
     fn write_chapter_list(&mut self) -> Result<(), String> {
         let dir = self.project_dir()?;
         let manifest = dir.join(MANIFEST);
-        let wanted: Vec<String> = self.book.iter().map(|id| self.known(*id).listed.clone()).collect();
+        let wanted: Vec<ChapterEntry> = (self.book.iter())
+            .map(|id| {
+                let chapter = self.known(*id);
+                ChapterEntry {
+                    file: chapter.listed.clone(),
+                    status: chapter.status.clone(),
+                }
+            })
+            .collect();
         self.patch_manifest(
             &manifest,
-            |text| yaml::set_list(text, CHAPTERS, &wanted, &[]).map(Some),
+            |text| {
+                let existing = details::parse(text, &manifest)?.chapters.unwrap_or_default();
+                let existing: Vec<ChapterEntry> = existing.into_iter().map(|chapter| chapter.value).collect();
+                yaml::set_chapters(text, CHAPTERS, &existing, &wanted, &[]).map(Some)
+            },
             |settings| {
                 let found = settings.chapters.iter().flatten().map(|chapter| &chapter.value);
                 found.eq(wanted.iter())
@@ -994,7 +1042,8 @@ impl Session {
         )
     }
 
-    /// Moves a chapter so it stands before the one now at `to`, or last if `to` is the length of the book.
+    /// Moves a chapter so it stands before the one now at `to`, or last if `to` is the length of the book. The move
+    /// can be undone with [`Self::undo_move`].
     pub fn move_chapter(&mut self, id: ChapterId, to: usize) -> Result<(), String> {
         let Some(from) = self.book.iter().position(|other| *other == id) else {
             return Err(crate::t!(Key::OnlyBookChaptersMove).to_owned());
@@ -1006,7 +1055,98 @@ impl Session {
         let order = self.book.clone();
         self.book.remove(from);
         self.book.insert(target, id);
-        self.write_chapter_list().inspect_err(|_| self.book = order)
+        self.write_chapter_list().inspect_err(|_| self.book = order.clone())?;
+        self.moves.undo.push(order);
+        self.moves.redo.clear();
+        Ok(())
+    }
+
+    /// Puts the book back in its order before the last move, returning whether there was one to undo.
+    pub fn undo_move(&mut self) -> Result<bool, String> {
+        self.step_move(true)
+    }
+
+    /// Makes the last undone move again, returning whether there was one to redo.
+    pub fn redo_move(&mut self) -> Result<bool, String> {
+        self.step_move(false)
+    }
+
+    fn step_move(&mut self, undo: bool) -> Result<bool, String> {
+        let popped = if undo {
+            self.moves.undo.pop()
+        } else {
+            self.moves.redo.pop()
+        };
+        let Some(order) = popped else {
+            return Ok(false);
+        };
+        let (mut wanted, mut book) = (order.clone(), self.book.clone());
+        wanted.sort();
+        book.sort();
+        if wanted != book {
+            // The book gained or lost a chapter since, so these orders no longer apply.
+            self.moves = Moves::default();
+            return Ok(false);
+        }
+        let current = std::mem::replace(&mut self.book, order);
+        let (back, forth) = match self.write_chapter_list() {
+            Ok(()) => (current, true),
+            Err(error) => {
+                let order = std::mem::replace(&mut self.book, current);
+                let stack = if undo {
+                    &mut self.moves.undo
+                } else {
+                    &mut self.moves.redo
+                };
+                stack.push(order);
+                return Err(error);
+            }
+        };
+        let stack = if undo {
+            &mut self.moves.redo
+        } else {
+            &mut self.moves.undo
+        };
+        stack.push(back);
+        Ok(forth)
+    }
+
+    /// The book's writing states in order of progress: its own `statuses`, or the default ones.
+    pub fn statuses(&self) -> Vec<String> {
+        match &self.settings {
+            Ok(settings) => settings.statuses(),
+            Err(_) => DEFAULT_STATUSES.map(str::to_owned).to_vec(),
+        }
+    }
+
+    /// Sets or clears a book chapter's writing state in `druck.yaml`.
+    pub fn set_status(&mut self, id: ChapterId, status: Option<&str>) -> Result<(), String> {
+        self.project_dir()?;
+        if !self.book.contains(&id) {
+            return Err(crate::t!(Key::OnlyBookChaptersHaveStatus).to_owned());
+        }
+        if status.is_some_and(|status| !self.statuses().iter().any(|known| known == status)) {
+            return Err(crate::t!(Key::UnknownStatus).to_owned());
+        }
+        let before = self.known(id).status.clone();
+        if before.as_deref() == status {
+            return Ok(());
+        }
+        self.known_mut(id).status = status.map(str::to_owned);
+        self.write_chapter_list()
+            .inspect_err(|_| self.known_mut(id).status = before)
+    }
+
+    /// The state after a chapter's current one, in the book's order, and none after the last.
+    pub fn next_status(&self, id: ChapterId) -> Option<String> {
+        let statuses = self.statuses();
+        match self.chapter(id).and_then(Chapter::status) {
+            None => statuses.first().cloned(),
+            Some(status) => {
+                let at = statuses.iter().position(|known| known == status)?;
+                statuses.get(at + 1).cloned()
+            }
+        }
     }
 
     /// Takes a chapter out of the book. Its file stays, in the "Not in book" list.

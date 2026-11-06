@@ -36,6 +36,8 @@ pub enum ShelfEvent {
     Select(ChapterId),
     /// Move a chapter so it stands before the one now at this place in the book.
     Move(ChapterId, usize),
+    /// Undo or redo the last move of a chapter.
+    StepMove { undo: bool },
     /// The shelf had the keys and put itself away, so the text takes them back.
     Closed,
 }
@@ -532,7 +534,8 @@ impl BookshelfView {
             .into_any_element()
     }
 
-    /// The card over a lit spine: title, words, pages, and the open placeholders in the accent, its only use on the shelf.
+    /// The card over a lit spine: title, words, pages, the writing state, and the open placeholders in the accent, its only
+    /// use on the shelf.
     fn card(&self, lit: &Lit, tokens: &Tokens, window: &Window) -> impl IntoElement + use<> {
         let Lit { spine, width, left } = lit;
         let (width, left) = (*width, *left);
@@ -553,6 +556,10 @@ impl BookshelfView {
             }
         });
         let counted = [words, pages].into_iter().flatten().collect::<Vec<_>>().join(", ");
+        let status = (self.contents.book.iter())
+            .find(|row| row.id == spine.id)
+            .and_then(|row| row.status.as_deref())
+            .map(crate::session::status_label);
         let open = match figures.todos {
             0 => None,
             1 => Some(crate::t!(Key::OpenOne).to_owned()),
@@ -607,6 +614,13 @@ impl BookshelfView {
                         .child(counted),
                 )
             })
+            .children(status.map(|status| {
+                div()
+                    .mt(px(2.))
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_quiet)
+                    .child(status)
+            }))
             .children(open.map(|open| {
                 div()
                     .mt(px(2.))
@@ -761,6 +775,8 @@ impl Render for BookshelfView {
             .key_context("Bookshelf")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|_, _: &crate::editor::Undo, _, cx| cx.emit(ShelfEvent::StepMove { undo: true })))
+            .on_action(cx.listener(|_, _: &crate::editor::Redo, _, cx| cx.emit(ShelfEvent::StepMove { undo: false })))
             .on_hover(cx.listener(|shelf, hovered: &bool, _, cx| shelf.hovered(*hovered, cx)));
         if !self.raised {
             return root

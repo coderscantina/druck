@@ -72,6 +72,8 @@ enum Kind {
 enum Target {
     Chapter(ChapterId),
     Command(Box<dyn Action>),
+    /// Sets or clears the writing state of the chapter in the text.
+    Status(ChapterId, Option<String>),
 }
 
 struct Row {
@@ -217,6 +219,37 @@ impl Palette {
                 target: Target::Command(menus::recent_action(index)),
             });
         }
+        rows.extend(self.status_rows(cx));
+        rows
+    }
+
+    /// One row per writing state the chapter in the text could take, and one to clear its state, in a project's book.
+    fn status_rows(&self, cx: &App) -> Vec<Row> {
+        let session = self.parts.editor.read(cx).session();
+        let id = session.active();
+        let in_book = matches!(session.kind(), session::Kind::Project { .. }) && session.book().contains(&id);
+        let Some(chapter) = session.chapter(id).filter(|_| in_book) else {
+            return Vec::new();
+        };
+        let current = chapter.status();
+        let row = |label: String, status: Option<String>| Row {
+            label,
+            keys: None,
+            chapter: None,
+            target: Target::Status(id, status),
+        };
+        let mut rows: Vec<Row> = (session.statuses().into_iter())
+            .filter(|status| current != Some(status.as_str()))
+            .map(|status| {
+                row(
+                    crate::t!(Key::MarkChapter, state = session::status_label(&status)),
+                    Some(status),
+                )
+            })
+            .collect();
+        if current.is_some() {
+            rows.push(row(crate::t!(Key::ClearState).to_owned(), None));
+        }
         rows
     }
 
@@ -276,6 +309,13 @@ impl Palette {
                 }
             }
             Target::Command(action) => window.dispatch_action(action, cx),
+            Target::Status(id, status) => {
+                if let Some(workspace) = self.workspace.upgrade() {
+                    workspace.update(cx, |workspace, cx| {
+                        workspace.sidebar_event(&sidebar::SidebarEvent::SetStatus(id, status), window, cx)
+                    });
+                }
+            }
         }
     }
 

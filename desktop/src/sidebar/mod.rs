@@ -94,6 +94,12 @@ pub enum SidebarEvent {
     Browse(ChapterId),
     /// Move a chapter so it stands before the one now at this place in the book.
     Move(ChapterId, usize),
+    /// Put the book back in its order before the last move.
+    UndoMove,
+    /// Make the last undone move again.
+    RedoMove,
+    /// Set or clear a book chapter's writing state.
+    SetStatus(ChapterId, Option<String>),
     AddToBook(ChapterId),
     Edit(ChapterId),
     NewSection,
@@ -605,6 +611,8 @@ impl Render for SidebarView {
             .key_context("Sidebar")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|_, _: &crate::editor::Undo, _, cx| cx.emit(SidebarEvent::UndoMove)))
+            .on_action(cx.listener(|_, _: &crate::editor::Redo, _, cx| cx.emit(SidebarEvent::RedoMove)))
             .bg(tokens.panel)
             .border_r_1()
             .border_color(tokens.divider)

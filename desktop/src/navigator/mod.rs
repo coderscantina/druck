@@ -24,7 +24,7 @@ use gpui::{
 use self::book::{Book, Place};
 use self::columns::Columns;
 use self::overview::Overview;
-use crate::editor::{CaretMoved, SessionChanged, TextChanged};
+use crate::editor::{CaretMoved, Redo, SessionChanged, TextChanged, Undo};
 use crate::session::ChapterId;
 use crate::sidebar::SidebarEvent;
 use crate::tokens::{self, Tokens};
@@ -44,6 +44,13 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-escape", ShowOverview, None),
         KeyBinding::new("tab", NextEntry, Some("Navigator")),
         KeyBinding::new("shift-tab", PreviousEntry, Some("Navigator")),
+        // Where the book's order changes, undo and redo take back its moves, never text.
+        KeyBinding::new("cmd-z", Undo, Some("Navigator")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("Navigator")),
+        KeyBinding::new("cmd-z", Undo, Some("Sidebar")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("Sidebar")),
+        KeyBinding::new("cmd-z", Undo, Some("Bookshelf")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("Bookshelf")),
     ]);
     cx.on_action(|_: &ShowColumns, cx| {
         Current::<Navigator>::defer(cx, |navigator, window, cx| {
@@ -65,7 +72,8 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     slots.overlays.push(navigator.into());
 }
 
-/// `DRUCK_NAVIGATOR=columns`, `parts`, `headings`, or `overview` opens it, for screenshots.
+/// `DRUCK_NAVIGATOR=columns`, `parts`, `headings`, or `overview` opens it, for screenshots. `states` opens the overview
+/// with the menu of writing states on the focused entry.
 #[cfg(any(debug_assertions, feature = "measure"))]
 pub fn apply_gate(window: &mut Window, cx: &mut App) {
     let Some(name) = crate::gate::var("DRUCK_NAVIGATOR") else {
@@ -76,6 +84,17 @@ pub fn apply_gate(window: &mut Window, cx: &mut App) {
     };
     navigator.update(cx, |navigator, cx| match name.as_str() {
         "overview" => navigator.toggle_overview(window, cx),
+        "states" => {
+            navigator.toggle_overview(window, cx);
+            // The book is read after the window mounts, so the menu waits for its entries.
+            cx.spawn(async move |navigator, cx| {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                navigator
+                    .update(cx, |navigator, cx| navigator.open_focused_status_menu(cx))
+                    .ok();
+            })
+            .detach();
+        }
         "parts" => navigator.toggle_columns(Level::Parts, window, cx),
         "headings" => navigator.toggle_columns(Level::Headings, window, cx),
         _ => navigator.toggle_columns(Level::Chapters, window, cx),
@@ -368,10 +387,13 @@ impl Navigator {
 
     /// Moves a file of the book so it stands before the one now at `place`, as the Binder does.
     fn move_to(&mut self, id: ChapterId, place: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.workspace_event(SidebarEvent::Move(id, place), window, cx);
+    }
+
+    /// Changes the book as the Binder would.
+    fn workspace_event(&mut self, event: SidebarEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = self.workspace.upgrade() {
-            workspace.update(cx, |workspace, cx| {
-                workspace.sidebar_event(&SidebarEvent::Move(id, place), window, cx)
-            });
+            workspace.update(cx, |workspace, cx| workspace.sidebar_event(&event, window, cx));
         }
     }
 
@@ -446,6 +468,12 @@ impl Render for Navigator {
                 .on_key_down(cx.listener(|navigator, event, window, cx| navigator.on_key(event, window, cx)))
                 .on_action(cx.listener(|navigator, _: &NextEntry, _, cx| navigator.step_entry(true, cx)))
                 .on_action(cx.listener(|navigator, _: &PreviousEntry, _, cx| navigator.step_entry(false, cx)))
+                .on_action(cx.listener(|navigator, _: &Undo, window, cx| {
+                    navigator.workspace_event(SidebarEvent::UndoMove, window, cx)
+                }))
+                .on_action(cx.listener(|navigator, _: &Redo, window, cx| {
+                    navigator.workspace_event(SidebarEvent::RedoMove, window, cx)
+                }))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
         )
         .with_priority(tokens::LAYER_QUESTION)

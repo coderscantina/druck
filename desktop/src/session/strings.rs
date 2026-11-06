@@ -79,6 +79,11 @@ crate::strings! {
             "Eine einzelne Datei hat keine Kapitelliste: Ihre Reihenfolge ist ihr Text."
         ),
         OnlyBookChaptersMove => ("Only a chapter in the book can move.", "Nur ein Kapitel im Buch lässt sich verschieben."),
+        OnlyBookChaptersHaveStatus => ("Only a chapter in the book has a state.", "Nur ein Kapitel im Buch hat einen Stand."),
+        UnknownStatus => ("That state is not one of the book's statuses.", "Diesen Stand kennt das Buch nicht."),
+        StatusDraft => ("Draft", "Entwurf"),
+        StatusRevised => ("Revised", "Überarbeitet"),
+        StatusFinal => ("Final", "Final"),
         BookNeedsChapter => ("A book needs at least one chapter.", "Ein Buch braucht mindestens ein Kapitel."),
         NameEmpty => ("A name cannot be empty.", "Ein Name darf nicht leer sein."),
         AlreadyExists => ("{path} already exists.", "{path} gibt es schon."),

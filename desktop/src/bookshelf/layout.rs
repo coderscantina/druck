@@ -152,6 +152,7 @@ mod tests {
                 number
             }),
             broken: false,
+            status: None,
         };
         Contents {
             book: rows

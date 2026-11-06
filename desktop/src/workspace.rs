@@ -728,6 +728,16 @@ impl Workspace {
                 let (id, to) = (*id, *to);
                 self.change(move |session| session.move_chapter(id, to), window, cx);
             }
+            SidebarEvent::UndoMove => {
+                self.change(|session| session.undo_move().map(drop), window, cx);
+            }
+            SidebarEvent::RedoMove => {
+                self.change(|session| session.redo_move().map(drop), window, cx);
+            }
+            SidebarEvent::SetStatus(id, status) => {
+                let (id, status) = (*id, status.clone());
+                self.change(move |session| session.set_status(id, status.as_deref()), window, cx);
+            }
             SidebarEvent::AddToBook(id) => {
                 let id = *id;
                 self.change(move |session| session.add_to_book(id), window, cx);
@@ -763,6 +773,8 @@ impl Workspace {
         match event {
             ShelfEvent::Select(id) => self.sidebar_event(&SidebarEvent::Select(*id), window, cx),
             ShelfEvent::Move(id, place) => self.sidebar_event(&SidebarEvent::Move(*id, *place), window, cx),
+            ShelfEvent::StepMove { undo: true } => self.sidebar_event(&SidebarEvent::UndoMove, window, cx),
+            ShelfEvent::StepMove { undo: false } => self.sidebar_event(&SidebarEvent::RedoMove, window, cx),
             ShelfEvent::Closed => self.focus_main(window, cx),
         }
     }

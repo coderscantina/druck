@@ -370,6 +370,7 @@ mod tests {
                 kind: RowKind::Plain,
                 number: None,
                 broken: false,
+                status: None,
             })
             .collect()
     }

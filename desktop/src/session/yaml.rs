@@ -6,6 +6,8 @@
 
 use std::ops::Range;
 
+use druck::editor::resolved_config::ChapterEntry;
+
 use crate::source::Edit;
 
 use super::strings::Key;
@@ -297,50 +299,130 @@ pub(crate) fn unquote(value: &str) -> String {
 /// Makes the block list at a top-level key hold exactly `wanted`, in that order. Items already there keep their exact
 /// lines and the comments above them. A list written on the key's line becomes a block list.
 pub fn set_list(text: &str, key: &str, wanted: &[String], order: &[&str]) -> Result<Edit, String> {
+    let existing = existing_list(text, key)?;
+    let existing: Vec<String> = existing.iter().map(|item| item.value.clone()).collect();
+    set_items(
+        text,
+        key,
+        &existing,
+        wanted,
+        |value| value.as_str(),
+        |value, indent, newline| plain_item(value, indent, newline),
+        order,
+    )
+}
+
+/// Makes the `chapters` list hold exactly `wanted`, given the entries the engine read from `text`, one per item and
+/// in its order. An entry that did not change keeps its exact lines; one whose status changed keeps the comments above
+/// it. A chapter without a status is written as its bare path.
+pub fn set_chapters(
+    text: &str,
+    key: &str,
+    existing: &[ChapterEntry],
+    wanted: &[ChapterEntry],
+    order: &[&str],
+) -> Result<Edit, String> {
+    set_items(
+        text,
+        key,
+        existing,
+        wanted,
+        |entry| entry.file.as_str(),
+        chapter_item,
+        order,
+    )
+}
+
+fn existing_list(text: &str, key: &str) -> Result<Vec<Item>, String> {
+    let found = entries(text, 0..text.len(), 0)?;
+    Ok(found
+        .iter()
+        .find(|entry| entry.key == key)
+        .and_then(|entry| list_items(text, entry))
+        .unwrap_or_default())
+}
+
+fn plain_item(value: &str, indent: usize, newline: &str) -> String {
+    format!("{:indent$}- {}{newline}", "", scalar(value))
+}
+
+fn chapter_item(entry: &ChapterEntry, indent: usize, newline: &str) -> String {
+    let file = scalar(&entry.file);
+    match &entry.status {
+        None => format!("{:indent$}- {file}{newline}", ""),
+        Some(status) => format!(
+            "{:indent$}- file: {file}{newline}{:indent$}  status: {}{newline}",
+            "",
+            "",
+            scalar(status)
+        ),
+    }
+}
+
+/// Rewrites the block list at `key` to `wanted`. `existing` holds what each item of the list says, in order, and
+/// `name` tells which item stands for which value, so an item that moved keeps its lines and comments.
+fn set_items<T: PartialEq>(
+    text: &str,
+    key: &str,
+    existing: &[T],
+    wanted: &[T],
+    name: impl Fn(&T) -> &str,
+    render: impl Fn(&T, usize, &str) -> String,
+    order: &[&str],
+) -> Result<Edit, String> {
     let found = entries(text, 0..text.len(), 0)?;
     let newline = newline(text);
-    let new_line = |indent: usize, value: &str| format!("{:indent$}- {}{newline}", "", scalar(value));
+    let block = |indent: usize| -> String { wanted.iter().map(|value| render(value, indent, newline)).collect() };
     let Some(entry) = found.iter().find(|entry| entry.key == key) else {
-        let items: String = wanted.iter().map(|value| new_line(2, value)).collect();
-        let lines = format!("{key}:{newline}{items}");
+        let lines = format!("{key}:{newline}{}", block(2));
         let lines = lines.strip_suffix(newline).unwrap_or(&lines);
         return Ok(insert(text, &found, key, lines, order));
     };
     let Some(items) = list_items(text, entry) else {
-        let body: String = wanted.iter().map(|value| new_line(2, value)).collect();
-        return Ok(Edit::new(entry.colon_end..entry.end, format!("{newline}{body}")));
+        return Ok(Edit::new(entry.colon_end..entry.end, format!("{newline}{}", block(2))));
     };
     let (Some(first), Some(last)) = (items.first(), items.last()) else {
-        let body: String = wanted.iter().map(|value| new_line(2, value)).collect();
         let lead = if text[..entry.line_end].ends_with('\n') {
             ""
         } else {
             newline
         };
-        return Ok(Edit::new(entry.line_end..entry.end, format!("{lead}{body}")));
+        return Ok(Edit::new(entry.line_end..entry.end, format!("{lead}{}", block(2))));
     };
-    let item_line = text[first.range.clone()]
-        .split_inclusive('\n')
-        .find(|line| line.trim_start().starts_with('-'))
-        .unwrap_or_default();
+    if items.len() != existing.len() {
+        return Err(crate::t!(Key::CannotReadYaml, line = key));
+    }
+    let dash_line = |item: &Item| -> usize {
+        let mut at = item.range.start;
+        for line in text[item.range.clone()].split_inclusive('\n') {
+            if line.trim_start().starts_with('-') {
+                return at;
+            }
+            at += line.len();
+        }
+        item.range.start
+    };
+    let item_line = &text[dash_line(first)..first.range.end];
     let indent = item_line.len() - item_line.trim_start_matches(' ').len();
     let mut used = vec![false; items.len()];
     let mut body = String::new();
     for value in wanted {
-        let existing = items
-            .iter()
-            .enumerate()
-            .position(|(at, item)| !used[at] && item.value == *value);
-        match existing {
-            Some(at) => {
-                used[at] = true;
-                let chunk = &text[items[at].range.clone()];
-                body.push_str(chunk);
-                if !chunk.ends_with('\n') {
-                    body.push_str(newline);
-                }
+        let same = |at: usize| !used[at] && name(&existing[at]) == name(value);
+        let Some(at) = (0..items.len()).find(|&at| same(at)) else {
+            body.push_str(&render(value, indent, newline));
+            continue;
+        };
+        used[at] = true;
+        let item = &items[at];
+        if existing[at] == *value {
+            let chunk = &text[item.range.clone()];
+            body.push_str(chunk);
+            if !chunk.ends_with('\n') {
+                body.push_str(newline);
             }
-            None => body.push_str(&new_line(indent, value)),
+        } else {
+            body.push_str(&text[item.range.start..dash_line(item)]);
+            body.push_str(&render(value, indent, newline));
         }
     }
     Ok(Edit::new(first.range.start..last.range.end, body))
@@ -478,6 +560,22 @@ mod tests {
         let wanted = ["b.md", "a.md"].map(str::to_owned);
         let edit = set_list(text, "chapters", &wanted, ORDER).expect("edits");
         assert_eq!(apply(text, edit), "chapters:\n  - b.md\n  - a.md\nlang: de\n");
+    }
+
+    #[test]
+    fn chapter_entries_keep_their_lines_unless_their_status_changes() {
+        let entry = |file: &str, status: Option<&str>| ChapterEntry {
+            file: file.to_owned(),
+            status: status.map(str::to_owned),
+        };
+        let text = "chapters:\n  - {file: a.md, status: draft} # first\n  # b\n  - b.md\n";
+        let existing = [entry("a.md", Some("draft")), entry("b.md", None)];
+        let wanted = [entry("b.md", Some("final")), entry("a.md", Some("draft"))];
+        let edit = set_chapters(text, "chapters", &existing, &wanted, ORDER).expect("edits");
+        assert_eq!(
+            apply(text, edit),
+            "chapters:\n  # b\n  - file: b.md\n    status: final\n  - {file: a.md, status: draft} # first\n"
+        );
     }
 
     #[test]
