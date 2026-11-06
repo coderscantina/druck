@@ -169,7 +169,13 @@ impl Place {
 }
 
 /// The status line's zoom: smaller, the value, larger, and fit.
-pub(super) fn zoom_controls(place: &Place, tokens: &Tokens, cx: &mut Context<PreviewView>) -> impl IntoElement + use<> {
+/// Minus, the value, plus, and Fit while `fit` has room.
+pub(super) fn zoom_controls(
+    place: &Place,
+    fit: bool,
+    tokens: &Tokens,
+    cx: &mut Context<PreviewView>,
+) -> impl IntoElement + use<> {
     let button = |id: &'static str, label: SharedString, aria: &'static str, on: bool| {
         div()
             .id(id)
@@ -208,15 +214,17 @@ pub(super) fn zoom_controls(place: &Place, tokens: &Tokens, cx: &mut Context<Pre
             button("zoom-in", "+".into(), crate::t!(Key::ZoomIn), false)
                 .on_click(cx.listener(|view, _, _, cx| view.zoom_step(1, cx))),
         )
-        .child(
-            button(
-                "zoom-fit",
-                crate::t!(Key::ZoomFit).into(),
-                crate::t!(Key::ZoomFit),
-                place.zoom == Zoom::Fit,
+        .when(fit, |controls| {
+            controls.child(
+                button(
+                    "zoom-fit",
+                    crate::t!(Key::ZoomFit).into(),
+                    crate::t!(Key::ZoomFit),
+                    place.zoom == Zoom::Fit,
+                )
+                .on_click(cx.listener(|view, _, _, cx| view.zoom_to_fit(cx))),
             )
-            .on_click(cx.listener(|view, _, _, cx| view.zoom_to_fit(cx))),
-        )
+        })
 }
 
 #[cfg(test)]

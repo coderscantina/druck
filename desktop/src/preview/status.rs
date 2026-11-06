@@ -10,8 +10,9 @@ use crate::a11y::Control as _;
 use crate::tokens::{self, Tokens};
 
 impl PreviewView {
-    /// Whether the status line holds `parts` in full beside the zoom.
-    pub(super) fn status_fits(&self, parts: &[&str], window: &Window) -> bool {
+    /// Whether the status line holds `parts` in full beside the zoom, with the Marks `switch` and the zoom's `fit` when
+    /// they show.
+    pub(super) fn status_fits(&self, parts: &[&str], switch: bool, fit: bool, window: &Window) -> bool {
         let width = |text: &str| f32::from(crate::shell::ui::small_text_width(text, window));
         let words: f32 = parts
             .iter()
@@ -19,10 +20,13 @@ impl PreviewView {
             .map(|part| width(part))
             .sum();
         let percent = format!("{}%", (self.place.current_zoom * 100.0).round());
-        let zoom = width(&percent)
-            + width(crate::t!(Key::ZoomFit))
-            + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 6. + tokens::HAIR_GAP * 3.)
-            + f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
+        let mut zoom = width(&percent) + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 4. + tokens::HAIR_GAP * 2.);
+        if fit {
+            zoom += width(crate::t!(Key::ZoomFit)) + f32::from(tokens::SPACE_1 * 2. + tokens::HAIR_GAP);
+        }
+        if switch {
+            zoom += f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
+        }
         let gaps = f32::from(tokens::SPACE_3) * (parts.len() + 3) as f32;
         words + zoom + gaps <= self.place.view.0
     }
@@ -65,7 +69,7 @@ impl PreviewView {
     }
 
     /// The line itself. A narrow one drops the printed page numbers, then the word "warnings", then the switch's label,
-    /// and never cuts a number.
+    /// then the switch, then the zoom's Fit, and never cuts a number.
     pub(super) fn status_line(
         &self,
         tokens: &Tokens,
@@ -86,7 +90,11 @@ impl PreviewView {
             (range, Some(labels)) => {
                 let full = format!("{range} ({labels})");
                 let fewest = [&full, look_label.as_deref().unwrap_or_default(), &warnings.to_string()];
-                if self.status_fits(&fewest, window) { full } else { range }
+                if self.status_fits(&fewest, warnings > 0, true, window) {
+                    full
+                } else {
+                    range
+                }
             }
             (range, None) => range,
         };
@@ -100,23 +108,28 @@ impl PreviewView {
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
                 .child(label)
         });
+        let look = look_label.as_deref().unwrap_or_default();
+        let toggle = crate::t!(Key::WarningMarks);
+        let warning_label = match warnings {
+            0 => String::new(),
+            1 => crate::t!(Key::OneWarning).to_owned(),
+            warnings => crate::t!(Key::Warnings, count = warnings),
+        };
+        let number = if warnings > 0 { warnings.to_string() } else { String::new() };
+        // A narrow line drops the word "warnings", then the switch's label, then the switch, then Fit.
+        let fits = |parts: &[&str], switch| self.status_fits(parts, switch && warnings > 0, true, window);
+        let (shown, toggle_label, switch) = if fits(&[&status, look, &warning_label, toggle], true) {
+            (warning_label.clone(), Some(toggle), true)
+        } else if fits(&[&status, look, &number, toggle], true) {
+            (number, Some(toggle), true)
+        } else if fits(&[&status, look, &number], true) {
+            (number, None, true)
+        } else {
+            (number, None, false)
+        };
+        let fit = self.status_fits(&[&status, look, &shown], switch && warnings > 0, true, window);
         let warning_count = (warnings > 0).then(|| {
-            let label = match warnings {
-                1 => crate::t!(Key::OneWarning).to_owned(),
-                warnings => crate::t!(Key::Warnings, count = warnings),
-            };
             let marks_on = crate::settings::get(cx).warning_marks;
-            let toggle = crate::t!(Key::WarningMarks);
-            // A narrow line drops the word "warnings", then the switch's label, and never cuts the number.
-            let look = look_label.as_deref().unwrap_or_default();
-            let number = warnings.to_string();
-            let (shown, toggle_label) = if self.status_fits(&[&status, look, &label, toggle], window) {
-                (label.clone(), Some(toggle))
-            } else if self.status_fits(&[&status, look, &number, toggle], window) {
-                (number, Some(toggle))
-            } else {
-                (number, None)
-            };
             div()
                 .flex_none()
                 .flex()
@@ -125,13 +138,14 @@ impl PreviewView {
                 .child(
                     div()
                         .id("warnings")
-                        .control(tokens, Role::Link, SharedString::from(label.clone()))
+                        .control(tokens, Role::Link, SharedString::from(warning_label.clone()))
                         .flex_none()
                         .cursor_pointer()
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ProblemsWanted)))
                         .child(shown),
                 )
-                .child(
+                .when(switch, |line| {
+                    line.child(
                     div()
                         .id("warning-marks")
                         .control(tokens, Role::Switch, toggle)
@@ -150,7 +164,8 @@ impl PreviewView {
                         })
                         .child(crate::shell::ui::switch_track(tokens, marks_on))
                         .children(toggle_label),
-                )
+                    )
+                })
         });
         div()
             .flex_none()
@@ -179,7 +194,7 @@ impl PreviewView {
                     })
                     .children(self.foot.clone()),
             )
-            .child(super::zoom::zoom_controls(&self.place, tokens, cx))
+            .child(super::zoom::zoom_controls(&self.place, fit, tokens, cx))
     }
 }
 
