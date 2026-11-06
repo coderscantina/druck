@@ -7,7 +7,7 @@ use gpui::{
     Window, WindowBounds, WindowKind, WindowOptions, div, point, px, rgb, size, svg,
 };
 
-use super::file::{Appearance, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
+use super::file::{Appearance, KeptFor, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
 use super::strings::Key;
 use super::{Store, change, file_path, get, open_file, problem};
 use crate::a11y::Control as _;
@@ -70,6 +70,7 @@ enum Control {
     LineLength,
     Language,
     Placeholders,
+    KeptFor,
     Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
 }
 
@@ -134,6 +135,12 @@ const ROWS: &[Row] = &[
         label: Key::Placeholders,
         hint: Key::PlaceholdersHint,
         control: Control::Placeholders,
+    },
+    Row {
+        category: Category::Writing,
+        label: Key::KeptFor,
+        hint: Key::KeptForHint,
+        control: Control::KeptFor,
     },
     Row {
         category: Category::Publishing,
@@ -475,6 +482,21 @@ impl SettingsWindow {
                     ],
                     settings.placeholders,
                     |settings, value| settings.placeholders = value,
+                    tokens,
+                    cx,
+                )
+                .into_any_element(),
+            Control::KeptFor => self
+                .segments(
+                    "kept-for",
+                    vec![
+                        (KeptFor::Week, crate::t!(Key::KeptForWeek).to_owned()),
+                        (KeptFor::Month, crate::t!(Key::KeptForMonth).to_owned()),
+                        (KeptFor::Quarter, crate::t!(Key::KeptForQuarter).to_owned()),
+                        (KeptFor::Forever, crate::t!(Key::KeptForNever).to_owned()),
+                    ],
+                    settings.kept_for,
+                    |settings, value| settings.kept_for = value,
                     tokens,
                     cx,
                 )

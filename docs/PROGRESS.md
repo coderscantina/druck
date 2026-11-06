@@ -91,7 +91,7 @@ Everything only a person can do or decide, most important first. Run the app wit
 11. [ ] **Looks to judge.** The accent caret line on the page, the small footnote mark, chips, the grid over its table, "page of Table 1" on a page reference's chip, and a long theme field in the Source panel, which does not scroll to keep its caret in view.
 12. [ ] **Push,** and let CI run for the first time: `check`, `render`, `compare`, `desktop`, `Examples`, and `Documentation`. Nothing has run on Linux or Windows.
 13. [ ] **The visual review of the samples,** veraPDF, epubcheck, and Windows offline checks, for milestone 10, with its two corpus findings: a sample that shows a continuing footnote, and `report.md` pages 4 and 5.
-14. [ ] **Smaller decisions:** when kept copies in `kept/` get cleaned up, whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
+14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
 
@@ -101,7 +101,7 @@ On 2026-11-06 the owner rated HTML variants of the writing surface in three roun
 
 Checks on the integration: `cargo test -p druck-desktop` 793 passed, 1 ignored; `cargo test` at the root 509 passed; `cargo clippy -p druck-desktop --all-targets -- -D warnings` and `cargo fmt --all --check` clean. Captures of the merged app on a demo book, dark and light, are in `.captures/writing-ux-integration` beside the repo, each slice's own in `.captures/writing-ux-<slice>`.
 
-Waiting on the owner: where a chapter's state (draft, revised, final) lives, proposed as `status:` per chapter in `druck.yaml`; whether reordering in the overview and the shelf needs an undo step, which the Binder's has never had; and the keys chosen: `Cmd+Alt+2` outline, `Cmd+Shift+J` columns, `Cmd+Escape` overview, `Cmd+Shift+\` bookshelf, `Cmd+Option+M` rail, `Cmd+Shift+O` library.
+Waiting on the owner: where a chapter's state (draft, revised, final) lives, proposed as `status:` per chapter in `druck.yaml`; whether reordering in the overview and the shelf needs an undo step, which the Binder's has never had; and the keys chosen: `Cmd+Alt+2` outline, `Cmd+Shift+J` columns, `Cmd+Escape` overview, `Cmd+Shift+\` bookshelf, `Cmd+Shift+M` rail, `Cmd+Shift+O` library.
 
 Not verified: every pointer path (hover, dwell, clicks, drags), since mouse events do not reach the window here; each has a key path that was checked. `Cmd+[` and `Cmd+]` in the rail's panel were taken by the View menu in a capture window that was not key.
 

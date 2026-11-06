@@ -49,7 +49,7 @@ const EXCERPT: usize = 280;
 /// The keys that reach the material from anywhere. `Cmd+[`, `Cmd+]`, and the verbs are the panel's, see [`panel`].
 pub fn install(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-alt-m", ToggleMaterial, None),
+        KeyBinding::new("cmd-shift-m", ToggleMaterial, None),
         KeyBinding::new("cmd-l", JumpToMaterial, None),
         KeyBinding::new("cmd-shift-o", ShowLibrary, None),
     ]);
