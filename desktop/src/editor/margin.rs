@@ -164,9 +164,14 @@ impl ChapterNotes {
 }
 
 impl Render for ChapterNotes {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let line = self.line.clone().unwrap_or_default();
+        let room = self.editor.read(cx).text_width() - tokens::NOTE_ICON - tokens::SPACE_1;
+        let measure = |text: &str| f32::from(width_of(text, tokens::NOTE_TEXT, window, &tokens));
+        let line = super::review::clipped(&line, 1, f32::from(room), 0., measure)
+            .and_then(|lines| lines.into_iter().next())
+            .unwrap_or(line);
         let label = crate::t!(Key::ChapterNotes);
         let unfolded = self.unfolded || self.held_open;
         let icon = svg()

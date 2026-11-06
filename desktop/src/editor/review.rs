@@ -407,7 +407,13 @@ impl EditorView {
 
 /// The first `lines` lines of `text` broken at words to fit `width`, the last ending in an ellipsis with `room` left
 /// after it, or `None` when the whole text fits in that many lines.
-fn clipped(text: &str, lines: usize, width: f32, room: f32, measure: impl Fn(&str) -> f32) -> Option<Vec<String>> {
+pub(super) fn clipped(
+    text: &str,
+    lines: usize,
+    width: f32,
+    room: f32,
+    measure: impl Fn(&str) -> f32,
+) -> Option<Vec<String>> {
     let mut words = text.split_whitespace().peekable();
     let mut shown: Vec<String> = (1..lines).map(|_| take_line(&mut words, width, &measure)).collect();
     let mut rest = words.clone();

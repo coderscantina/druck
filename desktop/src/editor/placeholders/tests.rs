@@ -172,3 +172,10 @@ fn a_blocks_style_name_is_its_custom_style_or_its_heading_level() {
     assert_eq!(name(text.len() - 3), None);
     assert_eq!(sentence_case("wide-heading"), "Wide heading");
 }
+
+#[test]
+fn a_line_shows_values_and_leaves_out_known_names_without_one() {
+    let book = values("title: Salt\n", 1, "en");
+    assert_eq!(filled("{title} by {author} {nope}", &book), "Salt by {nope}");
+    assert_eq!(filled("Open { brace", &book), "Open { brace");
+}

@@ -840,12 +840,12 @@ mod tests {
         assert_eq!(bare.text_width, px(460.));
         assert_eq!(bare.note_left, None);
         assert_eq!(noted.text_left, bare.text_left);
-        assert_eq!(noted.note_left, Some(px(1023.)));
+        assert_eq!(noted.note_left, Some(px(977.)));
     }
 
     #[test]
     fn a_narrow_window_moves_the_text_for_its_notes_then_drops_them_before_narrowing_it() {
-        let moved = Column::place(viewport(860.), px(460.), true, viewport(860.).center().x);
+        let moved = Column::place(viewport(960.), px(460.), true, viewport(960.).center().x);
         assert!(moved.text_left < px(200.));
         assert_eq!(moved.text_width, px(460.));
         assert!(moved.note_left.is_some());

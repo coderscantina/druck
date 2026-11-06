@@ -13,6 +13,7 @@ use gpui::{
 use super::book::{Book, Entry, Place, Shelf};
 use super::strings::Key;
 use super::{Navigator, group_label, grouped, hint};
+use crate::editor::placeholders::{Values, filled};
 use crate::session::{ChapterId, status_label};
 use crate::sidebar::SidebarEvent;
 use crate::tokens::{self, Tokens};
@@ -267,6 +268,7 @@ impl Navigator {
     ) -> gpui::Stateful<gpui::Div> {
         let book = self.book.clone();
         let font = self.parts.editor.read(cx).body_font().family;
+        let values = self.parts.editor.read(cx).placeholder_values().clone();
         let super::Shown::Overview(overview) = &self.shown else {
             return div().id("navigator-overview");
         };
@@ -289,6 +291,7 @@ impl Navigator {
             per_line,
             statuses,
             menu: overview.menu,
+            values,
         };
         let mut lines = Vec::new();
         let mut elements = Vec::new();
@@ -414,6 +417,8 @@ struct Desk<'a> {
     /// The book's writing states, for the menu.
     statuses: Vec<String>,
     menu: Option<(ChapterId, usize)>,
+    /// What placeholders show, for a card's first line.
+    values: Values,
 }
 
 impl Desk<'_> {
@@ -650,7 +655,7 @@ impl Desk<'_> {
                     .text_color(tokens.text_quiet)
                     .line_clamp(2)
                     .text_ellipsis()
-                    .children(entry.opening.first().cloned()),
+                    .children(entry.opening.first().map(|line| filled(line, &self.values))),
             )
             .child(
                 div()

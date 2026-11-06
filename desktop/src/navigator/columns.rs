@@ -11,6 +11,7 @@ use super::book::{Book, Kind, Place};
 use super::strings::Key;
 use super::{Level, Navigator, group_label, grouped, hint};
 use crate::a11y::Control as _;
+use crate::editor::placeholders::{Values, filled};
 use crate::session::ChapterId;
 use crate::tokens::{self, Tokens};
 
@@ -291,7 +292,7 @@ impl Navigator {
         let opening = with_opening
             .then(|| columns.chapter.and_then(|id| book.entry(id)))
             .flatten()
-            .map(|entry| opening(entry, font, tokens, cx));
+            .map(|entry| opening(entry, font, self.parts.editor.read(cx).placeholder_values(), tokens, cx));
         div()
             .id("navigator-columns")
             .occlude()
@@ -544,6 +545,7 @@ fn headings_column(
 fn opening(
     entry: &super::book::Entry,
     font: gpui::SharedString,
+    values: &Values,
     tokens: &Tokens,
     cx: &App,
 ) -> impl IntoElement + use<> {
@@ -573,7 +575,7 @@ fn opening(
                 .text_color(tokens.text_quiet)
                 .line_clamp(tokens::NAV_OPENING_LINES)
                 .text_ellipsis()
-                .child(paragraph.clone())
+                .child(filled(paragraph, values))
         }))
         .child(
             div()

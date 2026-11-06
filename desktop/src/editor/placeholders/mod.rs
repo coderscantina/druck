@@ -265,6 +265,25 @@ pub fn shown(lookup: &Lookup) -> String {
     }
 }
 
+/// A line as Write shows it in plain text: each `{name}` with a value replaced by it, any other known name left out.
+pub fn filled(line: &str, values: &Values) -> String {
+    let mut shown = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some((before, after)) = rest.split_once('{')
+        && let Some((name, next)) = after.split_once('}')
+    {
+        shown.push_str(before);
+        match values.lookup(name) {
+            Lookup::Value(value) => shown.push_str(&value),
+            Lookup::Unknown => shown.push_str(&rest[before.len()..rest.len() - next.len()]),
+            Lookup::NoValue | Lookup::Counting | Lookup::PageDependent => {}
+        }
+        rest = next;
+    }
+    shown.push_str(rest);
+    shown.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// A value longer than this may wrap; a shorter one stays on one row, as a chip does.
 const KEEP_TOGETHER: usize = 32;
 

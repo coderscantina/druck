@@ -944,6 +944,48 @@ impl EditorView {
         Some((element, point(self.column.text_left, top - self.chapter_label_room())))
     }
 
+    /// The left edge nearest `left` for something `width` wide over the row at `row`, inside `reach`, whose sides both
+    /// stand in a word space or past the row's ends, so it cuts no glyph. Where none does, `left` itself.
+    fn clear_of_glyphs(
+        &mut self,
+        left: Pixels,
+        width: Pixels,
+        row: Pixels,
+        reach: (Pixels, Pixels),
+        window: &Window,
+    ) -> Pixels {
+        let room = tokens::SPACE_1 * 0.5;
+        let mut shifts = vec![px(0.)];
+        for edge in [left, left + width] {
+            if let Some((start, end)) = self.word_under(edge, row, window) {
+                shifts.extend([start - room - edge, end + room - edge]);
+            }
+        }
+        shifts.sort_by(|a, b| f32::from(a.abs()).total_cmp(&f32::from(b.abs())));
+        shifts
+            .into_iter()
+            .map(|shift| left + shift)
+            .filter(|moved| *moved >= reach.0 && *moved + width <= reach.1)
+            .find(|moved| {
+                self.word_under(*moved, row, window).is_none() && self.word_under(*moved + width, row, window).is_none()
+            })
+            .unwrap_or(left)
+    }
+
+    /// The left and right of the word whose glyphs `x` falls on, in the row at `row`.
+    fn word_under(&mut self, x: Pixels, row: Pixels, window: &Window) -> Option<(Pixels, Pixels)> {
+        let (offset, _) = self.offset_at(point(x, row), window);
+        let text = self.session.active_buffer().text();
+        let block = self.blocks.as_slice()[self.blocks.index_at(offset)].range.clone();
+        let start =
+            (text[block.start..offset].rfind(char::is_whitespace)).map_or(block.start, |at| block.start + at + 1);
+        let end = (text[offset..block.end].find(char::is_whitespace)).map_or(block.end, |at| offset + at);
+        let first = self.offset_bounds(start, false, window)?;
+        let last = self.offset_bounds(end, true, window)?;
+        let on_row = |bounds: Bounds<Pixels>| bounds.top() <= row && row < bounds.bottom();
+        (on_row(first) && on_row(last) && first.left() < x && x < last.left()).then(|| (first.left(), last.left()))
+    }
+
     // The frame's floats
 
     /// Builds what floats in this frame, each with where it goes. Selection rectangles and the caret are this frame's.
@@ -995,7 +1037,10 @@ impl EditorView {
                         })
                         .filter(|snapped| y < f32::from(target.top()) && *snapped >= column.top + gap)
                         .unwrap_or(y);
-                    return vec![(self.toolbar(cx).into_any_element(), Spot::At(point(px(x), px(y))))];
+                    let row = px(y) + size.height * 0.5;
+                    let reach = (px(column.left + gap), px(column.right - gap));
+                    let x = self.clear_of_glyphs(px(x), size.width, row, reach, window);
+                    return vec![(self.toolbar(cx).into_any_element(), Spot::At(point(x, px(y))))];
                 }
                 Vec::new()
             }

@@ -6,8 +6,8 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels,
-    SharedString, Style, TextAlign, TextRun, Window, div, fill, linear_color_stop, linear_gradient, point, px,
+    Global, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent,
+    Pixels, SharedString, Style, TextAlign, TextRun, Window, div, fill, linear_color_stop, linear_gradient, point, px,
     relative, size,
 };
 
@@ -32,6 +32,33 @@ const MISSPELLED_RISE: f32 = 0.14;
 impl Galley {
     pub fn new(view: Entity<EditorView>) -> Self {
         Self { view }
+    }
+}
+
+/// Where this frame's rows of text stand down the window, so a card over the text can end its cover at one.
+pub struct TextRows(Vec<(Pixels, Pixels)>);
+
+impl Global for TextRows {}
+
+impl TextRows {
+    fn of(frame: &Frame) -> Self {
+        let rows = frame.blocks.iter().flat_map(|block| {
+            block.layout.lines.iter().flat_map(move |line| {
+                (0..line.rows.len()).map(move |row| {
+                    let top = block.top + line.y + line.line_height * row as f32;
+                    (top, top + line.line_height)
+                })
+            })
+        });
+        Self(rows.collect())
+    }
+
+    /// The bottom of the row that `y` cuts through, if it cuts one.
+    pub fn end_of_row_at(y: Pixels, cx: &App) -> Option<Pixels> {
+        let rows = &cx.try_global::<Self>()?.0;
+        rows.iter()
+            .find(|(top, bottom)| *top < y && y < *bottom)
+            .map(|(_, bottom)| *bottom)
     }
 }
 
@@ -241,6 +268,7 @@ impl Element for Galley {
         if let Some(style_name) = frame.style_name.take() {
             prepaint_style_name(&frame.column, style_name, &colors, window, cx);
         }
+        cx.set_global(TextRows::of(&frame));
         frame
     }
 

@@ -2,8 +2,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    ElementId, FontWeight, Hsla, Pixels, ScrollHandle, SharedString, Stateful, TextRun, Window, div, font,
-    linear_color_stop, linear_gradient,
+    App, Bounds, ElementId, FontWeight, Hsla, Pixels, ScrollHandle, SharedString, Stateful, TextRun, Window, canvas,
+    div, fill, font, linear_color_stop, linear_gradient, point, size,
 };
 
 use crate::a11y::Control as _;
@@ -38,20 +38,30 @@ pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
 }
 
 /// Fades Write's text out under the bottom edge of a card that covers it, so no line shows cut there, as the pane's
-/// foot does. It stands before the card in a parent that holds both, so the card's shadow stays over it.
+/// foot does: the rest of a row the edge crosses is covered, and the fade starts below it. It stands before the card
+/// in a parent that holds both, so the card's shadow stays over it.
 pub fn fade_under_card(tokens: &Tokens) -> gpui::Div {
     let solid: Hsla = tokens.canvas.into();
+    let paint = move |bounds: Bounds<Pixels>, _: (), window: &mut Window, cx: &mut App| {
+        let foot = bounds.top();
+        let cut = crate::editor::TextRows::end_of_row_at(foot, cx).unwrap_or(foot);
+        let width = bounds.size.width;
+        window.paint_quad(fill(Bounds::new(bounds.origin, size(width, cut - foot)), solid));
+        let fade = Bounds::new(point(bounds.left(), cut), size(width, tokens::TEXT_FADE_HEIGHT));
+        let gradient = linear_gradient(
+            tokens::FADE_DOWN,
+            linear_color_stop(solid, 0.),
+            linear_color_stop(solid.opacity(tokens::CLEAR), 1.),
+        );
+        window.paint_quad(fill(fade, gradient));
+    };
     div()
         .absolute()
         .left_0()
         .right_0()
         .top_full()
         .h(tokens::TEXT_FADE_HEIGHT)
-        .bg(linear_gradient(
-            tokens::FADE_DOWN,
-            linear_color_stop(solid, 0.),
-            linear_color_stop(solid.opacity(tokens::CLEAR), 1.),
-        ))
+        .child(canvas(|_, _, _| {}, paint).size_full())
 }
 
 /// The small label at the top of a panel, on a divider.

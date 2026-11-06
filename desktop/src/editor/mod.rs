@@ -57,6 +57,7 @@ use commands::notes;
 pub use directives::FullWidthFromCaret;
 use display::{Syntax, display_lines, hidden_ranges};
 use element::Galley;
+pub use element::TextRows;
 use float::Float;
 pub(crate) use float::tooltip;
 use gutter::{BlockGrab, CommentMarker};
@@ -482,6 +483,11 @@ impl EditorView {
             self.renew_completion_names();
             cx.notify();
         }
+    }
+
+    /// What placeholders show in this book.
+    pub fn placeholder_values(&self) -> &placeholders::Values {
+        &self.placeholder_values
     }
 
     /// The document, for reading.
