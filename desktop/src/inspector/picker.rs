@@ -328,7 +328,7 @@ impl ThemePicker {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .overflow_hidden()
             .text_size(tokens::TEXT_BODY)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

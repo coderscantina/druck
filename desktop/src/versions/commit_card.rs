@@ -390,7 +390,7 @@ impl Render for CommitCard {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .track_focus(&self.focus)
             .key_context("CommitCard")
             .on_action(cx.listener(|card, _: &Close, window, cx| card.close(window, cx)))

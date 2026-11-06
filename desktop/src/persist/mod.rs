@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 use futures::StreamExt as _;
 use gpui::prelude::*;
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, Entity, EventEmitter, FontWeight, Global, KeyBinding, MouseButton, Pixels,
-    SharedString, Subscription, Task, WeakEntity, Window, actions, div,
+    App, Bounds, Context, Entity, EventEmitter, FontWeight, KeyBinding, MouseButton, Pixels, SharedString,
+    Subscription, Task, Window, actions, div,
 };
 
 use self::atomic::Outcome;
@@ -37,7 +37,7 @@ use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
 use crate::session::disk::Outgoing;
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
-use crate::workspace::{Parts, Slots, TextColumn};
+use crate::workspace::{Current, Parts, Slots, TextColumn};
 
 actions!(persist, [KeepMine, TakeTheirs, SeeBoth, ShowKeptCopies]);
 
@@ -58,12 +58,6 @@ pub struct MergeResumed;
 impl EventEmitter<MergeResumed> for PersistView {}
 
 /// The view the conflict keys go to.
-struct Current {
-    view: WeakEntity<PersistView>,
-    window: AnyWindowHandle,
-}
-
-impl Global for Current {}
 
 /// Binds the keys of the conflict prompt. They work wherever the focus is, as the prompt never takes it.
 pub fn bind_keys(cx: &mut App) {
@@ -75,73 +69,42 @@ pub fn bind_keys(cx: &mut App) {
     cx.on_action(|_: &KeepMine, cx| choose(Choice::Mine, cx));
     cx.on_action(|_: &TakeTheirs, cx| choose(Choice::Theirs, cx));
     cx.on_action(|_: &SeeBoth, cx| choose(Choice::Both, cx));
-    cx.on_action(|_: &ShowKeptCopies, cx| {
-        let Some(current) = cx.try_global::<Current>() else {
-            return;
-        };
-        let (view, window) = (current.view.clone(), current.window);
-        cx.defer(move |cx| {
-            window
-                .update(cx, |_, window, cx| {
-                    view.update(cx, |view, cx| view.show_kept_copies(window, cx)).ok();
-                })
-                .ok();
-        });
-    });
+    cx.on_action(|_: &ShowKeptCopies, cx| Current::<PersistView>::defer(cx, PersistView::show_kept_copies));
 }
 
 fn choose(choice: Choice, cx: &mut App) {
-    let Some(current) = cx.try_global::<Current>() else {
-        return;
-    };
-    let (view, window) = (current.view.clone(), current.window);
-    // An action runs inside its window's update, which cannot be entered again.
-    cx.defer(move |cx| {
-        window
-            .update(cx, |_, window, cx| {
-                view.update(cx, |view, cx| view.resolve_first(choice, window, cx)).ok();
-            })
-            .ok();
-    });
+    Current::<PersistView>::defer(cx, move |view, window, cx| view.resolve_first(choice, window, cx));
 }
 
 /// Says on the saving-state line of the open document that something about `path` went wrong, or with `None` that it is
 /// over, for parts of the app that hold no view of it.
 pub fn report(path: &Path, kind: fn(String) -> Problem, error: Option<String>, cx: &mut App) {
-    let Some(current) = cx.try_global::<Current>() else {
+    let Some(view) = Current::<PersistView>::view(cx) else {
         return;
     };
-    let view = current.view.clone();
     let path = path.to_owned();
     // A report may come from inside the window's own update, which cannot be entered again.
-    cx.defer(move |cx| {
-        view.update(cx, |view, cx| view.report(&path, kind, error, cx)).ok();
-    });
+    cx.defer(move |cx| view.update(cx, |view, cx| view.report(&path, kind, error, cx)));
 }
 
 /// Clears a file's recovery copy once nothing of it is unsaved, for code that made it clean without a write.
 pub fn forget_copy(path: &Path, cx: &mut App) {
-    let Some(current) = cx.try_global::<Current>() else {
+    let Some(view) = Current::<PersistView>::view(cx) else {
         return;
     };
-    let view = current.view.clone();
     let path = path.to_owned();
     cx.defer(move |cx| {
         view.update(cx, |view, cx| {
             let session = view.editor.read(cx).session();
             view.sync.forget_copy_if_clean(session, &path);
         })
-        .ok();
     });
 }
 
 /// Mounts the saving state and starts everything behind it. One line in `app::mount`.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut App) -> Entity<PersistView> {
     let view = cx.new(|cx| PersistView::new(parts.editor.clone(), parts.inspector.clone(), window, cx));
-    cx.set_global(Current {
-        view: view.downgrade(),
-        window: window.window_handle(),
-    });
+    Current::set(&view, window, cx);
     slots.footer.push(view.clone().into());
     view
 }
@@ -154,13 +117,13 @@ fn open_theme(model: &Entity<ThemeModel>, cx: &App) -> Option<PathBuf> {
 /// Writes everything now for a document that is about to go, and says what is left: see [`Closing`]. Without a document
 /// there is nothing to write. The answer comes once any save that was running has landed.
 pub fn settle(window: &mut Window, cx: &mut App) -> Option<futures::channel::oneshot::Receiver<Closing>> {
-    let view = cx.try_global::<Current>()?.view.upgrade()?;
+    let view = Current::<PersistView>::view(cx)?;
     Some(view.update(cx, |view, cx| view.settle(window, cx)))
 }
 
 /// Writes what a float's fields hold into the text, before a document closes.
 pub fn commit_floats(window: &mut Window, cx: &mut App) {
-    let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) else {
+    let Some(view) = Current::<PersistView>::view(cx) else {
         return;
     };
     let editor = view.read(cx).editor.clone();
@@ -719,7 +682,7 @@ impl PersistView {
     /// Writes everything now and waits for it: the app is about to go. What cannot be written stays as a recovery copy.
     fn flush_blocking(&mut self, cx: &mut Context<Self>) {
         // A footnote's text being typed counts as written.
-        if let Some(handle) = cx.try_global::<Current>().map(|current| current.window) {
+        if let Some(handle) = Current::<PersistView>::window(cx) {
             let editor = self.editor.clone();
             handle
                 .update(cx, |_, window, cx| {
@@ -1100,7 +1063,7 @@ impl Render for PersistView {
                     .border_1()
                     .border_color(tokens.divider)
                     .rounded(tokens::RADIUS)
-                    .shadow_lg()
+                    .shadow(tokens::card_shadow())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .children(crate::versions::compared(
                         &passage.mine,

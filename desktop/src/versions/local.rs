@@ -12,10 +12,11 @@ use gpui::{App, Context, WeakEntity, Window};
 use super::history::{History, Label, Moment, Orphan, now_ms};
 use super::pacing::{Due, Pacing};
 use super::strings::Key;
-use super::{Current, REFRESH_PAUSE, Versions};
+use super::{REFRESH_PAUSE, Versions};
 use crate::persist::FileChange;
 use crate::persist::sync::{ChangeKind, Problem};
 use crate::session::{ChapterId, Kind, Session};
+use crate::workspace::Current;
 
 /// Local history's state in the view: the store, when snapshots are due, and which file had which path.
 pub(super) struct LocalHistory {
@@ -44,17 +45,17 @@ impl LocalHistory {
 /// before anything else that may change the text. A file that then does not change adds no mark to its timeline. The
 /// work happens off the main thread.
 pub fn label_history(session: &Session, label: impl Into<Label>, cx: &App) {
-    let Some(current) = cx.try_global::<Current>() else {
+    let Some(view) = Current::<Versions>::view(cx) else {
         return;
     };
-    let Some(store) = current.store.clone() else {
+    let Some(store) = view.read(cx).history.store.clone() else {
         return;
     };
     store_off_thread(
         store,
         files_with_text(session),
         Some(label.into()),
-        current.view.clone(),
+        view.downgrade(),
         cx,
     );
 }

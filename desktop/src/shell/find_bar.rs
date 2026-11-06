@@ -141,7 +141,7 @@ impl Render for FindBar {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().flex_1().min_w_0().child(self.input.clone()))
             .child(

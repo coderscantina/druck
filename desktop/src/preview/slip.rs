@@ -559,7 +559,7 @@ impl Render for ProofSlip {
             .border_1()
             .border_color(tokens.divider)
             .bg(tokens.panel)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()

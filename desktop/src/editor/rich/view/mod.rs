@@ -156,7 +156,7 @@ pub(super) fn card(tokens: &Tokens) -> gpui::Div {
         .bg(tokens.panel)
         .border_1()
         .border_color(tokens.divider)
-        .shadow_md()
+        .shadow(tokens::float_shadow())
         .text_size(tokens::TEXT_BODY)
         .text_color(tokens.text)
 }

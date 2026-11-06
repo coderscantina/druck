@@ -114,6 +114,47 @@ pub struct TextColumn {
 
 impl Global for TextColumn {}
 
+/// The document window's view of type `V`, for actions and code that hold no handle to it. There is one window.
+pub struct Current<V: 'static> {
+    view: gpui::WeakEntity<V>,
+    window: gpui::AnyWindowHandle,
+}
+
+impl<V: 'static> Global for Current<V> {}
+
+impl<V: 'static> Current<V> {
+    /// Remembers `view` as the window's.
+    pub fn set(view: &Entity<V>, window: &Window, cx: &mut App) {
+        cx.set_global(Self {
+            view: view.downgrade(),
+            window: window.window_handle(),
+        });
+    }
+
+    /// The view, while it lives.
+    pub fn view(cx: &App) -> Option<Entity<V>> {
+        cx.try_global::<Self>()?.view.upgrade()
+    }
+
+    /// The window the view is in.
+    pub fn window(cx: &App) -> Option<gpui::AnyWindowHandle> {
+        Some(cx.try_global::<Self>()?.window)
+    }
+
+    /// Runs `run` on the view in its window once what asked has finished: an action runs inside its window's update,
+    /// which cannot be entered again.
+    pub fn defer(cx: &mut App, run: impl FnOnce(&mut V, &mut Window, &mut Context<V>) + 'static) {
+        cx.defer(move |cx| {
+            let Some((view, window)) = Self::view(cx).zip(Self::window(cx)) else {
+                return;
+            };
+            window
+                .update(cx, |_, window, cx| view.update(cx, |view, cx| run(view, window, cx)))
+                .ok();
+        });
+    }
+}
+
 impl TextColumn {
     /// The left edge of something `width` wide centred over the text, kept inside the window.
     pub fn centred(cx: &App, width: Pixels) -> Pixels {

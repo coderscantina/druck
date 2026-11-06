@@ -173,7 +173,7 @@ impl TicksView {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .child(
                 div()
                     .flex_none()

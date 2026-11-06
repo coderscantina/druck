@@ -300,7 +300,7 @@ impl EditorView {
             .flex()
             .items_center()
             .rounded(tokens::RADIUS)
-            .shadow_md();
+            .shadow(tokens::float_shadow());
         let tokens_now = Tokens::get(cx).clone();
         row = row.bg(tokens_now.panel).border_1().border_color(tokens_now.divider);
         let hint = |label: &str, keys: &str| {
@@ -455,7 +455,7 @@ impl EditorView {
             .bg(tokens.panel)
             .border_1()
             .border_color(tokens.divider)
-            .shadow_md()
+            .shadow(tokens::float_shadow())
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.close_link(window, cx)))
             .child(
@@ -800,7 +800,7 @@ impl EditorView {
             .bg(tokens.panel)
             .border_1()
             .border_color(tokens.divider)
-            .shadow_md()
+            .shadow(tokens::float_shadow())
             .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| this.close_float(cx)))
             .children(rows)
     }

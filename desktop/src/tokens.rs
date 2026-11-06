@@ -2,7 +2,7 @@
 //! never hardcode them. Publish's pages use the theme's own values instead.
 
 use clap::ValueEnum;
-use gpui::{App, Global, Pixels, Rgba, WindowAppearance, px, rgb};
+use gpui::{App, BoxShadow, Global, Pixels, Rgba, WindowAppearance, hsla, px, rgb};
 
 use crate::preview::job::{BookType, Face};
 
@@ -321,6 +321,30 @@ pub const DISABLED_OPACITY: f32 = 0.4;
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
 const OXIDE_ON_LIGHT: u32 = 0xb54226;
+
+/// The shadow of what floats at the text: the toolbar, the link field, a menu, and a rich block's card.
+pub fn float_shadow() -> Vec<BoxShadow> {
+    vec![
+        BoxShadow::new(px(0.), px(4.), hsla(0., 0., 0., 0.1))
+            .blur_radius(px(6.))
+            .spread_radius(px(-1.)),
+        BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., 0.1))
+            .blur_radius(px(4.))
+            .spread_radius(px(-2.)),
+    ]
+}
+
+/// The shadow of a card over the window: a dialog, the palette, the search card, the slip, and the like.
+pub fn card_shadow() -> Vec<BoxShadow> {
+    vec![
+        BoxShadow::new(px(0.), px(10.), hsla(0., 0., 0., 0.1))
+            .blur_radius(px(15.))
+            .spread_radius(px(-3.)),
+        BoxShadow::new(px(0.), px(4.), hsla(0., 0., 0., 0.1))
+            .blur_radius(px(6.))
+            .spread_radius(px(-4.)),
+    ]
+}
 
 /// The text's type before a layout has read the theme, and for a theme that does not lay out.
 pub fn stand_in_type() -> BookType {

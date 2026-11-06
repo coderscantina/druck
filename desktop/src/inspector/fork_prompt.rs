@@ -128,7 +128,7 @@ impl Render for ForkPrompt {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().font_weight(FontWeight::SEMIBOLD).child(crate::t!(Key::ForkTitle)))
             .child(

@@ -19,14 +19,9 @@ use crate::shell::commands::{self, Scope};
 use crate::shell::{self, menus};
 use crate::sidebar;
 use crate::tokens::{self, Tokens};
-use crate::workspace::{Mode, Parts, Slots, Workspace};
+use crate::workspace::{Current, Mode, Parts, Slots, Workspace};
 
 actions!(palette, [FindChapter, RunCommand]);
-
-/// The palette of the document in the window, for the keys that open it.
-struct Current(WeakEntity<Palette>, gpui::AnyWindowHandle);
-
-impl gpui::Global for Current {}
 
 /// Binds the keys. Once, when the app starts.
 pub fn install(cx: &mut App) {
@@ -39,26 +34,14 @@ pub fn install(cx: &mut App) {
 }
 
 fn open(kind: Kind, cx: &mut App) {
-    cx.defer(move |cx| {
-        let Some((palette, window)) = cx
-            .try_global::<Current>()
-            .and_then(|current| Some((current.0.upgrade()?, current.1)))
-        else {
-            return;
-        };
-        window
-            .update(cx, |_, window, cx| {
-                palette.update(cx, |palette, cx| palette.open(kind, window, cx));
-            })
-            .ok();
-    });
+    Current::<Palette>::defer(cx, move |palette, window, cx| palette.open(kind, window, cx));
 }
 
 /// Mounts the palette as a layer over the window.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let workspace = cx.entity().downgrade();
     let palette = cx.new(|cx| Palette::new(parts.clone(), workspace, window, cx));
-    cx.set_global(Current(palette.downgrade(), window.window_handle()));
+    Current::set(&palette, window, cx);
     slots.overlays.push(palette.into());
 }
 
@@ -68,7 +51,7 @@ pub fn apply_gate(window: &mut Window, cx: &mut App) {
     let Some(name) = crate::gate::var("DRUCK_PALETTE") else {
         return;
     };
-    let Some(palette) = cx.try_global::<Current>().and_then(|current| current.0.upgrade()) else {
+    let Some(palette) = Current::<Palette>::view(cx) else {
         return;
     };
     let kind = if name == "commands" {
@@ -351,7 +334,7 @@ impl Render for Palette {
             .border_1()
             .border_color(tokens.divider)
             .rounded(tokens::RADIUS)
-            .shadow_lg()
+            .shadow(tokens::card_shadow())
             .key_context("Palette")
             .on_action(cx.listener(|palette, _: &input::Up, _, cx| palette.step(false, cx)))
             .on_action(cx.listener(|palette, _: &input::Down, _, cx| palette.step(true, cx)))

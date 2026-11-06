@@ -76,6 +76,14 @@ pub fn measuring() -> bool {
     var("DRUCK_GATE").is_some()
 }
 
+/// The display a measurement's windows open on: the last one, since Macs stop painting a covered window. `None` outside a
+/// measurement, for the system's choice.
+pub fn capture_display(cx: &App) -> Option<gpui::DisplayId> {
+    measuring()
+        .then(|| cx.displays().last().map(|display| display.id()))
+        .flatten()
+}
+
 /// What a run asks for with no document open.
 pub fn at_launch(cx: &mut App) {
     // `DRUCK_SETTINGS` opens the settings window on a category.

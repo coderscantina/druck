@@ -173,16 +173,24 @@ impl gpui::Global for Open {}
 
 /// Brings the settings window up, opening it if need be. `measuring` runs float it without taking focus.
 pub fn open(category: Option<&str>, cx: &mut App) {
+    let measuring = crate::gate::measuring();
     if let Some(open) = cx.try_global::<Open>().copied()
-        && open.0.update(cx, |_, window, _| window.activate_window()).is_ok()
+        && open
+            .0
+            .update(cx, |_, window, _| {
+                if !measuring {
+                    window.activate_window();
+                }
+            })
+            .is_ok()
     {
         return;
     }
-    let measuring = crate::gate::measuring();
     let (width, height) = tokens::SETTINGS_WINDOW;
+    let display_id = crate::gate::capture_display(cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
+            display_id,
             size(px(width), px(height)),
             cx,
         ))),
@@ -197,6 +205,7 @@ pub fn open(category: Option<&str>, cx: &mut App) {
         } else {
             WindowKind::Normal
         },
+        display_id,
         ..Default::default()
     };
     let category = category.map_or(Category::Appearance, Category::from_name);

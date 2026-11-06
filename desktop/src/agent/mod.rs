@@ -54,9 +54,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime};
 
 use gpui::prelude::*;
-use gpui::{
-    AnyWindowHandle, App, Context, Entity, Focusable, Global, ScrollHandle, Subscription, Task, WeakEntity, Window,
-};
+use gpui::{App, Context, Entity, Focusable, ScrollHandle, Subscription, Task, WeakEntity, Window};
 
 use crate::editor::review::{NoteClicked, ReviewClicked};
 use crate::editor::{EditorView, SessionChanged, TextChanged};
@@ -66,7 +64,7 @@ use crate::persist::PersistView;
 use crate::preview::PreviewView;
 use crate::session::{ChapterId, Session as Document};
 use crate::settings;
-use crate::workspace::{Mode, ModeChanged, Parts, Slots, Workspace};
+use crate::workspace::{Current, Mode, ModeChanged, Parts, Slots, Workspace};
 use cli::{CliState, Login};
 use context::{ChipKind, Context as PromptContext, Selected};
 use conversation::{Answer, Conversation, Effect, SentContext};
@@ -89,12 +87,6 @@ const TURN_GRACE: Duration = Duration::from_millis(500);
 const MODELS: [Option<&str>; 4] = [None, Some("haiku"), Some("sonnet"), Some("opus")];
 
 /// The view `Cmd+J` and [`unreviewed_changes`] go to: the open document's.
-struct Current {
-    view: WeakEntity<AgentView>,
-    window: AnyWindowHandle,
-}
-
-impl Global for Current {}
 
 /// Mounts the conversation as a tab of the inspector rail, and what shows over the text.
 pub fn mount(
@@ -107,10 +99,7 @@ pub fn mount(
     prompt::bind_keys(cx);
     let workspace = cx.entity();
     let view = cx.new(|cx| AgentView::new(parts, persist, workspace, window, cx));
-    cx.set_global(Current {
-        view: view.downgrade(),
-        window: window.window_handle(),
-    });
+    Current::set(&view, window, cx);
     card::mount(&view, slots, window, cx);
     parts
         .inspector
@@ -119,25 +108,14 @@ pub fn mount(
 
 #[cfg(any(debug_assertions, feature = "measure"))]
 pub fn apply_gate(window: &mut Window, cx: &mut Context<Workspace>) {
-    if let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) {
+    if let Some(view) = Current::<AgentView>::view(cx) {
         probe::start(&view, window, cx);
     }
 }
 
 /// `Cmd+J`: a prompt at the selection, the chat card, or in Publish the rail's tab. Closes what is open.
 pub fn ask(cx: &mut App) {
-    let Some(current) = cx.try_global::<Current>() else {
-        return;
-    };
-    let (view, window) = (current.view.clone(), current.window);
-    // An action runs inside its window's update, which cannot be entered again.
-    cx.defer(move |cx| {
-        window
-            .update(cx, |_, window, cx| {
-                view.update(cx, |view, cx| view.ask(window, cx)).ok();
-            })
-            .ok();
-    });
+    Current::<AgentView>::defer(cx, AgentView::ask);
 }
 
 /// A chapter, or another file of the project, with agent changes the author has neither accepted nor rejected.
@@ -154,8 +132,7 @@ pub struct Unreviewed {
 /// What has unreviewed agent changes and how many, as of the last time the text rested. Empty with the agent off. Export
 /// and commit name these and do not block.
 pub fn unreviewed_changes(cx: &App) -> Vec<Unreviewed> {
-    (cx.try_global::<Current>())
-        .and_then(|current| current.view.upgrade())
+    Current::<AgentView>::view(cx)
         .map(|view| view.read(cx).unreviewed.clone())
         .unwrap_or_default()
 }

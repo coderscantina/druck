@@ -14,6 +14,10 @@ mod gate {
         false
     }
 
+    pub fn capture_display(_: &gpui::App) -> Option<gpui::DisplayId> {
+        None
+    }
+
     pub fn at_launch(_: &mut gpui::App) {}
 
     pub fn apply(

@@ -30,9 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
-use gpui::{
-    AnyWindowHandle, App, Context, Entity, Global, KeyBinding, Subscription, Task, WeakEntity, Window, actions, div,
-};
+use gpui::{App, Context, Entity, Global, KeyBinding, Subscription, Task, WeakEntity, Window, actions, div};
 
 use self::commit_card::{CardField, CommitCard};
 use self::git_cli::{Git, Refused};
@@ -56,7 +54,7 @@ use crate::persist::{
 };
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
-use crate::workspace::{Mode, Parts, Slots};
+use crate::workspace::{Current, Mode, Parts, Slots};
 
 actions!(versions, [ShowCommitCard, ShowTimeline, ShowGitPanel]);
 
@@ -71,14 +69,6 @@ const PANEL_LOOK: Duration = Duration::from_secs(5);
 const FETCH_GAP: Duration = Duration::from_secs(300);
 /// Commits a panel lists. A long history stays usable through the terminal.
 const LOG_ROWS: usize = 500;
-
-struct Current {
-    view: WeakEntity<Versions>,
-    window: AnyWindowHandle,
-    store: Option<Arc<History>>,
-}
-
-impl Global for Current {}
 
 /// What shows the Git rail tab.
 type ShowRailTab = dyn Fn(&mut Window, &mut App);
@@ -101,22 +91,8 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &ShowGitPanel, cx| with_view(cx, Versions::toggle_panel));
 }
 
-fn with_view<Run>(cx: &mut App, run: Run)
-where
-    Run: FnOnce(&mut Versions, &mut Window, &mut Context<Versions>) + 'static,
-{
-    // An action runs inside its window's update, which cannot be entered again.
-    cx.defer(move |cx| {
-        let Some((view, window)) = cx
-            .try_global::<Current>()
-            .and_then(|current| Some((current.view.upgrade()?, current.window)))
-        else {
-            return;
-        };
-        window
-            .update(cx, |_, window, cx| view.update(cx, |view, cx| run(view, window, cx)))
-            .ok();
-    });
+fn with_view(cx: &mut App, run: impl FnOnce(&mut Versions, &mut Window, &mut Context<Versions>) + 'static) {
+    Current::<Versions>::defer(cx, run);
 }
 
 /// Mounts the three views and starts local history. One line in `app::mount`.
@@ -129,11 +105,7 @@ pub fn mount(
 ) -> Entity<GitPanel> {
     let workspace = cx.entity().downgrade();
     let view = cx.new(|cx| Versions::new(parts.clone(), persist.clone(), workspace, window, cx));
-    cx.set_global(Current {
-        view: view.downgrade(),
-        window: window.window_handle(),
-        store: view.read(cx).history.store.clone(),
-    });
+    Current::set(&view, window, cx);
     // First, so it stands at the left with the saving state and not past the word count.
     slots.footer.insert(0, view.clone().into());
     let (card, timeline, panel) = {
@@ -205,7 +177,7 @@ fn short_hash(hash: &str) -> &str {
 /// [`Versions::run_scripted`], as automated mouse events do not reach the window.
 #[cfg(any(debug_assertions, feature = "measure"))]
 pub fn apply_gate(window: &mut Window, cx: &mut App) {
-    let Some(view) = cx.try_global::<Current>().and_then(|current| current.view.upgrade()) else {
+    let Some(view) = Current::<Versions>::view(cx) else {
         return;
     };
     if crate::gate::var("DRUCK_NO_GIT").is_some() {
