@@ -7,7 +7,7 @@ use gpui::{
     AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, Subscription, Window, div, point, relative, svg,
 };
 
-use super::{CONTEXT, NextField, PreviousField, RichFloat, card, field_label, small_button};
+use super::{CONTEXT, NextField, PreviousField, RichFloat, bounds_probe, card, field_label, small_button};
 use crate::a11y::Control as _;
 use crate::editor::commands::marks::Mark;
 use crate::editor::float::Float;
@@ -118,6 +118,7 @@ impl EditorView {
             refused: None,
             _subscriptions: subscriptions,
         }));
+        self.start_revealing_float(true);
         cx.notify();
     }
 
@@ -243,6 +244,7 @@ impl EditorView {
             input.select_all(cx);
         });
         input.focus_handle(cx).focus(window, cx);
+        self.start_revealing_float(false);
         cx.notify();
     }
 
@@ -774,6 +776,7 @@ impl EditorView {
             .children(refused.map(|why| div().text_size(tokens::TEXT_SMALL).text_color(tokens.accent).child(why)))
             .child(caption_row)
             .child(footer)
+            .child(bounds_probe(self.float_bounds.clone()))
             .into_any_element();
         let x = self.column.text_left - tokens::SPACE_2;
         let viewport = self.column.viewport;

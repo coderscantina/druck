@@ -52,8 +52,8 @@ impl EditorView {
             Motion::Right => (motion::right(text, head), false),
             Motion::WordLeft => (motion::prev_word(text, head), false),
             Motion::WordRight => (motion::next_word(text, head), false),
-            Motion::DocStart => (0, false),
-            Motion::DocEnd => (text.len(), false),
+            Motion::DocStart => (self.chapter_edge(false), false),
+            Motion::DocEnd => (self.chapter_edge(true), false),
             Motion::LineStart => self.row_edge(false, window),
             Motion::LineEnd => self.row_edge(true, window),
             Motion::Up | Motion::Down => {
@@ -78,6 +78,15 @@ impl EditorView {
         self.set_selection(selection, upstream, window, cx);
         self.goal_x = new_goal;
         self.trace.handled(started);
+    }
+
+    /// Where Command+Up and Down go. The source view shows everything, so there it is the text's ends.
+    fn chapter_edge(&self, end: bool) -> usize {
+        let text = self.session.active_buffer().text();
+        if self.source {
+            return if end { text.len() } else { 0 };
+        }
+        chapter_edge(text, &self.blocks, end, |index| self.slots[index].expanded)
     }
 
     /// The source offset of the start or end of the caret's row.
@@ -354,5 +363,33 @@ impl EditorView {
             self.reveal_at = self.selection.head;
             cx.notify();
         }
+    }
+}
+
+/// The start of a chapter's first text that shows, its title, or with `end` the end of its last, never inside a note
+/// folded away above or below it: the author opens a note by going to it on purpose. `expanded` says which comments
+/// their gutter marker shows in the flow.
+pub(super) fn chapter_edge(text: &str, blocks: &Blocks, end: bool, expanded: impl Fn(usize) -> bool) -> usize {
+    let blocks = blocks.as_slice();
+    let folded = |index: usize| {
+        let block = &blocks[index];
+        let written = &text[block.range.clone()];
+        block.kind == BlockKind::Comment
+            && notes::is_closed(written)
+            && !crate::persist::merge::is_marker(written)
+            && !expanded(index)
+    };
+    let shows = |index: &usize| blocks[*index].kind != BlockKind::Blank && !folded(*index);
+    if !end {
+        return (0..blocks.len())
+            .find(shows)
+            .map_or(0, |index| blocks[index].range.start);
+    }
+    match (0..blocks.len()).rev().find(shows) {
+        Some(last) if (last + 1..blocks.len()).any(folded) => {
+            let range = blocks[last].range.clone();
+            range.start + text[range].trim_end_matches(['\n', '\r']).len()
+        }
+        _ => text.len(),
     }
 }

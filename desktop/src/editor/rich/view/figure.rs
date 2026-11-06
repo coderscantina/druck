@@ -3,13 +3,12 @@
 use gpui::Focusable;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, SharedString, Subscription, Window, div, point, px,
+    AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, SharedString, Subscription, Window, div, point,
 };
 
-use super::{CONTEXT, NextField, PreviousField, RichFloat, card, field_label, small_button};
+use super::{CONTEXT, NextField, PreviousField, RichFloat, bounds_probe, card, field_label, small_button};
 use crate::editor::EditorView;
 use crate::editor::float::Float;
-use crate::editor::place::Rect;
 use crate::editor::rich::images::{Figure, Placement};
 use crate::editor::rich::view::shapes::size_label;
 use crate::editor::rich::{AtomKind, Key};
@@ -98,6 +97,7 @@ impl EditorView {
             refused: None,
             _subscriptions: subscriptions,
         }));
+        self.start_revealing_float(true);
         cx.notify();
     }
 
@@ -153,7 +153,6 @@ impl EditorView {
     pub(super) fn figure_element(
         &mut self,
         start: usize,
-        area: Rect,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<(AnyElement, Point<Pixels>)> {
@@ -257,15 +256,10 @@ impl EditorView {
                         .on_click(cx.listener(|this, _, window, cx| this.delete_figure(window, cx))),
                 ),
             )
+            .child(bounds_probe(self.float_bounds.clone()))
             .into_any_element();
         let x = self.column.text_left + (self.column.text_width - tokens::FIGURE_CARD_WIDTH) * 0.5;
-        // Below the image, or over it when that would leave the galley.
-        let room = px(area.bottom) - (top + height);
-        let y = if room >= tokens::FIGURE_CARD_ROOM {
-            top + height + tokens::FLOAT_GAP
-        } else {
-            (px(area.bottom) - tokens::FIGURE_CARD_ROOM - tokens::SETTINGS_ROW_PADDING).max(px(area.top))
-        };
-        Some((element, point(x, y)))
+        // Below the image and its caption, which it edits, and the view scrolls to show it.
+        Some((element, point(x, top + height + tokens::FLOAT_GAP)))
     }
 }

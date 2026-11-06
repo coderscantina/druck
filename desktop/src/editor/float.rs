@@ -22,7 +22,7 @@ use super::{EditorView, MenuAccept, MenuDown, MenuUp};
 use crate::a11y::Control as _;
 use crate::inspector::input::{Submitted, TextInput};
 use crate::session::TEMPLATES;
-use crate::source::{EditKind, Selection, motion};
+use crate::source::{BlockKind, EditKind, Selection, motion};
 use crate::tokens::{self, Tokens};
 
 /// What is open over the galley.
@@ -801,14 +801,21 @@ impl EditorView {
     }
 
     /// The chapter's opening notes for this frame: one line above the last hidden block before its first text, which keeps
-    /// the room they need when unfolded. They scroll away with the chapter's top.
+    /// the room they need when unfolded. They scroll away with the chapter's top. While the caret shows a note raw in the
+    /// flow there is no line, which would stand over the note's own text.
     pub(super) fn margin_element(&self) -> Option<(AnyElement, Point<Pixels>)> {
         if self.source {
             return None;
         }
         let margin = self.margin.clone()?;
         let region = notes::leading_region(self.text(), &self.blocks)?;
+        let first = self.blocks.index_at(region.start);
         let last = self.blocks.index_at(region.end.saturating_sub(1));
+        let shown_raw = (first..=last)
+            .any(|index| self.blocks.as_slice()[index].kind == BlockKind::Comment && !self.comment_is_hidden(index));
+        if shown_raw {
+            return None;
+        }
         let (_, top) = self.visible.iter().find(|(index, _)| *index == last)?;
         let y = *top - tokens::NOTE_LINE_HEIGHT - tokens::SPACE_2;
         Some((margin.into_any_element(), point(self.column.text_left, y)))

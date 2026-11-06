@@ -8,13 +8,15 @@ mod note;
 mod picker;
 pub mod shapes;
 
+use std::cell::Cell;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, ExternalPaths, KeyBinding, MouseButton, Pixels, Point, SharedString, Window, actions,
-    div, point, px, size,
+    AnyElement, App, Bounds, Context, ExternalPaths, KeyBinding, MouseButton, Pixels, Point, SharedString, Window,
+    actions, div, point, px, size,
 };
 
 use self::figure::FigureFloat;
@@ -126,6 +128,25 @@ pub(super) fn small_button(
 }
 
 /// The card behind a float.
+/// An empty layer over a card that records where the card was drawn, for [`EditorView::reveal_float`].
+pub(super) fn bounds_probe(drawn: Rc<Cell<Option<Bounds<Pixels>>>>) -> impl IntoElement {
+    gpui::canvas(move |bounds, _, _| drawn.set(Some(bounds)), |_, _, _, _| {})
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+}
+
+impl EditorView {
+    /// Has the next frames bring the open card into view. `opened` forgets where an earlier card stood.
+    pub(super) fn start_revealing_float(&mut self, opened: bool) {
+        if opened {
+            self.float_bounds.set(None);
+        }
+        self.reveal_float = 4;
+    }
+}
+
 pub(super) fn card(tokens: &Tokens) -> gpui::Div {
     div()
         .occlude()
@@ -621,7 +642,7 @@ impl EditorView {
                 return self.grid_element(grid.first_byte(), cx);
             }
             Float::Rich(RichFloat::Figure(figure)) => {
-                return self.figure_element(figure.first_byte(), area, window, cx);
+                return self.figure_element(figure.first_byte(), window, cx);
             }
             _ => return None,
         };

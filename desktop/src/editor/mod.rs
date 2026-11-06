@@ -391,6 +391,12 @@ pub struct EditorView {
     margin: Option<Entity<ChapterNotes>>,
     /// The room those notes take in the flow while unfolded.
     note_room: Pixels,
+    /// Where the open table or figure card was drawn last, which [`EditorView::reveal_float`] brings into view.
+    float_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Frames left to bring the card into view, after it opened or its cell moved.
+    reveal_float: u8,
+    /// Room the view may go past the chapter's end, so a card at its foot can be scrolled into view.
+    float_room: Pixels,
     /// Later comments the author opened with their More, by their text.
     open_comments: HashSet<String>,
     /// The keys of those comments' More, by their text.
@@ -532,6 +538,9 @@ impl EditorView {
             writing: Writing::of(cx),
             margin: None,
             note_room: px(0.),
+            float_bounds: Rc::default(),
+            reveal_float: 0,
+            float_room: px(0.),
             open_comments: HashSet::new(),
             comment_focus: HashMap::new(),
             gutter_shown: false,
@@ -855,6 +864,8 @@ impl EditorView {
         // The two views differ in height everywhere, so the caret's line keeps its place on screen.
         self.caret_stays_at = (self.caret_bounds(window)).map(|caret| caret.top() - self.column.viewport.top());
         self.source = !self.source;
+        // Measured again when the galley draws the notes.
+        self.note_room = px(0.);
         if self.source {
             self.source_chapters.insert(active);
         } else {
@@ -1203,9 +1214,10 @@ impl EditorView {
         }
     }
 
-    /// The room a block keeps for the unfolded opening notes: the last hidden block before the chapter's first text.
+    /// The room a block keeps for the unfolded opening notes: the last hidden block before the chapter's first text. The
+    /// source view shows the notes as text, so it keeps none.
     fn note_room_at(&self, index: usize) -> Pixels {
-        if self.note_room == px(0.) {
+        if self.source || self.note_room == px(0.) {
             return px(0.);
         }
         let region = notes::leading_region(self.text(), &self.blocks);
@@ -1359,6 +1371,40 @@ impl EditorView {
         layout
     }
 
+    /// Brings the open table or figure card into view, a frame after it was drawn where it now stands: whole if it fits,
+    /// or from its top. Each scroll moves the card with its block, so it settles within a few frames.
+    fn reveal_float(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.float, Float::Rich(_)) {
+            self.reveal_float = 0;
+            self.float_room = px(0.);
+            return;
+        }
+        if self.reveal_float == 0 {
+            return;
+        }
+        self.reveal_float -= 1;
+        let Some(card) = self.float_bounds.get() else {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+            return;
+        };
+        let view = self.column.viewport;
+        let room = tokens::SPACE_4;
+        let delta = if card.size.height > view.size.height - room * 2. || card.top() < view.top() + room {
+            card.top() - view.top() - room
+        } else {
+            (card.bottom() - (view.bottom() - room)).max(px(0.))
+        };
+        if delta.abs() < px(1.) {
+            self.reveal_float = 0;
+            return;
+        }
+        if delta > px(0.) {
+            self.float_room += delta;
+        }
+        self.scroll_by(delta);
+        cx.on_next_frame(window, |_, _, cx| cx.notify());
+    }
+
     fn scroll_by(&mut self, delta: Pixels) {
         self.scroll.offset += delta;
         self.normalize_scroll();
@@ -1412,7 +1458,7 @@ impl EditorView {
             viewport.top() + viewport.size.height * tokens::TYPEWRITER_AT + tokens::TEXT_MARGIN_Y
         } else {
             viewport.bottom()
-        };
+        } - self.float_room;
         let mut retried = false;
         loop {
             self.visible.clear();
@@ -1809,6 +1855,20 @@ mod tests {
             opening_selection(text, &blocks, view(99), false),
             Selection::caret(text.len())
         );
+    }
+
+    #[test]
+    fn command_up_and_down_stop_at_the_text_and_leave_folded_notes_alone() {
+        let text = "<!-- opening note -->\n\n# Title\n\nLast words.\n\n<!-- closing note -->\n";
+        let blocks = Blocks::parse(text);
+        let edge = |end: bool| selection::chapter_edge(text, &blocks, end, |_| false);
+        assert_eq!(edge(false), text.find("# Title").unwrap());
+        assert_eq!(edge(true), text.find("Last words.").unwrap() + "Last words.".len());
+        // With no closing note the end stays the text's end.
+        let text = "# Title\n\nLast words.\n";
+        let blocks = Blocks::parse(text);
+        assert_eq!(selection::chapter_edge(text, &blocks, true, |_| false), text.len());
+        assert_eq!(selection::chapter_edge(text, &blocks, false, |_| false), 0);
     }
 
     #[test]

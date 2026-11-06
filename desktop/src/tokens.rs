@@ -281,9 +281,8 @@ pub const SCROLLBAR_INSET: Pixels = px(2.);
 pub const TABLE_RULE: Pixels = px(0.5);
 pub const CELL_MIN_WIDTH: Pixels = px(16.);
 pub const FIGURE_MISSING_HEIGHT: Pixels = px(48.);
-/// What the editing grid keeps free above the window's foot, and what a figure's card needs under it.
+/// What the editing grid keeps free above the window's foot.
 pub const GRID_MIN_ROOM: Pixels = px(120.);
-pub const FIGURE_CARD_ROOM: Pixels = px(280.);
 pub const LINK_POPUP_HEIGHT: Pixels = px(90.);
 /// A footnote's card: its height without text, and per line.
 pub const NOTE_CARD_BASE: Pixels = px(100.);
