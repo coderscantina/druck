@@ -6,8 +6,9 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, AnyView, App, AvailableSpace, Bounds, Context, Entity, Focusable, MouseButton, MouseDownEvent, Pixels,
-    Point, Render, ScrollHandle, SharedString, Size, Subscription, Window, div, point, px, size, svg,
+    AnyElement, AnyView, App, AvailableSpace, Bounds, Context, Entity, Focusable, Font, FontFeatures, MouseButton,
+    MouseDownEvent, Pixels, Point, Render, ScrollHandle, SharedString, Size, Subscription, Window, div, point, px,
+    size, svg,
 };
 
 use super::commands::Command;
@@ -926,13 +927,18 @@ impl EditorView {
         let (label, top) = self.chapter_label()?;
         let tokens = Tokens::get(cx);
         let size = self.chapter_label_size();
-        // gpui sets no letter spacing, so hair spaces stand between the letters.
+        // gpui sets no letter spacing, so a thin space, about 0.15 em, stands between the letters.
         let spaced = (label.to_uppercase().chars())
             .map(|letter| letter.to_string())
             .collect::<Vec<_>>()
-            .join("\u{200a}");
+            .join("\u{2009}");
+        // Lining figures stand as tall as the capitals, where a book face's old-style ones would sit at x-height.
+        let font = Font {
+            features: FontFeatures(std::sync::Arc::new(vec![("lnum".into(), 1)])),
+            ..self.style.body.clone()
+        };
         let element = div()
-            .font(self.style.body.clone())
+            .font(font)
             .text_size(size)
             .line_height(size * tokens::CHAPTER_LABEL_LEADING)
             .text_color(tokens.text_quiet)

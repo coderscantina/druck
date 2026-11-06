@@ -278,6 +278,8 @@ pub struct EditorView {
     float_room: Pixels,
     /// Later comments the author opened with their More, by their text.
     open_comments: HashSet<String>,
+    /// The agent notes whose quiet text is opened past its first lines.
+    open_advice: HashSet<u64>,
     /// The keys of those comments' More, by their text.
     comment_focus: HashMap<String, FocusHandle>,
     /// The pointer is in the left margin.
@@ -437,6 +439,7 @@ impl EditorView {
             reveal_float: 0,
             float_room: px(0.),
             open_comments: HashSet::new(),
+            open_advice: HashSet::new(),
             comment_focus: HashMap::new(),
             gutter_shown: false,
             directives: directives::Directives::default(),

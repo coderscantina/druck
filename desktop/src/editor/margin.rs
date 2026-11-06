@@ -266,7 +266,7 @@ impl EditorView {
             if shown.is_empty() {
                 continue;
             }
-            let rows = rows_of(&shown, window, &tokens);
+            let rows = rows_of(&shown, tokens::NOTE_TEXT, text_width(), window, &tokens);
             let focus = (self.comment_focus)
                 .entry(shown.clone())
                 .or_insert_with(|| cx.focus_handle().tab_stop(true))
@@ -380,7 +380,8 @@ impl EditorView {
 }
 
 /// How many rows a comment takes in the margin.
-fn rows_of(shown: &str, window: &Window, tokens: &Tokens) -> usize {
+/// How many lines `shown` wraps to in the UI face at `size`, `width` wide.
+pub(super) fn rows_of(shown: &str, size: Pixels, width: Pixels, window: &Window, tokens: &Tokens) -> usize {
     let run = TextRun {
         len: shown.len(),
         font: font(tokens::FONT_UI),
@@ -391,13 +392,7 @@ fn rows_of(shown: &str, window: &Window, tokens: &Tokens) -> usize {
     };
     window
         .text_system()
-        .shape_text(
-            SharedString::from(shown.to_owned()),
-            tokens::NOTE_TEXT,
-            &[run],
-            Some(text_width()),
-            None,
-        )
+        .shape_text(SharedString::from(shown.to_owned()), size, &[run], Some(width), None)
         .map_or(0, |lines| lines.iter().map(|line| line.wrap_boundaries.len() + 1).sum())
 }
 

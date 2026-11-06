@@ -467,10 +467,13 @@ impl TicksView {
         let headings = self.headings();
         let caret = self.read.as_ref().and_then(|read| read.caret);
         let (step, _) = self.strip(room);
+        let book_face = self.editor.read(cx).body_font();
         let rows = headings.iter().enumerate().map(|(index, heading)| {
             let current = caret == Some(index);
             let near = self.near == Some(index);
+            // It keeps its own length past the zone's room, so a grown chapter tick stays longer than a section's.
             let tick = div()
+                .flex_none()
                 .h(if near { px(2.) } else { tokens::TICK_HEIGHT })
                 .rounded(px(1.))
                 .bg(if current {
@@ -515,7 +518,8 @@ impl TicksView {
                             .px(tokens::SPACE_1)
                             .rounded(tokens::RADIUS)
                             .bg(tokens.canvas)
-                            .text_size(tokens::TEXT_SMALL)
+                            .font(book_face.clone())
+                            .text_size(tokens::TEXT_BODY)
                             .text_color(tokens.text_quiet)
                             .child(heading.title.clone())
                             .with_animation(

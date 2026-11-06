@@ -7,7 +7,8 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, AnyView, Context, Div, EventEmitter, FontWeight, MouseButton, Pixels, Point, Stateful, div, point,
+    AnyElement, AnyView, Context, Div, EventEmitter, FontWeight, MouseButton, Pixels, Point, Stateful, Window, div,
+    point,
 };
 
 use super::EditorView;
@@ -238,7 +239,7 @@ impl EditorView {
 
     /// The notes for this frame, each with the height it wants to stand at. Notes on passages off screen wait, and notes
     /// whose text is gone stand at the top.
-    pub(super) fn advice_elements(&self, cx: &mut Context<Self>) -> Vec<(AnyElement, Pixels)> {
+    pub(super) fn advice_elements(&self, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, Pixels)> {
         if self.column.note_left.is_none() {
             return Vec::new();
         }
@@ -254,7 +255,7 @@ impl EditorView {
                     None => continue,
                 },
             };
-            notes.push((self.advice_note(note, &body, &tokens, cx).into_any_element(), y));
+            notes.push((self.advice_note(note, &body, window, &tokens, cx).into_any_element(), y));
         }
         notes
     }
@@ -276,6 +277,7 @@ impl EditorView {
         &self,
         note: &Advice,
         body: &gpui::Font,
+        window: &Window,
         tokens: &Tokens,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -298,6 +300,27 @@ impl EditorView {
             (note.suggestion.is_some() && !gone).then(|| button("note-apply", Key::Apply, NoteAction::Apply, cx));
         let reply = (!gone).then(|| button("note-reply", Key::Reply, NoteAction::Reply, cx));
         let dismiss = button("note-dismiss", Key::Dismiss, NoteAction::Dismiss, cx);
+        let text_size = body_size * tokens::ADVICE_TEXT;
+        let text_width = tokens::NOTE_WIDTH - tokens::SPACE_3 - tokens::NOTE_RULE;
+        let long = super::margin::rows_of(&text, text_size, text_width, window, tokens) > tokens::ADVICE_QUIET_LINES;
+        let open = self.open_advice.contains(&id);
+        let more = long.then(|| {
+            let label = crate::t!(if open { Key::NoteLess } else { Key::NoteMore });
+            div()
+                .id(("note-more", id as usize))
+                .button(tokens, label)
+                .mt(-tokens::SPACE_1)
+                .cursor_pointer()
+                .text_color(tokens.text_quiet)
+                .hover(|link| link.text_color(tokens.text))
+                .on_click(cx.listener(move |editor, _, _, cx| {
+                    if !editor.open_advice.remove(&id) {
+                        editor.open_advice.insert(id);
+                    }
+                    cx.notify();
+                }))
+                .child(label)
+        });
         div()
             .w(tokens::NOTE_WIDTH)
             .flex()
@@ -309,8 +332,8 @@ impl EditorView {
             .border_l_1()
             .border_color(tokens.accent)
             .font_family(tokens::FONT_UI)
-            .text_size(body_size * tokens::ADVICE_TEXT)
-            .line_height(body_size * tokens::ADVICE_TEXT * tokens::ADVICE_LEADING)
+            .text_size(text_size)
+            .line_height(text_size * tokens::ADVICE_LEADING)
             .text_color(tokens.text_quiet)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
@@ -321,7 +344,14 @@ impl EditorView {
                     .text_color(tokens.text)
                     .child(note.title.clone()),
             )
-            .child(div().child(text))
+            .child(
+                div()
+                    .when(long && !open, |text| {
+                        text.line_clamp(tokens::ADVICE_QUIET_LINES).text_ellipsis()
+                    })
+                    .child(text),
+            )
+            .children(more)
             .when_some(note.suggestion.clone().filter(|_| !gone), |column, suggestion| {
                 column.child(
                     div()
@@ -355,6 +385,7 @@ impl EditorView {
         self.advice.clear();
         self.pins.clear();
         self.open_comments.clear();
+        self.open_advice.clear();
         self.comment_focus.clear();
     }
 }

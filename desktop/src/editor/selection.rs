@@ -225,7 +225,14 @@ impl EditorView {
         self.set_selection(selection, upstream, window, cx);
     }
 
-    pub(super) fn mouse_moved(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    /// `uncovered` says nothing stands over the pane where the pointer is, such as the unfolded outline.
+    pub(super) fn mouse_moved(
+        &mut self,
+        event: &MouseMoveEvent,
+        uncovered: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.pointer = event.position;
         let viewport = self.column.viewport;
         let inside = viewport.contains(&event.position);
@@ -234,7 +241,7 @@ impl EditorView {
             self.hovered = hovered;
             cx.notify();
         }
-        let in_margin = inside && event.position.x < self.column.text_left;
+        let in_margin = inside && uncovered && event.position.x < self.column.text_left;
         #[cfg(any(debug_assertions, feature = "measure"))]
         let in_margin = in_margin || self.gutter_pinned;
         if in_margin != self.gutter_shown {

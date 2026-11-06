@@ -690,11 +690,14 @@ impl PreviewView {
             let found = self.cache.get(key(page), page);
             let exact_here = found.is_some();
             exact += usize::from(exact_here);
+            // The edges snap rather than the size, so a centred spread keeps equal sides.
+            let (left, right) = (snap(centred), snap(centred + width));
+            let (top, bottom) = (snap(top), snap(top + height));
             placed.push(Placed {
                 page,
                 bounds: Bounds::new(
-                    point(bounds.origin.x + px(snap(centred)), bounds.origin.y + px(snap(top))),
-                    size(px(snap(width)), px(snap(height))),
+                    point(bounds.origin.x + px(left), bounds.origin.y + px(top)),
+                    size(px(right - left), px(bottom - top)),
                 ),
                 image: found.or_else(|| self.cache.stale(page)),
                 #[cfg(any(debug_assertions, feature = "measure"))]

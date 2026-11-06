@@ -65,6 +65,8 @@ pub struct Frame {
     caret: Option<Bounds<Pixels>>,
     hitbox: Hitbox,
     gutter_hitbox: Hitbox,
+    /// The whole pane, under the other two: the pointer is over it unless something stands over the text.
+    pane_hitbox: Hitbox,
     pub(super) markers: Vec<CommentMarker>,
     pub(super) drop_line: Option<Bounds<Pixels>>,
     /// The pointer is in the left margin, so the gutter shows.
@@ -158,6 +160,7 @@ impl Element for Galley {
             view.lay_out_visible(window);
             view.spelling_wanted(window, cx);
             view.update_scrollbar();
+            let pane_hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
             let gutter_left = view.column.text_left - tokens::GUTTER_WIDTH;
             let gutter_hitbox = window.insert_hitbox(
                 Bounds::new(
@@ -173,7 +176,7 @@ impl Element for Galley {
                 ),
                 HitboxBehavior::Normal,
             );
-            let frame = view.frame(hitbox, gutter_hitbox, window, cx);
+            let frame = view.frame(hitbox, gutter_hitbox, pane_hitbox, window, cx);
             let selection = frame.selection.clone();
             let caret = frame.caret.or_else(|| view.caret_bounds(window));
             let floats = view.floats(&selection, caret, window, cx);
@@ -181,7 +184,7 @@ impl Element for Galley {
             let mut rows = view.review_rows(cx);
             rows.extend(view.chapter_label_element(cx));
             rows.extend(view.pin_markers(cx));
-            let mut advice = view.advice_elements(cx);
+            let mut advice = view.advice_elements(window, cx);
             advice.extend(view.comment_notes(window, cx));
             advice.extend(view.pin_notes(window, cx));
             advice.sort_by_key(|(_, y)| *y);
@@ -339,10 +342,11 @@ impl Element for Galley {
             }
         });
 
-        let view = self.view.clone();
+        let (view, pane) = (self.view.clone(), frame.pane_hitbox.clone());
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
             if phase.bubble() {
-                view.update(cx, |view, cx| view.mouse_moved(event, window, cx));
+                let uncovered = pane.is_hovered(window);
+                view.update(cx, |view, cx| view.mouse_moved(event, uncovered, window, cx));
             }
         });
         let view = self.view.clone();
@@ -562,7 +566,14 @@ pub(super) fn paint_lines(
 
 impl EditorView {
     /// Everything paint needs, gathered while the view is mutably at hand.
-    fn frame(&mut self, hitbox: Hitbox, gutter_hitbox: Hitbox, window: &Window, cx: &App) -> Frame {
+    fn frame(
+        &mut self,
+        hitbox: Hitbox,
+        gutter_hitbox: Hitbox,
+        pane_hitbox: Hitbox,
+        window: &Window,
+        cx: &App,
+    ) -> Frame {
         let column = self.column;
         let gutter_icon = column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET;
         let gap = self.directives.column_gap();
@@ -598,7 +609,7 @@ impl EditorView {
                 icon_x: if left > column.text_left {
                     left - (gap + tokens::GUTTER_ICON) * 0.5
                 } else {
-                    gutter_icon.min(left + hang - tokens::SPACE_1 - tokens::GUTTER_ICON)
+                    gutter_icon.min(left + hang - tokens::SPACE_2 - tokens::GUTTER_ICON)
                 },
                 layout,
                 hovered: self.hovered == Some(index),
@@ -652,15 +663,19 @@ impl EditorView {
         let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
         let directives = self.directive_marks(&blocks, &indices, window, cx);
         // After the brackets, whose names on the same row the style's name ends before.
-        let style_name = self.style_name_at_caret(&blocks).map(|(top, height, name, icon_x)| {
-            let icons = gutter_icon.min(icon_x);
-            StyleName {
-                top,
-                height,
-                name,
-                before: (self.directives.name_left_beside(top, top + height)).map_or(icons, |left| left.min(icons)),
-            }
-        });
+        // Only while the text has the keys, so it never stands beside a card that covers its block.
+        let style_name = (self.style_name_at_caret(&blocks))
+            .filter(|_| self.focus.is_focused(window))
+            .map(|(top, height, name, icon_x)| {
+                let icons = gutter_icon.min(icon_x);
+                StyleName {
+                    top,
+                    height,
+                    name,
+                    before: (self.directives.name_left_beside(top, top + height)).map_or(icons, |left| left.min(icons)),
+                }
+            });
+        let uncovered = pane_hitbox.is_hovered(window);
         Frame {
             column,
             blocks,
@@ -673,9 +688,11 @@ impl EditorView {
             caret,
             hitbox,
             gutter_hitbox,
+            pane_hitbox,
             markers: self.markers.clone(),
             drop_line: self.drop_line(),
-            gutter_shown: self.gutter_shown || self.grab.is_some(),
+            // Also when something came to stand over the pointer without a move, as the outline unfolds.
+            gutter_shown: (self.gutter_shown && uncovered) || self.grab.is_some(),
             scrollbar: self.scrollbar,
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             images: Vec::new(),

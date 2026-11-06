@@ -179,10 +179,12 @@ impl Sheets {
         }
     }
 
-    /// The pages in rows that overlap the `view` pixels below `scroll`.
+    /// The pages in rows that overlap the `view` pixels below `scroll` by half a pixel or more, so a row that only
+    /// touches the view's edge, as the one before a spread at fit does, draws no sliver of its edge there.
     pub fn visible(&self, scroll: f32, view: f32) -> Range<usize> {
-        let first = self.rows.partition_point(|row| row.top + row.height < scroll);
-        let last = self.rows.partition_point(|row| row.top < scroll + view);
+        const TOUCH: f32 = 0.5;
+        let first = self.rows.partition_point(|row| row.top + row.height < scroll + TOUCH);
+        let last = self.rows.partition_point(|row| row.top < scroll + view - TOUCH);
         if first >= last {
             let page = self.rows.get(first).map_or(self.len(), |row| row.pages.start);
             return page..page;
