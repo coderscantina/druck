@@ -974,7 +974,9 @@ impl Render for Workspace {
             .flex()
             .relative()
             .map(|centre| match self.mode {
+                // The text ends above the foot line, so nothing of it shows beside what the line says.
                 Mode::Write => centre
+                    .pb(tokens::FOOTER_HEIGHT)
                     .child(self.parts.editor.clone())
                     .when(!binder_on, |centre| centre.child(self.parts.ticks.clone())),
                 Mode::Publish => centre.child(self.parts.preview.clone()),
