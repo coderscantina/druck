@@ -63,6 +63,8 @@ impl Renderer {
 }
 
 impl Job<'_> {
+    /// What to do about a missing image, bibliography, or font file: `Missing::Error` (default) or `Missing::StandIn`.
+    pub fn missing(self, missing: Missing) -> Self;
     /// Resolves and checks the configuration and reads every resource it names. Errors here never reach layout.
     pub fn configure(self) -> Result<Configured<'_>, Failure>;
 }
