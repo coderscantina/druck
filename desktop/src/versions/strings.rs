@@ -180,7 +180,7 @@ crate::strings! {
         Committed => ("Committed {hash}", "Commit {hash} angelegt"),
         TimelineKeys => (
             "\u{2190}\u{2192} walk  \u{2325}\u{2190}\u{2192} commits  \u{2191}\u{2193} passage  \u{21a9} restore  esc",
-            "\u{2190}\u{2192} gehen  \u{2325}\u{2190}\u{2192} Commits  \u{2191}\u{2193} Passage  \u{21a9} zurückholen  esc"
+            "\u{2190}\u{2192} gehen  \u{2325}\u{2190}\u{2192} Commits  \u{2191}\u{2193} Passage  \u{21a9} wiederherstellen  esc"
         ),
         PushFailed => ("Committed, but the push failed: {reason}", "Commit ist da, aber der Push schlug fehl: {reason}"),
     }
