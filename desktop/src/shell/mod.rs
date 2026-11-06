@@ -365,7 +365,13 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     slots.overlays.push(hub.clone().into());
     let hub = hub.read(cx);
     slots.footer.push(hub.footer.clone().into());
-    slots.overlays.push(hub.search.clone().into());
+    let search = hub.search.downgrade();
+    slots.left.push(crate::workspace::SidePanel {
+        view: hub.search.clone().into(),
+        width: std::rc::Rc::new(move |window_width, cx| {
+            (search.upgrade()).map_or(gpui::px(0.), |search| search.read(cx).width(window_width))
+        }),
+    });
     slots.overlays.push(hub.find.clone().into());
 }
 

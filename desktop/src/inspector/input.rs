@@ -187,6 +187,8 @@ pub struct TextInput {
     prose: bool,
     /// Enter keeps the focus here, for a field that is used again and again, such as the find bar's.
     keep_focus: bool,
+    /// Command+Enter goes on to the view holding the field.
+    pass_command_enter: bool,
     /// The type of a field that shows a book's text, in place of the interface's.
     book_type: Option<(gpui::Font, Pixels)>,
     /// No frame of its own, for a field that stands on a card as its text.
@@ -254,6 +256,7 @@ impl TextInput {
             multiline,
             prose: false,
             keep_focus: false,
+            pass_command_enter: false,
             book_type: None,
             bare: false,
             arrows_to_parent: false,
@@ -305,16 +308,21 @@ impl TextInput {
         self.set_selection(Selection::caret(at), cx);
     }
 
-    /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
     /// Up and Down go to what holds the field, such as a list it filters.
     pub fn arrows_to_parent(mut self) -> Self {
         self.arrows_to_parent = true;
         self
     }
 
+    /// Makes Enter submit without leaving the field, and Escape emit [`Cancelled`].
     pub fn keep_focus_on_enter(mut self) -> Self {
         self.keep_focus = true;
         self
+    }
+
+    /// Lets Command+Enter go on to what holds the field once the field took its text, for a card that acts on it.
+    pub fn pass_command_enter(&mut self) {
+        self.pass_command_enter = true;
     }
 
     /// What assistive technology calls the field. The label a person sees stands apart from it on screen.
@@ -1186,7 +1194,12 @@ impl Render for TextInput {
                     }
                 }
             }))
-            .on_action(cx.listener(|input, _: &Commit, _, cx| input.commit(cx)))
+            .on_action(cx.listener(|input, _: &Commit, _, cx| {
+                input.commit(cx);
+                if input.pass_command_enter {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|input, _: &Escape, window, cx| {
                 if input.keep_focus {
                     cx.emit(Cancelled);

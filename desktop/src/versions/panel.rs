@@ -8,7 +8,7 @@ use super::repo::{Branch, Overview};
 use super::strings::Key;
 use super::{RepoState, Versions, change_words, dates, repo, ui};
 use crate::a11y::Control as _;
-use crate::inspector::input::{Cancelled, Submitted, TextInput};
+use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
 use crate::workspace::Mode;
 
@@ -49,6 +49,8 @@ impl GitPanel {
             cx.subscribe_in(&message, window, |panel, _, _: &Cancelled, window, cx| {
                 panel.leave(window, cx)
             }),
+            // Commit's colour follows whether there is a message.
+            cx.subscribe(&message, |_, _, _: &Edited, cx| cx.notify()),
             cx.subscribe_in(&new_branch, window, |panel, _, _: &Cancelled, window, cx| {
                 panel.leave(window, cx)
             }),
@@ -454,9 +456,10 @@ impl Render for GitPanel {
                 })
                 .child(
                     ui::button(&tokens, "git-commit", crate::t!(Key::Commit))
-                        .when(overview.has_something_to_commit(), |button| {
-                            button.text_color(tokens.accent)
-                        })
+                        .when(
+                            overview.has_something_to_commit() && !self.message.read(cx).text().trim().is_empty(),
+                            |button| button.text_color(tokens.accent),
+                        )
                         .on_click(cx.listener(|panel, _, window, cx| panel.commit(false, window, cx))),
                 ),
         )

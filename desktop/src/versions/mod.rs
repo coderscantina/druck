@@ -147,9 +147,9 @@ pub fn mount(
     slots.overlays.push(timeline.into());
     let slot = cx.new(|_| Slot::new(panel.clone(), view.downgrade()));
     let shown = slot.downgrade();
-    slots.right.push(crate::workspace::RightPanel {
+    slots.right.push(crate::workspace::SidePanel {
         view: slot.into(),
-        width: std::rc::Rc::new(move |cx| {
+        width: std::rc::Rc::new(move |_, cx| {
             shown
                 .upgrade()
                 .map_or(gpui::px(0.), |slot| slot.read(cx).width_in_write(cx))
@@ -761,6 +761,10 @@ impl Versions {
     }
 
     fn toggle_timeline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The timeline covers the window, so the card goes first and its draft waits for the next time.
+        if self.card.read(cx).is_open() && !self.timeline.read(cx).is_open() {
+            self.card.update(cx, |card, cx| card.close(window, cx));
+        }
         self.timeline.update(cx, |timeline, cx| {
             if timeline.is_open() {
                 timeline.close(window, cx);

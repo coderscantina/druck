@@ -4,19 +4,23 @@
 use gpui::prelude::*;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollHandle, Subscription, WeakEntity, Window, actions,
-    div, relative,
+    div,
 };
 
 use super::repo::{self, Overview};
 use super::strings::Key;
 use super::{RepoState, Versions, change_words, ui, unreviewed_changes};
-use crate::inspector::input::{Cancelled, Submitted, TextInput};
+use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
+use crate::workspace::TextColumn;
 
-actions!(commit_card, [Close]);
+actions!(commit_card, [Close, CommitNow]);
 
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", Close, Some("CommitCard"))]);
+    cx.bind_keys([
+        KeyBinding::new("escape", Close, Some("CommitCard")),
+        KeyBinding::new("cmd-enter", CommitNow, Some("CommitCard")),
+    ]);
 }
 
 /// What gets the keys when the card opens.
@@ -54,6 +58,8 @@ impl CommitCard {
             })
         };
         let message = field(Key::Message, window, cx);
+        // Command+Enter commits from the message, as from anywhere on the card.
+        message.update(cx, |input, _| input.pass_command_enter());
         let name = field(Key::YourName, window, cx);
         let email = field(Key::YourEmail, window, cx);
         let subscriptions = vec![
@@ -63,6 +69,8 @@ impl CommitCard {
             cx.subscribe_in(&message, window, |card, _, _: &Cancelled, window, cx| {
                 card.close(window, cx)
             }),
+            // Commit's colour follows whether there is a message.
+            cx.subscribe(&message, |_, _, _: &Edited, cx| cx.notify()),
             cx.subscribe_in(&email, window, |card, _, _: &Submitted, window, cx| {
                 card.save_identity(window, cx)
             }),
@@ -137,7 +145,8 @@ impl CommitCard {
         cx.notify();
     }
 
-    /// A commit landed. With `all_done` nothing is left to say, so the card goes.
+    /// A commit landed, so its message goes, which is kept until then. With `all_done` nothing is left to say, so the
+    /// card goes.
     pub fn committed(&mut self, all_done: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.message
             .update(cx, |input, cx| input.set_value(String::new(), true, cx));
@@ -324,9 +333,10 @@ impl CommitCard {
             })
             .child(
                 ui::button(tokens, "card-commit", crate::t!(Key::Commit))
-                    .when(overview.has_something_to_commit(), |button| {
-                        button.text_color(tokens.accent)
-                    })
+                    .when(
+                        overview.has_something_to_commit() && !self.message.read(cx).text().trim().is_empty(),
+                        |button| button.text_color(tokens.accent),
+                    )
                     .on_click(cx.listener(|card, _, window, cx| card.commit(false, window, cx))),
             );
         parts.push(row.into_any_element());
@@ -372,8 +382,7 @@ impl Render for CommitCard {
             .occlude()
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT + tokens::SPACE_4)
-            .left(relative(0.5))
-            .ml(tokens::COMMIT_CARD_WIDTH / -2.)
+            .left(TextColumn::centred(cx, tokens::COMMIT_CARD_WIDTH))
             .w(tokens::COMMIT_CARD_WIDTH)
             .flex()
             .flex_col()
@@ -385,6 +394,7 @@ impl Render for CommitCard {
             .track_focus(&self.focus)
             .key_context("CommitCard")
             .on_action(cx.listener(|card, _: &Close, window, cx| card.close(window, cx)))
+            .on_action(cx.listener(|card, _: &CommitNow, window, cx| card.commit(false, window, cx)))
             .child(ui::section_label(&tokens, crate::t!(Key::CommitLabel)))
             .children(parts)
             .into_any_element()

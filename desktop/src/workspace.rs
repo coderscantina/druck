@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, EventEmitter, Focusable, MouseButton, PathPromptOptions, Pixels,
+    AnyView, App, Bounds, Context, Entity, EventEmitter, Focusable, Global, MouseButton, PathPromptOptions, Pixels,
     StyleRefinement, Subscription, Task, Window, div, point, px,
 };
 
@@ -83,16 +83,37 @@ pub struct Slots {
     pub footer: Vec<AnyView>,
     /// Layers over the window, last on top. A layer draws nothing while it is closed.
     pub overlays: Vec<AnyView>,
+    /// Panels at the left of the text or the pages, after the Binder. A view that is closed draws nothing.
+    pub left: Vec<SidePanel>,
     /// Panels at the right of the text or the pages, before the rail. A view that is closed draws nothing.
-    pub right: Vec<RightPanel>,
+    pub right: Vec<SidePanel>,
 }
 
-/// A panel at the right, and how wide it is in Write, so the text knows its room before anything is laid out.
+/// A panel beside the text, and how wide it is, so the text knows its room before anything is laid out.
 #[derive(Clone)]
-pub struct RightPanel {
+pub struct SidePanel {
     pub view: AnyView,
-    /// Zero while the panel is closed. Called while the workspace renders, so it must not read the workspace.
-    pub width: Rc<dyn Fn(&App) -> Pixels>,
+    /// The panel's width in a window of the given width, zero while it is closed. Called while the workspace renders,
+    /// so it must not read the workspace.
+    pub width: Rc<dyn Fn(Pixels, &App) -> Pixels>,
+}
+
+/// Where the text or the pages stand across the window, between the panels, as of the workspace's last render. Cards
+/// that centre over the text centre on this.
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct TextColumn {
+    pub left: Pixels,
+    pub width: Pixels,
+}
+
+impl Global for TextColumn {}
+
+impl TextColumn {
+    /// The left edge of something `width` wide centred over the text, kept inside the window.
+    pub fn centred(cx: &App, width: Pixels) -> Pixels {
+        let column = cx.try_global::<Self>().copied().unwrap_or_default();
+        (column.left + (column.width - width) / 2.).max(Pixels::ZERO)
+    }
 }
 
 /// What a slice's view can hold on to. Everything about the document is in the editor's session; events are on the
@@ -881,10 +902,30 @@ impl Render for Workspace {
                 .children(self.slots.footer.clone())
         });
         // The Binder gives way before the text goes below its least width, so no line is cut or covered.
-        let right: Pixels = self.slots.right.iter().map(|panel| (panel.width)(cx)).sum();
-        let text_room = window.viewport_size().width - right - tokens::SIDEBAR_WIDTH;
+        let window_width = window.viewport_size().width;
+        let width_of =
+            |panels: &[SidePanel]| -> Pixels { panels.iter().map(|panel| (panel.width)(window_width, cx)).sum() };
+        let (left, right) = (width_of(&self.slots.left), width_of(&self.slots.right));
+        let text_room = window_width - left - right - tokens::SIDEBAR_WIDTH;
         let binder_fits = text_room >= tokens::GUTTER_WIDTH + tokens::TEXT_MIN_WIDTH + tokens::TEXT_MARGIN_RIGHT;
         let binder_on = settings::get(cx).binder && binder_fits;
+        let binder_width = if self.mode == Mode::Write && binder_on {
+            tokens::SIDEBAR_WIDTH
+        } else {
+            Pixels::ZERO
+        };
+        let rail_width = if self.mode == Mode::Publish {
+            tokens::INSPECTOR_WIDTH + tokens::RAIL_WIDTH
+        } else {
+            Pixels::ZERO
+        };
+        let column = TextColumn {
+            left: binder_width + left,
+            width: window_width - binder_width - left - right - rail_width,
+        };
+        if cx.try_global::<TextColumn>() != Some(&column) {
+            cx.set_global(column);
+        }
         let centre = div()
             .tab_group()
             .tab_index(tokens::TAB_CENTRE)
@@ -936,6 +977,7 @@ impl Render for Workspace {
                     .flex()
                     .bg(tokens.canvas)
                     .children(binder)
+                    .children(self.slots.left.iter().map(|panel| panel.view.clone()))
                     .child(centre.children(foot))
                     .children(self.slots.right.iter().map(|panel| panel.view.clone()))
                     .children(rail),

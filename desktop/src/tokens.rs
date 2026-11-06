@@ -210,6 +210,8 @@ pub const PROOF_HEADING_HEIGHT: Pixels = px(28.);
 pub const PROOF_DOT_TOP: Pixels = px(5.);
 /// The project search card, and the line number beside a hit.
 pub const SEARCH_CARD_WIDTH: Pixels = px(440.);
+/// The search card narrows to this in a small window, so the text keeps its least width beside it.
+pub const SEARCH_CARD_MIN_WIDTH: Pixels = px(280.);
 pub const SEARCH_RESULTS_HEIGHT: Pixels = px(340.);
 pub const SEARCH_HIT_Y: Pixels = px(3.);
 pub const SEARCH_LINE_WIDTH: Pixels = px(34.);

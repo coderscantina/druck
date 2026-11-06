@@ -6,7 +6,8 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, EventEmitter, Focusable, FontWeight, ScrollHandle, SharedString, Subscription, Window, div, svg,
+    Context, Entity, EventEmitter, Focusable, FontWeight, Pixels, ScrollHandle, SharedString, Subscription, Window,
+    div, svg,
 };
 
 use super::search::{FileHits, Options};
@@ -104,6 +105,15 @@ impl SearchPanel {
         let focus = self.query.read(cx).focus_handle(cx);
         focus.focus(window, cx);
         cx.notify();
+    }
+
+    /// The room the panel takes at the text's left in a window `window_width` wide: the card and the gap before it.
+    pub fn width(&self, window_width: Pixels) -> Pixels {
+        if self.open {
+            card_width(window_width) + tokens::SPACE_4
+        } else {
+            Pixels::ZERO
+        }
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
@@ -293,13 +303,13 @@ impl Render for SearchPanel {
                     o.whole_word = !o.whole_word;
                 },
             ));
-        div()
+        let card = div()
             .id("search-card")
             .occlude()
             .absolute()
-            .top(tokens::TITLEBAR_HEIGHT + tokens::SECTION_HEIGHT)
-            .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
-            .w(tokens::SEARCH_CARD_WIDTH)
+            .top(tokens::SECTION_HEIGHT)
+            .left(tokens::SPACE_4)
+            .w(card_width(window.viewport_size().width))
             // A short window shortens the list, so the card's foot stays in it.
             .max_h(window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::SECTION_HEIGHT - tokens::SPACE_4)
             .flex()
@@ -394,7 +404,20 @@ impl Render for SearchPanel {
                         )
                         .when(ui::more_below(&self.scroll), |list| list.child(ui::foot_fade(&tokens))),
                 )
-            })
+            });
+        // The panel takes its room beside the text, so the text moves or narrows and nothing of it is covered.
+        div()
+            .flex_none()
+            .w(self.width(window.viewport_size().width))
+            .h_full()
+            .relative()
+            .child(card)
             .into_any_element()
     }
+}
+
+/// The card's width: its own, narrowed in a small window so the text keeps its least width, down to a least of its own.
+fn card_width(window_width: Pixels) -> Pixels {
+    let text = tokens::GUTTER_WIDTH + tokens::TEXT_MIN_WIDTH + tokens::TEXT_MARGIN_RIGHT;
+    (window_width - text - tokens::SPACE_4).clamp(tokens::SEARCH_CARD_MIN_WIDTH, tokens::SEARCH_CARD_WIDTH)
 }

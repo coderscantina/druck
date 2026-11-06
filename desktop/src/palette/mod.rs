@@ -8,7 +8,7 @@ mod strings;
 use gpui::prelude::*;
 use gpui::{
     Action, App, Context, Entity, FocusHandle, Focusable, KeyBinding, MouseDownEvent, ScrollHandle, Subscription,
-    WeakEntity, Window, actions, div, relative,
+    WeakEntity, Window, actions, div,
 };
 
 use self::strings::Key;
@@ -343,8 +343,7 @@ impl Render for Palette {
             .occlude()
             .absolute()
             .top(tokens::PALETTE_TOP)
-            .left(relative(0.5))
-            .ml(tokens::PALETTE_WIDTH / -2.)
+            .left(crate::workspace::TextColumn::centred(cx, tokens::PALETTE_WIDTH))
             .w(tokens::PALETTE_WIDTH)
             .flex()
             .flex_col()
