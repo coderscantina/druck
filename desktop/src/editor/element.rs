@@ -143,11 +143,16 @@ impl Element for Galley {
     ) -> Frame {
         let (mut frame, floats, margin, rows, advice) = self.view.update(cx, |view, cx| {
             view.trace.prepaint_started();
-            view.set_viewport(bounds, cx);
+            view.set_viewport(bounds, window.viewport_size().width * 0.5, cx);
             view.reveal_float(window, cx);
             if view.autoscroll {
                 view.autoscroll = false;
+                view.end_glide_for_caret();
                 view.scroll_to_caret(window);
+            }
+            if view.advance_glide() {
+                let view = cx.entity();
+                window.on_next_frame(move |_, cx| view.update(cx, |_, cx| cx.notify()));
             }
             view.lay_out_visible(window);
             view.spelling_wanted(window, cx);

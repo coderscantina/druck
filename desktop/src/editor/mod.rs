@@ -31,9 +31,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
-use std::time::Duration;
-#[cfg(any(debug_assertions, feature = "measure"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
@@ -99,6 +97,20 @@ enum Motion {
 struct Anchor {
     block: usize,
     offset: Pixels,
+}
+
+/// A jump's glide into place. The jump sets where the view lands at once; the glide only draws the last stretch, from
+/// where the view stood, so nothing else waits for it.
+#[derive(Clone, Copy)]
+enum Glide {
+    /// Where the view stood, until the jump's own autoscroll has placed it.
+    Pending(Anchor),
+    Running {
+        to: Anchor,
+        from: Pixels,
+        start: Instant,
+        duration: Duration,
+    },
 }
 
 /// The cached derivations of one block. A change to the block replaces its slot.
@@ -215,6 +227,7 @@ pub struct EditorView {
     autoscroll: bool,
     /// How far down the pane the caret's line is to stand at the next autoscroll, when something asks it to stay.
     caret_stays_at: Option<Pixels>,
+    glide: Option<Glide>,
     column: Column,
     /// Blocks in the current frame, with the window y of each one's top.
     visible: Vec<(usize, Pixels)>,
@@ -391,6 +404,7 @@ impl EditorView {
             scroll: START_OF_CHAPTER,
             autoscroll: false,
             caret_stays_at: None,
+            glide: None,
             column: Column::default(),
             visible: Vec::new(),
             hovered: None,
@@ -564,6 +578,17 @@ impl EditorView {
             window,
             cx,
         );
+    }
+
+    /// Opens a chapter at a heading, its line near the pane's top. In the open chapter the view glides there.
+    pub fn show_heading(&mut self, id: ChapterId, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let same = id == self.session.active();
+        let from = self.scroll;
+        self.show_place(id, offset, window, cx);
+        self.caret_stays_at = Some(self.column.viewport.size.height * tokens::HEADING_LANDING);
+        self.autoscroll = true;
+        self.glide = same.then_some(Glide::Pending(from));
+        cx.notify();
     }
 
     /// Reads the active chapter's title again, after its text changed.
@@ -1055,6 +1080,7 @@ impl EditorView {
     }
 
     fn scroll(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.glide = None;
         let delta = event.delta.pixel_delta(self.style.body_size * self.style.leading);
         self.scroll_by(px(0.) - delta.y);
         window.invalidate_character_coordinates();
@@ -1414,6 +1440,76 @@ impl EditorView {
         cx.on_next_frame(window, |_, _, cx| cx.notify());
     }
 
+    /// Another autoscroll, such as typing during a glide, takes over from it. A jump's own one has yet to run, so its
+    /// glide stays.
+    fn end_glide_for_caret(&mut self) {
+        if matches!(self.glide, Some(Glide::Running { .. })) {
+            self.glide = None;
+        }
+    }
+
+    /// Draws the glide's next frame, starting it once the jump's autoscroll has run. Returns whether it goes on.
+    fn advance_glide(&mut self) -> bool {
+        match self.glide {
+            None => false,
+            Some(Glide::Pending(from)) => {
+                let screen = self.column.viewport.size.height;
+                let from = self.distance(self.scroll, from, screen * tokens::GLIDE_REACH);
+                // Longer jumps take a little longer, so the speed stays readable: one screen in GLIDE, three in about
+                // half as long again.
+                let screens = (from.abs() / screen).max(1.);
+                let duration = tokens::GLIDE.mul_f32(1. + 0.3 * screens.log2());
+                self.glide = (from.abs() >= px(1.)).then(|| Glide::Running {
+                    to: self.scroll,
+                    from,
+                    start: Instant::now(),
+                    duration,
+                });
+                self.advance_glide()
+            }
+            Some(Glide::Running {
+                to,
+                from,
+                start,
+                duration,
+            }) => {
+                let t = (start.elapsed().as_secs_f32() / duration.as_secs_f32()).min(1.);
+                // Eased in and out, as a scroll a hand starts and stops.
+                let done = if t < 0.5 {
+                    4. * t * t * t
+                } else {
+                    1. - (2. - 2. * t).powi(3_i32) / 2.
+                };
+                self.scroll = to;
+                if t < 1. {
+                    self.scroll_by(from * (1. - done));
+                    return true;
+                }
+                self.glide = None;
+                false
+            }
+        }
+    }
+
+    /// How far below `to` the view at `from` stands, at most `reach` either way.
+    fn distance(&self, to: Anchor, from: Anchor, reach: Pixels) -> Pixels {
+        let (top, bottom, sign) = if (from.block, from.offset) >= (to.block, to.offset) {
+            (to, from, 1.)
+        } else {
+            (from, to, -1.)
+        };
+        let mut distance = px(0.) - top.offset;
+        let mut index = top.block;
+        while index < bottom.block && distance < reach {
+            distance += self.block_height(index);
+            index += 1;
+        }
+        if index == bottom.block {
+            distance += bottom.offset;
+        }
+        distance.min(reach) * sign
+    }
+
     fn scroll_by(&mut self, delta: Pixels) {
         self.scroll.offset += delta;
         self.normalize_scroll();
@@ -1443,9 +1539,18 @@ impl EditorView {
         }
     }
 
-    fn set_viewport(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+    /// `centre` is the window's centre across, which the text centres on.
+    fn set_viewport(&mut self, bounds: Bounds<Pixels>, centre: Pixels, cx: &mut Context<Self>) {
         let notes = !self.advice.is_empty() || (!self.source && (self.has_later_comment() || self.pins.want_margin()));
-        let column = Column::place(bounds, self.measure(), notes);
+        let mut column = Column::place(bounds, self.measure(), notes, centre);
+        // A panel at the right moves no text for the notes: they give way to their markers instead.
+        let panel_at_right = bounds.right() < centre * 2. - px(1.);
+        if notes && panel_at_right {
+            let bare = Column::place(bounds, self.measure(), false, centre);
+            if bare.text_left != column.text_left {
+                column = bare;
+            }
+        }
         if column.text_width != self.column.text_width {
             for slot in &self.slots {
                 slot.estimate.set(None);

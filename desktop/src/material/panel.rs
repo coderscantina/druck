@@ -8,12 +8,13 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle, InteractiveText, KeyBinding,
-    MouseButton, ObjectFit, Role, ScrollHandle, SharedString, StyledText, Subscription, Window, actions, div, img, svg,
+    Animation, AnimationExt, AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight, HighlightStyle,
+    InteractiveText, KeyBinding, MouseButton, ObjectFit, Role, ScrollHandle, SharedString, StyledText, Subscription,
+    Window, actions, div, ease_out_quint, img, svg,
 };
 
 use super::model::{Form, Item, Kind, Where, mentions};
-use super::trail::{Place, Trail};
+use super::trail::{Crumb, Place, Trail};
 use super::{Key, Material, MaterialChanged, icon, insert_label, kind_label};
 use crate::a11y::Control as _;
 use crate::editor::EditorView;
@@ -64,6 +65,8 @@ pub struct MaterialPanel {
     /// An open image's size, read when it opened.
     image_size: Option<(String, ImageSize)>,
     scroll: ScrollHandle,
+    /// Counts the places arrived at, so each one's content slides in afresh, and whether the last move went down.
+    arrival: (usize, bool),
     pub(super) probe: super::probe::ProbeChoice,
     _subscriptions: Vec<Subscription>,
 }
@@ -108,10 +111,11 @@ impl MaterialPanel {
         Self {
             material,
             editor,
-            trail: Trail::new(Place::List(Kind::Research)),
+            trail: Trail::new(Kind::Research),
             field,
             focus: cx.focus_handle(),
             selected: 0,
+            arrival: (0, true),
             passage: None,
             table: None,
             image_size: None,
@@ -135,22 +139,32 @@ impl MaterialPanel {
 
     /// Shows a kind's list, from its rail tab.
     pub fn show_kind(&mut self, kind: Kind, cx: &mut Context<Self>) {
-        self.go(Place::List(kind), cx);
+        if *self.trail.current() == Place::List(kind) {
+            return;
+        }
+        self.trail.list(kind);
+        self.arrived(false, cx);
     }
 
-    /// Shows an item, adding it to the trail.
+    /// Shows an item under its kind's list, as a row, the jump field, or the library opens it.
     pub fn open_item(&mut self, id: &str, cx: &mut Context<Self>) {
-        self.go(Place::Item(id.to_owned()), cx);
+        let Some(kind) = self.material.read(cx).item(id).map(|item| item.kind) else {
+            return;
+        };
+        self.trail.open(id, kind);
+        self.arrived(true, cx);
     }
 
-    fn go(&mut self, place: Place, cx: &mut Context<Self>) {
-        self.trail.go(place);
-        self.arrived(cx);
+    /// Follows a source the open item names, one level down the breadcrumb.
+    fn follow_item(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.trail.follow(id);
+        self.arrived(true, cx);
     }
 
     /// Starts the new place at its top. What it needs from its files is read as it is drawn, since this may run while
     /// the material is busy asking for it.
-    fn arrived(&mut self, cx: &mut Context<Self>) {
+    fn arrived(&mut self, down: bool, cx: &mut Context<Self>) {
+        self.arrival = (self.arrival.0 + 1, down);
         self.selected = 0;
         self.passage = None;
         self.scroll.set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
@@ -180,14 +194,14 @@ impl MaterialPanel {
     }
 
     fn back(&mut self, cx: &mut Context<Self>) {
-        if self.trail.back() {
-            self.arrived(cx);
+        if self.trail.up() {
+            self.arrived(false, cx);
         }
     }
 
     fn forward(&mut self, cx: &mut Context<Self>) {
-        if self.trail.forward() {
-            self.arrived(cx);
+        if self.trail.down() {
+            self.arrived(true, cx);
         }
     }
 
@@ -334,7 +348,7 @@ impl MaterialPanel {
                 };
                 let items = self.material.read(cx).items().clone();
                 if let Some((_, id)) = mentions(paragraph, &items, &item.id).into_iter().next() {
-                    self.open_item(&id, cx);
+                    self.follow_item(&id, cx);
                 }
             }
             None => {
@@ -378,7 +392,7 @@ impl MaterialPanel {
     }
 
     fn header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let can_go_back = self.trail.can_go_back();
+        let can_go_back = self.trail.can_go_up();
         let back = div()
             .id("material-back")
             .button(tokens, crate::t!(Key::Back))
@@ -402,10 +416,10 @@ impl MaterialPanel {
                     }),
             )
             .on_click(cx.listener(|panel, _, _, cx| panel.back(cx)));
-        let shown = self.trail.shown();
-        let last = shown.len().saturating_sub(1);
+        let crumbs = self.trail.crumbs();
+        let last = crumbs.len().saturating_sub(1);
         let mut trail: Vec<AnyElement> = Vec::new();
-        for (at, (steps, place)) in shown.into_iter().enumerate() {
+        for (at, crumb) in crumbs.into_iter().enumerate() {
             if at > 0 {
                 trail.push(
                     svg()
@@ -416,31 +430,57 @@ impl MaterialPanel {
                         .into_any_element(),
                 );
             }
-            let current = at == last;
+            let Crumb::Place(depth, place) = crumb else {
+                trail.push(
+                    div()
+                        .flex_none()
+                        .text_color(tokens.text_faint)
+                        .child("\u{2026}")
+                        .into_any_element(),
+                );
+                continue;
+            };
+            let name = self.place_name(place, cx);
+            let step = div()
+                .id(("crumb", depth))
+                .px(tokens::SPACE_1)
+                .rounded(tokens::BOX_RADIUS)
+                .truncate();
+            if at == last {
+                // The place just reached comes in from the side it was reached from.
+                let (arrival, down) = self.arrival;
+                let from = if down {
+                    tokens::OUTLINE_SLIDE
+                } else {
+                    gpui::px(0.) - tokens::OUTLINE_SLIDE
+                };
+                trail.push(
+                    step.flex_shrink(1.)
+                        .min_w_0()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(tokens.text)
+                        .child(name)
+                        .with_animation(
+                            ("crumb-in", arrival),
+                            Animation::new(tokens::FADE).with_easing(ease_out_quint()),
+                            move |step, shown| step.opacity(shown).ml(from * (1. - shown)),
+                        )
+                        .into_any_element(),
+                );
+                continue;
+            }
             trail.push(
-                div()
-                    .id(("trail", at))
-                    .px(tokens::SPACE_1)
-                    .rounded(tokens::BOX_RADIUS)
-                    .truncate()
-                    .when(current, |step| {
-                        step.flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(tokens.text)
-                    })
-                    .when(!current, |step| {
-                        step.flex_shrink(1.)
-                            .min_w_0()
-                            .max_w(tokens::MATERIAL_TRAIL_STEP)
-                            .text_color(tokens.text_quiet)
-                            .cursor_pointer()
-                            .hover(|step| step.bg(tokens.raised).text_color(tokens.text))
-                            .on_click(cx.listener(move |panel, _, _, cx| {
-                                panel.trail.back_by(steps);
-                                panel.arrived(cx);
-                            }))
-                    })
-                    .child(self.place_name(place, cx))
+                step.flex_shrink(1.)
+                    .min_w_0()
+                    .max_w(tokens::MATERIAL_TRAIL_STEP)
+                    .text_color(tokens.text_quiet)
+                    .cursor_pointer()
+                    .hover(|step| step.bg(tokens.raised).text_color(tokens.text))
+                    .on_click(cx.listener(move |panel, _, _, cx| {
+                        panel.trail.up_to(depth);
+                        panel.arrived(false, cx);
+                    }))
+                    .child(name)
                     .into_any_element(),
             );
         }
@@ -781,7 +821,7 @@ impl MaterialPanel {
             let panel = cx.entity().downgrade();
             let text = InteractiveText::new(("passage", at), styled).on_click(ranges, move |index, _, cx| {
                 if let (Some(panel), Some(id)) = (panel.upgrade(), targets.get(index)) {
-                    panel.update(cx, |panel, cx| panel.open_item(id, cx));
+                    panel.update(cx, |panel, cx| panel.follow_item(id, cx));
                 }
             });
             children.push(
@@ -894,6 +934,23 @@ impl Focusable for MaterialPanel {
     }
 }
 
+impl MaterialPanel {
+    /// A new place's content fades in, sliding a little from the side it was reached from.
+    fn arriving(&self, content: AnyElement) -> impl IntoElement + use<> {
+        let (arrival, down) = self.arrival;
+        let from = if down {
+            tokens::OUTLINE_SLIDE
+        } else {
+            gpui::px(0.) - tokens::OUTLINE_SLIDE
+        };
+        div().relative().child(content).with_animation(
+            ("arrive", arrival),
+            Animation::new(tokens::FADE).with_easing(ease_out_quint()),
+            move |body, shown| body.opacity(shown).left(from * (1. - shown)),
+        )
+    }
+}
+
 impl Render for MaterialPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.load(cx);
@@ -934,7 +991,7 @@ impl Render for MaterialPanel {
                     .track_scroll(&self.scroll)
                     .border_t_1()
                     .border_color(tokens.divider)
-                    .child(content),
+                    .child(self.arriving(content)),
             )
             .child(self.foot(&tokens))
     }

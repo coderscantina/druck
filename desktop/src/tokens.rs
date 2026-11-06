@@ -120,14 +120,29 @@ pub const TICK_LEFT: Pixels = px(12.);
 pub const TICK_ZONE_WIDTH: Pixels = px(36.);
 pub const TICK_OPACITY: f32 = 0.65;
 /// How far the pointer's reach is along the strip, and how much wider the tick under it grows, against its width.
-pub const TICK_REACH: Pixels = px(40.);
-pub const TICK_GROWTH: f32 = 1.7;
+pub const TICK_REACH: Pixels = px(48.);
+pub const TICK_GROWTH: f32 = 2.2;
 /// The outline a resting pointer unfolds from the ticks: its row, its width, how far a level moves a heading in, and
 /// how much of the text shows through the veil laid over it.
 pub const OUTLINE_ROW_HEIGHT: Pixels = px(20.);
 pub const OUTLINE_WIDTH: Pixels = px(260.);
 pub const OUTLINE_INDENT: Pixels = px(12.);
 pub const OUTLINE_TEXT_OPACITY: f32 = 0.62;
+/// Motion. One spring for what follows the pointer, the ticks, the outline's lit row, and the rail, so they move alike:
+/// quick, settled in about 250 ms, with no visible overshoot.
+pub const SPRING: gpui::SpringConfig = gpui::SpringConfig::new(420., 38., 1.);
+/// How long something fades in or out as it shows or goes: the outline, a tick's title, the rail's tick.
+pub const FADE: std::time::Duration = std::time::Duration::from_millis(140);
+/// How far the unfolding outline slides in from the left as it fades in.
+pub const OUTLINE_SLIDE: Pixels = px(6.);
+/// How long the pointer may be off the outline or the rail before it folds or leaves, so a slip of the hand does not
+/// close it.
+pub const LEAVE_GRACE: std::time::Duration = std::time::Duration::from_millis(220);
+/// A jump to a heading: where down the pane its line lands, how long the view glides one screen, and how many screens it
+/// glides at most, so a long jump does not race past pages of text: beyond that it starts this far from its target.
+pub const HEADING_LANDING: f32 = 0.16;
+pub const GLIDE: std::time::Duration = std::time::Duration::from_millis(260);
+pub const GLIDE_REACH: f32 = 8.;
 /// The bookshelf. A spine is as wide as its chapter is long: this much plus [`SPINE_WORD_WIDTH`] per word, and never
 /// under [`SPINE_MIN_WIDTH`], which keeps its number legible and lets 40 chapters stand in the narrowest window. A spine
 /// stops growing at [`SPINE_MAX_WIDTH`]. Too many words for the window shrink every spine's share of words alike.
@@ -146,7 +161,7 @@ pub const SPINE_HEIGHT: Pixels = px(72.);
 pub const SPINE_LIFT_OPEN: Pixels = px(6.);
 pub const SPINE_LIFT_HOVER: Pixels = px(3.);
 /// A spine needs this much width to show its title beside its number.
-pub const SPINE_TITLE_MIN_WIDTH: f32 = 44.;
+pub const SPINE_TITLE_MIN_WIDTH: f32 = 64.;
 /// The room under the baseline for a part's label.
 pub const SHELF_LABEL_HEIGHT: Pixels = px(20.);
 /// The raised shelf: its spines, labels, and lift, then a fade into the text above.
@@ -462,7 +477,10 @@ pub const MATERIAL_PANEL_MIN_WIDTH: Pixels = px(280.);
 pub const MATERIAL_TICK: (Pixels, Pixels) = (px(3.), px(32.));
 pub const MATERIAL_TICK_INSET: Pixels = px(4.);
 pub const MATERIAL_TICK_OPACITY: f32 = 0.45;
-pub const MATERIAL_EDGE: Pixels = px(14.);
+pub const MATERIAL_EDGE: Pixels = px(24.);
+/// How tall the band around the tick is that the pointer rests on, and how the tick grows while it is there.
+pub const MATERIAL_EDGE_BAND: Pixels = px(120.);
+pub const MATERIAL_TICK_LIT: (Pixels, f32) = (px(48.), 0.9);
 pub const MATERIAL_REST: std::time::Duration = std::time::Duration::from_millis(350);
 /// The trail's header, and the longest an earlier place's name stands before it is cut.
 pub const MATERIAL_TRAIL_HEIGHT: Pixels = px(38.);
@@ -576,6 +594,9 @@ pub struct Tokens {
     /// A page in a small drawing, such as the page panel's.
     pub sheet: Rgba,
     pub text: Rgba,
+    /// The author's running text in Write: softer than [`text`](Self::text), which headings and the chrome keep, so a
+    /// page of it does not glare.
+    pub writing: Rgba,
     pub text_quiet: Rgba,
     pub text_faint: Rgba,
     /// The author's choice. It colours only the caret, selection, marks, and the action that moves on, and says what is
@@ -599,15 +620,18 @@ impl Tokens {
     pub fn new(scheme: Scheme, accent: Option<u32>) -> Self {
         match scheme {
             Scheme::Dark => Self {
-                canvas: rgb(0x161616),
-                pages_canvas: rgb(0x161616),
-                panel: rgb(0x1c1c1c),
-                raised: rgb(0x2a2a2a),
-                field: rgb(0x232323),
-                divider: rgb(0x303030),
+                // Lifted off black and kept to about 8:1 for running text and 13:1 for headings, so a long read in the
+                // dark neither glares nor blooms. Asked for by the owner on 2026-11-06.
+                canvas: rgb(0x1a1a1a),
+                pages_canvas: rgb(0x1a1a1a),
+                panel: rgb(0x1f1f1f),
+                raised: rgb(0x2d2d2d),
+                field: rgb(0x262626),
+                divider: rgb(0x333333),
                 sheet: rgb(0xf7f7f5),
-                text: rgb(0xededed),
-                text_quiet: rgb(0xa6a6a6),
+                text: rgb(0xdedede),
+                writing: rgb(0xb4b4b4),
+                text_quiet: rgb(0x969696),
                 text_faint: rgb(0x6f6f6f),
                 accent: rgb(accent.unwrap_or(ACCENTS[0])),
                 switch_on: rgb(0x4a4a4a),
@@ -626,6 +650,7 @@ impl Tokens {
                 divider: rgb(0xdedede),
                 sheet: rgb(0xffffff),
                 text: rgb(0x1b1b1b),
+                writing: rgb(0x2e2e2e),
                 text_quiet: rgb(0x5e5e5e),
                 text_faint: rgb(0x8f8f8f),
                 accent: rgb(accent.unwrap_or(OXIDE_ON_LIGHT)),

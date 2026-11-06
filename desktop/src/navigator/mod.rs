@@ -379,7 +379,7 @@ impl Navigator {
     fn open(&mut self, id: ChapterId, at: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
         self.close(false, window, cx);
         self.parts.editor.update(cx, |editor, cx| match at {
-            Some(offset) => editor.show_place(id, offset, window, cx),
+            Some(offset) => editor.show_heading(id, offset, window, cx),
             None => editor.show_chapter(id, window, cx),
         });
         self.focus_text(window, cx);

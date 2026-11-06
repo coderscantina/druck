@@ -16,8 +16,9 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, Role, ScrollHandle,
-    SharedString, Task, Window, div, linear_color_stop, linear_gradient, px,
+    Animation, AnimationExt, AnyElement, Context, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
+    Role, ScrollHandle, SharedString, SpringAnimation, Task, Window, div, ease_out_quint, linear_color_stop,
+    linear_gradient, px,
 };
 
 use self::layout::{Group, Spine};
@@ -27,9 +28,11 @@ use crate::session::{ChapterId, Contents};
 use crate::sidebar::Mark;
 use crate::tokens::{self, Tokens};
 
-/// How long the pointer rests on the edge before the shelf rises, so passing it raises nothing, and how long it stays
-/// after the pointer leaves.
-const SETTLE: Duration = Duration::from_millis(140);
+/// How long the pointer rests on the edge before the shelf rises, so passing it raises nothing. It stays
+/// [`tokens::LEAVE_GRACE`] after the pointer leaves.
+const RISE: Duration = Duration::from_millis(250);
+/// How long the shelf is still drawn after it is put away, while it sinks.
+const SINK: Duration = Duration::from_millis(320);
 
 pub enum ShelfEvent {
     /// Open a chapter.
@@ -94,6 +97,9 @@ pub struct BookshelfView {
     marks: HashMap<ChapterId, Mark>,
     groups: Vec<Group>,
     raised: bool,
+    /// Whether the raised shelf is drawn: while raised, and while it sinks after.
+    shown: bool,
+    sinking: Option<Task<()>>,
     /// The keys are in the shelf.
     keyed: bool,
     pointer_in: bool,
@@ -143,6 +149,8 @@ impl BookshelfView {
             marks: HashMap::new(),
             groups: Vec::new(),
             raised: false,
+            shown: false,
+            sinking: None,
             keyed: false,
             pointer_in: false,
             hovered: None,
@@ -248,9 +256,10 @@ impl BookshelfView {
     /// the edge raises nothing and one dragging a spine out of the strip does not put it away.
     fn hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
         self.pointer_in = hovered;
+        let pause = if hovered { RISE } else { tokens::LEAVE_GRACE };
         self.settle = cx.spawn(async move |shelf, cx| {
             loop {
-                cx.background_executor().timer(SETTLE).await;
+                cx.background_executor().timer(pause).await;
                 let done = shelf.update(cx, |shelf, cx| shelf.settled(cx)).unwrap_or(true);
                 if done {
                     break;
@@ -432,26 +441,17 @@ impl BookshelfView {
         });
         // A spine too narrow for its title shows the number alone, small and centred, so two digits fit the least width.
         let titled = width >= tokens::SPINE_TITLE_MIN_WIDTH;
+        // gpui sets no text on its side, so a narrow spine shows its initial and the card has the title.
         let body = if spine.matter {
-            let room = (f32::from(tokens::SPINE_HEIGHT) / 11.) as usize - 1;
-            let count = spine.title.chars().count();
-            let shown: Vec<String> = if count <= room {
-                spine.title.chars().map(String::from).collect()
-            } else {
-                (spine.title.chars().take(room - 1).map(String::from))
-                    .chain(["\u{2026}".to_owned()])
-                    .collect()
-            };
             div()
                 .size_full()
-                .pt(tokens::SPACE_2)
+                .pt(px(10.))
                 .flex()
-                .flex_col()
-                .items_center()
+                .justify_center()
                 .text_size(tokens::TEXT_SMALL)
-                .line_height(px(11.))
+                .line_height(px(16.))
                 .text_color(title_color)
-                .children(shown.into_iter().map(|letter| div().child(letter)))
+                .child(spine.title.chars().next().map(String::from).unwrap_or_default())
         } else {
             div()
                 .size_full()
@@ -483,7 +483,6 @@ impl BookshelfView {
             .relative()
             .w_full()
             .h(tokens::SPINE_HEIGHT)
-            .mb(lift)
             .rounded_t(px(2.))
             .border_1()
             .border_b_0()
@@ -496,7 +495,12 @@ impl BookshelfView {
             .when(!open && !lit && !loose, |face| face.bg(tokens.field))
             .when(open, |face| face.shadow(tokens::float_shadow()))
             .child(body)
-            .children(dot);
+            .children(dot)
+            .with_spring(
+                ("spine-lift", id.number()),
+                SpringAnimation::new(tokens::SPRING).to(lift),
+                |face, lift| face.mb(lift),
+            );
         let accent = tokens.accent;
         let title: SharedString = spine.title.clone().into();
         div()
@@ -634,6 +638,11 @@ impl BookshelfView {
                     .text_size(tokens::TEXT_SMALL)
                     .text_color(tokens.text_faint)
                     .child(hint),
+            )
+            .with_animation(
+                ("spine-card", spine.id.number()),
+                Animation::new(tokens::FADE).with_easing(ease_out_quint()),
+                |card, shown| card.opacity(shown).mb(px(4. * (shown - 1.))),
             )
     }
 
@@ -778,12 +787,28 @@ impl Render for BookshelfView {
             .on_action(cx.listener(|_, _: &crate::editor::Undo, _, cx| cx.emit(ShelfEvent::StepMove { undo: true })))
             .on_action(cx.listener(|_, _: &crate::editor::Redo, _, cx| cx.emit(ShelfEvent::StepMove { undo: false })))
             .on_hover(cx.listener(|shelf, hovered: &bool, _, cx| shelf.hovered(*hovered, cx)));
-        if !self.raised {
+        if self.raised {
+            self.shown = true;
+            self.sinking = None;
+        } else if self.shown && self.sinking.is_none() {
+            self.sinking = Some(cx.spawn(async move |shelf, cx| {
+                cx.background_executor().timer(SINK).await;
+                shelf
+                    .update(cx, |shelf, cx| {
+                        shelf.shown = false;
+                        shelf.sinking = None;
+                        cx.notify();
+                    })
+                    .ok();
+            }));
+        }
+        if !self.shown {
             return root
                 .h(tokens::SHELF_EDGE_HEIGHT)
                 .child(self.trace(&fit, fits, &tokens))
                 .into_any_element();
         }
+        let height = tokens::SHELF_HEIGHT + tokens::SHELF_FADE_HEIGHT;
         let (clear, solid) = (
             Hsla::from(tokens.canvas).opacity(tokens::CLEAR),
             Hsla::from(tokens.canvas),
@@ -797,10 +822,11 @@ impl Render for BookshelfView {
             };
             self.card(&lit, &tokens, window)
         });
-        root.role(Role::Navigation)
-            .aria_label(crate::t!(Key::TheBookshelf))
-            .h(tokens::SHELF_HEIGHT + tokens::SHELF_FADE_HEIGHT)
-            .occlude()
+        let rising = div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .h(height)
             .child(
                 div()
                     .absolute()
@@ -833,6 +859,19 @@ impl Render for BookshelfView {
                     .child(row),
             )
             .children(card)
+            // Rises from the edge on the spring, and sinks back the same way while it is still drawn.
+            .with_spring(
+                "shelf-rise",
+                SpringAnimation::new(tokens::SPRING)
+                    .to(if self.raised { px(0.) } else { px(0.) - height })
+                    .from(px(0.) - height),
+                |rising, bottom| rising.bottom(bottom),
+            );
+        root.role(Role::Navigation)
+            .aria_label(crate::t!(Key::TheBookshelf))
+            .h(height)
+            .when(self.raised, |root| root.occlude())
+            .child(rising)
             .into_any_element()
     }
 }

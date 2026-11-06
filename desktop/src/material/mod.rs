@@ -111,6 +111,9 @@ pub struct Material {
     pause: Task<()>,
     /// Until when an edit of the text is the material's own insert, which does not close the rail as typing does.
     quiet_until: Option<std::time::Instant>,
+    /// Whether the rail is open only because the pointer rested at the edge: it leaves again with the pointer, until a
+    /// click in it or the keys keep it.
+    peeking: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -132,7 +135,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
             inspector.mount(tab, panel.clone().into());
         }
     });
-    let rail = cx.new(|_| rail::WriteRail::new(parts.inspector.clone()));
+    let rail = cx.new(|_| rail::WriteRail::new(parts.inspector.clone(), material.clone()));
     slots.right.push(crate::workspace::SidePanel {
         view: rail.into(),
         width: Rc::new(|window_width, cx| {
@@ -184,6 +187,7 @@ impl Material {
             library: None,
             pause: Task::ready(()),
             quiet_until: None,
+            peeking: false,
             _subscriptions: subscriptions,
         };
         material.reread(cx);
@@ -403,6 +407,7 @@ impl Material {
     /// Opens or closes the rail in Write. Opening reads the material again, so a file added outside shows.
     pub fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         let rail = Rail::get(cx);
+        self.peeking = false;
         if rail.open == open {
             return;
         }
@@ -415,6 +420,24 @@ impl Material {
             workspace.update(cx, |_, cx| cx.notify());
         }
         cx.notify();
+    }
+
+    /// Opens the rail for a pointer resting at the edge. It leaves with the pointer unless something keeps it.
+    pub fn peek(&mut self, cx: &mut Context<Self>) {
+        if Rail::get(cx).open {
+            return;
+        }
+        self.set_open(true, cx);
+        self.peeking = true;
+    }
+
+    pub fn peeking(&self) -> bool {
+        self.peeking
+    }
+
+    /// A click in the rail keeps it open.
+    pub fn keep(&mut self) {
+        self.peeking = false;
     }
 
     /// The rail's key: in Write, opens it with the keys on its panel, or closes it and gives them back to the text.
@@ -441,6 +464,7 @@ impl Material {
     }
 
     fn focus_panel(&mut self, field: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.peeking = false;
         let Some(panel) = self.panel.clone() else {
             return;
         };

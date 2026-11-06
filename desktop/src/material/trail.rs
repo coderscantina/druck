@@ -1,4 +1,5 @@
-//! Where the material panel has been, as a browser's history: back and forward, and a trail of the last places.
+//! Where the material panel is, as a breadcrumb: a kind's list, the item opened from it, and each source followed from
+//! that item. Going up drops the deepest place; going down again returns to it until another place is opened.
 
 use super::model::Kind;
 
@@ -9,79 +10,111 @@ pub enum Place {
     Item(String),
 }
 
-/// How many places the trail shows, ending at the current one.
+/// How many places the breadcrumb shows before it folds the middle ones into a gap: the list and the last two.
 pub const SHOWN: usize = 3;
 /// How many items the jump field lists as recent.
 const RECENT: usize = 8;
 
+/// One step of the breadcrumb as it shows: a place with its depth, or the gap standing for the places folded away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Crumb<'a> {
+    Place(usize, &'a Place),
+    Gap,
+}
+
 #[derive(Debug, Clone)]
 pub struct Trail {
-    places: Vec<Place>,
-    at: usize,
+    /// From the kind's list down to the current place. Never empty, and its first place is always a list.
+    path: Vec<Place>,
+    /// The places gone up from, the nearest last, for going down again.
+    below: Vec<Place>,
     /// Items opened, most recent first.
     recent: Vec<String>,
 }
 
 impl Trail {
-    pub fn new(start: Place) -> Self {
+    pub fn new(kind: Kind) -> Self {
         Self {
-            places: vec![start],
-            at: 0,
+            path: vec![Place::List(kind)],
+            below: Vec::new(),
             recent: Vec::new(),
         }
     }
 
     pub fn current(&self) -> &Place {
-        &self.places[self.at]
+        self.path.last().expect("the path starts at a list")
     }
 
-    /// Goes to `place`. What lay ahead of the current place is dropped, as a browser does, and going where the panel is
-    /// already adds nothing.
-    pub fn go(&mut self, place: Place) {
-        if let Place::Item(id) = &place {
-            self.recent.retain(|recent| recent != id);
-            self.recent.insert(0, id.clone());
-            self.recent.truncate(RECENT);
-        }
-        if *self.current() == place {
+    /// Shows a kind's list, as its rail tab does.
+    pub fn list(&mut self, kind: Kind) {
+        self.below.clear();
+        self.path = vec![Place::List(kind)];
+    }
+
+    /// Opens an item from its kind's list, the jump field, or the library.
+    pub fn open(&mut self, id: &str, kind: Kind) {
+        self.remember(id);
+        if self.path.len() == 2 && self.path[0] == Place::List(kind) && *self.current() == Place::Item(id.to_owned()) {
             return;
         }
-        self.places.truncate(self.at + 1);
-        self.places.push(place);
-        self.at += 1;
+        self.below.clear();
+        self.path = vec![Place::List(kind), Place::Item(id.to_owned())];
     }
 
-    /// Steps back, returning whether there was a place behind.
-    pub fn back(&mut self) -> bool {
-        let moved = self.at > 0;
-        self.at = self.at.saturating_sub(1);
-        moved
-    }
-
-    /// Steps forward, returning whether there was a place ahead.
-    pub fn forward(&mut self) -> bool {
-        let moved = self.at + 1 < self.places.len();
-        if moved {
-            self.at += 1;
+    /// Follows a source the current item names: one level deeper, or back up to it when it is on the way already.
+    pub fn follow(&mut self, id: &str) {
+        self.remember(id);
+        let place = Place::Item(id.to_owned());
+        self.below.clear();
+        match self.path.iter().position(|step| *step == place) {
+            Some(at) => self.path.truncate(at + 1),
+            None => self.path.push(place),
         }
-        moved
     }
 
-    pub fn can_go_back(&self) -> bool {
-        self.at > 0
+    fn remember(&mut self, id: &str) {
+        self.recent.retain(|recent| recent != id);
+        self.recent.insert(0, id.to_owned());
+        self.recent.truncate(RECENT);
     }
 
-    /// The last places up to the current one, oldest first, with how many steps back each is.
-    pub fn shown(&self) -> Vec<(usize, &Place)> {
-        let from = (self.at + 1).saturating_sub(SHOWN);
-        (from..=self.at)
-            .map(|index| (self.at - index, &self.places[index]))
-            .collect()
+    /// Goes up a level, returning whether there was one.
+    pub fn up(&mut self) -> bool {
+        if self.path.len() < 2 {
+            return false;
+        }
+        self.below.extend(self.path.pop());
+        true
     }
 
-    /// Steps back `steps` places, for a click on the trail.
-    pub fn back_by(&mut self, steps: usize) {
-        self.at = self.at.saturating_sub(steps);
+    /// Goes down again to where the panel went up from, returning whether there was such a place.
+    pub fn down(&mut self) -> bool {
+        let Some(place) = self.below.pop() else {
+            return false;
+        };
+        self.path.push(place);
+        true
+    }
+
+    pub fn can_go_up(&self) -> bool {
+        self.path.len() > 1
+    }
+
+    /// Goes up to the place at `depth`, for a click on the breadcrumb.
+    pub fn up_to(&mut self, depth: usize) {
+        while self.path.len() > depth + 1 && self.up() {}
+    }
+
+    /// The breadcrumb: the list, then the deeper places, with the middle ones folded into a gap past [`SHOWN`].
+    pub fn crumbs(&self) -> Vec<Crumb<'_>> {
+        let crumb = |depth: usize| Crumb::Place(depth, &self.path[depth]);
+        let last = self.path.len() - 1;
+        if self.path.len() <= SHOWN {
+            return (0..=last).map(crumb).collect();
+        }
+        let mut crumbs = vec![crumb(0), Crumb::Gap];
+        crumbs.extend((last + 2 - SHOWN..=last).map(crumb));
+        crumbs
     }
 
     /// The items opened, most recent first.
@@ -89,9 +122,14 @@ impl Trail {
         &self.recent
     }
 
-    /// Forgets items that are gone.
+    /// Forgets items that are gone, and goes up past any on the way.
     pub fn retain(&mut self, exists: impl Fn(&str) -> bool) {
         self.recent.retain(|id| exists(id));
+        let gone = |place: &Place| matches!(place, Place::Item(id) if !exists(id));
+        if let Some(at) = self.path.iter().position(gone) {
+            self.path.truncate(at);
+        }
+        self.below.clear();
     }
 }
 
@@ -104,48 +142,79 @@ mod tests {
     }
 
     #[test]
-    fn the_trail_walks_back_and_forward_and_a_new_place_drops_what_lay_ahead() {
-        let mut trail = Trail::new(Place::List(Kind::Research));
-        trail.go(item("a"));
-        trail.go(item("b"));
-        assert!(trail.back());
-        assert_eq!(trail.current(), &item("a"));
-        assert!(trail.forward());
-        assert!(!trail.forward());
-        trail.back();
-        trail.go(item("c"));
-        assert!(!trail.forward());
-        assert_eq!(trail.current(), &item("c"));
-        trail.back();
-        trail.back();
-        assert!(!trail.back());
+    fn the_breadcrumb_goes_down_by_following_sources_and_up_again() {
+        let mut trail = Trail::new(Kind::Research);
+        trail.open("interview", Kind::Research);
+        trail.follow("scan");
+        assert_eq!(trail.current(), &item("scan"));
+        assert!(trail.up());
+        assert_eq!(trail.current(), &item("interview"));
+        assert!(trail.down());
+        assert_eq!(trail.current(), &item("scan"));
+        assert!(!trail.down());
+        trail.up_to(0);
         assert_eq!(trail.current(), &Place::List(Kind::Research));
+        assert!(!trail.up());
     }
 
     #[test]
-    fn the_trail_shows_the_last_three_places_and_how_far_back_each_is() {
-        let mut trail = Trail::new(Place::List(Kind::Research));
-        for id in ["a", "b", "c"] {
-            trail.go(item(id));
+    fn a_tab_or_a_fresh_open_starts_the_breadcrumb_again_instead_of_adding_to_it() {
+        let mut trail = Trail::new(Kind::Research);
+        trail.open("interview", Kind::Research);
+        trail.list(Kind::Notes);
+        assert_eq!(trail.crumbs(), [Crumb::Place(0, &Place::List(Kind::Notes))]);
+        trail.open("idea", Kind::Notes);
+        assert_eq!(
+            trail.crumbs(),
+            [
+                Crumb::Place(0, &Place::List(Kind::Notes)),
+                Crumb::Place(1, &item("idea"))
+            ]
+        );
+        trail.up();
+        trail.open("other", Kind::Notes);
+        assert!(!trail.down());
+    }
+
+    #[test]
+    fn following_a_source_already_on_the_way_goes_back_up_to_it() {
+        let mut trail = Trail::new(Kind::Research);
+        trail.open("a", Kind::Research);
+        trail.follow("b");
+        trail.follow("a");
+        assert_eq!(
+            trail.crumbs(),
+            [
+                Crumb::Place(0, &Place::List(Kind::Research)),
+                Crumb::Place(1, &item("a"))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_deep_breadcrumb_shows_the_list_a_gap_and_the_last_two() {
+        let mut trail = Trail::new(Kind::Research);
+        trail.open("a", Kind::Research);
+        for id in ["b", "c"] {
+            trail.follow(id);
         }
-        let shown: Vec<_> = trail
-            .shown()
-            .into_iter()
-            .map(|(steps, place)| (steps, place.clone()))
-            .collect();
-        assert_eq!(shown, [(2, item("a")), (1, item("b")), (0, item("c"))]);
-        trail.back_by(2);
-        assert_eq!(trail.current(), &item("a"));
+        assert_eq!(
+            trail.crumbs(),
+            [
+                Crumb::Place(0, &Place::List(Kind::Research)),
+                Crumb::Gap,
+                Crumb::Place(2, &item("b")),
+                Crumb::Place(3, &item("c")),
+            ]
+        );
     }
 
     #[test]
     fn recent_items_come_most_recent_first_without_repeats() {
-        let mut trail = Trail::new(Place::List(Kind::Notes));
-        trail.go(item("a"));
-        trail.go(item("b"));
-        trail.go(item("a"));
+        let mut trail = Trail::new(Kind::Notes);
+        trail.open("a", Kind::Notes);
+        trail.open("b", Kind::Notes);
+        trail.follow("a");
         assert_eq!(trail.recent(), ["a", "b"]);
-        trail.go(item("a"));
-        assert_eq!(trail.shown().len(), 3);
     }
 }

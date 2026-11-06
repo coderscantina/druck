@@ -104,6 +104,7 @@ pub fn apply(parts: &Parts, workspace: Entity<Workspace>, window: &mut Window, c
         crate::versions::apply_gate(window, cx);
         crate::material::apply_gate(window, cx);
         workspace.update(cx, |_, cx| crate::agent::apply_gate(window, cx));
+        pointer_script(handle, cx);
         start(
             workspace.clone(),
             parts.editor.clone(),
@@ -223,6 +224,74 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
             })
             .detach();
     }
+}
+
+/// `DRUCK_POINTER=file` plays a pointer script through the window's own event path, so hover, rest, and clicks run as
+/// a hand would make them, without the window being key. A line is `move X Y`, `glide X0 Y0 X1 Y1 MS` (moves at 60 Hz
+/// for that long), `click X Y`, `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in
+/// the window, from its top left.
+fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
+    let Some(script) = var("DRUCK_POINTER").and_then(|path| std::fs::read_to_string(path).ok()) else {
+        return;
+    };
+    cx.spawn(async move |cx| {
+        let start = Instant::now();
+        let at = |x: f32, y: f32| gpui::point(gpui::px(x), gpui::px(y));
+        let send = |input: gpui::PlatformInput, cx: &mut AsyncApp| {
+            handle.update(cx, |_, window, cx| window.dispatch_event(input, cx)).ok();
+        };
+        let moved = |position| {
+            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                position,
+                pressed_button: None,
+                modifiers: gpui::Modifiers::default(),
+            })
+        };
+        for line in script.lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let numbers: Vec<f32> = words.iter().skip(1).filter_map(|word| word.parse().ok()).collect();
+            match (words.first().copied(), numbers.as_slice()) {
+                (Some("move"), [x, y]) => send(moved(at(*x, *y)), cx),
+                (Some("glide"), [x0, y0, x1, y1, ms]) => {
+                    let steps = (ms / 16.).max(1.) as usize;
+                    for step in 0..=steps {
+                        let t = step as f32 / steps as f32;
+                        send(moved(at(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)), cx);
+                        cx.background_executor().timer(Duration::from_millis(16)).await;
+                    }
+                }
+                (Some("click"), [x, y]) => {
+                    let position = at(*x, *y);
+                    send(moved(position), cx);
+                    send(
+                        gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                            button: gpui::MouseButton::Left,
+                            position,
+                            modifiers: gpui::Modifiers::default(),
+                            click_count: 1,
+                            first_mouse: false,
+                        }),
+                        cx,
+                    );
+                    cx.background_executor().timer(Duration::from_millis(70)).await;
+                    send(
+                        gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                            button: gpui::MouseButton::Left,
+                            position,
+                            modifiers: gpui::Modifiers::default(),
+                            click_count: 1,
+                        }),
+                        cx,
+                    );
+                }
+                (Some("wait"), [ms]) => cx.background_executor().timer(Duration::from_millis(*ms as u64)).await,
+                (Some("say"), _) => eprintln!("pointer {:>6} ms: {}", start.elapsed().as_millis(), line[3..].trim()),
+                _ => eprintln!("pointer: cannot read {line:?}"),
+            }
+        }
+        eprintln!("pointer {:>6} ms: done", start.elapsed().as_millis());
+    })
+    .detach();
 }
 
 pub fn start(

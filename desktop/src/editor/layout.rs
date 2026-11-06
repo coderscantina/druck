@@ -24,7 +24,10 @@ pub struct GalleyStyle {
     pub mono: Font,
     pub body_size: Pixels,
     pub leading: f32,
+    /// Running text.
     pub ink: Hsla,
+    /// Headings, a step stronger than running text.
+    pub heading_ink: Hsla,
     pub quiet: Hsla,
     pub link: Hsla,
     pub rule: Hsla,
@@ -61,7 +64,8 @@ impl GalleyStyle {
             body_size: px(book.body.size * tokens::POINT),
             leading: book.body.line_height,
             book,
-            ink: tokens.text.into(),
+            ink: tokens.writing.into(),
+            heading_ink: tokens.text.into(),
             quiet: tokens.text_quiet.into(),
             link: tokens.link.into(),
             rule: tokens.divider.into(),
@@ -77,7 +81,8 @@ impl GalleyStyle {
 
     /// Takes the colours of the appearance.
     pub fn set_colors(&mut self, tokens: &Tokens) {
-        self.ink = tokens.text.into();
+        self.ink = tokens.writing.into();
+        self.heading_ink = tokens.text.into();
         self.quiet = tokens.text_quiet.into();
         self.link = tokens.link.into();
         self.rule = tokens.divider.into();
@@ -141,7 +146,7 @@ impl GalleyStyle {
     /// A line of the source view: the same monospace throughout, with color and weight telling blocks apart.
     fn source_line_style(&self, kind: BlockKind) -> LineStyle {
         let (weight, color) = match kind {
-            BlockKind::Heading { .. } => (FontWeight::BOLD, self.ink),
+            BlockKind::Heading { .. } => (FontWeight::BOLD, self.heading_ink),
             BlockKind::Code => (FontWeight::NORMAL, self.link),
             BlockKind::FrontMatter
             | BlockKind::Directive
@@ -195,7 +200,11 @@ impl GalleyStyle {
             font: font_of(face),
             size: px(face.size * self.scale()),
             leading: face.line_height,
-            color: self.ink,
+            color: if matches!(kind, BlockKind::Heading { .. }) {
+                self.heading_ink
+            } else {
+                self.ink
+            },
         };
         match kind {
             BlockKind::FrontMatter
@@ -280,7 +289,8 @@ impl GalleyStyle {
     }
 }
 
-/// Where the text stands in the pane: centred at its measure, keeping room for the gutter on its left. Margin notes stand
+/// Where the text stands in the pane: centred at its measure on the window's centre, so a panel that opens beside it
+/// moves nothing while there is room, and keeping room for the gutter on its left. Margin notes stand
 /// at its right, and the text moves left for them only if the window is too narrow to hold both. The text keeps its measure
 /// before the notes keep their place: below measure plus margin they do not show, and the gutter's marker stands for them.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
@@ -293,7 +303,8 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn place(viewport: Bounds<Pixels>, measure: Pixels, notes: bool) -> Self {
+    /// `centre` is the window's centre across, in the pane's coordinates.
+    pub fn place(viewport: Bounds<Pixels>, measure: Pixels, notes: bool, centre: Pixels) -> Self {
         let left = viewport.left() + tokens::GUTTER_WIDTH;
         let right = viewport.right() - tokens::TEXT_MARGIN_RIGHT;
         let note_room = tokens::NOTE_GAP + tokens::NOTE_WIDTH;
@@ -301,7 +312,7 @@ impl Column {
         let room = right - left - if notes_fit { note_room } else { px(0.) };
         // Never wider than the room, so a line is never cut by the pane's edge or covered by a panel.
         let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH.min(room));
-        let centred = viewport.left() + (viewport.size.width - text_width) * 0.5;
+        let centred = centre - text_width * 0.5;
         let last = right - text_width - if notes_fit { note_room } else { px(0.) };
         let text_left = centred.min(last).max(left);
         Self {
@@ -785,8 +796,8 @@ mod tests {
 
     #[test]
     fn the_text_is_centred_and_notes_do_not_move_it_when_both_fit() {
-        let bare = Column::place(viewport(1400.), px(460.), false);
-        let noted = Column::place(viewport(1400.), px(460.), true);
+        let bare = Column::place(viewport(1400.), px(460.), false, viewport(1400.).center().x);
+        let noted = Column::place(viewport(1400.), px(460.), true, viewport(1400.).center().x);
         assert_eq!(bare.text_left, px(470.));
         assert_eq!(bare.text_width, px(460.));
         assert_eq!(bare.note_left, None);
@@ -796,23 +807,35 @@ mod tests {
 
     #[test]
     fn a_narrow_window_moves_the_text_for_its_notes_then_drops_them_before_narrowing_it() {
-        let moved = Column::place(viewport(860.), px(460.), true);
+        let moved = Column::place(viewport(860.), px(460.), true, viewport(860.).center().x);
         assert!(moved.text_left < px(200.));
         assert_eq!(moved.text_width, px(460.));
         assert!(moved.note_left.is_some());
-        let dropped = Column::place(viewport(620.), px(460.), true);
+        let dropped = Column::place(viewport(620.), px(460.), true, viewport(620.).center().x);
         assert_eq!(dropped.note_left, None);
         assert_eq!(dropped.text_width, px(460.));
-        let narrowed = Column::place(viewport(400.), px(460.), true);
+        let narrowed = Column::place(viewport(400.), px(460.), true, viewport(400.).center().x);
         assert_eq!(narrowed.note_left, None);
         assert!(narrowed.text_width < px(460.));
+    }
+
+    #[test]
+    fn a_panel_at_the_right_moves_the_text_only_when_it_would_reach_it() {
+        let window = viewport(1400.);
+        let roomy = Column::place(viewport(1024.), px(460.), false, window.center().x);
+        assert_eq!(
+            roomy.text_left,
+            Column::place(window, px(460.), false, window.center().x).text_left
+        );
+        let tight = Column::place(viewport(700.), px(460.), false, window.center().x);
+        assert_eq!(tight.text_left + tight.text_width, px(700.) - tokens::TEXT_MARGIN_RIGHT);
     }
 
     #[test]
     fn the_text_never_runs_past_its_pane() {
         // Narrower than the least width: the text takes what there is rather than run under a panel.
         let pane = viewport(208.);
-        let column = Column::place(pane, px(460.), false);
+        let column = Column::place(pane, px(460.), false, pane.center().x);
         assert!(column.text_left + column.text_width <= pane.right() - tokens::TEXT_MARGIN_RIGHT);
         assert!(column.text_left >= pane.left() + tokens::GUTTER_WIDTH);
     }

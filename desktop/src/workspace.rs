@@ -717,7 +717,7 @@ impl Workspace {
                 self.focus_main(window, cx);
             }
             SidebarEvent::Jump(id, offset) => {
-                editor.update(cx, |editor, cx| editor.show_place(*id, *offset, window, cx));
+                editor.update(cx, |editor, cx| editor.show_heading(*id, *offset, window, cx));
                 self.focus_main(window, cx);
             }
             SidebarEvent::FocusText => self.focus_main(window, cx),
