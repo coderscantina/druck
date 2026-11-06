@@ -95,6 +95,12 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Owner decisions after the sixth review
+
+On 2026-11-06 the owner's decisions on the sixth review's open points went in, with two fixes. The choices are in [decisions](DECISIONS.md#2026-11-06-proof-order-and-missing-citation-keys). `Cmd+]` and `Cmd+[` walk errors and open placeholders before warnings, each group in book order, and the Proof list shows that order. In the app, a citation key the bibliography lacks no longer leaves "No pages": it shows as `[?key]`, counts as an error in Proof at its place, and only a final export refuses. The CLI and the default `Missing::Error` are unchanged: a hand run of `druck render` on a document with a missing key printed the error at line 5, column 22 and exited 1 with no PDF. The new section dialog closes on Escape: its name field took Escape as its own and only gave up its focus, so the dialog needed a second press, with or without the palette. The field now reports Escape as the palette, find bar, and commit card fields do. No other card had the fault. A wrapped figure caption centres every row, and so does a wrapped table cell that is centred or right aligned, since both use one helper.
+
+Evidence on a temp project, release with `--features measure`, `DRUCK_GATE=2`, keys by PID, windows captured by id: Proof with errors and a placeholder first, then warnings; five `Cmd+]` presses ending on the first warning; pages kept with two missing keys and a missing image; the dialog closing on one Escape after the palette; a two-row caption centred. Commands: `cargo test` (450 unit tests and the integration tests), `cargo test --test cli`, `--test parity`, `--test public_api`, `cargo test -p druck-desktop` (721, 1 ignored), both `cargo clippy --all-targets -- -D warnings` runs, and `cargo fmt --all --check`, all clean. Not verified: light appearance and German captures, and a wrapped table cell on screen.
+
 ### Sixth review note
 
 On 2026-11-06 the sixth review's findings went in, except F4 and the walk order of F2, which wait for the owner. The choices are in [decisions](DECISIONS.md#2026-11-06-sixth-review-findings), and [the design](DESIGN.md) follows them. F17 was applied in part: the final check still asks the resolver for images, since the `ImageNotFound` warnings only exist after a layout. PNGs of the visual fixes are in `.captures/fixes-review-6-2026-11-06` beside the repo.
@@ -105,7 +111,7 @@ Evidence by captures on that copy, keys by PID, with a sandboxed `XDG_CONFIG_HOM
 
 Not verified: an agent's struck words in the text (F12), which need a live turn, covered by a test of the display line; the timeline's struck words, covered by a test; the same-sentence case of F1, which takes the same path as the one captured; light appearance captures of the new tints; and the walk keys after a refused export, which wait for the owner's decision.
 
-Follow-ups: Escape still does not reach the new section dialog after the palette opened over it, seen again here. A wrapped figure caption keeps its rows at the left.
+Follow-ups: both fixed in the note above.
 
 ### Fifth review note
 
