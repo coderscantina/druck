@@ -37,6 +37,8 @@ pub struct GridRow {
 pub struct GridShape {
     /// What it was shaped from, to tell when the text changed.
     source: Rc<Grid>,
+    /// The room above the caption, and as much below the last rule, as a figure keeps.
+    space: Pixels,
     caption: Option<BlockLayout>,
     top: Pixels,
     rows: Vec<GridRow>,
@@ -126,7 +128,7 @@ impl Whole {
 impl GridShape {
     fn paint(&self, origin: Point<Pixels>, frame: &Frame, window: &mut Window, cx: &mut App) {
         if let Some(caption) = &self.caption {
-            paint_lines(caption, origin.x, origin.y, frame, window, cx);
+            paint_lines(caption, origin.x, origin.y + self.space, frame, window, cx);
         }
         let rule = |y: Pixels, strong: bool, window: &mut Window| {
             let bounds = Bounds::new(
@@ -259,9 +261,11 @@ impl EditorView {
             .collect();
         let caption = (!grid.caption.text.is_empty())
             .then(|| self.shape_inline(&grid.caption.text, width, false, None, dim, window));
-        let top = caption
-            .as_ref()
-            .map_or(px(0.), |caption| caption.height + tokens::CAPTION_GAP);
+        let space = self.style.body_size * tokens::PARAGRAPH_GAP;
+        let top = space
+            + caption
+                .as_ref()
+                .map_or(px(0.), |caption| caption.height + tokens::CAPTION_GAP);
         let mut y = top;
         let mut rows = Vec::with_capacity(grid.rows.len());
         for (index, row) in grid.rows.iter().enumerate() {
@@ -293,11 +297,12 @@ impl EditorView {
         }
         GridShape {
             source: grid,
+            space,
             caption,
             top,
             rows,
             width,
-            height: y + tokens::HAIRLINE,
+            height: y + tokens::HAIRLINE + space,
         }
     }
 
