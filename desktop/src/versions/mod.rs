@@ -51,7 +51,9 @@ use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
 use crate::persist::merge::Choice;
 use crate::persist::recovery::data_dir;
-use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, GitConflict, GitMove, PersistView, Source};
+use crate::persist::{
+    ChoiceWithoutConflict, Closing, FileChange, GitConflict, GitMove, MergeResumed, PersistView, Source, StoppedMerge,
+};
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Mode, Parts, Slots};
@@ -286,6 +288,8 @@ pub struct Versions {
     merge: PendingMerge,
     /// Changes coming in now are the repo's own moves, which were labelled before they began.
     quiet: bool,
+    /// Where the first read of the repo sends the merge Git stopped on, for recovery copies.
+    stopped_merge: Option<futures::channel::oneshot::Sender<StoppedMerge>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -318,6 +322,7 @@ impl Versions {
                 view.outside_change(change, cx)
             }),
             cx.observe(&persist, |view, _, cx| view.conflicts_settled(cx)),
+            cx.subscribe(&persist, |view, _, MergeResumed, _| view.merge.stopped()),
             cx.subscribe_in(
                 &persist,
                 window,
@@ -343,6 +348,7 @@ impl Versions {
             Kind::Single { .. } => RepoState::Single,
             Kind::Project { .. } => RepoState::Reading,
         };
+        let stopped_merge = persist.update(cx, |persist, _| persist.take_stopped_merge());
         let mut view = Self {
             parts,
             persist,
@@ -361,15 +367,13 @@ impl Versions {
             fetching: Fetching::default(),
             merge: PendingMerge::default(),
             quiet: false,
+            stopped_merge,
             _subscriptions: subscriptions,
         };
         view.history.paths = view.chapter_paths(cx);
         view.look_after_history(window, cx);
         view.warn_about_cloud(window, cx);
         view.say_what_opening_did(window, cx);
-        if view.book(cx).is_none() {
-            view.persist.update(cx, |persist, cx| persist.restore(None, window, cx));
-        }
         view.refresh(cx);
         view
     }
@@ -425,32 +429,29 @@ impl Versions {
         let Some(book) = self.book(cx) else {
             return;
         };
-        let first = !self.persist.read(cx).restored();
+        let first = self.stopped_merge.is_some();
         let work = cx.background_spawn(async move {
             match Repo::open(&book) {
-                Ok(None) => (RepoState::NoRepo, None),
+                Ok(None) => (RepoState::NoRepo, Ok(None)),
                 Ok(Some(repo)) => match repo.overview(LOG_ROWS) {
                     Ok(overview) => {
-                        let stopped = (first && overview.merging.is_some())
-                            .then(|| stopped_merge(&repo))
-                            .flatten();
+                        let stopped = if first && overview.merging.is_some() {
+                            stopped_merge(&repo)
+                        } else {
+                            Ok(None)
+                        };
                         (RepoState::Ready(Box::new(overview)), stopped)
                     }
-                    Err(problem) => (RepoState::Broken(describe(&problem)), None),
+                    Err(problem) => (RepoState::Broken(describe(&problem)), Err(describe(&problem))),
                 },
-                Err(problem) => (RepoState::Broken(describe(&problem)), None),
+                Err(problem) => (RepoState::Broken(describe(&problem)), Err(describe(&problem))),
             }
         });
         self.reading = cx.spawn(async move |view, cx| {
             let (state, stopped) = work.await;
             view.update(cx, |view, cx| {
-                if first {
-                    with_view(cx, move |view, window, cx| {
-                        let persist = view.persist.clone();
-                        if persist.update(cx, |persist, cx| persist.restore(stopped, window, cx)) {
-                            view.merge.stopped();
-                        }
-                    });
+                if first && let Some(reply) = view.stopped_merge.take() {
+                    reply.send(stopped).ok();
                 }
                 if view.state != state {
                     view.state = state;
@@ -930,9 +931,11 @@ impl Render for Versions {
 
 /// A merge Git stopped on, as the app finds it when it opens: the branch it brings in, and the files in the book the
 /// conflict line can show.
-fn stopped_merge(repo: &Repo) -> Option<(String, Vec<GitConflict>)> {
-    let branch = repo.merging_from().ok()??;
-    let conflicts = (repo.conflicts().ok()?.into_iter())
+fn stopped_merge(repo: &Repo) -> StoppedMerge {
+    let Some(branch) = repo.merging_from().map_err(|problem| describe(&problem))? else {
+        return Ok(None);
+    };
+    let conflicts = (repo.conflicts().map_err(|problem| describe(&problem))?.into_iter())
         .filter(|conflict| conflict.in_book && conflict.ours_exists)
         .filter_map(|conflict| {
             Some(GitConflict {
@@ -942,7 +945,7 @@ fn stopped_merge(repo: &Repo) -> Option<(String, Vec<GitConflict>)> {
             })
         })
         .collect::<Vec<_>>();
-    (!conflicts.is_empty()).then_some((branch, conflicts))
+    Ok((!conflicts.is_empty()).then_some((branch, conflicts)))
 }
 
 fn open_repo(book: &Path) -> Result<Repo, Problem> {

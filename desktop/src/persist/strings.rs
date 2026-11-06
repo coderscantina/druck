@@ -74,6 +74,11 @@ crate::strings! {
             "Cannot bring back the unsaved text of {file}: {error}",
             "Der ungesicherte Text von {file} lässt sich nicht zurückholen: {error}"
         ),
+        RestoredUnmerged => (
+            "Unsaved text came back without the repo's merge state: {error}",
+            "Ungesicherter Text kam ohne den Merge-Stand des Repos zurück: {error}"
+        ),
+        RepoTooSlow => ("the repo did not answer in time", "das Repo antwortete nicht rechtzeitig"),
         CannotKeepCopy => (
             "Cannot keep a recovery copy of {file}: {error}",
             "Keine Sicherungskopie von {file} möglich: {error}"

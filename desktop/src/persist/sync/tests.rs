@@ -914,6 +914,35 @@ fn a_git_conflict_left_open_at_a_quit_comes_back_as_one() {
     assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
 }
 
+/// Without the merge Git stopped on, as when the repo cannot be read in time, the same copy comes back merged by
+/// sentences, since the two sides changed different ones.
+#[test]
+fn a_git_conflict_left_open_comes_back_merged_without_the_merge_state() {
+    let mut fixture = Fixture::new();
+    let path = fixture.one();
+    let base = "# One\n\nFirst line. Of words.\n\nSecond line.\n";
+    let theirs = "# One\n\nFirst long line. Of words.\n\nSecond line.\n";
+    fixture.type_in(ONE, "First line.", "First line. Of my words.");
+    fixture.save();
+    fs::write(&path, theirs).unwrap();
+    fixture
+        .sync
+        .take_git_conflict(&mut fixture.session, &path, base, theirs);
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Held);
+
+    let copies = fixture.sync.copies().unwrap().clone();
+    let mut session = Session::open(&fixture.dir).unwrap();
+    let mut sync = FileSync::new(Some(copies.clone()));
+    for copy in copies.load() {
+        assert!(sync.restore_copy(&mut session, &copy, &[]));
+    }
+    assert_eq!(sync.conflicts().count(), 0);
+    assert_eq!(
+        session.file_text(&path).unwrap(),
+        "# One\n\nFirst long line. Of my words.\n\nSecond line.\n"
+    );
+}
+
 #[test]
 fn a_conflict_in_a_line_that_also_stands_earlier_is_marked_where_it_is() {
     let mut fixture = Fixture::new();

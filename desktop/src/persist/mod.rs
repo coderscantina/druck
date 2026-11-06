@@ -45,6 +45,17 @@ actions!(persist, [KeepMine, TakeTheirs, SeeBoth, ShowKeptCopies]);
 const GONE_POLL: Duration = Duration::from_secs(2);
 /// How soon to try again while an input method is composing or a write is running.
 const BUSY_RETRY: Duration = Duration::from_millis(100);
+/// How long recovery copies wait for the merge Git stopped on, before they come back without it.
+const RESTORE_WAIT: Duration = Duration::from_secs(2);
+
+/// The merge Git stopped on, as Versions reads it for recovery copies: its branch and conflicts, or nothing, or why it
+/// could not be read.
+pub type StoppedMerge = Result<Option<(String, Vec<GitConflict>)>, String>;
+
+/// Restoring recovery copies took up the merge Git stopped on, so the conflict line is about that merge.
+pub struct MergeResumed;
+
+impl EventEmitter<MergeResumed> for PersistView {}
 
 /// The view the conflict keys go to.
 struct Current {
@@ -200,6 +211,9 @@ pub struct PersistView {
     passage: Option<ConflictPassage>,
     /// Recovery copies wait for [`Self::restore`], so none is written over before it is read.
     restored: bool,
+    /// Where Versions sends the merge Git stopped on, which restoring waits for, until it has.
+    stopped_merge: Option<futures::channel::oneshot::Sender<StoppedMerge>>,
+    _restoring: Task<()>,
     _incoming: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -227,6 +241,22 @@ impl PersistView {
         let copies = data_dir().map(|data| Copies::new(&data, &location));
         let model = inspector.read(cx).model().clone();
         let theme = open_theme(&model, cx);
+        // A project waits a moment for Versions to read the merge Git stopped on. A single file has no repo.
+        let (stopped_merge, merge_read) = futures::channel::oneshot::channel();
+        let project = matches!(editor.read(cx).session().kind(), Kind::Project { .. });
+        let restoring = cx.spawn_in(window, async move |view, cx| {
+            let read = if project {
+                let timer = cx.background_executor().timer(RESTORE_WAIT);
+                match futures::future::select(merge_read, timer).await {
+                    futures::future::Either::Left((read, _)) => read.ok(),
+                    futures::future::Either::Right(_) => None,
+                }
+            } else {
+                Some(Ok(None))
+            };
+            view.update_in(cx, |view, window, cx| view.restore(read, window, cx))
+                .ok();
+        });
         let (signals, mut receive) = futures::channel::mpsc::unbounded::<Signal>();
         let incoming = cx.spawn_in(window, async move |view, cx| {
             // Parked in `next` while nothing changes: no timer runs at idle.
@@ -304,6 +334,8 @@ impl PersistView {
             merging: None,
             passage: None,
             restored: false,
+            stopped_merge: Some(stopped_merge),
+            _restoring: restoring,
             _incoming: incoming,
             _subscriptions: subscriptions,
         };
@@ -478,30 +510,31 @@ impl PersistView {
         }
     }
 
-    /// Whether [`Self::restore`] has run.
-    pub fn restored(&self) -> bool {
-        self.restored
+    /// Where to send the merge Git stopped on, once, for recovery copies to wait for. See [`Self::restore`].
+    pub fn take_stopped_merge(&mut self) -> Option<futures::channel::oneshot::Sender<StoppedMerge>> {
+        self.stopped_merge.take()
     }
 
     /// Brings back what a run that did not finish left in recovery copies, once. Each is one undo step, and merges with
-    /// whatever the file holds by now. Versions calls it after its first read of the repo, with the merge Git stopped
-    /// on, if any, as `(branch, conflicts)`: a file of it whose choice the last run left open goes back to the conflict
-    /// line. Returns whether one did.
-    pub fn restore(
-        &mut self,
-        merge: Option<(String, Vec<GitConflict>)>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// whatever the file holds by now. `read` is the merge Git stopped on, from Versions, or `None` when it did not come
+    /// in time: a file of that merge whose choice the last run left open goes back to the conflict line. Without it the
+    /// copies come back merged by sentences, and the foot says why.
+    fn restore(&mut self, read: Option<StoppedMerge>, window: &mut Window, cx: &mut Context<Self>) {
         if std::mem::replace(&mut self.restored, true) {
-            return false;
+            return;
         }
+        self.stopped_merge = None;
         let Some(copies) = self.sync.copies().cloned() else {
-            return false;
+            return;
         };
         let found = copies.load();
         if found.is_empty() {
-            return false;
+            return;
+        }
+        let (merge, unread) = merge_or_why(read);
+        if unread.is_some() {
+            let book = self.session(cx).base_dir();
+            self.report(&book, Problem::RestoreUnmerged, unread, cx);
         }
         let (branch, git) = merge.unzip();
         let git = git.unwrap_or_default();
@@ -524,19 +557,18 @@ impl PersistView {
             );
         });
         self.sync.set_source(self.source());
-        let resumed = self.has_conflicts() && branch.is_some();
-        if resumed {
+        if self.has_conflicts() && branch.is_some() {
             self.merging = branch;
             self.update_watched_files(cx);
             self.sync_passage(cx);
             self.go_to_passage(window, cx);
+            cx.emit(MergeResumed);
         }
         if !names.is_empty() {
             let text = format!("{} {}", crate::t!(Key::Restored), names.join(", "));
             self.show_note(text, window, cx);
             self.edited(window, cx);
         }
-        resumed
     }
 
     // Saving
@@ -1101,6 +1133,7 @@ impl Render for PersistView {
                 Problem::Unreadable(reason) => format!("{}: {reason}", crate::t!(Key::Unreadable)),
                 Problem::Watch(error) => crate::t!(Key::CannotWatch, error = error),
                 Problem::Restore(error) => crate::t!(Key::CannotRestore, file = file_name(path), error = error),
+                Problem::RestoreUnmerged(error) => crate::t!(Key::RestoredUnmerged, error = error),
                 Problem::Copy(error) => crate::t!(Key::CannotKeepCopy, file = file_name(path), error = error),
                 Problem::Merge(error) => crate::t!(Key::CannotMerge, file = file_name(path), error = error),
                 Problem::ChapterList(error) => crate::t!(Key::CannotUpdateChapters, error = error),
@@ -1141,6 +1174,41 @@ impl Render for PersistView {
     }
 }
 
+/// The merge to restore recovery copies with, and why there is none when Versions could not say: it failed, or did not
+/// answer in time.
+fn merge_or_why(read: Option<StoppedMerge>) -> (Option<(String, Vec<GitConflict>)>, Option<String>) {
+    match read {
+        Some(Ok(merge)) => (merge, None),
+        Some(Err(error)) => (None, Some(error)),
+        None => (None, Some(crate::t!(Key::RepoTooSlow).to_owned())),
+    }
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_copies_take_the_merge_that_came_and_say_why_one_did_not() {
+        let conflict = GitConflict {
+            path: PathBuf::from("/book/one.md"),
+            base: "base".into(),
+            theirs: "theirs".into(),
+        };
+        let merge = Some(("p2".to_owned(), vec![conflict.clone()]));
+        assert_eq!(merge_or_why(Some(Ok(merge.clone()))), (merge, None));
+        assert_eq!(merge_or_why(Some(Ok(None))), (None, None));
+        assert_eq!(
+            merge_or_why(Some(Err("locked".into()))),
+            (None, Some("locked".to_owned()))
+        );
+        assert!(
+            merge_or_why(None).1.is_some(),
+            "a read that did not come in time says so"
+        );
+    }
 }

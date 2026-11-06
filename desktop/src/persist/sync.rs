@@ -218,6 +218,9 @@ pub enum Problem {
     Restore(String),
     /// Unsaved text cannot be kept in a recovery copy.
     Copy(String),
+    /// Recovery copies came back without the merge Git stopped on, which could not be read, so a conflict that merge
+    /// left open was merged by sentences.
+    RestoreUnmerged(String),
     /// A change from outside cannot be merged into the text, which stays as it was.
     Merge(String),
     /// The chapter list cannot be written after a chapter's file moved.
