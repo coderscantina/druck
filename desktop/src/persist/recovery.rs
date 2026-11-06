@@ -69,6 +69,11 @@ impl Copies {
         }
     }
 
+    /// The folder of this document's kept copies, which exists once one is kept.
+    pub fn kept_folder(&self) -> &Path {
+        &self.kept
+    }
+
     /// Stores a file's unsaved text, replacing any copy before it.
     pub fn store(&self, path: &Path, base: &str, text: &str) -> io::Result<()> {
         fs::create_dir_all(&self.recovery)?;

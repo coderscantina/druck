@@ -11,6 +11,7 @@ use crate::editor::{
     Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers, ToggleQuote,
     ToggleSmallCaps, ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline, Undo,
 };
+use crate::persist::ShowKeptCopies;
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{NewSection, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
@@ -63,6 +64,7 @@ pub fn all() -> Vec<Command> {
         command(Key::CommitCard, Anywhere, ShowCommitCard),
         command(Key::Timeline, Anywhere, ShowTimeline),
         command(Key::GitPanel, Anywhere, ShowGitPanel),
+        command(Key::KeptCopies, Anywhere, ShowKeptCopies),
         command(Key::Settings, Anywhere, ShowSettings),
         command(Key::SourceView, Write, ToggleSource),
         command(Key::NewSection, Anywhere, NewSection),

@@ -477,7 +477,11 @@ impl EditorView {
             list[*first].range.start..list[*last].range.end
         });
         let found = (self.find_matches.iter())
-            .filter(|found| on_screen.as_ref().is_some_and(|shown| found.start < shown.end && shown.start < found.end))
+            .filter(|found| {
+                on_screen
+                    .as_ref()
+                    .is_some_and(|shown| found.start < shown.end && shown.start < found.end)
+            })
             .flat_map(|found| self.range_rectangles(found.clone(), &blocks, false))
             .collect();
         let misspelled = self

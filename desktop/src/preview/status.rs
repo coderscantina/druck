@@ -20,7 +20,8 @@ impl PreviewView {
             .map(|part| width(part))
             .sum();
         let percent = format!("{}%", (self.place.current_zoom * 100.0).round());
-        let mut zoom = width(&percent) + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 4. + tokens::HAIR_GAP * 2.);
+        let mut zoom =
+            width(&percent) + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 4. + tokens::HAIR_GAP * 2.);
         if fit {
             zoom += width(crate::t!(Key::ZoomFit)) + f32::from(tokens::SPACE_1 * 2. + tokens::HAIR_GAP);
         }
@@ -115,7 +116,11 @@ impl PreviewView {
             1 => crate::t!(Key::OneWarning).to_owned(),
             warnings => crate::t!(Key::Warnings, count = warnings),
         };
-        let number = if warnings > 0 { warnings.to_string() } else { String::new() };
+        let number = if warnings > 0 {
+            warnings.to_string()
+        } else {
+            String::new()
+        };
         // A narrow line drops the word "warnings", then the switch's label, then the switch, then Fit.
         let fits = |parts: &[&str], switch| self.status_fits(parts, switch && warnings > 0, true, window);
         let (shown, toggle_label, switch) = if fits(&[&status, look, &warning_label, toggle], true) {
@@ -146,24 +151,26 @@ impl PreviewView {
                 )
                 .when(switch, |line| {
                     line.child(
-                    div()
-                        .id("warning-marks")
-                        .control(tokens, Role::Switch, toggle)
-                        .aria_toggled(if marks_on { Toggled::True } else { Toggled::False })
-                        .flex_none()
-                        .h(tokens::ZOOM_BUTTON)
-                        .px(tokens::SPACE_1)
-                        .flex()
-                        .items_center()
-                        .gap(tokens::SPACE_1)
-                        .rounded(tokens::RADIUS)
-                        .cursor_pointer()
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(|_, _, cx| {
-                            crate::settings::change(cx, |settings| settings.warning_marks = !settings.warning_marks);
-                        })
-                        .child(crate::shell::ui::switch_track(tokens, marks_on))
-                        .children(toggle_label),
+                        div()
+                            .id("warning-marks")
+                            .control(tokens, Role::Switch, toggle)
+                            .aria_toggled(if marks_on { Toggled::True } else { Toggled::False })
+                            .flex_none()
+                            .h(tokens::ZOOM_BUTTON)
+                            .px(tokens::SPACE_1)
+                            .flex()
+                            .items_center()
+                            .gap(tokens::SPACE_1)
+                            .rounded(tokens::RADIUS)
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(|_, _, cx| {
+                                crate::settings::change(cx, |settings| {
+                                    settings.warning_marks = !settings.warning_marks
+                                });
+                            })
+                            .child(crate::shell::ui::switch_track(tokens, marks_on))
+                            .children(toggle_label),
                     )
                 })
         });

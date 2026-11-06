@@ -57,6 +57,10 @@ crate::strings! {
         ),
         CopyKept => ("The other version is kept in the folder \"{folder}\".", "Die andere Fassung liegt im Ordner „{folder}“."),
         ShowInFinder => ("Show in Finder", "Im Finder zeigen"),
+        NoKeptCopies => (
+            "No other versions are kept for this book yet.",
+            "Für dieses Buch liegen noch keine anderen Fassungen bereit."
+        ),
         NotUtf8 => ("{file} is not UTF-8 text.", "{file} ist kein UTF-8-Text."),
         NotAsSeen => (
             "the file is not as the app last saw it",

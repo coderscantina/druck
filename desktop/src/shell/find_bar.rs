@@ -8,8 +8,8 @@ use super::text::Key;
 use crate::a11y::Control as _;
 use crate::editor::EditorView;
 use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
-use crate::workspace::TextColumn;
 use crate::tokens::{self, Tokens};
+use crate::workspace::TextColumn;
 
 pub enum FindEvent {
     /// The query changed.

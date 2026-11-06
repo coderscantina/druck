@@ -84,6 +84,7 @@ crate::strings! {
         AskAgent => ("Ask the Agent\u{2026}", "Agent fragen\u{2026}"),
         CommitCard => ("Commit…", "Commit…"),
         Timeline => ("Timeline", "Zeitleiste"),
+        KeptCopies => ("Show kept versions", "Aufbewahrte Fassungen zeigen"),
         GitPanel => ("Git Panel", "Git-Panel"),
         MenuInsert => ("Insert", "Einfügen"),
         InsertFootnote => ("Footnote", "Fußnote"),

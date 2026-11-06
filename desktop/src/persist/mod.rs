@@ -39,7 +39,7 @@ use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Parts, Slots};
 
-actions!(persist, [KeepMine, TakeTheirs, SeeBoth]);
+actions!(persist, [KeepMine, TakeTheirs, SeeBoth, ShowKeptCopies]);
 
 /// How often to look for a folder that went away, only while it is away.
 const GONE_POLL: Duration = Duration::from_secs(2);
@@ -64,6 +64,19 @@ pub fn bind_keys(cx: &mut App) {
     cx.on_action(|_: &KeepMine, cx| choose(Choice::Mine, cx));
     cx.on_action(|_: &TakeTheirs, cx| choose(Choice::Theirs, cx));
     cx.on_action(|_: &SeeBoth, cx| choose(Choice::Both, cx));
+    cx.on_action(|_: &ShowKeptCopies, cx| {
+        let Some(current) = cx.try_global::<Current>() else {
+            return;
+        };
+        let (view, window) = (current.view.clone(), current.window);
+        cx.defer(move |cx| {
+            window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |view, cx| view.show_kept_copies(window, cx)).ok();
+                })
+                .ok();
+        });
+    });
 }
 
 fn choose(choice: Choice, cx: &mut App) {
@@ -866,6 +879,14 @@ impl PersistView {
     /// A passing note on the saving line, the window's one place for them.
     pub fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.show_note_about(text, None, window, cx);
+    }
+
+    /// Opens the folder of this book's kept copies, or says there is none yet.
+    fn show_kept_copies(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.sync.copies().map(|copies| copies.kept_folder().to_owned()) {
+            Some(folder) if folder.is_dir() => cx.open_with_system(&folder),
+            _ => self.show_note(crate::t!(Key::NoKeptCopies).to_owned(), window, cx),
+        }
     }
 
     /// A note about a kept copy: it names the folder, and Show in Finder shows the copy in it.
