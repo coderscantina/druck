@@ -610,6 +610,11 @@ impl PreviewView {
                 _ => (self.sheets(self.place.current_zoom)?).page_at_middle(self.place.scroll.1, self.place.view.1),
             })
             .flatten();
+        // The status line was drawn with the zoom before this frame's, and a notify while drawing asks for no frame.
+        if zoom != self.place.current_zoom {
+            let view = cx.entity().downgrade();
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()).unwrap_or_default());
+        }
         self.place.fit = fit;
         self.place.current_zoom = zoom;
         let Some(sheets) = self.sheets(zoom) else {
