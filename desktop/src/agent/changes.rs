@@ -449,8 +449,8 @@ impl Tracked {
             let range = place.range.start + range.start..place.range.start + range.end;
             let gone = shown_inline(&gone);
             if !gone.is_empty() {
-                // A space of its own, or it runs into the word after it.
-                removed.push((moved(readable_place(text, range.start)), format!("{gone} ")));
+                let at = readable_place(text, range.start);
+                removed.push((moved(at), with_own_space(text, at, &gone)));
             }
             let kept = text[range.clone()].trim_end().len();
             if kept > 0 {
@@ -502,6 +502,21 @@ fn shown_inline(text: &str) -> String {
 
 /// A place where something can show near `at`: a blank line has no text to stand in, so it moves on to the next line
 /// with text, or back to the end of the last one.
+/// Removed words standing at `at` in `text`, with a space of their own where the text has none: before them after a
+/// word, and after them before a word, but none before punctuation that closes.
+fn with_own_space(text: &str, at: usize, gone: &str) -> String {
+    let before = text[..at]
+        .chars()
+        .next_back()
+        .is_some_and(|character| !character.is_whitespace());
+    let after = text[at..].chars().next().is_some_and(|character| {
+        !character.is_whitespace() && !matches!(character, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '…')
+    });
+    let lead = if before { " " } else { "" };
+    let trail = if after { " " } else { "" };
+    format!("{lead}{gone}{trail}")
+}
+
 fn readable_place(text: &str, at: usize) -> usize {
     let line_start = text[..at].rfind('\n').map_or(0, |found| found + 1);
     let line_end = text[at..].find('\n').map_or(text.len(), |found| at + found);
@@ -1133,6 +1148,16 @@ mod tests {
         assert_eq!(passage.added, [at..at + "Howdy".len()]);
         assert_eq!(passage.removed, [(at, "Hello ".to_owned())]);
         assert_eq!(passage.end, at);
+    }
+
+    #[test]
+    fn removed_words_take_their_own_space_where_the_text_has_none() {
+        let text = "Licht, sonst alles dunkel. Neu";
+        let comma = text.find(',').expect("there");
+        assert_eq!(with_own_space(text, comma, "fällt"), " fällt");
+        let word = text.find("sonst").expect("there");
+        assert_eq!(with_own_space(text, word, "fällt"), "fällt ");
+        assert_eq!(with_own_space(text, text.len(), "Alt"), " Alt");
     }
 
     #[test]

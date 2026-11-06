@@ -284,15 +284,23 @@ fn display_line(
                 len: chip.text.len(),
                 source_len: chip.range.len(),
             });
-            // White space after a chip's words, such as the space an agent's removed words keep, is not struck or tinted.
-            let words = chip.text.trim_end().len();
-            shown_chips.push((display.len()..display.len() + words, chip.look));
+            // White space around a chip's words, such as the space an agent's removed words keep, is not struck or
+            // tinted.
+            let lead = chip.text.len() - chip.text.trim_start().len();
+            let words = chip.text.trim().len();
+            let start = display.len() + lead;
+            shown_chips.push((start..start + words, chip.look));
             display.push_str(&chip.text);
             let style = RunStyle {
                 chip: Some(chip.look),
                 ..RunStyle::default()
             };
-            for (len, style) in [(words, style), (chip.text.len() - words, RunStyle::default())] {
+            let parts = [
+                (lead, RunStyle::default()),
+                (words, style),
+                (chip.text.len() - lead - words, RunStyle::default()),
+            ];
+            for (len, style) in parts {
                 if len > 0 {
                     push_run(&mut runs, (len, style));
                 }
@@ -618,6 +626,21 @@ mod tests {
         assert_eq!(line.to_source(4), 6);
         assert_eq!(line.to_source(7), 6);
         assert_eq!(line.to_source(8), 7);
+    }
+
+    #[test]
+    fn removed_words_are_struck_without_their_own_space_before_them() {
+        let text = "a, b";
+        let syntax = syntax(BlockKind::Paragraph, text);
+        let chips = [Chip {
+            range: 1..1,
+            text: " gone".to_owned(),
+            look: ChipLook::Removed,
+            atomic: false,
+        }];
+        let line = &display_lines(BlockKind::Paragraph, text, &syntax, &[], None, false, &chips)[0];
+        assert_eq!(line.text, "a gone, b");
+        assert_eq!(line.chips, [(2..6, ChipLook::Removed)]);
     }
 
     #[test]
