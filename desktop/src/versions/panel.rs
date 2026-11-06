@@ -30,14 +30,14 @@ impl GitPanel {
         let message = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_label(crate::t!(Key::Message))
-                .with_placeholder(crate::t!(Key::Message))
+                .with_label(Key::Message)
+                .with_placeholder(Key::Message)
         });
         let new_branch = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_label(crate::t!(Key::NewBranch))
-                .with_placeholder(crate::t!(Key::NewBranch))
+                .with_label(Key::NewBranch)
+                .with_placeholder(Key::NewBranch)
         });
         let subscriptions = vec![
             cx.subscribe_in(&message, window, |panel, _, _: &Submitted, window, cx| {

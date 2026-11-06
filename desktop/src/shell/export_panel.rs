@@ -98,7 +98,7 @@ pub struct ExportPanel {
 
 impl ExportPanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let new_name = cx.new(|cx| TextInput::new(window, cx).with_placeholder(crate::t!(Key::ExportName)));
+        let new_name = cx.new(|cx| TextInput::new(window, cx).with_placeholder(Key::ExportName));
         let subscription = cx.subscribe(&new_name, |panel, _, _: &Submitted, cx| panel.add(cx));
         Self {
             setup: Setup::default(),
@@ -134,12 +134,6 @@ impl ExportPanel {
         }
         self.setup = setup;
         cx.notify();
-    }
-
-    /// Puts the field's hint in the language now set.
-    pub fn refresh_text(&mut self, cx: &mut Context<Self>) {
-        self.new_name
-            .update(cx, |input, cx| input.set_placeholder(crate::t!(Key::ExportName), cx));
     }
 
     pub fn set_run(&mut self, run: RunState, cx: &mut Context<Self>) {

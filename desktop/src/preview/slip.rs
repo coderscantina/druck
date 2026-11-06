@@ -217,7 +217,7 @@ impl ProofSlip {
                 .in_prose()
                 .bare()
                 .keep_focus_on_enter()
-                .with_label(crate::t!(Key::SlipText))
+                .with_label(Key::SlipText)
         });
         let subscriptions = vec![
             cx.subscribe_in(&input, window, |slip, input, _: &Edited, window, cx| {

@@ -114,6 +114,53 @@ fn bind(cx: &mut App) {
     ]);
 }
 
+/// What a field shows when empty or is called: fixed words, or a string table's key worded in the language at each
+/// render, so a change of language reaches every field with nothing to refresh.
+#[derive(Clone)]
+pub enum Words {
+    Fixed(SharedString),
+    Keyed(std::rc::Rc<dyn Fn() -> &'static str>),
+}
+
+impl Words {
+    fn get(&self) -> SharedString {
+        match self {
+            Words::Fixed(words) => words.clone(),
+            Words::Keyed(word) => word().into(),
+        }
+    }
+}
+
+impl Default for Words {
+    fn default() -> Self {
+        Words::Fixed(SharedString::default())
+    }
+}
+
+impl<K: crate::shell::strings::Table> From<K> for Words {
+    fn from(key: K) -> Self {
+        Words::Keyed(std::rc::Rc::new(move || crate::shell::strings::lookup(key)))
+    }
+}
+
+impl From<&'static str> for Words {
+    fn from(words: &'static str) -> Self {
+        Words::Fixed(words.into())
+    }
+}
+
+impl From<String> for Words {
+    fn from(words: String) -> Self {
+        Words::Fixed(words.into())
+    }
+}
+
+impl From<SharedString> for Words {
+    fn from(words: SharedString) -> Self {
+        Words::Fixed(words)
+    }
+}
+
 /// The field's text, after the author finished editing it.
 pub struct Committed(pub String);
 
@@ -195,8 +242,8 @@ pub struct TextInput {
     bare: bool,
     arrows_to_parent: bool,
     /// Shown in the quiet color while the field is empty.
-    placeholder: SharedString,
-    label: SharedString,
+    placeholder: Words,
+    label: Words,
     focus: FocusHandle,
     /// Inside a drag that started in the text.
     dragging: bool,
@@ -260,8 +307,8 @@ impl TextInput {
             book_type: None,
             bare: false,
             arrows_to_parent: false,
-            placeholder: SharedString::default(),
-            label: SharedString::default(),
+            placeholder: Words::default(),
+            label: Words::default(),
             focus,
             dragging: false,
             scroll_x: px(0.),
@@ -326,17 +373,17 @@ impl TextInput {
     }
 
     /// What assistive technology calls the field. The label a person sees stands apart from it on screen.
-    pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn with_label(mut self, label: impl Into<Words>) -> Self {
         self.label = label.into();
         self
     }
 
-    pub fn with_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
+    pub fn with_placeholder(mut self, placeholder: impl Into<Words>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub fn set_placeholder(&mut self, placeholder: impl Into<Words>, cx: &mut Context<Self>) {
         self.placeholder = placeholder.into();
         cx.notify();
     }
@@ -970,7 +1017,8 @@ impl TextInput {
     /// Shapes the text for `width`, one wrapped line per written line. A one-line field never wraps.
     fn shape(&mut self, width: Pixels, window: &mut Window, cx: &mut Context<Self>) -> Shaped {
         let tokens = Tokens::get(cx);
-        let showing_placeholder = self.buffer.text().is_empty() && !self.placeholder.is_empty();
+        let placeholder = self.placeholder.get();
+        let showing_placeholder = self.buffer.text().is_empty() && !placeholder.is_empty();
         let color: Hsla = if showing_placeholder {
             tokens.text_faint
         } else if self.customized || self.focus.is_focused(window) {
@@ -995,7 +1043,7 @@ impl TextInput {
         let line_height = size * 1.45;
         let wrap = self.multiline.then_some(width);
         let text = if showing_placeholder {
-            self.placeholder.to_string()
+            placeholder.to_string()
         } else {
             self.buffer.text().to_owned()
         };
@@ -1124,10 +1172,9 @@ impl Render for TextInput {
             } else {
                 gpui::Role::TextInput
             })
-            .aria_label(if self.label.is_empty() {
-                self.placeholder.clone()
-            } else {
-                self.label.clone()
+            .aria_label(match self.label.get() {
+                label if label.is_empty() => self.placeholder.get(),
+                label => label,
             })
             .aria_value(self.buffer.text().to_owned())
             .key_context(CONTEXT)

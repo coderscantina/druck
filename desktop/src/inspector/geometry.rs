@@ -99,7 +99,7 @@ impl GeometryPanel {
             let input = cx.new(|cx| {
                 let input = TextInput::new(window, cx);
                 if field == TEXT_WIDTH {
-                    input.with_placeholder(crate::t!(Key::TextWidthHint))
+                    input.with_placeholder(Key::TextWidthHint)
                 } else {
                     input
                 }

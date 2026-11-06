@@ -214,10 +214,10 @@ impl SettingsWindow {
         let search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_label(crate::t!(Key::Search))
-                .with_placeholder(crate::t!(Key::Search))
+                .with_label(Key::Search)
+                .with_placeholder(Key::Search)
         });
-        let accent = cx.new(|cx| TextInput::new(window, cx).with_label(crate::t!(Key::Accent)));
+        let accent = cx.new(|cx| TextInput::new(window, cx).with_label(Key::Accent));
         let subscriptions = vec![
             cx.observe_global_in::<Store>(window, |view, window, cx| view.settings_changed(window, cx)),
             cx.observe_global_in::<Tokens>(window, |_, _, cx| cx.notify()),
@@ -241,8 +241,6 @@ impl SettingsWindow {
     fn settings_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_accent(cx);
         window.set_window_title(crate::t!(Key::Title));
-        self.search
-            .update(cx, |search, cx| search.set_placeholder(crate::t!(Key::Search), cx));
         cx.notify();
     }
 

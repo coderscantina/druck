@@ -38,7 +38,7 @@ impl SourceView {
         let input = cx.new(|cx| {
             TextInput::multiline(window, cx)
                 .with_placeholder(JSON_PLACEHOLDER)
-                .with_label(crate::t!(Key::JsonOwn))
+                .with_label(Key::JsonOwn)
         });
         let subscriptions = vec![
             cx.observe_in(&model, window, |view, _, window, cx| view.show_section(window, cx)),

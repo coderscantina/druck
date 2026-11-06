@@ -60,12 +60,12 @@ impl SearchPanel {
         let query = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_placeholder(crate::t!(Key::SearchPlaceholder))
+                .with_placeholder(Key::SearchPlaceholder)
         });
         let replacement = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_placeholder(crate::t!(Key::ReplacePlaceholder))
+                .with_placeholder(Key::ReplacePlaceholder)
         });
         let mut subscriptions = Vec::new();
         for input in [&query, &replacement] {
@@ -87,16 +87,6 @@ impl SearchPanel {
             scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
-    }
-
-    /// Puts the fields' hints in the language now set.
-    pub fn refresh_text(&mut self, cx: &mut Context<Self>) {
-        self.query.update(cx, |input, cx| {
-            input.set_placeholder(crate::t!(Key::SearchPlaceholder), cx)
-        });
-        self.replacement.update(cx, |input, cx| {
-            input.set_placeholder(crate::t!(Key::ReplacePlaceholder), cx)
-        });
     }
 
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {

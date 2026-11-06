@@ -186,7 +186,7 @@ impl TokensPanel {
     }
 
     fn start_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| TextInput::new(window, cx).with_placeholder(crate::t!(Key::NewTokenHint)));
+        let input = cx.new(|cx| TextInput::new(window, cx).with_placeholder(Key::NewTokenHint));
         self._subscriptions
             .push(cx.subscribe(&input, |panel, input, _: &Submitted, cx| {
                 let name = input.read(cx).text().to_owned();

@@ -1068,9 +1068,6 @@ impl Hub {
 
     /// Has everything that reads strings read them again, if the language changed.
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.search.update(cx, |panel, cx| panel.refresh_text(cx));
-        self.find.update(cx, |bar, cx| bar.refresh_text(cx));
-        self.export.update(cx, |panel, cx| panel.refresh_text(cx));
         self.refresh_report(cx);
         self.update_footer(cx);
     }

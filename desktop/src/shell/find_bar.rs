@@ -31,7 +31,7 @@ impl FindBar {
         let input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_placeholder(crate::t!(Key::FindPlaceholder))
+                .with_placeholder(Key::FindPlaceholder)
         });
         let subscriptions = vec![
             cx.subscribe(&input, |bar, _, _: &Edited, cx| {
@@ -47,13 +47,6 @@ impl FindBar {
             position: None,
             _subscriptions: subscriptions,
         }
-    }
-
-    /// Puts the field's hint in the language now set.
-    pub fn refresh_text(&mut self, cx: &mut Context<Self>) {
-        self.input.update(cx, |input, cx| {
-            input.set_placeholder(crate::t!(Key::FindPlaceholder), cx)
-        });
     }
 
     /// Opens the bar with its text selected, so a new search replaces the last one.

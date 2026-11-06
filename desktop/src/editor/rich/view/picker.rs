@@ -90,7 +90,7 @@ impl EditorView {
         let locator = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_placeholder(crate::t!(Key::LocatorPlaceholder));
+                .with_placeholder(Key::LocatorPlaceholder);
             input.set_value(locator_text, true, cx);
             input
         });

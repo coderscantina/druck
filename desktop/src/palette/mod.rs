@@ -121,7 +121,7 @@ impl Palette {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
                 .arrows_to_parent()
-                .with_label(crate::t!(Key::Commands))
+                .with_label(Key::Commands)
         });
         let subscriptions = vec![
             cx.subscribe(&input, |palette, _, _: &Edited, cx| palette.filter(cx)),

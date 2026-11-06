@@ -192,8 +192,8 @@ impl StyleIndex {
         let search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
-                .with_placeholder(crate::t!(Key::SearchSections))
-                .with_label(crate::t!(Key::SearchSections))
+                .with_placeholder(Key::SearchSections)
+                .with_label(Key::SearchSections)
         });
         let tokens_panel = cx.new(|cx| TokensPanel::new(model.clone(), window, cx));
         let geometry = cx.new(|cx| GeometryPanel::new(model.clone(), window, cx));

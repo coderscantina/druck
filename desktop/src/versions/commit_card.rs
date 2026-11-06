@@ -53,8 +53,8 @@ impl CommitCard {
             cx.new(|cx| {
                 TextInput::new(window, cx)
                     .keep_focus_on_enter()
-                    .with_label(crate::t!(label))
-                    .with_placeholder(crate::t!(label))
+                    .with_label(label)
+                    .with_placeholder(label)
             })
         };
         let message = field(Key::Message, window, cx);
