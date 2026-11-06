@@ -8,6 +8,7 @@ use super::strings::{Language, language};
 crate::strings! {
     pub enum Key {
         Page => ("page {page}", "Seite {page}"),
+        PagePrinted => ("page {page} ({printed})", "Seite {page} ({printed})"),
         UnnumberedPage => ("unnumbered page {page}", "Seite {page} ohne Nummer"),
         OneLine => ("1 line", "1 Zeile"),
         Lines => ("{count} lines", "{count} Zeilen"),
@@ -73,10 +74,16 @@ crate::strings! {
     }
 }
 
-fn page_of(page: &PageName) -> String {
-    match page {
-        PageName::Numbered(page) => crate::t!(Key::Page, page = page),
-        PageName::Unnumbered(page) => crate::t!(Key::UnnumberedPage, page = page),
+/// A page as the status line words it: by its place in the file, with its printed number in brackets when that differs.
+/// `place` is the page's index, when the diagnostic has one.
+fn page_of(page: &PageName, place: Option<usize>) -> String {
+    match (page, place.map(|index| index + 1)) {
+        (PageName::Numbered(printed), Some(place)) if *printed != place.to_string() => {
+            crate::t!(Key::PagePrinted, page = place, printed = printed)
+        }
+        (_, Some(place)) => crate::t!(Key::Page, page = place),
+        (PageName::Numbered(page), None) => crate::t!(Key::Page, page = page),
+        (PageName::Unnumbered(page), None) => crate::t!(Key::UnnumberedPage, page = page),
     }
 }
 
@@ -101,7 +108,7 @@ fn decimal(lines: f64) -> String {
 /// its own in a list or a line, so it starts with a capital, where the engine's start lower case.
 pub fn message(diagnostic: &Diagnostic) -> String {
     let words = (diagnostic.code.as_ref())
-        .and_then(coded)
+        .and_then(|code| coded(code, diagnostic.page))
         .unwrap_or_else(|| diagnostic.message.clone());
     let mut chars = words.chars();
     chars
@@ -109,31 +116,37 @@ pub fn message(diagnostic: &Diagnostic) -> String {
         .map_or(words.clone(), |first| first.to_uppercase().chain(chars).collect())
 }
 
-fn coded(code: &Code) -> Option<String> {
+fn coded(code: &Code, place: Option<usize>) -> Option<String> {
     Some(match code {
-        Code::PageShort { page, lines } => crate::t!(Key::PageShort, page = page_of(page), lines = decimal(*lines)),
-        Code::PageUneven { page, lines } => crate::t!(Key::PageUneven, page = page_of(page), lines = decimal(*lines)),
+        Code::PageShort { page, lines } => {
+            crate::t!(Key::PageShort, page = page_of(page, place), lines = decimal(*lines))
+        }
+        Code::PageUneven { page, lines } => {
+            crate::t!(Key::PageUneven, page = page_of(page, place), lines = decimal(*lines))
+        }
         Code::ChapterEndShort { page, lines, wanted } => {
             crate::t!(
                 Key::ChapterEndShort,
-                page = page_of(page),
+                page = page_of(page, place),
                 lines = lines_of(*lines),
                 wanted = wanted
             )
         }
-        Code::OneLinerAtTop { page } => crate::t!(Key::OneLinerAtTop, page = page_of(page)),
-        Code::OneLinerAtBottom { page } => crate::t!(Key::OneLinerAtBottom, page = page_of(page)),
+        Code::OneLinerAtTop { page } => crate::t!(Key::OneLinerAtTop, page = page_of(page, place)),
+        Code::OneLinerAtBottom { page } => crate::t!(Key::OneLinerAtBottom, page = page_of(page, place)),
         Code::HeadingAtFoot { page, lines, wanted } => {
             crate::t!(
                 Key::HeadingAtFoot,
-                page = page_of(page),
+                page = page_of(page, place),
                 lines = lines_of(*lines),
                 wanted = wanted
             )
         }
-        Code::LooseLine { page } => crate::t!(Key::LooseLine, page = page_of(page)),
-        Code::TooManyHyphens { page, limit } => crate::t!(Key::TooManyHyphens, page = page_of(page), limit = limit),
-        Code::ShortLastLine { page } => crate::t!(Key::ShortLastLine, page = page_of(page)),
+        Code::LooseLine { page } => crate::t!(Key::LooseLine, page = page_of(page, place)),
+        Code::TooManyHyphens { page, limit } => {
+            crate::t!(Key::TooManyHyphens, page = page_of(page, place), limit = limit)
+        }
+        Code::ShortLastLine { page } => crate::t!(Key::ShortLastLine, page = page_of(page, place)),
         Code::NotInChapterList => crate::t!(Key::NotInChapterList).to_owned(),
         Code::UndefinedLabel { label } => crate::t!(Key::UndefinedLabel, label = label),
         Code::UndefinedFootnote { label } => crate::t!(Key::UndefinedFootnote, label = label),
@@ -172,6 +185,27 @@ mod tests {
         assert_eq!(message(&short), "Seite 12 endet 1,4 Zeilen über dem Seitenfuß");
         set_language(Language::English);
         assert_eq!(message(&short), "Page 12 ends 1.4 lines short of the bottom");
+    }
+
+    #[test]
+    fn a_page_is_worded_by_its_place_with_a_differing_printed_number_in_brackets() {
+        let _guard = LANGUAGE_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_language(Language::English);
+        let at = |printed: &str, index: usize| {
+            let mut diagnostic = with_code(Code::LooseLine {
+                page: PageName::Numbered(printed.into()),
+            });
+            diagnostic.page = Some(index);
+            message(&diagnostic)
+        };
+        assert_eq!(
+            at("iii", 2),
+            "A line of this paragraph on page 3 (iii) has its spaces stretched loose"
+        );
+        assert_eq!(
+            at("5", 4),
+            "A line of this paragraph on page 5 has its spaces stretched loose"
+        );
     }
 
     #[test]
