@@ -18,10 +18,10 @@ use gpui::{
 use super::commands::notes::{Note, comments_in, first_meaningful_line, leading_notes, leading_region, shown_range};
 use super::strings::Key;
 use super::{
-    Backspace, CaretMoved, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down, EditorView,
-    Left, LineEnd, LineStart, NewBlock, NewLine, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectLineEnd,
-    SelectLineStart, SelectRight, SelectUp, SelectWordLeft, SelectWordRight, SessionChanged, TextChanged, Undo, Up,
-    WordLeft, WordRight,
+    Backspace, Cancel, CaretMoved, Copy, Cut, Delete, DeleteWordLeft, DeleteWordRight, DocEnd, DocStart, Down,
+    EditorView, Left, LineEnd, LineStart, NewBlock, NewLine, Paste, Redo, Right, SelectAll, SelectDown, SelectLeft,
+    SelectLineEnd, SelectLineStart, SelectRight, SelectUp, SelectWordLeft, SelectWordRight, SessionChanged,
+    TextChanged, Undo, Up, WordLeft, WordRight,
 };
 use crate::session::ChapterId;
 use crate::source::inline::SpanKind;
@@ -71,8 +71,8 @@ pub struct ChapterNotes {
 
 impl ChapterNotes {
     pub fn new(editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // Not a stop of its own: it drew no ring, so Control+Tab from the text seemed to do nothing. A click unfolds it.
-        let focus = cx.focus_handle();
+        // A stop of Control+Tab: it unfolds as it takes the keys and hands them to the first note.
+        let focus = cx.focus_handle().tab_stop(true);
         let subscriptions = vec![
             cx.subscribe(&editor, |notes, _, _: &TextChanged, cx| notes.sync(cx)),
             cx.subscribe(&editor, |notes, _, _: &SessionChanged, cx| notes.sync(cx)),
@@ -193,6 +193,7 @@ impl Render for ChapterNotes {
             .role(Role::Button)
             .aria_label(label)
             .track_focus(&self.focus)
+            .on_action(cx.listener(|notes, _: &Cancel, window, cx| notes.fold(window, cx)))
             .w(self.editor.read(cx).text_width())
             .flex()
             .flex_col()
@@ -368,12 +369,13 @@ impl EditorView {
             .map(|(index, note)| (index, range.start - note.shown.start..range.end - note.shown.start))
     }
 
-    pub(super) fn set_note_room(&mut self, height: Pixels, cx: &mut Context<Self>) {
+    /// Takes the height the opening notes were measured at while the text was drawn, and returns whether their room
+    /// changed. A notify while drawing asks for no frame, so the caller asks for the next one.
+    pub(super) fn set_note_room(&mut self, height: Pixels) -> bool {
         let room = (height - LINE_HEIGHT).max(px(0.));
-        if self.note_room != room {
-            self.note_room = room;
-            cx.notify();
-        }
+        let changed = self.note_room != room;
+        self.note_room = room;
+        changed
     }
 }
 

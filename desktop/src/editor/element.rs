@@ -187,7 +187,12 @@ impl Element for Galley {
                 element.prepaint_at(origin, window, cx);
                 height
             });
-            self.view.update(cx, |view, cx| view.set_note_room(height, cx));
+            // Without asking for the next frame, notes unfolded by keyboard focus drew over the text until something else
+            // drew, as the caret's blink does in the text but not in a note's field.
+            if self.view.update(cx, |view, _| view.set_note_room(height)) {
+                let view = self.view.clone();
+                window.on_next_frame(move |_, cx| view.update(cx, |_, cx| cx.notify()));
+            }
             element
         });
         frame.floats = floats
