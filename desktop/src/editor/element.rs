@@ -95,9 +95,7 @@ pub struct Frame {
     /// The value of the placeholder the caret is in, over where it stands.
     hint: Option<(Bounds<Pixels>, String)>,
     /// The style of the block the caret is in, far out in the left margin: its first line's top and height, and the name.
-    /// The caret's block's style name: its row's top and height, the name, and the left edge of a bracket name on that
-    /// row, which it ends before.
-    style_name: Option<(Pixels, Pixels, String, Option<Pixels>)>,
+    style_name: Option<StyleName>,
 }
 
 impl IntoElement for Galley {
@@ -224,8 +222,8 @@ impl Element for Galley {
         if let Some((target, text)) = frame.hint.take() {
             prepaint_hint(target, text, bounds, &colors, window, cx);
         }
-        if let Some((top, height, name, before)) = frame.style_name.take() {
-            prepaint_style_name(&frame.column, top, height, name, before, &colors, window, cx);
+        if let Some(style_name) = frame.style_name.take() {
+            prepaint_style_name(&frame.column, style_name, &colors, window, cx);
         }
         frame
     }
@@ -363,10 +361,7 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
     let dotted = frame.placeholders == Display::Underline;
     for line in &block.layout.lines {
         for (chip, look) in &line.chips {
-            let bounds = Bounds::new(
-                point(block.left + chip.origin.x, block.top + chip.origin.y),
-                chip.size,
-            );
+            let bounds = Bounds::new(point(block.left + chip.origin.x, block.top + chip.origin.y), chip.size);
             let color = match look {
                 ChipLook::Mark | ChipLook::NoteLabel | ChipLook::Ghost => continue,
                 ChipLook::Value | ChipLook::Note if dotted => {
@@ -457,18 +452,24 @@ fn prepaint_hint(
     window.defer_draw(element, point(x, y), 1, None);
 }
 
-/// A block's style name, one faint word that ends clear of the block gutter's icons and starts clear of the heading
-/// ticks. Where the margin has no room for it, it does not show.
-fn prepaint_style_name(
-    column: &Column,
+/// The caret's block's style name, beside its first row.
+struct StyleName {
     top: Pixels,
     height: Pixels,
     name: String,
+    /// The left edge of a directive's bracket name on the same row, which the style's name ends before.
     before: Option<Pixels>,
-    colors: &Tokens,
-    window: &mut Window,
-    cx: &mut App,
-) {
+}
+
+/// A block's style name, one faint word that ends clear of the block gutter's icons and of a bracket's name, and starts
+/// clear of the heading ticks. Where the margin has no room for it, it does not show.
+fn prepaint_style_name(column: &Column, style_name: StyleName, colors: &Tokens, window: &mut Window, cx: &mut App) {
+    let StyleName {
+        top,
+        height,
+        name,
+        before,
+    } = style_name;
     let mut element = div()
         .h(height)
         .flex()
@@ -624,9 +625,11 @@ impl EditorView {
         let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
         let directives = self.directive_marks(&blocks, &indices, window, cx);
         // After the brackets, whose names on the same row the style's name ends before.
-        let style_name = self.style_name_at_caret(&blocks).map(|(top, height, name)| {
-            let before = self.directives.name_left_beside(top, top + height);
-            (top, height, name, before)
+        let style_name = self.style_name_at_caret(&blocks).map(|(top, height, name)| StyleName {
+            top,
+            height,
+            name,
+            before: self.directives.name_left_beside(top, top + height),
         });
         Frame {
             column,
