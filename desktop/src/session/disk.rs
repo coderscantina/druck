@@ -23,6 +23,17 @@ const EARLIER_FOR: Duration = Duration::from_secs(5 * 60);
 /// At most this many, so a burst of saves holds few copies of a long chapter.
 const EARLIER_VERSIONS: usize = 32;
 
+/// `text` as the app writes it: ending in exactly one line break, in the file's own kind, so blank lines typed at the
+/// end of a chapter do not reach the file. Every other byte stays. A text of nothing but line breaks stays as it is.
+pub fn one_final_break(text: &str) -> std::borrow::Cow<'_, str> {
+    let body = text.trim_end_matches(['\n', '\r']);
+    let ending = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    if body.is_empty() || text.len() - body.len() == ending.len() && text.ends_with(ending) {
+        return text.into();
+    }
+    format!("{body}{ending}").into()
+}
+
 /// The last text a file and the session agreed on.
 pub(super) struct Synced {
     base: Arc<str>,
@@ -259,7 +270,7 @@ impl Session {
         paths.retain(|path| !self.held.contains(path));
         let mut outgoing = Vec::with_capacity(paths.len());
         for path in paths {
-            let Some(text) = self.file_text(&path) else {
+            let Some(text) = self.file_text(&path).map(|text| one_final_break(&text).into_owned()) else {
                 continue;
             };
             let hash = content_hash(text.as_bytes());

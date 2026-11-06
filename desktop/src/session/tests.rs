@@ -809,3 +809,34 @@ fn every_starter_leaves_its_exports_out_of_git() {
         fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[test]
+fn a_written_chapter_ends_in_one_line_break_and_its_buffer_keeps_what_was_typed() {
+    let (folder, mut session) = project("final-break");
+    let one = session
+        .chapter_of_file(&folder.0.join("manuscript/one.md"))
+        .expect("one");
+    let end = session.chapter(one).expect("one").buffer.len();
+    typing(&mut session, one, end, "\n\n");
+    assert_eq!(session.save(), Ok(0), "the file already holds that");
+    assert_eq!(
+        folder.read("manuscript/one.md"),
+        "# One {#sec:one}\n\nFirst chapter text.\n"
+    );
+    assert!(
+        session
+            .file_text(&folder.0.join("manuscript/one.md"))
+            .expect("text")
+            .ends_with("text.\n\n\n")
+    );
+    assert!(!session.is_dirty());
+    let three = session
+        .chapter_of_file(&folder.0.join("manuscript/three.md"))
+        .expect("three");
+    typing(&mut session, three, 0, "A ");
+    assert_eq!(session.save(), Ok(1));
+    assert_eq!(
+        folder.read("manuscript/three.md"),
+        "A # Three {-}\n\nThird chapter text.\n"
+    );
+}
