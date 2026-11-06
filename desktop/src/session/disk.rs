@@ -238,6 +238,12 @@ impl Session {
         }
     }
 
+    /// Whether a file's buffers hold text the file does not.
+    pub fn file_is_dirty(&self, path: &Path) -> bool {
+        let single = matches!(&self.kind, Kind::Single { path: file } if file == path);
+        (single && self.resplit_unsaved) || self.ids_of(path).into_iter().any(|id| self.known(id).is_dirty())
+    }
+
     /// The files whose text differs from the disk, ready to write. Skips the ones held back. A buffer that came back to
     /// what the file holds, as after an undo, is marked saved and needs no write.
     pub fn outgoing(&mut self) -> Vec<Outgoing> {

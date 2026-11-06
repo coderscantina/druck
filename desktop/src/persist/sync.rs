@@ -9,7 +9,7 @@
 //! - where both changed the same text, a person decides. Until then the buffer keeps its text and the file keeps its
 //!   text, and nothing is written over it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -255,6 +255,8 @@ pub struct FileSync {
     pending: BTreeMap<PathBuf, Pending>,
     problems: BTreeMap<PathBuf, Problem>,
     copies: Option<Copies>,
+    /// The hash of each file's newest recovery copy this run, so unchanged text is not written again.
+    stored: HashMap<PathBuf, u64>,
     /// What is writing the files now, for the changes taken in next.
     source: Source,
 }
@@ -266,6 +268,7 @@ impl FileSync {
             pending: BTreeMap::new(),
             problems: BTreeMap::new(),
             copies,
+            stored: HashMap::new(),
             source: Source::Elsewhere,
         }
     }
@@ -324,6 +327,32 @@ impl FileSync {
 
     pub fn copies(&self) -> Option<&Copies> {
         self.copies.as_ref()
+    }
+
+    /// Whether a recovery copy of `text` is still to be written, and notes it as written.
+    pub fn copy_is_due(&mut self, path: &Path, text: &str) -> bool {
+        let hash = content_hash(text.as_bytes());
+        self.stored.insert(path.to_owned(), hash) != Some(hash)
+    }
+
+    /// Clears a file's recovery copy once its buffers hold what the file holds, written or not. A copy left behind
+    /// would come back at the next launch as a change from outside.
+    pub fn forget_copy_if_clean(&mut self, session: &Session, path: &Path) {
+        if session.file_is_dirty(path) {
+            return;
+        }
+        self.stored.remove(path);
+        if let Some(copies) = &self.copies {
+            copies.clear(path);
+        }
+    }
+
+    /// Clears the recovery copies of files that became clean with no write, as an undo back to the file's text does.
+    pub fn forget_clean_copies(&mut self, session: &Session) {
+        let paths: Vec<PathBuf> = self.stored.keys().cloned().collect();
+        for path in paths {
+            self.forget_copy_if_clean(session, &path);
+        }
     }
 
     /// Whether a file's bytes tell the session anything new. A save's own echo does not, so it needs no session change.
@@ -465,6 +494,7 @@ impl FileSync {
     fn release(&mut self, session: &mut Session, path: &Path) {
         self.pending.remove(path);
         session.hold_file(path, false);
+        self.forget_copy_if_clean(session, path);
     }
 
     fn on_removed(&mut self, session: &mut Session, path: &Path, base: Arc<str>) -> Option<FileChange> {
@@ -550,8 +580,8 @@ impl FileSync {
             }
             Choice::Theirs => {
                 let kept = self.keep(path, "mine", mine)?;
-                self.release(session, path);
                 session.mark_clean(path);
+                self.release(session, path);
                 session.file_removed(path);
                 Ok(kept)
             }
@@ -571,6 +601,7 @@ impl FileSync {
         match result {
             Ok(Outcome::Written) => {
                 self.problems.remove(&outgoing.path);
+                self.stored.remove(&outgoing.path);
                 session.written(outgoing);
                 false
             }
@@ -614,6 +645,11 @@ impl FileSync {
                     Ok(()) => self.clear(&file.path, Problem::Copy),
                     Err(error) => self.report(&file.path, Problem::Copy(error.to_string())),
                 }
+            }
+            if unsaved.is_empty() {
+                // Nothing is unsaved, so no copy may come back at the next launch.
+                copies.clear_all();
+                self.stored.clear();
             }
         }
         match unsaved.iter().find(|file| !self.pending.contains_key(&file.path)) {

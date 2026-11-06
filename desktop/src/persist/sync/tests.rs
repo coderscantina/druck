@@ -853,3 +853,27 @@ fn an_outside_change_merges_by_sentences_and_asks_in_the_same_sentence() {
     assert_eq!(passage.mine, "First long line. Of nothing.\n");
     assert_eq!(passage.theirs, "First long line. Of all words.\n");
 }
+
+#[test]
+fn taking_theirs_clears_the_recovery_copy() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    fixture.outside(ONE, "# One\n\nTheirs.\n\nSecond line.\n");
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Held);
+    assert!(!fixture.sync.copies().unwrap().load().is_empty());
+    let path = fixture.one();
+    fixture
+        .sync
+        .resolve(&mut fixture.session, &path, Choice::Theirs)
+        .unwrap();
+    assert!(fixture.sync.copies().unwrap().load().is_empty());
+}
+
+#[test]
+fn closing_with_nothing_unsaved_leaves_no_recovery_copy() {
+    let mut fixture = Fixture::new();
+    let copies = fixture.sync.copies().unwrap().clone();
+    copies.store(&fixture.one(), "", "stale").unwrap();
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
+    assert!(copies.load().is_empty());
+}

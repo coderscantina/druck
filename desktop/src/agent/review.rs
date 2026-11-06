@@ -398,6 +398,7 @@ impl AgentView {
                 cx,
             );
         });
+        crate::persist::forget_copy(path, cx);
     }
 
     /// Rejects a passage and asks the agent for another go at it.

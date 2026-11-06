@@ -12,7 +12,7 @@ mod strings;
 pub mod sync;
 pub mod watch;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -97,6 +97,22 @@ pub fn report(path: &Path, kind: fn(String) -> Problem, error: Option<String>, c
     });
 }
 
+/// Clears a file's recovery copy once nothing of it is unsaved, for code that made it clean without a write.
+pub fn forget_copy(path: &Path, cx: &mut App) {
+    let Some(current) = cx.try_global::<Current>() else {
+        return;
+    };
+    let view = current.view.clone();
+    let path = path.to_owned();
+    cx.defer(move |cx| {
+        view.update(cx, |view, cx| {
+            let session = view.editor.read(cx).session();
+            view.sync.forget_copy_if_clean(session, &path);
+        })
+        .ok();
+    });
+}
+
 /// Mounts the saving state and starts everything behind it. One line in `app::mount`.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut App) -> Entity<PersistView> {
     let view = cx.new(|cx| PersistView::new(parts.editor.clone(), parts.inspector.clone(), window, cx));
@@ -161,8 +177,6 @@ pub struct PersistView {
     note_file: Option<PathBuf>,
     note_task: Task<()>,
     gone_task: Option<Task<()>>,
-    /// The hash of each file's newest recovery copy, so unchanged text is not written again.
-    recovered: HashMap<PathBuf, u64>,
     /// A Git command is moving the files, and what they hold now is not for taking in yet.
     holding_outside: bool,
     /// The Git command that moves the files, which what comes in until it lets go is named after.
@@ -271,7 +285,6 @@ impl PersistView {
             note_file: None,
             note_task: Task::ready(()),
             gone_task: None,
-            recovered: HashMap::new(),
             holding_outside: false,
             git_move: None,
             agent_working: false,
@@ -538,6 +551,7 @@ impl PersistView {
         self.retry_conflicts(window, cx);
         self.sync.forget_save_problems_if_clean(self.session(cx));
         let outgoing = self.editor.update(cx, |editor, _| editor.session_quietly().outgoing());
+        self.sync.forget_clean_copies(self.session(cx));
         if outgoing.is_empty() {
             cx.notify();
             return;
@@ -590,13 +604,10 @@ impl PersistView {
         // door, to reach the galley and the panels.
         let manifest = self.session(cx).manifest_path();
         let quiet = (results.iter()).all(|(outgoing, _)| manifest.as_ref() != Some(&outgoing.path));
-        let (sync, recovered) = (&mut self.sync, &mut self.recovered);
+        let sync = &mut self.sync;
         let record = |session: &mut Session| {
             for (outgoing, result) in results {
                 failed |= result.is_err();
-                if let Ok(Outcome::Written) = &result {
-                    recovered.remove(&outgoing.path);
-                }
                 if sync.finish_write(session, &outgoing, result) {
                     changed.push(outgoing.path);
                 }
@@ -688,10 +699,7 @@ impl PersistView {
             return;
         };
         let mut unsaved = self.session(cx).unsaved();
-        unsaved.retain(|file| {
-            let hash = atomic::content_hash(file.text.as_bytes());
-            self.recovered.insert(file.path.clone(), hash) != Some(hash)
-        });
+        unsaved.retain(|file| self.sync.copy_is_due(&file.path, &file.text));
         if unsaved.is_empty() {
             return;
         }
