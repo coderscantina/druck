@@ -64,9 +64,30 @@ fn marker(start: &str, side: &str) -> String {
     format!("{start}{}{COMMENT_END}\n", side.replace("--", "-"))
 }
 
+/// The marker lines of each complete [`Choice::Both`] in `lines`: mine, between, and theirs, in that order. A marker
+/// line outside such a group is ordinary text, so a lone `<!-- ======= -->` someone wrote is never taken for one.
+fn marker_groups(lines: &[&str]) -> Vec<[usize; 3]> {
+    let mut groups = Vec::new();
+    let (mut mine, mut between) = (None, None);
+    for (index, line) in lines.iter().enumerate() {
+        match marker_line(line) {
+            Some(MarkerLine::Mine) => (mine, between) = (Some(index), None),
+            Some(MarkerLine::Between) if mine.is_some() && between.is_none() => between = Some(index),
+            Some(MarkerLine::Theirs) => {
+                if let (Some(mine), Some(between)) = (mine, between) {
+                    groups.push([mine, between, index]);
+                }
+                (mine, between) = (None, None);
+            }
+            _ => {}
+        }
+    }
+    groups
+}
+
 /// Whether a text still has the marker comments of a [`Choice::Both`].
 pub fn has_markers(text: &str) -> bool {
-    text.lines().any(|line| marker_line(line).is_some())
+    !marker_groups(&text.lines().collect::<Vec<_>>()).is_empty()
 }
 
 /// Whether a block or line is one of the marker comments of a [`Choice::Both`].
@@ -76,31 +97,21 @@ pub fn is_marker(text: &str) -> bool {
 
 /// The text with the versions [`Choice::Both`] left in it reduced to `choice`'s side, and the marker lines gone.
 pub fn keep_one(text: &str, choice: Choice) -> String {
-    #[derive(PartialEq)]
-    enum Part {
-        Outside,
-        Mine,
-        Theirs,
-    }
-    let mut part = Part::Outside;
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let mut kept = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        match marker_line(line) {
-            Some(MarkerLine::Mine) => part = Part::Mine,
-            Some(MarkerLine::Between) => part = Part::Theirs,
-            Some(MarkerLine::Theirs) => part = Part::Outside,
-            None => {
-                let keep = match part {
-                    Part::Outside => true,
-                    Part::Mine => choice != Choice::Theirs,
-                    Part::Theirs => choice != Choice::Mine,
-                };
-                if keep {
-                    kept.push_str(line);
-                }
-            }
+    let mut next = 0;
+    for [mine, between, theirs] in marker_groups(&lines) {
+        let side = |range: std::ops::Range<usize>| lines[range].concat();
+        kept.push_str(&side(next..mine));
+        if choice != Choice::Theirs {
+            kept.push_str(&side(mine + 1..between));
         }
+        if choice != Choice::Mine {
+            kept.push_str(&side(between + 1..theirs));
+        }
+        next = theirs + 1;
     }
+    kept.push_str(&lines[next..].concat());
     kept
 }
 
@@ -624,6 +635,16 @@ mod tests {
             "x\n<!-- <<<<<<< deins -->\nmine\n<!-- ======= -->\ntheirs\n<!-- >>>>>>> entwurf-2 -->\ny\n"
         );
         assert_eq!(keep_one(&both, Choice::Theirs), "x\ntheirs\ny\n");
+    }
+
+    #[test]
+    fn a_marker_line_outside_a_complete_group_is_text() {
+        let text = "Before.\n<!-- ======= -->\nAfter.\n<!-- >>>>>>> deins -->\nEnd.\n";
+        assert!(!has_markers(text));
+        assert_eq!(keep_one(text, Choice::Mine), text);
+        let both = format!("{text}<!-- <<<<<<< yours -->\nMine.\n<!-- ======= -->\nTheirs.\n<!-- >>>>>>> app -->\n");
+        assert!(has_markers(&both));
+        assert_eq!(keep_one(&both, Choice::Mine), format!("{text}Mine.\n"));
     }
 
     #[test]
