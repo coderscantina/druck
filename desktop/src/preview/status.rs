@@ -1,7 +1,13 @@
 //! The status line under the pages: which pages show, what is left to look at, the warnings with their Marks switch,
 //! the window's foot line, and the zoom.
 
-use super::*;
+use gpui::prelude::*;
+use gpui::{AnyView, Context, Role, SharedString, Toggled, Window, div};
+
+use super::strings::Key;
+use super::{PreviewView, ProblemsWanted, in_words};
+use crate::a11y::Control as _;
+use crate::tokens::{self, Tokens};
 
 impl PreviewView {
     /// Whether the status line holds `parts` in full beside the zoom.
@@ -12,13 +18,13 @@ impl PreviewView {
             .filter(|part| !part.is_empty())
             .map(|part| width(part))
             .sum();
-        let percent = format!("{}%", (self.current_zoom * 100.0).round());
+        let percent = format!("{}%", (self.place.current_zoom * 100.0).round());
         let zoom = width(&percent)
             + width(crate::t!(Key::ZoomFit))
             + f32::from(tokens::ZOOM_BUTTON * 2. + tokens::SPACE_1 * 6. + tokens::HAIR_GAP * 3.)
             + f32::from(tokens::SWITCH_WIDTH + tokens::SPACE_1 * 3.);
         let gaps = f32::from(tokens::SPACE_3) * (parts.len() + 3) as f32;
-        words + zoom + gaps <= self.view.0
+        words + zoom + gaps <= self.place.view.0
     }
 
     /// The window's foot line, to show in the status line.
@@ -44,11 +50,11 @@ impl PreviewView {
             };
             return (text, None);
         }
-        let shown = self.sheets(self.current_zoom).and_then(|sheets| {
-            let page = sheets.page_at_middle(self.scroll.1, self.view.1)?;
+        let shown = self.sheets(self.place.current_zoom).and_then(|sheets| {
+            let page = sheets.page_at_middle(self.place.scroll.1, self.place.view.1)?;
             Some(sheets.row_pages(page))
         });
-        let shown = shown.unwrap_or(self.page..self.page + 1);
+        let shown = shown.unwrap_or(self.place.page..self.place.page + 1);
         let shown = shown.start.min(pages - 1)..shown.end.min(pages);
         let range = if shown.len() > 1 {
             crate::t!(Key::PagesOf, first = shown.start + 1, last = shown.end, pages = pages)
@@ -173,7 +179,7 @@ impl PreviewView {
                     })
                     .children(self.foot.clone()),
             )
-            .child(self.zoom_controls(tokens, cx))
+            .child(super::zoom::zoom_controls(&self.place, tokens, cx))
     }
 }
 

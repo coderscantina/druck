@@ -1,7 +1,75 @@
 //! Layout scheduling: asking the engine for pages when the text or theme changes, one run at a time with the newest
 //! waiting, taking in what a run gave, and keeping Publish ready while Write is on screen.
 
-use super::*;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+#[cfg(any(debug_assertions, feature = "measure"))]
+use std::time::Instant;
+
+use druck::Failure;
+use gpui::prelude::*;
+use gpui::{AnyWindowHandle, Bounds, Context, Pixels};
+
+use super::job::{Job, Layout, Scheduler, Started, Typesetter};
+use super::{Laid, PreviewView, SPECIMEN, SPECIMEN_FILE, TypeRead, Typeset};
+use crate::session::{Joined, Kind};
+
+/// What is typeset when: one run at a time with the newest waiting, the document's or the specimen's, in which theme.
+pub(super) struct Typesetting {
+    pub scheduler: Scheduler<Job>,
+    pub typesetter: Arc<Mutex<Typesetter>>,
+    /// Typesets the bundled specimen in the same theme, for a view of every element.
+    pub specimen_typesetter: Arc<Mutex<Typesetter>>,
+    /// The theme to typeset with, if not the document's, which the next layout follows.
+    pub theme: Option<PathBuf>,
+    /// The document's text as last asked for, to typeset again when the theme changes or the specimen goes.
+    pub latest: Option<Joined>,
+    /// Whether the pages show the specimen instead of the document.
+    pub specimen: bool,
+    /// The request whose pages are published.
+    pub published: u64,
+}
+
+impl Typesetting {
+    /// Typesetting of the document `kind` in `theme`, or the theme it names.
+    pub(super) fn new(kind: Kind, theme: Option<PathBuf>) -> Self {
+        let specimen = Kind::Single {
+            path: kind.base_dir().join(SPECIMEN_FILE),
+        };
+        Self {
+            scheduler: Scheduler::new(),
+            specimen_typesetter: Arc::new(Mutex::new(Typesetter::new(specimen, None))),
+            typesetter: Arc::new(Mutex::new(Typesetter::new(kind, theme.clone()))),
+            theme,
+            latest: None,
+            specimen: false,
+            published: 0,
+        }
+    }
+
+    /// The run for what the pages show, the specimen or the document as last asked for, if it can start now.
+    fn next(&mut self) -> Option<Started<Job>> {
+        let joined = self.latest.clone()?;
+        let joined = if self.specimen {
+            Joined::single(SPECIMEN.to_owned(), joined.revision)
+        } else {
+            joined
+        };
+        self.scheduler.request(Job {
+            joined,
+            theme: self.theme.clone(),
+            specimen: self.specimen,
+        })
+    }
+
+    fn typesetter(&self, specimen: bool) -> Arc<Mutex<Typesetter>> {
+        if specimen {
+            self.specimen_typesetter.clone()
+        } else {
+            self.typesetter.clone()
+        }
+    }
+}
 
 /// Where the pages would paint if they were on screen.
 #[derive(Clone, Copy)]
@@ -20,9 +88,9 @@ impl PreviewView {
         if let Some(bench) = &mut self.bench {
             bench.requested(&joined.text);
         }
-        self.latest = Some(joined);
+        self.typesetting.latest = Some(joined);
         // The specimen stays as it is while the document changes. A theme edit asks for it again with `refresh`.
-        if !self.specimen || self.layout.is_none() {
+        if !self.typesetting.specimen || self.layout.is_none() {
             self.typeset_latest(cx);
         }
     }
@@ -34,42 +102,29 @@ impl PreviewView {
 
     /// Typesets what the pages show: the specimen, or the document as last asked for.
     pub(super) fn typeset_latest(&mut self, cx: &mut Context<Self>) {
-        let Some(joined) = self.latest.clone() else {
-            return;
-        };
-        let joined = if self.specimen {
-            Joined::single(SPECIMEN.to_owned(), joined.revision)
-        } else {
-            joined
-        };
-        let job = Job {
-            joined,
-            theme: self.theme.clone(),
-            specimen: self.specimen,
-        };
-        if let Some(started) = self.scheduler.request(job) {
+        if let Some(started) = self.typesetting.next() {
             self.start_layout(started, cx);
         }
     }
 
     /// Typesets with another theme file, or with the document's own when `None`. The next layout takes it.
     pub fn set_theme(&mut self, theme: Option<PathBuf>, cx: &mut Context<Self>) {
-        if self.theme != theme {
-            self.theme = theme;
+        if self.typesetting.theme != theme {
+            self.typesetting.theme = theme;
             self.typeset_latest(cx);
         }
     }
 
     /// Shows the bundled specimen in pages, or the document again.
     pub fn set_specimen(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.specimen != on {
-            self.specimen = on;
+        if self.typesetting.specimen != on {
+            self.typesetting.specimen = on;
             self.typeset_latest(cx);
         }
     }
 
     pub fn is_specimen(&self) -> bool {
-        self.specimen
+        self.typesetting.specimen
     }
 
     pub(super) fn start_layout(&mut self, (number, job, cancel): Started<Job>, cx: &mut Context<Self>) {
@@ -78,11 +133,7 @@ impl PreviewView {
             theme,
             specimen,
         } = job;
-        let typesetter = if specimen {
-            self.specimen_typesetter.clone()
-        } else {
-            self.typesetter.clone()
-        };
+        let typesetter = self.typesetting.typesetter(specimen);
         let revision = joined.revision;
         let layout = cx.background_spawn(async move {
             // A panic is caught inside the run, so this lock is not poisoned, and if it were the typesetter is still whole.
@@ -94,7 +145,7 @@ impl PreviewView {
         cx.spawn(async move |this, cx| {
             let (result, failed_type) = layout.await;
             this.update(cx, |view, cx| {
-                let (publish, next) = view.scheduler.finished(number);
+                let (publish, next) = view.typesetting.scheduler.finished(number);
                 if publish {
                     view.publish(number, revision, specimen, result, cx);
                     // Write keeps the theme's type when the pages cannot be set.
@@ -121,7 +172,7 @@ impl PreviewView {
     ) {
         match result {
             Ok(layout) => {
-                self.published = number;
+                self.typesetting.published = number;
                 // Offsets in the specimen are not offsets in any chapter.
                 self.revision = (!specimen).then_some(revision);
                 self.diagnostics.clear();
@@ -162,13 +213,13 @@ impl PreviewView {
     /// Whether a layout is running, which the next request would cancel.
     #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn is_laying_out(&self) -> bool {
-        self.scheduler.is_running()
+        self.typesetting.scheduler.is_running()
     }
 
     /// The moment the pages of the newest request were first ready to paint, if they have been.
     #[cfg(any(debug_assertions, feature = "measure"))]
     pub fn ready_at(&self) -> Option<Instant> {
-        (self.ready.0 == self.scheduler.latest()).then_some(self.ready.1)
+        (self.ready.0 == self.typesetting.scheduler.latest()).then_some(self.ready.1)
     }
 
     /// The last frame that showed every visible page exact.

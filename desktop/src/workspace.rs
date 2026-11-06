@@ -91,13 +91,15 @@ pub struct Slots {
     pub right: Vec<SidePanel>,
 }
 
+/// A panel's width in a window of the given width, zero while it is closed. Called while the workspace renders, so it
+/// must not read the workspace.
+pub type PanelWidth = Rc<dyn Fn(Pixels, &App) -> Pixels>;
+
 /// A panel beside the text, and how wide it is, so the text knows its room before anything is laid out.
 #[derive(Clone)]
 pub struct SidePanel {
     pub view: AnyView,
-    /// The panel's width in a window of the given width, zero while it is closed. Called while the workspace renders,
-    /// so it must not read the workspace.
-    pub width: Rc<dyn Fn(Pixels, &App) -> Pixels>,
+    pub width: PanelWidth,
 }
 
 /// Where the text or the pages stand across the window, between the panels, as of the workspace's last render. Cards

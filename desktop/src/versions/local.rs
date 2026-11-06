@@ -9,13 +9,36 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{App, Context, WeakEntity, Window};
 
-use super::history::{History, Label, Moment, now_ms};
-use super::pacing::Due;
+use super::history::{History, Label, Moment, Orphan, now_ms};
+use super::pacing::{Due, Pacing};
 use super::strings::Key;
 use super::{Current, REFRESH_PAUSE, Versions};
 use crate::persist::FileChange;
 use crate::persist::sync::{ChangeKind, Problem};
 use crate::session::{ChapterId, Kind, Session};
+
+/// Local history's state in the view: the store, when snapshots are due, and which file had which path.
+pub(super) struct LocalHistory {
+    pub store: Option<Arc<History>>,
+    pub pacing: Pacing,
+    pub pacing_running: bool,
+    /// Each chapter's file when last looked at, to tell a rename.
+    pub paths: HashMap<ChapterId, PathBuf>,
+    /// The file names that may be another file's lost history, by the file with no history.
+    pub unplaced: HashMap<PathBuf, Orphan>,
+}
+
+impl LocalHistory {
+    pub(super) fn new(store: Option<Arc<History>>) -> Self {
+        Self {
+            store,
+            pacing: Pacing::default(),
+            pacing_running: false,
+            paths: HashMap::new(),
+            unplaced: HashMap::new(),
+        }
+    }
+}
 
 /// Records what every file of the document holds now in its local history, with a label: before an agent's turn, and
 /// before anything else that may change the text. A file that then does not change adds no mark to its timeline. The
@@ -77,7 +100,7 @@ fn store_off_thread(
 impl Versions {
     /// At opening: finds history that moved with the book, says so, and thins what is old.
     pub(super) fn look_after_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(store) = self.store.clone() else {
+        let Some(store) = self.history.store.clone() else {
             return;
         };
         let files = self.session(cx).files();
@@ -90,7 +113,7 @@ impl Versions {
             let followed = work.await;
             view.update_in(cx, |view, window, cx| {
                 let left = followed.unplaced.len();
-                view.unplaced = followed.unplaced.into_iter().collect();
+                view.history.unplaced = followed.unplaced.into_iter().collect();
                 if let Some((from, _)) = followed.moved.first() {
                     let text = crate::t!(Key::HistoryFollowed, from = from.display().to_string());
                     view.show_note(text, window, cx);
@@ -113,9 +136,9 @@ impl Versions {
         let session = self.parts.editor.read(cx).session();
         let path = session.active_chapter().path();
         let now = Instant::now();
-        if self.pacing.edited(path, now) {
+        if self.history.pacing.edited(path, now) {
             // Before the first edit this run, keep what the file held, or the timeline would start after it.
-            if let (Some(store), Some(known)) = (self.store.clone(), session.file_base(path)) {
+            if let (Some(store), Some(known)) = (self.history.store.clone(), session.file_base(path)) {
                 let files = vec![(path.to_owned(), known.base.to_string())];
                 store_off_thread(store, files, None, cx.entity().downgrade(), cx);
             }
@@ -133,15 +156,15 @@ impl Versions {
     }
 
     fn start_pacing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pacing_running {
+        if self.history.pacing_running {
             return;
         }
-        self.pacing_running = true;
+        self.history.pacing_running = true;
         cx.spawn_in(window, async move |view, cx| {
             loop {
-                let wait = view.update(cx, |view, cx| match view.pacing.next(Instant::now()) {
+                let wait = view.update(cx, |view, cx| match view.history.pacing.next(Instant::now()) {
                     Due::Idle => {
-                        view.pacing_running = false;
+                        view.history.pacing_running = false;
                         None
                     }
                     Due::Wait(wait) => Some(wait),
@@ -161,7 +184,7 @@ impl Versions {
 
     /// Stores what these files hold now, off the main thread.
     fn keep(&self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        let Some(store) = self.store.clone() else {
+        let Some(store) = self.history.store.clone() else {
             return;
         };
         let session = self.session(cx);
@@ -173,12 +196,12 @@ impl Versions {
 
     /// The app or the document is about to go: what waits for a pause is stored now.
     pub(super) fn keep_waiting(&mut self, cx: &App) {
-        let Some(store) = self.store.clone() else {
+        let Some(store) = self.history.store.clone() else {
             return;
         };
         let session = self.session(cx);
         let now = now_ms();
-        for path in self.pacing.drain() {
+        for path in self.history.pacing.drain() {
             if let Some(text) = session.file_text(&path) {
                 store.snapshot(&path, &text, None, now).ok();
             }
@@ -193,10 +216,10 @@ impl Versions {
     /// A chapter's file changed name: its log goes along.
     pub(super) fn session_changed(&mut self, cx: &mut Context<Self>) {
         let now = self.chapter_paths(cx);
-        if let Some(store) = self.store.clone() {
+        if let Some(store) = self.history.store.clone() {
             let renamed: Vec<(PathBuf, PathBuf)> = (now.iter())
                 .filter_map(|(id, path)| {
-                    let before = self.paths.get(id)?;
+                    let before = self.history.paths.get(id)?;
                     (before != path).then(|| (before.clone(), path.clone()))
                 })
                 .collect();
@@ -209,7 +232,7 @@ impl Versions {
                 .detach();
             }
         }
-        self.paths = now;
+        self.history.paths = now;
         self.timeline.update(cx, |timeline, cx| timeline.follow_active(cx));
     }
 
@@ -234,13 +257,13 @@ impl Versions {
         {
             return;
         }
-        let Some(store) = self.store.clone() else {
+        let Some(store) = self.history.store.clone() else {
             return;
         };
         let (path, base) = (change.path.clone(), change.base.clone());
         let after = self.session(cx).file_text(&path);
         let label = Label::from(Moment::Outside);
-        self.pacing.taken(&path, Instant::now());
+        self.history.pacing.taken(&path, Instant::now());
         cx.background_spawn(async move {
             let now = now_ms();
             store.snapshot(&path, &base, Some(&label), now).ok();

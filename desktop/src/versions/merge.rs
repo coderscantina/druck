@@ -1,7 +1,19 @@
 //! Merging through `git`: running a merge or a pull, taking what Git stopped on to the conflict line, and the time after
 //! it, while "See both"'s markers stand, until the commit that finishes it. [`PendingMerge`] holds where that stands.
 
-use super::*;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use gpui::{App, Context, Window};
+
+use super::git_cli::{Git, Merged};
+use super::history::Moment;
+use super::repo::Conflict;
+use super::strings::Key;
+use super::{Done, RepoState, Versions, describe, describe_refused, open_repo};
+use crate::persist::merge::{Choice, edits_between, has_markers, keep_one};
+use crate::persist::{GitMove, Source};
+use crate::source::EditKind;
 
 /// Where a merge Git stopped on stands: its conflicts, then "See both"'s markers, then the commit that finishes it.
 #[derive(Default)]

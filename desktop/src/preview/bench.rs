@@ -161,19 +161,19 @@ pub fn frame(
             );
             bench.phase = Phase::Painting;
             if let Some(layout) = view.layout.clone() {
-                let resolution = (view.current_zoom * window.scale_factor()).min(super::MAX_RESOLUTION);
+                let resolution = (view.place.current_zoom * window.scale_factor()).min(super::MAX_RESOLUTION);
                 paint_all(layout, resolution, cx);
             }
         }
         Phase::Scrolling => {
-            view.scroll.1 += bench.scroll_per_frame;
-            if view.scroll.1 + view.view.1 >= content {
+            view.place.scroll.1 += bench.scroll_per_frame;
+            if view.place.scroll.1 + view.place.view.1 >= content {
                 report_frames("scrolling", bench);
                 eprintln!("after scrolling: {}", memory());
                 bench.phase = Phase::Refreshing { done: 0 };
                 bench.awaiting_paint = false;
                 // At the edit, so each refresh repaints the pages it changed.
-                view.scroll.1 = content / 2.0;
+                view.place.scroll.1 = content / 2.0;
                 next_text = Some(0);
             }
         }

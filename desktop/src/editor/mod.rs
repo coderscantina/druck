@@ -6,12 +6,14 @@
 //! images, with their floats and the Selection and Images tabs. [`input`] is what typing and the input methods do to the
 //! text, [`selection`] where the caret goes, and [`review`] what shows of an agent's work.
 
+mod accessible;
 mod commands;
 mod display;
 mod element;
 mod float;
 mod gutter;
 mod input;
+mod keys;
 mod layout;
 mod margin;
 mod place;
@@ -34,8 +36,8 @@ use std::time::Instant;
 use gpui::prelude::*;
 use gpui::{
     AnyView, App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable,
-    KeyBinding, KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent,
-    SharedString, Subscription, Task, UTF16Selection, Window, actions, div, point, px, size,
+    KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString,
+    Subscription, Task, UTF16Selection, Window, div, point, px, size,
 };
 
 use crate::preview::BookType;
@@ -46,6 +48,7 @@ use crate::source::inline::{inline_spans, line_markers};
 use crate::source::{BlockKind, Blocks, Edit, EditKind, Selection, motion, typing};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Parts, Workspace};
+use accessible::{ShownBlock, a11y_text};
 use commands::convert::BlockType;
 use commands::marks::Mark;
 use commands::notes;
@@ -54,6 +57,8 @@ use element::Galley;
 use float::Float;
 pub(crate) use float::tooltip;
 use gutter::{BlockGrab, CommentMarker};
+pub use keys::*;
+use keys::{CONTEXT, MENU_CONTEXT};
 use layout::{BlockLayout, Column, GalleyStyle, ShapeRequest, shape_block};
 use margin::ChapterNotes;
 use trace::Trace;
@@ -64,161 +69,6 @@ pub fn mount(parts: &Parts, window: &mut Window, cx: &mut Context<Workspace>) {
     let notes = cx.new(|cx| ChapterNotes::new(editor.clone(), window, cx));
     editor.update(cx, |editor, _| editor.margin = Some(notes));
     rich::view::mount(parts, cx);
-}
-
-actions!(
-    editor,
-    [
-        Backspace,
-        Delete,
-        DeleteWordLeft,
-        DeleteWordRight,
-        DeleteToLineStart,
-        NewBlock,
-        NewLine,
-        Left,
-        Right,
-        Up,
-        Down,
-        WordLeft,
-        WordRight,
-        LineStart,
-        LineEnd,
-        DocStart,
-        DocEnd,
-        PageUp,
-        PageDown,
-        SelectLeft,
-        SelectRight,
-        SelectUp,
-        SelectDown,
-        SelectWordLeft,
-        SelectWordRight,
-        SelectLineStart,
-        SelectLineEnd,
-        SelectDocStart,
-        SelectDocEnd,
-        SelectPageUp,
-        SelectPageDown,
-        SelectAll,
-        Copy,
-        Cut,
-        Paste,
-        Undo,
-        Redo,
-        Save,
-        ShowCharacterPalette,
-        ToggleBold,
-        ToggleItalic,
-        ToggleUnderline,
-        ToggleStrike,
-        ToggleSuperscript,
-        ToggleSubscript,
-        ToggleQuote,
-        ToggleBullets,
-        ToggleNumbers,
-        OpenLink,
-        ToggleSmallCaps,
-        ToggleSource,
-        ShowSpelling,
-        Cancel,
-        InsertFootnote,
-        InsertCitation,
-        InsertReference,
-        InsertImage,
-        InsertTable,
-        EditRich,
-        MenuUp,
-        MenuDown,
-        MenuAccept,
-    ]
-);
-
-const CONTEXT: &str = "Editor";
-/// Set beside [`CONTEXT`] while a menu is open, whose bindings then win.
-const MENU_CONTEXT: &str = "CommandMenu";
-
-pub fn bind_keys(cx: &mut App) {
-    // The notes panel's field listens to the editing keys too.
-    let context = Some("Editor || NoteField");
-    cx.bind_keys([
-        KeyBinding::new("backspace", Backspace, context),
-        KeyBinding::new("shift-backspace", Backspace, context),
-        KeyBinding::new("delete", Delete, context),
-        KeyBinding::new("alt-backspace", DeleteWordLeft, context),
-        KeyBinding::new("alt-delete", DeleteWordRight, context),
-        KeyBinding::new("cmd-backspace", DeleteToLineStart, context),
-        KeyBinding::new("enter", NewBlock, context),
-        KeyBinding::new("shift-enter", NewLine, context),
-        KeyBinding::new("left", Left, context),
-        KeyBinding::new("right", Right, context),
-        KeyBinding::new("up", Up, context),
-        KeyBinding::new("down", Down, context),
-        KeyBinding::new("alt-left", WordLeft, context),
-        KeyBinding::new("alt-right", WordRight, context),
-        KeyBinding::new("cmd-left", LineStart, context),
-        KeyBinding::new("cmd-right", LineEnd, context),
-        KeyBinding::new("home", LineStart, context),
-        KeyBinding::new("end", LineEnd, context),
-        KeyBinding::new("cmd-up", DocStart, context),
-        KeyBinding::new("cmd-down", DocEnd, context),
-        KeyBinding::new("pageup", PageUp, context),
-        KeyBinding::new("pagedown", PageDown, context),
-        KeyBinding::new("shift-left", SelectLeft, context),
-        KeyBinding::new("shift-right", SelectRight, context),
-        KeyBinding::new("shift-up", SelectUp, context),
-        KeyBinding::new("shift-down", SelectDown, context),
-        KeyBinding::new("alt-shift-left", SelectWordLeft, context),
-        KeyBinding::new("alt-shift-right", SelectWordRight, context),
-        KeyBinding::new("cmd-shift-left", SelectLineStart, context),
-        KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
-        KeyBinding::new("shift-home", SelectLineStart, context),
-        KeyBinding::new("shift-end", SelectLineEnd, context),
-        KeyBinding::new("cmd-shift-up", SelectDocStart, context),
-        KeyBinding::new("cmd-shift-down", SelectDocEnd, context),
-        KeyBinding::new("shift-pageup", SelectPageUp, context),
-        KeyBinding::new("shift-pagedown", SelectPageDown, context),
-        KeyBinding::new("cmd-a", SelectAll, context),
-        KeyBinding::new("cmd-c", Copy, context),
-        KeyBinding::new("cmd-x", Cut, context),
-        KeyBinding::new("cmd-v", Paste, context),
-        KeyBinding::new("cmd-z", Undo, context),
-        KeyBinding::new("cmd-shift-z", Redo, context),
-        KeyBinding::new("cmd-s", Save, context),
-        KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, context),
-    ]);
-    let context = Some(CONTEXT);
-    cx.bind_keys([
-        KeyBinding::new("cmd-b", ToggleBold, context),
-        KeyBinding::new("cmd-i", ToggleItalic, context),
-        KeyBinding::new("cmd-u", ToggleUnderline, context),
-        KeyBinding::new("cmd-shift-x", ToggleStrike, context),
-        KeyBinding::new("cmd-.", ToggleSuperscript, context),
-        KeyBinding::new("cmd-shift-.", ToggleSubscript, context),
-        KeyBinding::new("cmd-shift-9", ToggleQuote, context),
-        KeyBinding::new("cmd-shift-8", ToggleBullets, context),
-        KeyBinding::new("cmd-shift-7", ToggleNumbers, context),
-        KeyBinding::new("cmd-k", OpenLink, context),
-        KeyBinding::new("cmd-/", ToggleSource, context),
-        KeyBinding::new("cmd-;", ShowSpelling, context),
-        KeyBinding::new("escape", Cancel, context),
-        KeyBinding::new("cmd-alt-f", InsertFootnote, context),
-        KeyBinding::new("cmd-alt-c", InsertCitation, context),
-        KeyBinding::new("cmd-alt-r", InsertReference, context),
-        KeyBinding::new("cmd-shift-i", InsertImage, context),
-        KeyBinding::new("cmd-alt-t", InsertTable, context),
-        // A Tab in the text stays in the text. Control-Tab leaves it.
-        KeyBinding::new("tab", gpui::NoAction, context),
-        KeyBinding::new("shift-tab", gpui::NoAction, context),
-        KeyBinding::new("cmd-enter", EditRich, context),
-    ]);
-    rich::view::bind_keys(cx);
-    let context = Some(MENU_CONTEXT);
-    cx.bind_keys([
-        KeyBinding::new("up", MenuUp, context),
-        KeyBinding::new("down", MenuDown, context),
-        KeyBinding::new("enter", MenuAccept, context),
-    ]);
 }
 
 #[derive(Clone, Copy)]
@@ -1768,11 +1618,6 @@ impl Render for EditorView {
     }
 }
 
-/// A shown line of the galley, with where its block starts.
-type ShownBlock = (usize, Rc<BlockLayout>);
-
-/// The galley's lines on screen for assistive technology: one text run per line, with the caret or selection where a run
-/// holds it. What is off screen is not in the tree, as the toolkit's own lists leave it out.
 /// Keeps the blocks on screen pointing at the same blocks after an edit replaced some. Until the next layout they are all
 /// there is of where things stand, and the next render reads them first, so none may point past the end. A replaced block
 /// goes: its layout is gone too.
@@ -1784,139 +1629,5 @@ fn follow_blocks(visible: &mut Vec<(usize, Pixels)>, change: BlockChange) {
     }
 }
 
-fn a11y_text(shown: &[ShownBlock], selection: Selection, builder: &mut gpui::A11ySubtreeBuilder) {
-    let mut anchor = None;
-    let mut focus = None;
-    let mut key = 0usize;
-    for (start, layout) in shown {
-        for line in &layout.lines {
-            if line.height == px(0.) || line.skipped {
-                continue;
-            }
-            let id = builder.synthetic_node_id(("run", key));
-            key += 1;
-            let value = format!("{}\n", line.display.text);
-            let mut run = gpui::accesskit::Node::new(gpui::Role::TextRun);
-            let lengths: Vec<u8> = value.chars().map(|character| character.len_utf8() as u8).collect();
-            run.set_character_lengths(lengths);
-            run.set_value(value);
-            let source = start + line.display.source.start..=start + line.display.source.end;
-            let position = |offset: usize| gpui::accesskit::TextPosition {
-                node: id,
-                character_index: line.display.text[..line.display.to_display(offset - start)]
-                    .chars()
-                    .count(),
-            };
-            if source.contains(&selection.anchor) {
-                anchor.get_or_insert(position(selection.anchor));
-            }
-            if source.contains(&selection.head) {
-                focus.get_or_insert(position(selection.head));
-            }
-            builder.push_child(id, run);
-        }
-    }
-    if let (Some(anchor), Some(focus)) = (anchor.or(focus), focus.or(anchor)) {
-        builder
-            .parent_node()
-            .set_text_selection(gpui::accesskit::TextSelection { anchor, focus });
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn indices(visible: &[(usize, Pixels)]) -> Vec<usize> {
-        visible.iter().map(|(index, _)| *index).collect()
-    }
-
-    #[test]
-    fn a_chapter_opens_where_the_session_put_its_caret() {
-        let view = |head: usize| ChapterView {
-            selection: Selection::caret(head),
-            scroll: None,
-        };
-        // A new project's caret after its title, which `{#sec:intro}` closes.
-        let text = "# Einleitung {#sec:intro}\n\nText.\n";
-        let title = "# Einleitung {#sec:intro}".len();
-        let blocks = Blocks::parse(text);
-        assert_eq!(
-            opening_selection(text, &blocks, view(title), false),
-            Selection::caret(title)
-        );
-        // In the galley a caret inside the notes above the first text moves after them, and the source view keeps it.
-        let text = "<!-- note -->\n\n# T\n";
-        let blocks = Blocks::parse(text);
-        assert_eq!(opening_selection(text, &blocks, view(0), false), Selection::caret(15));
-        assert_eq!(opening_selection(text, &blocks, view(0), true), Selection::caret(0));
-        // A kept place past the end of a shorter text is clamped.
-        assert_eq!(
-            opening_selection(text, &blocks, view(99), false),
-            Selection::caret(text.len())
-        );
-    }
-
-    #[test]
-    fn command_up_and_down_stop_at_the_text_and_leave_folded_notes_alone() {
-        let text = "<!-- opening note -->\n\n# Title\n\nLast words.\n\n<!-- closing note -->\n";
-        let blocks = Blocks::parse(text);
-        let edge = |end: bool| selection::chapter_edge(text, &blocks, end, |_| false);
-        assert_eq!(edge(false), text.find("# Title").unwrap());
-        assert_eq!(edge(true), text.find("Last words.").unwrap() + "Last words.".len());
-        // With no closing note the end stays the text's end.
-        let text = "# Title\n\nLast words.\n";
-        let blocks = Blocks::parse(text);
-        assert_eq!(selection::chapter_edge(text, &blocks, true, |_| false), text.len());
-        assert_eq!(selection::chapter_edge(text, &blocks, false, |_| false), 0);
-    }
-
-    #[test]
-    fn blocks_on_screen_never_point_past_the_end_after_an_edit() {
-        let on_screen =
-            |from: usize, to: usize| -> Vec<(usize, Pixels)> { (from..to).map(|index| (index, px(0.))).collect() };
-        // Backspace at the end of a chapter merges the last two blocks of 134.
-        let mut visible = on_screen(125, 134);
-        follow_blocks(
-            &mut visible,
-            BlockChange {
-                start: 132,
-                removed: 2,
-                inserted: 1,
-            },
-        );
-        assert_eq!(indices(&visible), (125..132).collect::<Vec<_>>());
-        // Select all and a key: everything after the opening note became one block, leaving 3.
-        let mut visible = on_screen(140, 150);
-        follow_blocks(
-            &mut visible,
-            BlockChange {
-                start: 2,
-                removed: 169,
-                inserted: 1,
-            },
-        );
-        assert!(visible.is_empty());
-        // Blocks after the change keep pointing at the same blocks.
-        let mut visible = on_screen(4, 8);
-        follow_blocks(
-            &mut visible,
-            BlockChange {
-                start: 1,
-                removed: 3,
-                inserted: 1,
-            },
-        );
-        assert_eq!(indices(&visible), [2, 3, 4, 5]);
-        let mut visible = on_screen(4, 8);
-        follow_blocks(
-            &mut visible,
-            BlockChange {
-                start: 5,
-                removed: 1,
-                inserted: 3,
-            },
-        );
-        assert_eq!(indices(&visible), [4, 8, 9]);
-    }
-}
+mod tests;

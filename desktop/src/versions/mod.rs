@@ -25,7 +25,6 @@ mod timeline;
 mod ui;
 mod words;
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,25 +35,24 @@ use gpui::{
 };
 
 use self::commit_card::{CardField, CommitCard};
-use self::git_cli::{Git, Merged, Refused};
+use self::git_cli::{Git, Refused};
 pub use self::history::Moment;
 use self::history::{History, Orphan};
+use self::local::LocalHistory;
 pub use self::local::label_history;
 use self::merge::PendingMerge;
-use self::pacing::Pacing;
 pub use self::panel::GitPanel;
 use self::panel::Slot;
-use self::repo::{Conflict, Overview, Problem, Repo};
+use self::repo::{Overview, Problem, Repo};
 use self::strings::Key;
 use self::timeline::Timeline;
 pub use self::ui::compared;
 use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
-use crate::persist::merge::{Choice, edits_between, has_markers, keep_one};
+use crate::persist::merge::Choice;
 use crate::persist::recovery::data_dir;
 use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, GitMove, PersistView, Source};
-use crate::session::{ChapterId, Kind, Session};
-use crate::source::EditKind;
+use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Mode, Parts, Slots};
 
@@ -132,7 +130,7 @@ pub fn mount(
     cx.set_global(Current {
         view: view.downgrade(),
         window: window.window_handle(),
-        store: view.read(cx).store.clone(),
+        store: view.read(cx).history.store.clone(),
     });
     // First, so it stands at the left with the saving state and not past the word count.
     slots.footer.insert(0, view.clone().into());
@@ -253,13 +251,24 @@ enum RepoState {
     Broken(String),
 }
 
+/// When the remote was last asked about, and what that means for showing its state.
+#[derive(Default)]
+struct Fetching {
+    last_fetch: Option<Instant>,
+    /// A view asked for a fetch before the repo had been read, and it runs once it has.
+    fetch_wanted: bool,
+    /// A fetch came back this run, so what the repo says about its remote is worth showing.
+    fetched: bool,
+}
+
 type Done<T> = Box<dyn FnOnce(&mut Versions, Result<T, String>, &mut Window, &mut Context<Versions>)>;
 
 pub struct Versions {
     parts: Parts,
     persist: Entity<PersistView>,
     workspace: WeakEntity<crate::workspace::Workspace>,
-    store: Option<Arc<History>>,
+    /// Local history: the store, when snapshots are due, and which file had which path.
+    history: LocalHistory,
     git: Option<Arc<Git>>,
     state: RepoState,
     card: Entity<CommitCard>,
@@ -269,20 +278,10 @@ pub struct Versions {
     working: bool,
     /// What went wrong last, shown in the card and the panel until the next action.
     error: Option<String>,
-    pacing: Pacing,
-    pacing_running: bool,
-    /// Each chapter's file when last looked at, to tell a rename.
-    paths: HashMap<ChapterId, PathBuf>,
-    /// The file names that may be another file's lost history, by the file with no history.
-    unplaced: HashMap<PathBuf, Orphan>,
     refresh_pause: Task<()>,
     panel_watch: Task<()>,
     reading: Task<()>,
-    last_fetch: Option<Instant>,
-    /// A view asked for a fetch before the repo had been read, and it runs once it has.
-    fetch_wanted: bool,
-    /// A fetch came back this run, so what the repo says about its remote is worth showing.
-    fetched: bool,
+    fetching: Fetching,
     /// A merge Git stopped on, until the commit that finishes it.
     merge: PendingMerge,
     /// Changes coming in now are the repo's own moves, which were labelled before they began.
@@ -348,7 +347,7 @@ impl Versions {
             parts,
             persist,
             workspace,
-            store,
+            history: LocalHistory::new(store),
             git,
             state,
             card,
@@ -356,21 +355,15 @@ impl Versions {
             panel,
             working: false,
             error: None,
-            pacing: Pacing::default(),
-            pacing_running: false,
-            paths: HashMap::new(),
-            unplaced: HashMap::new(),
             refresh_pause: Task::ready(()),
             panel_watch: Task::ready(()),
             reading: Task::ready(()),
-            last_fetch: None,
-            fetch_wanted: false,
-            fetched: false,
+            fetching: Fetching::default(),
             merge: PendingMerge::default(),
             quiet: false,
             _subscriptions: subscriptions,
         };
-        view.paths = view.chapter_paths(cx);
+        view.history.paths = view.chapter_paths(cx);
         view.look_after_history(window, cx);
         view.warn_about_cloud(window, cx);
         view.say_what_opening_did(window, cx);
@@ -450,7 +443,7 @@ impl Versions {
                     }
                     view.resume_merge(cx);
                 }
-                if std::mem::take(&mut view.fetch_wanted) {
+                if std::mem::take(&mut view.fetching.fetch_wanted) {
                     view.fetch_now_and_then(cx);
                 }
                 if view.merge.take_card_after_reading() {
@@ -465,22 +458,22 @@ impl Versions {
     /// the author may be offline, and a push or pull says why.
     fn fetch_now_and_then(&mut self, cx: &mut Context<Self>) {
         if self.state == RepoState::Reading {
-            self.fetch_wanted = true;
+            self.fetching.fetch_wanted = true;
             return;
         }
         let has_remote = matches!(&self.state, RepoState::Ready(overview) if overview.remote.is_some());
         let (Some(git), Some(book), true) = (self.git.clone(), self.book(cx), has_remote) else {
             return;
         };
-        if self.last_fetch.is_some_and(|last| last.elapsed() < FETCH_GAP) {
+        if self.fetching.last_fetch.is_some_and(|last| last.elapsed() < FETCH_GAP) {
             return;
         }
-        self.last_fetch = Some(Instant::now());
+        self.fetching.last_fetch = Some(Instant::now());
         let work = cx.background_spawn(async move { git.fetch(&book) });
         cx.spawn(async move |view, cx| {
             let fetched = work.await;
             view.update(cx, |view, cx| {
-                view.fetched = true;
+                view.fetching.fetched = true;
                 if fetched.is_ok() {
                     view.refresh(cx);
                 }
@@ -495,7 +488,8 @@ impl Versions {
     /// state is only as new as the last run's. With no Git to fetch with, it stays what the repo knows.
     fn sync_shown(&self, overview: &Overview) -> Option<String> {
         use repo::Sync;
-        let waiting = self.git.is_some() && !self.fetched && !matches!(overview.sync, Sync::NoRemote | Sync::NotPushed);
+        let waiting =
+            self.git.is_some() && !self.fetching.fetched && !matches!(overview.sync, Sync::NoRemote | Sync::NotPushed);
         (!waiting).then(|| sync_words(overview.sync))
     }
 
@@ -755,7 +749,7 @@ impl Versions {
             RepoState::Single | RepoState::NoRepo | RepoState::Broken(_) => (None, CardField::None),
         };
         let asking = matches!(self.state, RepoState::NoRepo)
-            && (self.book(cx).zip(self.store.clone())).is_some_and(|(book, store)| store.first_asking(&book));
+            && (self.book(cx).zip(self.history.store.clone())).is_some_and(|(book, store)| store.first_asking(&book));
         self.card
             .update(cx, |card, cx| card.prepare(message, asking, field, window, cx));
     }
@@ -836,12 +830,12 @@ impl Versions {
     }
 
     fn unplaced_history(&self, path: &Path) -> Option<&Orphan> {
-        self.unplaced.get(path)
+        self.history.unplaced.get(path)
     }
 
     /// The history of a file the author said is this one's.
     fn claim_history(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let (Some(store), Some(orphan)) = (self.store.clone(), self.unplaced.remove(path)) else {
+        let (Some(store), Some(orphan)) = (self.history.store.clone(), self.history.unplaced.remove(path)) else {
             return;
         };
         let to = path.to_owned();
