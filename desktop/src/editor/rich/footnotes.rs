@@ -214,13 +214,11 @@ fn definition_edit(text: &str, blocks: &Blocks, facts: &Facts, at: usize, new: &
     }
 }
 
-/// A new note's command, as one undo step, and where its parts land in the text after it.
+/// A new note's command, as one undo step, and where its reference lands in the text after it.
 pub struct NewNote {
     pub command: Command,
     /// The reference, `[^label]`.
     pub reference: Range<usize>,
-    /// The note's text.
-    pub body: Range<usize>,
 }
 
 /// The new note's reference at `replaced`, with its definition where the text keeps them.
@@ -237,20 +235,15 @@ pub fn insert(
     let space = if text[..replaced.start].ends_with(']') { " " } else { "" };
     let reference = format!("{space}[^{label}]");
     let keeping = keeping(blocks).or(book_keeping).unwrap_or(Keeping::BelowBlock);
-    let lead = format!("[^{label}]: ");
-    let new = format!("{lead}{body}");
+    let new = format!("[^{label}]: {body}");
     let definition = definition_edit(text, blocks, facts, replaced.start, &new, keeping);
-    let in_edit = definition.text.find(&lead).unwrap_or(0) + lead.len();
     // The definition lands before the reference when the chapter keeps its notes above it, as for a paragraph written
     // after them. The order is the one the edits apply in, so a tie keeps the reference first.
     let definition_first = (definition.range.start, definition.range.end) < (replaced.start, replaced.end);
-    let (reference_at, body_start) = if definition_first {
-        (replaced.start + definition.text.len(), definition.range.start + in_edit)
+    let reference_at = if definition_first {
+        replaced.start + definition.text.len()
     } else {
-        (
-            replaced.start,
-            definition.range.start - replaced.len() + reference.len() + in_edit,
-        )
+        replaced.start
     };
     let reference_edit = Edit::new(replaced, reference.clone());
     let edits = if definition_first {
@@ -262,7 +255,6 @@ pub fn insert(
     NewNote {
         command: Command { edits, selection },
         reference: reference_at + space.len()..reference_at + reference.len(),
-        body: body_start..body_start + body.len(),
     }
 }
 
@@ -400,7 +392,6 @@ mod tests {
             let facts = scan(text);
             let note = insert(text, &blocks, &facts, at..at, "n", "Größe", usual);
             let result = applied(text, &note.command.edits);
-            assert_eq!(&result[note.body], "Größe");
             assert_eq!(&result[note.reference.clone()], "[^n]");
             assert_eq!(note.command.selection.head, note.reference.end);
             result

@@ -27,6 +27,7 @@ crate::strings! {
         Numbers => ("Numbered list", "Nummerierte Liste"),
         Link => ("Link", "Link"),
         RemoveLink => ("Remove", "Entfernen"),
+        LinkPlaceholder => ("Address, such as https://…", "Adresse, etwa https://…"),
         Paragraph => ("Text", "Text"),
         Heading1 => ("Heading 1", "Überschrift 1"),
         Heading2 => ("Heading 2", "Überschrift 2"),

@@ -154,7 +154,6 @@ fn a_new_note_follows_the_pattern_and_renders_and_undoes() {
     let note = footnotes::insert(&text, &blocks, &facts, at..at, &label, "Größe »ß«.", rich.book.keeping);
     let command = note.command;
     let result = round_trip(&text, &command.edits);
-    assert_eq!(&result[note.body], "Größe »ß«.");
     assert_eq!(
         result,
         "# Drei\n\nReferenz auf fernen Text.[^k03-fern] [^k03-1]Ohne eigene Texte.\n\n[^k03-1]: Größe »ß«.\n"
@@ -680,7 +679,7 @@ fn on_every_chapter_of_the_book_each_note_reads_writes_and_comes_back() {
         let keeping = footnotes::keeping(&blocks).or(Some(footnotes::Keeping::AtEnd));
         let note = footnotes::insert(text, &blocks, &facts, at..at, &label, "Größe.", keeping);
         let result = round_trip(text, &note.command.edits);
-        assert_eq!(&result[note.body], "Größe.", "{name}");
+        assert_eq!(&result[note.reference], format!("[^{label}]"), "{name}");
         // Every block but the ones written stays as it was.
         let reference = format!("[^{label}]");
         let definition = format!("[^{label}]: Größe.");

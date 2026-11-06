@@ -16,7 +16,7 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, Context, ExternalPaths, KeyBinding, MouseButton, Pixels, Point, SharedString, Window,
-    actions, div, point, px, size,
+    actions, div, point, px,
 };
 
 use self::figure::FigureFloat;
@@ -25,7 +25,7 @@ use self::note::NoteFloat;
 use self::picker::PickerFloat;
 use crate::a11y::Control as _;
 use crate::editor::commands::{Command, normalized, selection_after};
-use crate::editor::float::{Float, placed_at_caret};
+use crate::editor::float::{Float, Spot};
 use crate::editor::place::Rect;
 use crate::editor::rich::{Atom, AtomKind, Key, check, facts, footnotes, images};
 use crate::editor::{EditorView, ToggleBold, ToggleItalic, ToggleStrike, ToggleUnderline};
@@ -632,26 +632,25 @@ impl EditorView {
         area: Rect,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Option<(AnyElement, Point<Pixels>)> {
+    ) -> Option<(AnyElement, Spot)> {
         let target = match &self.float {
             Float::Rich(RichFloat::Note(note)) => note.anchor(),
             Float::Rich(RichFloat::Picker(picker)) => picker.anchor(),
             Float::Rich(RichFloat::Offer(_)) => self.selection.head,
             Float::Rich(RichFloat::Notice(notice)) => notice.at,
             Float::Rich(RichFloat::Grid(grid)) => {
-                return self.grid_element(grid.first_byte(), cx);
+                return self
+                    .grid_element(grid.first_byte(), cx)
+                    .map(|(element, origin)| (element, Spot::At(origin)));
             }
             Float::Rich(RichFloat::Figure(figure)) => {
-                return self.figure_element(figure.first_byte(), window, cx);
+                return self
+                    .figure_element(figure.first_byte(), window, cx)
+                    .map(|(element, origin)| (element, Spot::At(origin)));
             }
             _ => return None,
         };
         let bounds = self.caret_rect(target, window)?;
-        let wanted = match &self.float {
-            Float::Rich(RichFloat::Note(note)) => size(note::WIDTH, note.height(cx)),
-            Float::Rich(RichFloat::Picker(_)) => size(picker::WIDTH, tokens::PICKER_CARD_HEIGHT),
-            _ => size(tokens::LINK_POPUP_WIDTH, tokens::LINK_POPUP_HEIGHT),
-        };
         let float = std::mem::take(&mut self.float);
         let built = match &float {
             Float::Rich(RichFloat::Note(note)) => self.note_element(note, cx),
@@ -661,7 +660,7 @@ impl EditorView {
             _ => unreachable!("taken above"),
         };
         self.float = float;
-        Some((built, placed_at_caret(bounds, wanted, area)))
+        Some((built, Spot::Caret(bounds, area)))
     }
 
     // Images, from the dialog and by drop

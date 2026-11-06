@@ -7,7 +7,7 @@ use std::ops::Range;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, AnyView, App, AvailableSpace, Bounds, Context, Entity, Focusable, MouseButton, MouseDownEvent, Pixels,
-    Point, Render, ScrollHandle, SharedString, Size, Subscription, Window, deferred, div, point, px, size, svg,
+    Point, Render, ScrollHandle, SharedString, Size, Subscription, Window, div, point, px, size, svg,
 };
 
 use super::commands::Command;
@@ -20,7 +20,7 @@ use super::rich::view::RichFloat;
 use super::strings::Key;
 use super::{EditorView, MenuAccept, MenuDown, MenuUp};
 use crate::a11y::Control as _;
-use crate::inspector::input::{Submitted, TextInput};
+use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::session::TEMPLATES;
 use crate::source::{BlockKind, EditKind, Selection, motion};
 use crate::tokens::{self, Tokens};
@@ -165,16 +165,12 @@ fn rect(bounds: Bounds<Pixels>) -> Rect {
     }
 }
 
-/// A float's place beside `target`, in `area`.
-pub(super) fn placed(target: Bounds<Pixels>, wanted: Size<Pixels>, area: Rect) -> Point<Pixels> {
-    let (x, y) = place::beside(
-        rect(target),
-        f32::from(wanted.width),
-        f32::from(wanted.height),
-        area,
-        f32::from(tokens::FLOAT_GAP),
-    );
-    point(px(x), px(y))
+/// Where a float goes.
+pub(super) enum Spot {
+    /// Its top left corner.
+    At(Point<Pixels>),
+    /// At the left edge of a caret, icon, or selection, below it or above it by the float's measured height, in an area.
+    Caret(Bounds<Pixels>, Rect),
 }
 
 /// A list's place at a caret or icon, in `area`.
@@ -378,8 +374,12 @@ impl EditorView {
         }
         let has_link = address.is_some();
         let selection = self.selection;
+        // A field that keeps its focus reports Escape, which closes the field, as the section dialog's does. Losing the
+        // window's focus leaves it open.
         let input = cx.new(|cx| {
-            let mut input = TextInput::new(window, cx);
+            let mut input = TextInput::new(window, cx)
+                .keep_focus_on_enter()
+                .with_placeholder(Key::LinkPlaceholder);
             input.set_value(address.unwrap_or_default(), true, cx);
             input
         });
@@ -388,12 +388,8 @@ impl EditorView {
                 let address = input.read(cx).text().to_owned();
                 this.submit_link(&address, window, cx);
             }),
-            cx.on_focus_out(&input.focus_handle(cx), window, |this, _, window, cx| {
-                this.close_float(cx);
-                // Escape blurs the field. A click on another field keeps its focus.
-                if window.focused(cx).is_none() {
-                    window.focus(&this.focus, cx);
-                }
+            cx.subscribe_in(&input, window, |this, _, Cancelled, window, cx| {
+                this.close_link(window, cx);
             }),
         ];
         input.focus_handle(cx).focus(window, cx);
@@ -415,6 +411,14 @@ impl EditorView {
         Selection {
             anchor: range.start,
             head: range.end,
+        }
+    }
+
+    /// Closes the link field with nothing written, and gives the keys back to the text.
+    fn close_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.float, Float::Link(_)) {
+            self.close_float(cx);
+            window.focus(&self.focus, cx);
         }
     }
 
@@ -453,6 +457,7 @@ impl EditorView {
             .border_color(tokens.divider)
             .shadow_md()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.close_link(window, cx)))
             .child(
                 svg()
                     .flex_none()
@@ -830,7 +835,7 @@ impl EditorView {
         caret: Option<Bounds<Pixels>>,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Vec<(AnyElement, Point<Pixels>)> {
+    ) -> Vec<(AnyElement, Spot)> {
         let target = Self::selection_box(selection).or(caret);
         // Up and down it stays over the galley, and sideways inside the window.
         let viewport = self.column.viewport;
@@ -843,7 +848,7 @@ impl EditorView {
         if let (Some(prompt), Some(target)) = (&self.selection_prompt, Self::selection_box(selection)) {
             let wanted = size(tokens::PROMPT_CARD_WIDTH, tokens::PROMPT_CARD_HEIGHT);
             let origin = point(self.column.text_left, placed_at_caret(target, wanted, area).y);
-            return vec![(prompt.clone().into_any_element(), origin)];
+            return vec![(prompt.clone().into_any_element(), Spot::At(origin))];
         }
         match &self.float {
             Float::None => {
@@ -864,7 +869,7 @@ impl EditorView {
                         column,
                         f32::from(tokens::FLOAT_GAP),
                     );
-                    return vec![(self.toolbar(cx).into_any_element(), point(px(x), px(y)))];
+                    return vec![(self.toolbar(cx).into_any_element(), Spot::At(point(px(x), px(y))))];
                 }
                 Vec::new()
             }
@@ -877,33 +882,37 @@ impl EditorView {
                 let Some(target) = target else {
                     return Vec::new();
                 };
-                let origin = placed_at_caret(target, Self::menu_size(menu.len()), area);
-                vec![(self.menu_element(menu, cx).into_any_element(), origin)]
+                vec![(
+                    self.menu_element(menu, cx).into_any_element(),
+                    Spot::Caret(target, area),
+                )]
             }
             Float::Link(link) => {
                 let Some(target) = target else {
                     return Vec::new();
                 };
-                let wanted = size(
-                    tokens::LINK_POPUP_WIDTH,
-                    tokens::FIELD_HEIGHT + tokens::SPACE_2 + tokens::CARD_BORDERS,
-                );
-                let origin = placed(target, wanted, area);
-                vec![(self.link_popup(link, cx).into_any_element(), origin)]
+                // At the selection's left edge, inside the text column.
+                let column = Rect {
+                    left: f32::from(self.column.text_left - tokens::FLOAT_GAP),
+                    right: f32::from(self.column.text_left + self.column.text_width + tokens::FLOAT_GAP),
+                    ..area
+                };
+                vec![(
+                    self.link_popup(link, cx).into_any_element(),
+                    Spot::Caret(target, column),
+                )]
             }
             Float::Rich(_) => self.rich_float(area, window, cx).into_iter().collect(),
         }
     }
 }
 
-/// Lays a float out and draws it above everything else, later in this same frame.
-pub(super) fn prepaint_float(
-    element: AnyElement,
-    origin: Point<Pixels>,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    let mut wrapped = deferred(element).with_priority(2).into_any_element();
-    wrapped.prepaint_as_root(origin, AvailableSpace::min_size(), window, cx);
-    wrapped
+/// Lays a float out and draws it above everything else, later in this same frame, where its measured size puts it.
+pub(super) fn prepaint_float(mut element: AnyElement, spot: Spot, window: &mut Window, cx: &mut App) {
+    let size = element.layout_as_root(AvailableSpace::min_size(), window, cx);
+    let origin = match spot {
+        Spot::At(origin) => origin,
+        Spot::Caret(target, area) => placed_at_caret(target, size, area),
+    };
+    window.defer_draw(element, origin, 2, None);
 }

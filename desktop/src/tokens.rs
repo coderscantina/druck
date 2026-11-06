@@ -240,7 +240,6 @@ pub const GUTTER_ICON_INSET: Pixels = px(14.);
 /// The cards over the text: a figure's, a citation's, and a footnote's, and the citation card's rows.
 pub const FIGURE_CARD_WIDTH: Pixels = px(360.);
 pub const PICKER_CARD_WIDTH: Pixels = px(400.);
-pub const PICKER_CARD_HEIGHT: Pixels = px(460.);
 pub const PICKER_ROW_HEIGHT: Pixels = px(40.);
 pub const NOTE_CARD_WIDTH: Pixels = px(400.);
 pub const IMAGE_THUMB: Pixels = px(44.);
@@ -285,10 +284,6 @@ pub const CELL_MIN_WIDTH: Pixels = px(16.);
 pub const FIGURE_MISSING_HEIGHT: Pixels = px(48.);
 /// What the editing grid keeps free above the window's foot.
 pub const GRID_MIN_ROOM: Pixels = px(120.);
-pub const LINK_POPUP_HEIGHT: Pixels = px(90.);
-/// A footnote's card: its height without text, and per line.
-pub const NOTE_CARD_BASE: Pixels = px(100.);
-pub const NOTE_CARD_LINE: Pixels = px(22.);
 /// How strongly the accent tints a selection, and a prompt's.
 pub const SELECTION_TINT: f32 = 0.25;
 /// How strongly the accent tints a find or search match that is not the selection.
