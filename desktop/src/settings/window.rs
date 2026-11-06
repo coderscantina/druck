@@ -507,10 +507,10 @@ impl SettingsWindow {
                     let Some(keys) = commands::keys_of(command.action.as_ref(), cx) else {
                         continue;
                     };
-                    if matches(query, crate::t!(command.label), &keys) {
+                    if matches(query, command.name(), &keys) {
                         rows.push(
                             Self::row(
-                                crate::t!(command.label),
+                                command.name(),
                                 None,
                                 div().flex_none().text_color(tokens.text_quiet).child(keys),
                                 tokens,

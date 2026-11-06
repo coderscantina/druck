@@ -220,7 +220,7 @@ impl Palette {
             .into_iter()
             .filter(|command| command.is_available(cx) && (command.scope != Scope::Write || mode == Mode::Write))
             .map(|command| Row {
-                label: crate::t!(command.label).trim_end_matches('\u{2026}').to_owned(),
+                label: command.name().to_owned(),
                 keys: commands::keys_of(command.action.as_ref(), cx),
                 chapter: None,
                 target: Target::Command(command.action),

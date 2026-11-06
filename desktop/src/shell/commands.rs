@@ -32,6 +32,12 @@ pub struct Command {
 }
 
 impl Command {
+    /// How the palette and the Keys list name the command: as the menu does, without the ellipsis a menu item that asks
+    /// for more shows by macOS's rule.
+    pub fn name(&self) -> &'static str {
+        crate::t!(self.label).trim_end_matches('\u{2026}')
+    }
+
     /// Whether the settings let this command exist at all. With the agent off, its commands leave no trace.
     pub fn is_available(&self, cx: &App) -> bool {
         self.scope != Scope::Agent || crate::settings::get(cx).agent
@@ -194,6 +200,19 @@ mod tests {
         }
         let missing: Vec<_> = names.iter().filter(|name| !commands.contains(*name)).collect();
         assert!(missing.is_empty(), "not in the palette: {missing:?}");
+    }
+
+    #[test]
+    fn command_names_are_in_sentence_case() {
+        let _guard = LANGUAGE_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_language(Language::English);
+        let names = ["Druck", "Binder"];
+        for command in all() {
+            let capitals: Vec<_> = (command.name().split_whitespace().skip(1))
+                .filter(|word| word.starts_with(char::is_uppercase) && !names.contains(word))
+                .collect();
+            assert!(capitals.is_empty(), "{}: {capitals:?}", command.name());
+        }
     }
 
     #[test]

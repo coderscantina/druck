@@ -295,6 +295,6 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(names, ["one", "two", "Clear Menu"]);
+        assert_eq!(names, ["one", "two", "Clear menu"]);
     }
 }
