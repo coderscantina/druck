@@ -79,6 +79,11 @@ pub fn prose_of(kind: BlockKind, text: &str) -> Option<Prose> {
             | SpanKind::CrossReference
             | SpanKind::FootnoteReference
             | SpanKind::Comment => left_out.push(span.range),
+            // A placeholder's words are prose, and its `{todo:` and closing brace are not.
+            SpanKind::Todo => {
+                left_out.push(span.range.start..span.range.start + "{todo:".len());
+                left_out.push(span.range.end - 1..span.range.end);
+            }
             _ => {
                 left_out.push(span.open);
                 left_out.push(span.close);
@@ -430,6 +435,10 @@ mod tests {
         assert_eq!(
             checked(BlockKind::Paragraph, "Text {meta.publisher} mehr {.copyrigt}"),
             "Text  mehr "
+        );
+        assert_eq!(
+            checked(BlockKind::Paragraph, "Text {todo: Quelle prüfen} mehr"),
+            "Text  Quelle prüfen mehr"
         );
     }
 
