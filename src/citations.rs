@@ -35,10 +35,12 @@ impl Cited {
 }
 
 /// Formats the citations of `document`, read from `source`. Citations without a bibliography and keys the
-/// bibliography lacks are errors at the citation and the key.
+/// bibliography lacks are errors at the citation and the key. With `unresolved`, the bibliography is named but its file
+/// is not there, which was reported as it was read, so each citation shows its keys and links nowhere.
 pub fn resolve(
     document: &Document,
     bibliography: Option<&Bibliography>,
+    unresolved: bool,
     config: &Config,
     source: &InputSource,
     cancel: &Cancel,
@@ -47,6 +49,12 @@ pub fn resolve(
         return Ok(Cited::default());
     };
     let error = |at: Location, message: String| Diagnostic::new(Some(source.clone()), message).at(at.line, at.column);
+    if bibliography.is_none() && unresolved {
+        return Ok(Cited {
+            citations: document.citations.iter().map(keys_only).collect(),
+            section: None,
+        });
+    }
     let Some(bibliography) = bibliography else {
         let message = "a citation needs a bibliography; set `bibliography` to a BibTeX file in the front matter";
         return Err(vec![error(first.at, message.to_owned()).coded(Code::NoBibliography)].into());
@@ -95,6 +103,17 @@ pub fn resolve(
             references: rendered.into_references(),
         }),
     })
+}
+
+/// A citation as its keys alone, such as `[?smith2020; ?jones]`, for a bibliography that is not there.
+fn keys_only(citation: &crate::document::Citation) -> Vec<Part> {
+    let keys: Vec<String> = (citation.syntax.items.iter())
+        .map(|item| format!("?{}", item.key))
+        .collect();
+    vec![Part {
+        text: format!("[{}]", keys.join("; ")),
+        target: None,
+    }]
 }
 
 /// Adds the indexes of the citations in `blocks` in reading order, with a footnote's at its reference.

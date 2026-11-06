@@ -61,8 +61,15 @@ fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]
     let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography =
         bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography parses"));
-    let cited = crate::citations::resolve(&document, bibliography.as_ref(), config, &source(), &Cancel::default())
-        .map_err(Failure::into_errors)?;
+    let cited = crate::citations::resolve(
+        &document,
+        bibliography.as_ref(),
+        false,
+        config,
+        &source(),
+        &Cancel::default(),
+    )
+    .map_err(Failure::into_errors)?;
     let fonts = Fonts::load(config, &Default::default()).expect("bundled fonts");
     uncancelled(
         &document,

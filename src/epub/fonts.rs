@@ -240,6 +240,7 @@ mod tests {
         ]);
         let Ok(files) =
             crate::pipeline::read_resources(&FileResolver::new(), &config, &crate::cancel::Cancel::default())
+                .map(|(files, _)| files)
         else {
             panic!("the files are there")
         };

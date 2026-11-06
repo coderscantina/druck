@@ -402,14 +402,16 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
     let renderer = Renderer::new();
     let input = document("Plain text.\n", memory_dir(), "doc.md", in_memory_theme());
 
+    // A missing font file has a stand-in, see `a_missing_font_file_has_a_bundled_face_stand_in_and_says_so`, and the
+    // warning still names the resource.
     let mut missing = MemoryResolver::new();
     missing.insert(Origin::Theme(memory_dir()), "theme.json", FONT_THEME.as_bytes());
-    let errors_of_missing = errors(try_pdf(&renderer, &missing, &input));
-    assert_eq!(errors_of_missing[0].property.as_deref(), Some("fonts.Body.regular"));
+    let warned = rendered(&renderer, &missing, &input);
+    assert_eq!(warned.warnings[0].property.as_deref(), Some("fonts.Body.regular"));
     assert_eq!(
-        errors_of_missing[0].message,
+        warned.warnings[0].message,
         format!(
-            "resource not found: \"body.otf\" relative to the theme in {}",
+            "resource not found: \"body.otf\" relative to the theme in {}; Libertinus Serif stands in",
             memory_dir().display()
         )
     );
@@ -428,12 +430,12 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
     );
 
     let picture = document("Text.\n\n![A](gone.png)\n", memory_dir(), "doc.md", no_theme());
-    let image_error = errors(try_pdf(&renderer, &missing, &picture));
-    assert_eq!(image_error[0].location, Some((3, 1).into()));
+    let image_warning = rendered(&renderer, &missing, &picture).warnings.remove(0);
+    assert_eq!(image_warning.location, Some((3, 1).into()));
     assert_eq!(
-        image_error[0].message,
+        image_warning.message,
         format!(
-            "image not found: \"gone.png\" relative to the document in {}",
+            "image not found: \"gone.png\" relative to the document in {}; a box stands in",
             memory_dir().display()
         )
     );
@@ -443,5 +445,95 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
         pdf(&renderer, &working, &input),
         pdf(&Renderer::new(), &working, &input),
         "the renderer still works"
+    );
+}
+
+fn rendered(renderer: &Renderer, resolver: &dyn Resolver, input: &Input) -> crate::renderer::Rendered {
+    on_big_stack(|| {
+        renderer
+            .render(resolver, input, &PdfOptions::default(), &Cancel::default())
+            .unwrap_or_else(|failure| panic!("{failure:?}"))
+    })
+}
+
+fn codes(rendered: &crate::renderer::Rendered) -> Vec<crate::diagnostic::Code> {
+    rendered
+        .warnings
+        .iter()
+        .filter_map(|warning| warning.code.clone())
+        .collect()
+}
+
+#[test]
+fn a_missing_image_stands_in_as_a_box_and_says_so() {
+    let input = document(
+        "Text.\n\n![A map](assets/gone.png)\n",
+        memory_dir(),
+        "doc.md",
+        no_theme(),
+    );
+    let done = rendered(&Renderer::new(), &MemoryResolver::new(), &input);
+    assert!(done.parts > 0);
+    let warning = done
+        .warnings
+        .iter()
+        .find(|warning| warning.code.is_some())
+        .expect("a warning");
+    assert_eq!(
+        warning.code,
+        Some(crate::diagnostic::Code::ImageNotFound {
+            file: memory_dir().join("assets/gone.png")
+        })
+    );
+    assert_eq!(warning.location, Some((3, 1).into()));
+}
+
+#[test]
+fn a_missing_bibliography_leaves_citations_as_their_keys_and_says_so() {
+    let text = "---\nbibliography: gone.bib\n---\n\nAs [@smith2020] wrote.\n";
+    let input = document(text, memory_dir(), "doc.md", no_theme());
+    let done = rendered(&Renderer::new(), &MemoryResolver::new(), &input);
+    assert_eq!(
+        codes(&done),
+        vec![crate::diagnostic::Code::BibliographyNotFound {
+            file: memory_dir().join("gone.bib")
+        }]
+    );
+}
+
+#[test]
+fn a_missing_font_file_has_a_bundled_face_stand_in_and_says_so() {
+    let mut resolver = MemoryResolver::new();
+    resolver.insert(Origin::Theme(memory_dir()), "theme.json", FONT_THEME.as_bytes());
+    let input = document("Plain text.\n", memory_dir(), "doc.md", in_memory_theme());
+    let done = rendered(&Renderer::new(), &resolver, &input);
+    assert_eq!(
+        codes(&done),
+        vec![crate::diagnostic::Code::FontNotFound {
+            family: "Body".to_owned(),
+            file: memory_dir().join("body.otf"),
+            stand_in: "Libertinus Serif".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn a_final_export_refuses_what_is_missing() {
+    let input = document("![A map](assets/gone.png)\n", memory_dir(), "doc.md", no_theme());
+    let renderer = Renderer::new();
+    let resolver = MemoryResolver::new();
+    let cancel = Cancel::default();
+    let configured = renderer
+        .job(&resolver, &input, &cancel)
+        .configure()
+        .expect("configures");
+    let Err(Failure::Errors(errors)) = configured.check_final("print") else {
+        panic!("a final export refuses a missing image");
+    };
+    assert!(
+        errors[0]
+            .message
+            .contains("is final, but this image is not there: assets/gone.png"),
+        "{errors:?}"
     );
 }

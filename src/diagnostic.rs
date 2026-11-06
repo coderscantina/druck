@@ -77,6 +77,16 @@ pub enum Code {
     UnknownStyle { name: String, known: Vec<String> },
     /// A file a property names is not there. `property` is the dotted path, and `file` the absolute path looked at.
     ResourceNotFound { property: String, file: PathBuf },
+    /// An image file the text names is not there, so a box with its path stands in. `file` is the absolute path.
+    ImageNotFound { file: PathBuf },
+    /// A font file of `family` is not there, so the bundled `stand_in` sets that face. `file` is the absolute path.
+    FontNotFound {
+        family: String,
+        file: PathBuf,
+        stand_in: String,
+    },
+    /// The bibliography file is not there, so citations show their keys. `file` is the absolute path.
+    BibliographyNotFound { file: PathBuf },
 }
 
 /// The input a diagnostic concerns.

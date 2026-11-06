@@ -115,7 +115,9 @@ impl<'r> Job<'r> {
             }
             DocumentText::Project(project) => project.configure(resolver, input)?,
         };
-        let files = pipeline::read_resources(resolver, &config, cancel)?;
+        let (files, missing) = pipeline::read_resources(resolver, &config, cancel)?;
+        let mut config = config;
+        config.warnings.extend(missing);
         Ok(Configured {
             job: JobContext {
                 renderer,
@@ -152,9 +154,19 @@ impl Configured<'_> {
         serde_json::to_string_pretty(&self.config).expect("configuration serializes")
     }
 
-    /// Fails with one error per open placeholder, at its real location, naming the final `export`.
+    /// Fails with one error per open placeholder, and per image, bibliography, or font file that is not there, at its
+    /// real location, naming the final `export`.
     pub fn check_final(&self, export: &str) -> Result<(), Failure> {
-        Ok(project::check_final(&self.config, &self.document, export)?)
+        let mut errors = project::check_final(&self.config, &self.document, export)
+            .err()
+            .unwrap_or_default();
+        errors.extend(pipeline::missing_for_final(
+            &self.job,
+            &self.config,
+            &self.document,
+            export,
+        )?);
+        if errors.is_empty() { Ok(()) } else { Err(errors.into()) }
     }
 
     /// Lays out the document, reporting everything a render reports before writing.

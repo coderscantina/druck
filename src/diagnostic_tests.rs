@@ -122,9 +122,9 @@ fn a_bad_theme_value_names_the_theme_and_the_property() {
 }
 
 #[test]
-fn a_missing_font_names_the_resource_with_its_origin() {
+fn a_missing_theme_image_names_the_resource_with_its_origin() {
     let mut resolver = MemoryResolver::new();
-    let theme = r#"{"version": 1, "fonts": {"Body": {"regular": "body.otf"}}, "styles": {"body": {"font": "Body"}}}"#;
+    let theme = r#"{"version": 1, "images": {"logo": "logo.png"}}"#;
     resolver.insert(Origin::Theme(book()), "theme.json", theme.as_bytes());
     let selection = ThemeSelection::File {
         path: book().join("theme.json"),
@@ -134,19 +134,19 @@ fn a_missing_font_names_the_resource_with_its_origin() {
 
     let resource = Resource {
         origin: Origin::Theme(book()),
-        path: "body.otf".to_owned(),
+        path: "logo.png".to_owned(),
     };
     assert_eq!(errors[0].resource.as_ref(), Some(&resource));
-    assert_eq!(errors[0].property.as_deref(), Some("fonts.Body.regular"));
+    assert_eq!(errors[0].property.as_deref(), Some("images.logo"));
     assert_eq!(
         errors[0].code,
         Some(Code::ResourceNotFound {
-            property: "fonts.Body.regular".to_owned(),
-            file: book().join("body.otf"),
+            property: "images.logo".to_owned(),
+            file: book().join("logo.png"),
         })
     );
     let from = |base: &str| errors[0].display_from(Path::new(base)).to_string();
-    let expected = "error: fonts.Body.regular: resource not found: \"body.otf\" relative to the theme in";
+    let expected = "error: images.logo: resource not found: \"logo.png\" relative to the theme in";
     assert_eq!(from("/work/book"), format!("{expected} ."));
     assert_eq!(from("/work"), format!("{expected} book"));
     assert_eq!(from("/elsewhere"), format!("{expected} /work/book"));
@@ -156,15 +156,31 @@ fn a_missing_font_names_the_resource_with_its_origin() {
 #[test]
 fn a_missing_image_has_a_resource_and_a_place_in_the_document() {
     let resolver = MemoryResolver::new();
+    let input = input(single("Text.\n\n![A](gone.png)\n"), no_theme(), Overrides::default());
+    let warnings = std::thread::scope(|scope| {
+        let thread = std::thread::Builder::new().stack_size(16 * 1024 * 1024);
+        let run = || {
+            let (cancel, renderer) = (Cancel::default(), Renderer::new());
+            let configured = renderer
+                .job(&resolver, &input, &cancel)
+                .configure()
+                .expect("configures");
+            let layout = configured
+                .layout(&LayoutOptions::default())
+                .expect("pages, with a box standing in");
+            layout.warnings().to_vec()
+        };
+        thread
+            .spawn_scoped(scope, run)
+            .expect("thread")
+            .join()
+            .expect("no panic")
+    });
 
-    let errors = errors(
-        &resolver,
-        &input(single("Text.\n\n![A](gone.png)\n"), no_theme(), Overrides::default()),
-    );
-
-    assert_eq!(errors[0].source, Some(Source::Document(book().join("doc.md"))));
-    assert_eq!(errors[0].location, Some((3, 1).into()));
-    let resource = errors[0].resource.as_ref().expect("the image");
+    assert_eq!(warnings[0].severity, Severity::Warning);
+    assert_eq!(warnings[0].source, Some(Source::Document(book().join("doc.md"))));
+    assert_eq!(warnings[0].location, Some((3, 1).into()));
+    let resource = warnings[0].resource.as_ref().expect("the image");
     assert_eq!(
         (&resource.origin, resource.path.as_str()),
         (&Origin::Document(book()), "gone.png")

@@ -128,7 +128,32 @@ impl fmt::Debug for Image {
     }
 }
 
+/// The size of the stand-in for a missing image: four inches wide, in the proportions of a screen.
+const MISSING_WIDTH: f64 = 288.0;
+const MISSING_HEIGHT: f64 = 162.0;
+/// The stand-in's grey, quiet on a white page or a tinted one.
+const MISSING_GREY: &str = "#8c8c8c";
+
 impl Image {
+    /// A stand-in for an image file that is not there: a dashed box of a usual figure's size with the path written in
+    /// it, in a quiet grey, so pages keep their shape and show what is missing.
+    pub fn missing(path: &str) -> Image {
+        let (width, height) = (MISSING_WIDTH / PT_PER_SVG_PX, MISSING_HEIGHT / PT_PER_SVG_PX);
+        let escaped = path
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect x="1" y="1" width="{inner_width}" height="{inner_height}" fill="none" stroke="{MISSING_GREY}" stroke-width="1" stroke-dasharray="4 3"/><text x="{middle}" y="{baseline}" font-family="Libertinus Serif" font-size="12" fill="{MISSING_GREY}" text-anchor="middle">{escaped}</text></svg>"#,
+            inner_width = width - 2.0,
+            inner_height = height - 2.0,
+            middle = width / 2.0,
+            baseline = height / 2.0 + 4.0,
+        );
+        decode_as(Format::Svg, Bytes::from(svg.into_bytes())).expect("the stand-in is valid SVG")
+    }
+
     /// Decodes and validates `data`. `extension` is the file name extension as written, without the dot, any case
     /// (may be empty). Errors are plain messages without file name or location.
     ///
@@ -373,6 +398,12 @@ mod tests {
     fn decode(name: &str) -> Result<Image, String> {
         let (data, extension) = fixture(name);
         Image::decode(data, extension)
+    }
+
+    #[test]
+    fn a_missing_image_stands_in_as_a_box_of_a_figures_size() {
+        let image = Image::missing("assets/<missing> & co.png");
+        assert_eq!(image.size(), (Pt(MISSING_WIDTH), Pt(MISSING_HEIGHT)));
     }
 
     #[test]

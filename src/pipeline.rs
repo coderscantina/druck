@@ -12,13 +12,14 @@ use crate::config::front_matter::{self, FrontMatter};
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::Config;
 use crate::config::source::{InputSource, Origin, Resource, normalize};
+use crate::config::theme::FontStyle;
 use crate::date::Date;
 use crate::diagnostic::{Code, Diagnostic};
 use crate::image::Image;
 use crate::input::{Input, ThemeDirs, ThemeSelection};
 use crate::renderer::{Failure, Renderer};
 use crate::resource::{Bytes, Files, ResolveError, Resolver};
-use crate::text::FontSet;
+use crate::text::{FontSet, bundled};
 use crate::{citations, document, installed, layout, markdown, output, theme_path};
 
 /// What one job reads from and reuses.
@@ -68,6 +69,8 @@ pub struct Prepared {
     pub cited: citations::Cited,
     pub images: Vec<Image>,
     pub theme_images: HashMap<Resource, Image>,
+    /// What stood in for a missing image, which the output reports beside its pages.
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// Parses the Markdown body into the document model.
@@ -107,15 +110,25 @@ fn prepare_parsed(
     content: document::Document,
 ) -> Result<Prepared, Failure> {
     let bibliography = load_bibliography(job, config)?;
-    let cited = citations::resolve(&content, bibliography.as_ref(), config, &document.source, job.cancel)?;
+    // A bibliography that is named but not there was reported as it was read, and its citations show their keys.
+    let unresolved = bibliography.is_none() && config.bibliography_file.is_some();
+    let cited = citations::resolve(
+        &content,
+        bibliography.as_ref(),
+        unresolved,
+        config,
+        &document.source,
+        job.cancel,
+    )?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
-    let images = load_images(job, &content.images, dir, &document.source)?;
+    let (images, warnings) = load_images(job, &content.images, dir, &document.source)?;
     let theme_images = load_theme_images(job, config)?;
     Ok(Prepared {
         content,
         cited,
         images,
         theme_images,
+        warnings,
     })
 }
 
@@ -136,7 +149,7 @@ pub fn typeset(
         parse(config, document)?
     };
     let prepared = prepare_parsed(job, config, document, content)?;
-    let laid = layout::layout(
+    let mut laid = layout::layout(
         &prepared.content,
         &prepared.cited,
         &prepared.images,
@@ -148,6 +161,7 @@ pub fn typeset(
         today,
         job.cancel,
     )?;
+    laid.warnings.splice(0..0, prepared.warnings);
     Ok((set, laid))
 }
 
@@ -164,11 +178,18 @@ fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Failure> {
     FontSet::load(config, &found.families, &files, faces, job.number, job.cancel)
 }
 
-/// Reads every resource the configuration names, so a missing file fails before layout and everything in the job
-/// sees the same bytes. Errors name the resource, its origin, and the property.
-pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel) -> Result<Files, Failure> {
+/// Reads every resource the configuration names, so everything in the job sees the same bytes. Errors name the
+/// resource, its origin, and the property. A missing bibliography or font file is a warning, returned beside the files,
+/// where the book can still be set honestly: citations show their keys, and a bundled face stands in for the font.
+/// Any other missing file fails before layout.
+pub fn read_resources(
+    resolver: &dyn Resolver,
+    config: &Config,
+    cancel: &Cancel,
+) -> Result<(Files, Vec<Diagnostic>), Failure> {
     let mut files = Files::default();
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
     for (property, resource) in config.resources() {
         if resource.origin == Origin::Bundled || files.contains(resource) {
             continue;
@@ -176,6 +197,30 @@ pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel)
         cancel.check(CheckPoint::Resource)?;
         match resolver.read(&resource.origin, &resource.path) {
             Ok(data) => files.insert(resource.clone(), data),
+            Err(ResolveError::NotFound(_)) if property == "bibliography" && resource.file().is_some() => {
+                let file = resource.file().expect("checked above");
+                let message = format!("resource not found: {resource}; citations show their keys");
+                let diagnostic = Diagnostic::warning(None, message).coded(Code::BibliographyNotFound { file });
+                warnings.push(diagnostic.property(Some(property)).resource(resource));
+            }
+            Err(ResolveError::NotFound(_)) if stand_in_font(config, resource).is_some() => {
+                let (family, path) = stand_in_font(config, resource).expect("checked above");
+                let data = bundled::font(path).expect("a stand-in is bundled");
+                files.insert(resource.clone(), Bytes::bundled(path, data));
+                let stand_in = STAND_IN_FAMILY.to_owned();
+                let message = format!("resource not found: {resource}; {stand_in} stands in");
+                let code = Code::FontNotFound {
+                    family,
+                    file: resource.file().unwrap_or_default(),
+                    stand_in,
+                };
+                warnings.push(
+                    Diagnostic::warning(None, message)
+                        .coded(code)
+                        .property(Some(property))
+                        .resource(resource),
+                );
+            }
             Err(e) => {
                 let not_found = matches!(e, ResolveError::NotFound(_));
                 let message = match e {
@@ -194,19 +239,43 @@ pub fn read_resources(resolver: &dyn Resolver, config: &Config, cancel: &Cancel)
         }
     }
     if errors.is_empty() {
-        Ok(files)
+        Ok((files, warnings))
     } else {
         Err(errors.into())
     }
 }
 
-/// Parses the BibTeX file the configuration names, if any.
+/// The family whose bundled faces stand in for a font file that is not there.
+const STAND_IN_FAMILY: &str = "Libertinus Serif";
+
+/// The family of a static font file `resource` is, and the bundled face of the same weight and slant that can stand in
+/// for it. A variable font or a face of a collection has no honest stand-in, since its axes and index would not match.
+fn stand_in_font(config: &Config, resource: &Resource) -> Option<(String, &'static str)> {
+    let (family, face) = (config.fonts.iter()).find_map(|(family, files)| {
+        let (face, file) = files.iter().find(|(_, file)| file.resource == *resource)?;
+        (!file.variable && file.index == 0).then_some((family, *face))
+    })?;
+    let bold = face.weight.get() >= 600;
+    let path = match (bold, face.style == FontStyle::Italic) {
+        (false, false) => "fonts/LibertinusSerif-Regular.otf",
+        (false, true) => "fonts/LibertinusSerif-Italic.otf",
+        (true, false) => "fonts/LibertinusSerif-Bold.otf",
+        (true, true) => "fonts/LibertinusSerif-BoldItalic.otf",
+    };
+    Some((family.clone(), path))
+}
+
+/// Parses the BibTeX file the configuration names, if any. One that is named and was not there, which reading the
+/// resources reported, gives none.
 pub(crate) fn load_bibliography(job: &JobContext, config: &Config) -> Result<Option<Bibliography>, Failure> {
     let Some(resource) = &config.bibliography_file else {
         return Ok(None);
     };
     job.cancel.check(CheckPoint::Bibliography)?;
     let path = resource.file().expect("a bibliography is never bundled");
+    if !job.files.contains(resource) {
+        return Ok(None);
+    }
     let text = job.files.get(resource).and_then(|data| text(&data)).map_err(|e| {
         let message = format!("cannot read bibliography {resource}: {e}");
         let diagnostic = Diagnostic::new(None, message).property(Some("bibliography".to_owned()));
@@ -249,15 +318,17 @@ fn load_theme_images(job: &JobContext, config: &Config) -> Result<HashMap<Resour
     }
 }
 
-/// Reads and decodes each image file once, relative to the document. Errors name the first reference.
+/// Reads and decodes each image file once, relative to the document. Errors name the first reference. A file that is
+/// not there gets a stand-in box and a warning at its first reference, so the pages keep their shape.
 fn load_images(
     job: &JobContext,
     files: &[document::ImageFile],
     dir: &Path,
     source: &InputSource,
-) -> Result<Vec<Image>, Failure> {
+) -> Result<(Vec<Image>, Vec<Diagnostic>), Failure> {
     let mut images = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
     for file in files {
         job.cancel.check(CheckPoint::Image)?;
         let resource = Resource {
@@ -271,7 +342,15 @@ fn load_images(
             Ok(data) => (job.renderer.images)
                 .image(&data, extension, job.number)
                 .map_err(|e| format!("image {resource}: {e}")),
-            Err(ResolveError::NotFound(_)) => Err(format!("image not found: {resource}")),
+            Err(ResolveError::NotFound(_)) => {
+                let message = format!("image not found: {resource}; a box stands in");
+                let code = Code::ImageNotFound {
+                    file: normalize(&dir.join(&file.path)),
+                };
+                let diagnostic = Diagnostic::warning(Some(source.clone()), message).coded(code);
+                warnings.push(diagnostic.resource(&resource).at(file.at.line, file.at.column));
+                Ok(Image::missing(&file.path))
+            }
             Err(e) => Err(format!("cannot read image {resource}: {e}")),
         };
         match loaded {
@@ -283,10 +362,46 @@ fn load_images(
         }
     }
     if errors.is_empty() {
-        Ok(images)
+        Ok((images, warnings))
     } else {
         Err(errors.into())
     }
+}
+
+/// The errors for a final export of a document that names a file that is not there: an image of the text, the
+/// bibliography, or a font. Other exports run with what stands in.
+pub(crate) fn missing_for_final(
+    job: &JobContext,
+    config: &Config,
+    document: &DocumentFile,
+    export: &str,
+) -> Result<Vec<Diagnostic>, Failure> {
+    let content = parse(config, document)?;
+    let dir = document.path.parent().expect("an absolute file path has a parent");
+    let mut errors = Vec::new();
+    for file in &content.images {
+        let origin = Origin::Document(dir.to_owned());
+        if let Err(ResolveError::NotFound(_)) = job.resolver.read(&origin, &file.path) {
+            let message = format!(
+                "export \"{export}\" is final, but this image is not there: {}",
+                file.path
+            );
+            let diagnostic = Diagnostic::new(Some(document.source.clone()), message);
+            errors.push(diagnostic.at(file.at.line, file.at.column));
+        }
+    }
+    for warning in &config.warnings {
+        if matches!(
+            warning.code,
+            Some(Code::BibliographyNotFound { .. } | Code::FontNotFound { .. })
+        ) {
+            let mut error = warning.clone();
+            error.severity = crate::diagnostic::Severity::Error;
+            error.message = format!("export \"{export}\" is final, but {}", warning.message);
+            errors.push(error);
+        }
+    }
+    Ok(errors)
 }
 
 /// Resolves and checks the configuration for one Markdown document `name` in the folder `dir`.

@@ -49,7 +49,7 @@ fn write(config: &Config, body: &str, bib: Option<&str>) -> (Content, Structure)
     let cancel = crate::cancel::Cancel::default();
     let document = crate::markdown::parse(body, 1, &source(), crate::config::theme::Lang::En).expect("document parses");
     let bibliography = bib.map(|bib| Bibliography::parse(bib, Path::new("/fake/refs.bib")).expect("bibliography"));
-    let cited: Cited = citations::resolve(&document, bibliography.as_ref(), config, &source(), &cancel)
+    let cited: Cited = citations::resolve(&document, bibliography.as_ref(), false, config, &source(), &cancel)
         .unwrap_or_else(|failure| panic!("{failure:?}"));
     let fields = Fields::new(&document, config, Date::from_unix(0));
     let structure = Structure::new(&document, config, cited.references());
