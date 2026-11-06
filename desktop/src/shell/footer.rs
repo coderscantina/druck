@@ -97,7 +97,7 @@ fn fits(count: &str, room: gpui::Pixels, window: &Window) -> bool {
 }
 
 /// A number with thousands separated by a thin space.
-fn grouped(number: usize) -> String {
+pub fn grouped(number: usize) -> String {
     let digits = number.to_string();
     let mut out = String::new();
     for (at, digit) in digits.chars().enumerate() {

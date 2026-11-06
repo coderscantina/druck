@@ -61,6 +61,8 @@ pub fn all() -> Vec<Command> {
         command(Key::ToggleBinder, Anywhere, ToggleBinder),
         command(Key::FocusBinder, Anywhere, FocusBinder),
         command(Key::FocusEditor, Anywhere, FocusEditor),
+        command(Key::GoToPath, Anywhere, crate::navigator::ShowColumns),
+        command(Key::BookOverview, Anywhere, crate::navigator::ShowOverview),
         command(Key::Find, Write, Find),
         command(Key::FindNext, Write, FindNext),
         command(Key::FindPrevious, Write, FindPrevious),

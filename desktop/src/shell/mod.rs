@@ -369,6 +369,11 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     slots.overlays.push(hub.finding.find.clone().into());
 }
 
+/// What the shell last read of a chapter: its words and open placeholders. Nothing until it has counted them.
+pub fn chapter_facts(id: ChapterId, cx: &App) -> Option<&facts::Facts> {
+    Current::<Hub>::view(cx)?.read(cx).facts.get(id)
+}
+
 // The hub
 
 pub struct Hub {

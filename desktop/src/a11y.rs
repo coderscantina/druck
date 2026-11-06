@@ -25,7 +25,8 @@ pub trait Control: Sized {
     fn ring_while_focused(self, tokens: &Tokens) -> Self;
 }
 
-fn ring(tokens: &Tokens) -> BoxShadow {
+/// The keyboard's focus ring, for a control that draws it itself.
+pub(crate) fn ring(tokens: &Tokens) -> BoxShadow {
     BoxShadow {
         color: tokens.accent.into(),
         offset: point(px(0.), px(0.)),

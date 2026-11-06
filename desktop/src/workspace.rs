@@ -89,6 +89,9 @@ pub struct Slots {
     pub left: Vec<SidePanel>,
     /// Panels at the right of the text or the pages, before the rail. A view that is closed draws nothing.
     pub right: Vec<SidePanel>,
+    /// Views at the title bar's left, after the traffic lights, in Write. They place themselves and keep clear of the
+    /// mode switch, see [`mode_switch_width`].
+    pub title: Vec<AnyView>,
 }
 
 /// A panel's width in a window of the given width, zero while it is closed. Called while the workspace renders, so it
@@ -692,7 +695,7 @@ impl Workspace {
         }
     }
 
-    fn sidebar_event(&mut self, event: &SidebarEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn sidebar_event(&mut self, event: &SidebarEvent, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.parts.editor.clone();
         match event {
             SidebarEvent::Select(id) => {
@@ -924,9 +927,22 @@ impl Workspace {
     }
 }
 
-/// The bar at the window's top, which moves the window. It holds the mode switch at its centre and `end` at its right, and
-/// shares the window's surface. Also used with no document.
-pub fn titlebar(tokens: &Tokens, center: impl IntoElement, end: impl IntoElement) -> impl IntoElement {
+/// How wide the mode switch at the title bar's centre is, as [`Workspace::mode_switch`] lays it out.
+pub fn mode_switch_width(window: &Window) -> Pixels {
+    let buttons = Mode::ALL
+        .iter()
+        .map(|(_, key)| crate::shell::ui::small_text_width(crate::t!(*key), window) + tokens::SPACE_2 * 2.);
+    buttons.fold(Pixels::ZERO, |sum, width| sum + width) + tokens::HAIR_GAP * (Mode::ALL.len() - 1) as f32
+}
+
+/// The bar at the window's top, which moves the window. It holds `start` at its left, the mode switch at its centre,
+/// and `end` at its right, and shares the window's surface. Also used with no document.
+pub fn titlebar(
+    tokens: &Tokens,
+    start: impl IntoElement,
+    center: impl IntoElement,
+    end: impl IntoElement,
+) -> impl IntoElement {
     div()
         .id("titlebar")
         .tab_group()
@@ -948,6 +964,7 @@ pub fn titlebar(tokens: &Tokens, center: impl IntoElement, end: impl IntoElement
                 window.start_window_move();
             }
         })
+        .child(start)
         .child(center)
         .child(
             div()
@@ -968,6 +985,13 @@ impl Render for Workspace {
         let accessible = window.is_a11y_active();
         let switch = self.mode_switch(&tokens, cx);
         let export = (self.mode == Mode::Publish).then(|| self.export_button(&tokens));
+        // Fills the title bar, so its views place themselves in it.
+        let title = div().absolute().top_0().left_0().size_full().children(
+            (self.mode == Mode::Write)
+                .then(|| self.slots.title.clone())
+                .into_iter()
+                .flatten(),
+        );
         // In Publish the same line stands in the status line, see `PreviewView::set_foot`.
         let foot = (self.mode == Mode::Write).then(|| {
             div()
@@ -1051,7 +1075,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|workspace, _: &Save, _, cx| {
                 workspace.parts.editor.update(cx, |_, cx| cx.emit(SaveRequested));
             }))
-            .child(titlebar(&tokens, switch, div().children(export)))
+            .child(titlebar(&tokens, title, switch, div().children(export)))
             .child(
                 div()
                     .flex_1()
