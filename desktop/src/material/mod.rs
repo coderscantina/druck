@@ -25,7 +25,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{App, Context, Entity, EventEmitter, Focusable, KeyBinding, Pixels, Subscription, Task, Window, actions};
 
-use crate::editor::{EditorView, PinCard, PinClicked, PinGroup, PinVerb, SessionChanged, TextChanged};
+use crate::editor::{PinCard, PinClicked, PinGroup, PinVerb, SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
 use crate::source::EditKind;
 use crate::tokens;
@@ -363,13 +363,13 @@ impl Material {
 
     fn card(&self, index: usize, pin: &Pin, item: &Item) -> PinCard {
         let excerpt = pin.passage.clone().or_else(|| {
-            let text = item.paragraphs().join(" ");
+            let text = item.prose();
             (!text.is_empty()).then(|| cut(&text, EXCERPT))
         });
         PinCard {
             index,
             icon: icon(item),
-            title: item.name().to_owned(),
+            title: item.label().to_owned(),
             meta: item.date.clone().unwrap_or_else(|| kind_label(item.kind).to_owned()),
             excerpt,
             insert: insert_label(item).to_owned(),
@@ -520,6 +520,7 @@ impl Material {
                 };
                 editor.update(cx, |editor, cx| {
                     let range = editor.selection_range();
+                    let written = verbs::spaced(editor.text(), range.start, written);
                     let chapter = editor.session().active();
                     let caret = range.start + written.len();
                     let edit = crate::source::Edit::new(range, written);
@@ -648,13 +649,22 @@ pub fn insert_label(item: &Item) -> &'static str {
     })
 }
 
-/// Sets what a run asks for, for screenshots: `DRUCK_MATERIAL` as `rail`, `jump`, `library`, `item:<id>`, or
-/// `pin:<id>` (pins the item to the caret's paragraph), several separated by commas.
+/// Sets what a run asks for, for screenshots, with no keys: `DRUCK_MATERIAL` as `rail`, `jump`, `library`, `step` (as
+/// Option+Down does), `item:<id>`, `pin:<id>` and `insert:<id>` (at the caret, as the verbs do), and `probe:<theme>`,
+/// several separated by commas, in order.
 #[cfg(any(debug_assertions, feature = "measure"))]
-pub fn apply_gate(window: &mut Window, cx: &mut App) {
+pub fn apply_gate(window: &mut Window, _: &mut App) {
     let Some(asked) = crate::gate::var("DRUCK_MATERIAL") else {
         return;
     };
+    // Two frames on, after `DRUCK_SELECT` has put the caret where the steps may pin to.
+    window.on_next_frame(move |window, _| {
+        window.on_next_frame(move |window, cx| gate_steps(&asked, window, cx));
+    });
+}
+
+#[cfg(any(debug_assertions, feature = "measure"))]
+fn gate_steps(asked: &str, window: &mut Window, cx: &mut App) {
     let Some(material) = Current::<Material>::view(cx) else {
         return;
     };
@@ -663,6 +673,7 @@ pub fn apply_gate(window: &mut Window, cx: &mut App) {
             match step.split_once(':') {
                 Some(("item", id)) => material.open(id, window, cx),
                 Some(("pin", id)) => material.pin(id, None, cx),
+                Some(("insert", id)) => material.insert(id, None, window, cx),
                 Some(("probe", theme)) => {
                     if let Some(panel) = &material.panel {
                         let theme = theme.to_owned();

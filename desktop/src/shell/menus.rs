@@ -11,6 +11,7 @@ use crate::editor::{
     Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
     ShowSpelling, ToggleSource, Undo,
 };
+use crate::material::{JumpToMaterial, ShowLibrary, ToggleMaterial};
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{FocusNext, FocusPrevious, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
@@ -228,6 +229,10 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::CommitCard, ShowCommitCard),
             item(Key::Timeline, ShowTimeline),
             item(Key::GitPanel, ShowGitPanel),
+            MenuItem::separator(),
+            item(Key::SupportingMaterial, ToggleMaterial),
+            item(Key::GoToMaterial, JumpToMaterial),
+            item(Key::MaterialLibrary, ShowLibrary),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new(crate::t!(Key::Inspector)).items(inspector_items(state))),
             item(Key::NextProblem, NextProblem),

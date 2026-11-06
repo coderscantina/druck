@@ -1021,11 +1021,11 @@ impl EditorView {
         self.pins.groups.iter().map(|group| group.anchor).collect()
     }
 
-    /// The window y of the bottom of the caret's block, when it is on screen, for a card that opens under it.
-    pub fn caret_block_bottom(&self) -> Option<Pixels> {
+    /// The window y of the top and bottom of the caret's block, when it is on screen, for a card that opens by it.
+    pub fn caret_block_span(&self) -> Option<(Pixels, Pixels)> {
         let index = self.blocks.index_at(self.selection.head);
         let (_, top) = self.visible.iter().find(|(visible, _)| *visible == index)?;
-        Some(*top + self.slots[index].layout.as_ref()?.height)
+        Some((*top, *top + self.slots[index].layout.as_ref()?.height))
     }
 
     /// The group on the caret's paragraph.

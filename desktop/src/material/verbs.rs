@@ -47,6 +47,16 @@ pub fn quotation(passage: &str, key: Option<&str>, language: &str) -> String {
     }
 }
 
+/// `written` as it goes in at `at`: after a space unless it starts a line or follows one, or an opening bracket.
+pub fn spaced(text: &str, at: usize, written: String) -> String {
+    let before = text[..at].chars().next_back();
+    match before {
+        None => written,
+        Some(char) if char.is_whitespace() || matches!(char, '(' | '[' | '\u{201e}' | '\u{201c}') => written,
+        Some(_) => format!(" {written}"),
+    }
+}
+
 /// What a table or passage insert writes for `item`: the CSV as a table, or the chosen passage, else the whole text.
 pub fn block_text(item: &Item, csv: Option<&str>, passage: Option<&str>) -> Option<String> {
     match Insert::of(item) {
@@ -91,6 +101,14 @@ mod tests {
     fn a_quotation_takes_the_books_marks_and_a_citation() {
         assert_eq!(quotation(" They rounded. ", Some("s24"), "en"), "\u{201c}They rounded.\u{201d} [@s24]");
         assert_eq!(quotation("\"Sie rundeten.\"", None, "de-AT"), "\u{201e}Sie rundeten.\u{201c}");
+    }
+
+    #[test]
+    fn an_inline_insert_after_a_word_takes_a_space() {
+        assert_eq!(spaced("four.", 5, "[@k]".into()), " [@k]");
+        assert_eq!(spaced("four. ", 6, "[@k]".into()), "[@k]");
+        assert_eq!(spaced("(", 1, "[@k]".into()), "[@k]");
+        assert_eq!(spaced("", 0, "[@k]".into()), "[@k]");
     }
 
     #[test]

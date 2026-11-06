@@ -167,7 +167,8 @@ impl MaterialPanel {
                 }
                 _ => {}
             }
-            self.probe.item_opened(&id, cx);
+            let editor = self.editor.clone();
+            self.probe.item_opened(&id, &editor, cx);
         }
     }
 
@@ -503,7 +504,7 @@ impl MaterialPanel {
                 div()
                     .id(SharedString::from(format!("material-row-{}", row.id)))
                     .role(Role::ListItem)
-                    .aria_label(item.name().to_owned())
+                    .aria_label(item.label().to_owned())
                     .aria_selected(chosen)
                     .h(tokens::MATERIAL_ROW_HEIGHT)
                     .px(tokens::SPACE_3)
@@ -514,7 +515,7 @@ impl MaterialPanel {
                     .when(chosen, |line| line.bg(tokens.raised))
                     .hover(|line| line.bg(tokens.raised))
                     .child(svg().flex_none().path(icon(item)).size(tokens::ICON_SIZE).text_color(tokens.text_faint))
-                    .child(div().flex_1().min_w_0().truncate().text_color(tokens.text).child(item.name().to_owned()))
+                    .child(div().flex_1().min_w_0().truncate().text_color(tokens.text).child(item.label().to_owned()))
                     .when_some(row.end.clone(), |line, end| {
                         line.child(
                             div()

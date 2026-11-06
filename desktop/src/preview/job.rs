@@ -282,6 +282,32 @@ impl Typesetter {
         })
     }
 
+    /// The type of the theme this typesetter is set to, read from its fonts without a layout, such as for setting a
+    /// style probe in another theme. `None` while it cannot be read.
+    pub fn read_type(&self, joined: Joined) -> Option<BookType> {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("druck-type".into())
+                .stack_size(LAYOUT_STACK)
+                .spawn_scoped(scope, || {
+                    let cancel = Cancel::default();
+                    let (input, _) = self.input(joined).ok()?;
+                    let configured = self
+                        .renderer
+                        .job(&self.resolver, &input, &cancel)
+                        .missing(Missing::StandIn)
+                        .configure()
+                        .ok()?;
+                    let fonts = configured.fonts().ok()?;
+                    let config = resolved_config::of(&configured);
+                    Some(BookType::of(config, |family, weight, italic| fonts.font(family, weight, italic)))
+                })
+                .expect("the system starts a thread")
+                .join()
+                .unwrap_or(None)
+        })
+    }
+
     fn typeset(&mut self, joined: Joined, cancel: &Cancel) -> Result<Layout, Failure> {
         #[cfg(any(debug_assertions, feature = "measure"))]
         let start = Instant::now();

@@ -62,6 +62,22 @@ impl Item {
         self.id.rsplit('/').next().unwrap_or(&self.id)
     }
 
+    /// How a list names the item: a file by its name, a bibliography entry by its authors, year, and title.
+    pub fn label(&self) -> &str {
+        if self.form == Form::Source { &self.title } else { self.name() }
+    }
+
+    /// The text's paragraphs without its headings, joined, for a short excerpt.
+    pub fn prose(&self) -> String {
+        let text = self.text.as_deref().unwrap_or_default();
+        text.split("\n\n")
+            .map(str::trim)
+            .filter(|paragraph| !paragraph.is_empty() && !paragraph.starts_with('#'))
+            .map(|paragraph| paragraph.replace('\n', " "))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// The paragraphs of a text, trimmed, without headings' markers.
     pub fn paragraphs(&self) -> Vec<String> {
         let Some(text) = &self.text else {

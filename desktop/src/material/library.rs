@@ -320,7 +320,7 @@ impl LibraryCard {
                     .object_fit(ObjectFit::Contain)
                     .rounded(tokens::BOX_RADIUS)
             });
-        let excerpt = (item.form == Form::Text).then(|| item.paragraphs().join(" ")).filter(|text| !text.is_empty());
+        let excerpt = (item.form == Form::Text).then(|| item.prose()).filter(|text| !text.is_empty());
         let body = self.editor.read(cx).body_font().family;
         let pins = material.pinned_count(&item.id);
         let path = item.path().unwrap_or(&item.id).to_owned();
@@ -395,7 +395,7 @@ impl Render for LibraryCard {
                     .id(SharedString::from(format!("library-row-{}", item.id)))
                     .role(Role::ListItem)
                     .aria_selected(chosen)
-                    .aria_label(item.name().to_owned())
+                    .aria_label(item.label().to_owned())
                     .flex_none()
                     .h(tokens::MATERIAL_ROW_HEIGHT)
                     .px(tokens::SPACE_3)
@@ -406,11 +406,7 @@ impl Render for LibraryCard {
                     .when(chosen, |row| row.bg(tokens.raised))
                     .hover(|row| row.bg(tokens.raised))
                     .child(svg().flex_none().path(icon(item)).size(tokens::ICON_SIZE).text_color(tokens.text_faint))
-                    .child(div().flex_1().min_w_0().truncate().child(if item.form == Form::Source {
-                        item.title.clone()
-                    } else {
-                        item.name().to_owned()
-                    }))
+                    .child(div().flex_1().min_w_0().truncate().child(item.label().to_owned()))
                     .child(
                         div()
                             .flex_none()
@@ -429,10 +425,13 @@ impl Render for LibraryCard {
         let width = tokens::LIBRARY_WIDTH.min(window_size.width - tokens::SPACE_4 * 2.);
         let left = TextColumn::centred(cx, width).min(window_size.width - width - tokens::SPACE_4);
         let height = tokens::LIBRARY_PANES_HEIGHT + tokens::TOOLBAR_HEIGHT * 3.;
-        let below = self.editor.read(cx).caret_block_bottom().map(|bottom| bottom + tokens::SPACE_2);
-        let top = match below {
-            Some(top) if top + height <= window_size.height => top,
-            _ => (window_size.height - height - tokens::FOOTER_HEIGHT).max(tokens::TITLEBAR_HEIGHT),
+        // Under the caret's paragraph, else above it, else as low as the window lets it stand.
+        let span = self.editor.read(cx).caret_block_span();
+        let fallback = (window_size.height - height - tokens::FOOTER_HEIGHT).max(tokens::TITLEBAR_HEIGHT);
+        let top = match span {
+            Some((_, bottom)) if bottom + tokens::SPACE_2 + height <= window_size.height => bottom + tokens::SPACE_2,
+            Some((top, _)) if top - tokens::SPACE_2 - height >= tokens::TITLEBAR_HEIGHT => top - tokens::SPACE_2 - height,
+            _ => fallback,
         };
         let count = crate::t!(Key::Count, all = all, shown = results.len());
         let chosen = results.get(selected).cloned();
