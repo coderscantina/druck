@@ -100,6 +100,7 @@ pub fn apply(parts: &Parts, workspace: Entity<Workspace>, window: &mut Window, c
         apply_to_panes(&parts, window, cx);
         apply_to_workspace(&parts, &workspace, window, cx);
         crate::palette::apply_gate(window, cx);
+        crate::navigator::apply_gate(window, cx);
         crate::versions::apply_gate(window, cx);
         workspace.update(cx, |_, cx| crate::agent::apply_gate(window, cx));
         start(

@@ -104,6 +104,8 @@ crate::strings! {
         PreviousProblem => ("Previous problem", "Voriges Problem"),
         FocusBinder => ("Go to the Binder", "Zum Binder"),
         FocusOutline => ("Go to the outline", "Zur Gliederung"),
+        GoToPath => ("Go to a file or section", "Zu Datei oder Abschnitt"),
+        BookOverview => ("Overview of the book", "Übersicht des Buchs"),
         Minimize => ("Minimize", "Im Dock ablegen"),
         WindowZoom => ("Zoom", "Zoomen"),
         HelpWeb => ("Druck documentation", "Druck-Dokumentation"),

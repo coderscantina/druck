@@ -227,6 +227,8 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::FocusBinder, FocusBinder),
             item(Key::FocusOutline, FocusOutline),
             item(Key::FocusEditor, FocusEditor),
+            item(Key::GoToPath, crate::navigator::ShowColumns),
+            item(Key::BookOverview, crate::navigator::ShowOverview),
             MenuItem::separator(),
             item(Key::CommitCard, ShowCommitCard),
             item(Key::Timeline, ShowTimeline),

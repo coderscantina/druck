@@ -111,6 +111,16 @@ pub fn part_title(text: &str) -> Option<String> {
         .map(|h| h.title)
 }
 
+/// A heading line's words without their Markdown, and whether it says `{-}` or `{.unnumbered}`.
+pub fn heading_text(line: &str) -> (String, bool) {
+    let words = heading_words(line);
+    let (bare, attributes) = split_attributes(&line[words]);
+    let unnumbered = attributes
+        .split_whitespace()
+        .any(|attribute| attribute == "-" || attribute == ".unnumbered");
+    (plain_text(bare), unnumbered)
+}
+
 /// Whether the text holds a `::: toc` and otherwise only directive lines and comments.
 fn is_only_contents(text: &str) -> bool {
     let mut has_toc = false;

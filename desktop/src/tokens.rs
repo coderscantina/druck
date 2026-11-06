@@ -311,6 +311,49 @@ pub const DIFF_ROW_TINT: f32 = 0.14;
 /// The start of a fade.
 pub const CLEAR: f32 = 0.;
 
+/// The path bar, its columns, and the overview. The path starts after the traffic lights; a segment has room for at least
+/// an ellipsis.
+pub const NAV_PATH_LEFT: Pixels = px(76.);
+pub const NAV_SEGMENT_X: Pixels = px(6.);
+pub const NAV_SEGMENT_LEAST: Pixels = px(24.);
+pub const NAV_CHEVRON: Pixels = px(10.);
+/// The columns' card, its columns, and its foot. A column's rows are `MENU_ROW_HEIGHT`; a deeper heading is indented.
+pub const NAV_CARD_LEFT: Pixels = px(64.);
+pub const NAV_PARTS_WIDTH: Pixels = px(216.);
+pub const NAV_CHAPTERS_WIDTH: Pixels = px(196.);
+pub const NAV_HEADINGS_WIDTH: Pixels = px(228.);
+pub const NAV_OPENING_WIDTH: Pixels = px(232.);
+pub const NAV_COLUMN_Y: Pixels = px(6.);
+pub const NAV_INDENT: Pixels = px(14.);
+pub const NAV_MARK: Pixels = px(6.);
+pub const NAV_ICON: Pixels = px(10.);
+pub const NAV_FOOT_HEIGHT: Pixels = px(30.);
+/// The chosen file's opening: its title, and its paragraphs in the book face, cut after a few lines.
+pub const NAV_OPENING_Y: Pixels = px(14.);
+pub const NAV_OPENING_TITLE: Pixels = px(16.);
+pub const NAV_OPENING_LEADING: Pixels = px(19.5);
+pub const NAV_OPENING_LINES: usize = 4;
+/// How strongly the raised grey marks the path's choice in a column that does not have the keys.
+pub const NAV_PATH_TINT: f32 = 0.55;
+/// The overview: its margins, narrower below `NAV_DESK_WIDE`, the label column, and the entries, at most
+/// `NAV_DESK_COLUMNS` to a line and none narrower than `NAV_DESK_CARD_MIN`.
+pub const NAV_DESK_WIDE: Pixels = px(960.);
+pub const NAV_DESK_MARGIN: Pixels = px(48.);
+pub const NAV_DESK_TOP: Pixels = px(36.);
+pub const NAV_DESK_LABEL: Pixels = px(140.);
+pub const NAV_DESK_COLUMNS: usize = 4;
+pub const NAV_DESK_CARD_MIN: Pixels = px(176.);
+pub const NAV_DESK_CARD_HEIGHT: Pixels = px(92.);
+pub const NAV_DESK_CARD_X: Pixels = px(10.);
+pub const NAV_DESK_CARD_Y: Pixels = px(9.);
+pub const NAV_DESK_NUMBER_GAP: Pixels = px(6.);
+pub const NAV_DESK_TITLE: Pixels = px(24.);
+pub const NAV_DESK_LABEL_TEXT: Pixels = px(14.);
+pub const NAV_DESK_CARD_TITLE: Pixels = px(15.);
+pub const NAV_DESK_FIRST_LINE: Pixels = px(12.5);
+pub const NAV_DESK_TITLE_LEADING: Pixels = px(19.);
+pub const NAV_DESK_FIRST_LINE_LEADING: Pixels = px(17.);
+
 /// The paint order of a card that asks a question, above the proof slip (1) and the text's floats (2).
 pub const LAYER_QUESTION: usize = 3;
 

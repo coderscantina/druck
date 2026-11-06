@@ -72,6 +72,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
         cx,
     );
     crate::editor::mount(parts, window, cx);
+    crate::navigator::mount(parts, slots, window, cx);
 }
 
 /// Opens the only window, with a document or with the launch screen. `error` says why a document asked for did not
@@ -99,6 +100,7 @@ pub fn open(
     shell::install(cx);
     crate::palette::install(cx);
     crate::versions::install(cx);
+    crate::navigator::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
         async {}
@@ -514,7 +516,9 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &menus::Recent9, window, cx| shell.open_recent(9, window, cx)))
             .map(|root| match self.workspace.clone() {
                 Some(workspace) => root.child(workspace),
-                None => root.child(titlebar(&tokens, div(), div())).child(self.launch.clone()),
+                None => root
+                    .child(titlebar(&tokens, div(), div(), div()))
+                    .child(self.launch.clone()),
             })
     }
 }

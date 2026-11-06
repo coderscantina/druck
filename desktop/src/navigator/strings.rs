@@ -1,0 +1,33 @@
+//! The path bar's, the columns', and the overview's strings, in English and German.
+
+crate::strings! {
+    pub enum Key {
+        FrontMatter => ("Front matter", "Vorspann"),
+        BackMatter => ("Back matter", "Anhang"),
+        Chapters => ("Chapters", "Kapitel"),
+        BeforeParts => ("Before the parts", "Vor den Teilen"),
+        NotInBook => ("Not in book", "Nicht im Buch"),
+        Research => ("Research", "Recherche"),
+        Notes => ("Notes", "Notizen"),
+        Probes => ("Style probes", "Stilproben"),
+        Overview => ("Overview", "Übersicht"),
+        Path => ("Where the caret is", "Wo die Einfügemarke steht"),
+        Columns => ("The book's files and sections", "Dateien und Abschnitte des Buchs"),
+        HintArrows => ("Arrows", "Pfeile"),
+        HintMove => ("move", "wandern"),
+        HintReturn => ("Return", "Return"),
+        HintOpen => ("open", "öffnet"),
+        HintType => ("Type", "Tippen"),
+        HintSelect => ("select by title", "wählt nach Titel"),
+        HintEscape => ("Esc", "Esc"),
+        HintClose => ("close", "schließt"),
+        HintReorder => ("reorder", "verschiebt"),
+        HintBack => ("back to the text", "zurück zum Text"),
+        Words => ("{count} words", "{count} Wörter"),
+        Open => ("{count} open", "{count} offen"),
+        Files => ("{count} files", "{count} Dateien"),
+        OneFile => ("1 file", "1 Datei"),
+        BookWords => ("{authors}, {count} words", "{authors}, {count} Wörter"),
+        BookWordsAlone => ("{count} words", "{count} Wörter"),
+    }
+}

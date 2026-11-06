@@ -37,6 +37,7 @@ pub use self::details::{Details, Field, LANGUAGES, MetaRow};
 use self::disk::Synced;
 pub use self::joined::{ChapterMap, Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
+pub use self::outline::heading_text;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
 use self::strings::Key;
 pub use self::templates::{STARTERS, Starter, TEMPLATES, Template};
@@ -60,6 +61,12 @@ impl ChapterId {
     /// A number that stays this chapter's for the session, for element ids.
     pub fn number(self) -> usize {
         self.0 as usize
+    }
+
+    /// An id made up by a test, for a model that is built without a session.
+    #[cfg(test)]
+    pub fn for_tests(number: u32) -> Self {
+        Self(number)
     }
 }
 
