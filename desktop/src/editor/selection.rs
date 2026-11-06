@@ -23,6 +23,7 @@ impl EditorView {
         }
         self.autoscroll = true;
         self.follow_slash();
+        self.follow_fence();
         self.restart_blink(window, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
@@ -224,11 +225,7 @@ impl EditorView {
         self.pointer = event.position;
         let viewport = self.column.viewport;
         let inside = viewport.contains(&event.position);
-        let hovered = if inside {
-            self.block_at_y(event.position.y)
-        } else {
-            None
-        };
+        let hovered = if inside { self.block_at(event.position) } else { None };
         if hovered != self.hovered {
             self.hovered = hovered;
             cx.notify();

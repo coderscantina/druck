@@ -158,4 +158,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("down", MenuDown, context),
         KeyBinding::new("enter", MenuAccept, context),
     ]);
+    // After the menu's, so a directive's options win while they have the keys.
+    super::directives::bind_keys(cx);
 }

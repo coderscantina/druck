@@ -25,7 +25,7 @@
 //! outside the views.
 //!
 //! For captures, no window needs to be frontmost or key. `DRUCK_GATE=2` floats on the last display without focus, and these
-//! need no keystrokes at all: `DRUCK_MODE`, `DRUCK_TAB`, `DRUCK_CHAPTER`, `DRUCK_SELECT`, `DRUCK_SECTION`, `DRUCK_SLIP`,
+//! need no keystrokes at all: `DRUCK_MODE`, `DRUCK_TAB`, `DRUCK_CHAPTER`, `DRUCK_SELECT`, `DRUCK_CARET`, `DRUCK_SECTION`, `DRUCK_SLIP`,
 //! `DRUCK_VERSIONS`, `DRUCK_VERSIONS_RUN`, and the scripted actions of `DRUCK_AGENT_SCRIPT`. Keys sent by
 //! `CGEventPostToPid` reach the process without it being frontmost, and never reach another window.
 
@@ -171,6 +171,17 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
             editor.update(cx, |editor, cx| {
                 if let Some(at) = editor.text().find(&word) {
                     editor.select_for_screenshot(at..at + word.len(), window, cx);
+                }
+            });
+        });
+    }
+    // `DRUCK_CARET` puts the caret at the end of the first place with these words, such as a directive's fence line.
+    if let Some(words) = var("DRUCK_CARET") {
+        let editor = parts.editor.clone();
+        window.on_next_frame(move |window, cx| {
+            editor.update(cx, |editor, cx| {
+                if let Some(at) = editor.text().find(&words) {
+                    editor.jump_to(at + words.len(), window, cx);
                 }
             });
         });

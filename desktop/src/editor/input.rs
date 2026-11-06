@@ -62,6 +62,7 @@ impl EditorView {
         self.scroll.block = self.blocks.index_at(moved);
         self.hovered = None;
         self.rich.atoms = rich::atoms(self.session.active_buffer().text(), &self.blocks);
+        self.read_directives();
         review::shift(&mut self.review, &mut self.advice, &splice);
     }
 
@@ -88,8 +89,14 @@ impl EditorView {
             let other = target(self.session.active_buffer().text(), head);
             // A key deletes a chip whole.
             let other = self.past_chip(other, other > head);
-            // A comment hidden there is not deleted by a key that cannot show it: the caret goes past it.
+            // A comment hidden there is not deleted by a key that cannot show it: the caret goes past it. A fence line
+            // at rest is not either: the caret goes onto it, which shows it.
             let visible = self.skip_hidden(other, other > head);
+            let fence = self.blocks.index_at(other);
+            if visible == other && fence != self.blocks.index_at(head) && self.fence_at_rest(fence) {
+                self.set_selection(Selection::caret(other), false, window, cx);
+                return;
+            }
             if visible != other {
                 if visible != head {
                     self.set_selection(Selection::caret(visible), false, window, cx);
@@ -281,6 +288,7 @@ impl EntityInputHandler for EditorView {
         } else {
             EditKind::Typing
         };
+        self.options_release_keys();
         let range = self.input_range(range_utf16);
         let typed_slash = new_text == "/" && kind == EditKind::Typing && !self.menu_is_open();
         let at = range.start;
@@ -299,6 +307,7 @@ impl EntityInputHandler for EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.options_release_keys();
         let range = self.input_range(range_utf16);
         let new_len_utf16 = new_text.encode_utf16().count();
         let marked = (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());

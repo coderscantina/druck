@@ -92,6 +92,7 @@ crate::strings! {
         InsertReference => ("Cross-reference…", "Querverweis…"),
         InsertImage => ("Image…", "Bild…"),
         InsertTable => ("Table", "Tabelle"),
+        FullWidthFromCaret => ("Full width from the caret", "Ab hier volle Breite"),
         NextMisspelled => ("Next misspelled word", "Nächstes falsches Wort"),
         CheckSpelling => ("Check spelling while typing", "Rechtschreibung prüfen"),
         ZoomIn => ("Zoom in", "Vergrößern"),

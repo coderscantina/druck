@@ -13,6 +13,34 @@ const FILES: &[(&str, &[u8])] = &[
     ("icons/more.svg", include_bytes!("../assets/icons/more.svg")),
     ("icons/plus.svg", include_bytes!("../assets/icons/plus.svg")),
     ("icons/title.svg", include_bytes!("../assets/icons/title.svg")),
+    (
+        "icons/directive-bottom.svg",
+        include_bytes!("../assets/icons/directive-bottom.svg"),
+    ),
+    (
+        "icons/directive-columns.svg",
+        include_bytes!("../assets/icons/directive-columns.svg"),
+    ),
+    (
+        "icons/directive-full-width.svg",
+        include_bytes!("../assets/icons/directive-full-width.svg"),
+    ),
+    (
+        "icons/directive-jump.svg",
+        include_bytes!("../assets/icons/directive-jump.svg"),
+    ),
+    (
+        "icons/directive-keep.svg",
+        include_bytes!("../assets/icons/directive-keep.svg"),
+    ),
+    (
+        "icons/directive-page-break.svg",
+        include_bytes!("../assets/icons/directive-page-break.svg"),
+    ),
+    (
+        "icons/directive-unwrap.svg",
+        include_bytes!("../assets/icons/directive-unwrap.svg"),
+    ),
     ("icons/details.svg", include_bytes!("../assets/icons/details.svg")),
     (
         "icons/diagnostics.svg",

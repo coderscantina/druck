@@ -10,6 +10,7 @@ use gpui::{
     Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
 };
 
+use super::directives::{Marks, paint_marks};
 use super::display::ChipLook;
 use super::float::prepaint_float;
 use super::gutter::{CommentMarker, block_icon, gutter_cursor, paint_gutter};
@@ -35,6 +36,11 @@ impl Galley {
 pub(super) struct FrameBlock {
     pub kind: BlockKind,
     pub top: Pixels,
+    /// Its window x and width: the text's, or its column's inside two columns.
+    pub left: Pixels,
+    pub width: Pixels,
+    /// Where its gutter icon stands: in the left margin, or in the gap before a second column.
+    pub icon_x: Pixels,
     pub layout: Rc<BlockLayout>,
     pub hovered: bool,
     pub icon: Option<&'static str>,
@@ -65,6 +71,8 @@ pub struct Frame {
     scrollbar_strong: bool,
     /// The images of visible figures, drawn inside the text's bounds.
     images: Vec<AnyElement>,
+    /// The directives' brackets, sheet gaps, and ghost.
+    directives: Marks,
     /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
     margin: Option<AnyElement>,
     /// A passage's buttons and the agent's notes, drawn inside the same bounds for the same reason.
@@ -150,7 +158,7 @@ impl Element for Galley {
                 ),
                 HitboxBehavior::Normal,
             );
-            let frame = view.frame(hitbox, gutter_hitbox, window);
+            let frame = view.frame(hitbox, gutter_hitbox, window, cx);
             let selection = frame.selection.clone();
             let caret = frame.caret.or_else(|| view.caret_bounds(window));
             let floats = view.floats(&selection, caret, window, cx);
@@ -259,6 +267,7 @@ impl Element for Galley {
             for block in &frame.blocks {
                 paint_block_text(block, frame, window, cx);
             }
+            paint_marks(&frame.directives, frame, window, cx);
             for word in &frame.misspelled {
                 let line = Bounds::new(
                     point(word.left(), word.bottom() - word.size.height * MISSPELLED_RISE),
@@ -321,7 +330,7 @@ impl Galley {
                 .layout
                 .whole
                 .as_ref()
-                .and_then(|whole| whole.image_element(point(frame.column.text_left, block.top), bounds, window, cx))
+                .and_then(|whole| whole.image_element(point(block.left, block.top), bounds, window, cx))
             {
                 images.push(element);
             }
@@ -331,7 +340,6 @@ impl Galley {
 }
 
 fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window) {
-    let column = &frame.column;
     for line in &block.layout.lines {
         for (chip, look) in &line.chips {
             let color = match look {
@@ -340,10 +348,7 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
                 ChipLook::Error => frame.error.opacity(tokens::CHIP_ERROR_TINT),
                 ChipLook::Removed => frame.removed.opacity(tokens::REVIEW_TINT),
             };
-            let bounds = Bounds::new(
-                point(column.text_left + chip.origin.x, block.top + chip.origin.y),
-                chip.size,
-            );
+            let bounds = Bounds::new(point(block.left + chip.origin.x, block.top + chip.origin.y), chip.size);
             window.paint_quad(fill(bounds, color).corner_radii(tokens::BOX_RADIUS));
         }
     }
@@ -354,14 +359,14 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
     match block.kind {
         BlockKind::Code => {
             let bounds = Bounds::new(
-                point(column.text_left - tokens::CODE_OUTDENT, block.top),
-                size(column.text_width + tokens::CODE_OUTDENT * 2., height),
+                point(block.left - tokens::CODE_OUTDENT, block.top),
+                size(block.width + tokens::CODE_OUTDENT * 2., height),
             );
             window.paint_quad(fill(bounds, frame.code_background));
         }
         BlockKind::Quote => {
             let bounds = Bounds::new(
-                point(column.text_left + tokens::QUOTE_RULE_X, block.top),
+                point(block.left + tokens::QUOTE_RULE_X, block.top),
                 size(tokens::QUOTE_RULE_WIDTH, height),
             );
             window.paint_quad(fill(bounds, frame.rule));
@@ -371,11 +376,10 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
 }
 
 fn paint_block_text(block: &FrameBlock, frame: &Frame, window: &mut Window, cx: &mut App) {
-    let column = &frame.column;
     if let Some(whole) = &block.layout.whole {
-        whole.paint(point(column.text_left, block.top), frame, window, cx);
+        whole.paint(point(block.left, block.top), frame, window, cx);
     }
-    paint_lines(&block.layout, column.text_left, block.top, frame, window, cx);
+    paint_lines(&block.layout, block.left, block.top, frame, window, cx);
 }
 
 /// Paints a shaped block's lines with its top left corner at (`left`, `top`).
@@ -418,8 +422,10 @@ pub(super) fn paint_lines(
 
 impl EditorView {
     /// Everything paint needs, gathered while the view is mutably at hand.
-    fn frame(&mut self, hitbox: Hitbox, gutter_hitbox: Hitbox, window: &Window) -> Frame {
+    fn frame(&mut self, hitbox: Hitbox, gutter_hitbox: Hitbox, window: &Window, cx: &App) -> Frame {
         let column = self.column;
+        let gutter_icon = column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET;
+        let gap = self.directives.column_gap();
         let mut blocks = Vec::with_capacity(self.visible.len());
         for (index, top) in self.visible.clone() {
             let block = self.blocks.as_slice()[index].clone();
@@ -440,9 +446,17 @@ impl EditorView {
             } else {
                 icon
             };
+            let left = self.block_left(index);
             blocks.push(FrameBlock {
                 kind: block.kind,
                 top,
+                left,
+                width: self.block_width(index),
+                icon_x: if left > column.text_left {
+                    left - (gap + tokens::GUTTER_ICON) * 0.5
+                } else {
+                    gutter_icon
+                },
                 layout: self.layout_block(index, window),
                 hovered: self.hovered == Some(index),
                 icon,
@@ -491,6 +505,8 @@ impl EditorView {
             None
         };
         self.markers = self.comment_markers(&blocks);
+        let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
+        let directives = self.directive_marks(&blocks, &indices, window, cx);
         Frame {
             column,
             blocks,
@@ -509,6 +525,7 @@ impl EditorView {
             scrollbar: self.scrollbar,
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             images: Vec::new(),
+            directives,
             margin: None,
             review: Vec::new(),
             source: self.source,
@@ -545,8 +562,8 @@ impl EditorView {
                 && selection.end > block_start
             {
                 rectangles.push(Bounds::new(
-                    point(self.column.text_left, block.top),
-                    size(self.column.text_width, whole.height()),
+                    point(block.left, block.top),
+                    size(block.width, whole.height()),
                 ));
             }
             for line in &block.layout.lines {
@@ -589,7 +606,7 @@ impl EditorView {
                     }
                     rectangles.push(Bounds::new(
                         point(
-                            self.column.text_left + line.x + x0,
+                            block.left + line.x + x0,
                             block.top + line.y + line.line_height * row as f32,
                         ),
                         size(x1 - x0, line.line_height),

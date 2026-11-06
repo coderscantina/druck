@@ -527,6 +527,7 @@ impl EditorView {
         slash::Context {
             open_directives: slash::open_directives(text, &self.blocks, at),
             has_toc: chapters().any(slash::holds_toc),
+            has_bibliography: chapters().any(|text| slash::holds_directive(text, "bibliography")),
             has_works: !self.rich.works.is_empty(),
             has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
@@ -574,6 +575,19 @@ impl EditorView {
                 cx.notify();
             }
         }
+    }
+
+    /// Where the slash menu's slash is and what its chosen entry does, while it is open.
+    pub(super) fn slash_choice(&self) -> Option<(usize, &Action)> {
+        let Float::Menu(Menu {
+            kind: MenuKind::Slash { start, items, .. },
+            selected,
+            ..
+        }) = &self.float
+        else {
+            return None;
+        };
+        Some((*start, &items.get(*selected)?.action))
     }
 
     pub(super) fn menu_up(&mut self, _: &MenuUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -653,7 +667,7 @@ impl EditorView {
             Action::OpenImage => return self.choose_image(Some(start..caret), window, cx),
             _ => {}
         }
-        let Some(command) = slash::apply(
+        let Some(mut command) = slash::apply(
             text,
             &self.blocks,
             start..caret,
@@ -662,7 +676,17 @@ impl EditorView {
         ) else {
             return;
         };
-        let table_at = matches!(action, Action::Insert(slash::Standalone::Table)).then_some(command.selection.head);
+        if matches!(action, Action::Insert(slash::Standalone::ListTable))
+            && let Some(ghost) = self.directives.ghost_table.take()
+            && ghost != super::directives::GhostTable::default()
+        {
+            with_table_options(&mut command, &ghost.options.opening_line());
+        }
+        let table_at = matches!(
+            action,
+            Action::Insert(slash::Standalone::Table | slash::Standalone::ListTable)
+        )
+        .then_some(command.selection.head);
         self.run_command(command, window, cx);
         self.toolbar_dismissed = true;
         if let Some(at) = table_at {
@@ -852,6 +876,9 @@ impl EditorView {
         }
         match &self.float {
             Float::None => {
+                if let Some(options) = self.options_float(cx) {
+                    return vec![options];
+                }
                 if let Some(target) = Self::selection_box(selection)
                     && self.toolbar_wanted()
                 {
@@ -882,10 +909,26 @@ impl EditorView {
                 let Some(target) = target else {
                     return Vec::new();
                 };
-                vec![(
-                    self.menu_element(menu, cx).into_any_element(),
-                    Spot::Caret(target, area),
-                )]
+                let element = self.menu_element(menu, cx).into_any_element();
+                // Above the caret while it lists directives, so their ghost shows in the text below it.
+                let spot = match &menu.kind {
+                    MenuKind::Slash { items, .. }
+                        if items
+                            .iter()
+                            .any(|item| super::directives::ghost_kind(&item.action).is_some()) =>
+                    {
+                        let wanted = Self::menu_size(menu.len());
+                        let (width, height) = (f32::from(wanted.width), f32::from(wanted.height));
+                        let gap = f32::from(tokens::FLOAT_GAP);
+                        let (x, _) = place::at_caret(rect(target), width, height, area, gap);
+                        let (_, y) = place::above(rect(target), width, height, area, gap);
+                        Spot::At(point(px(x), px(y)))
+                    }
+                    _ => Spot::Caret(target, area),
+                };
+                let mut floats = vec![(element, spot)];
+                floats.extend(self.options_float(cx));
+                floats
             }
             Float::Link(link) => {
                 let Some(target) = target else {
@@ -905,6 +948,29 @@ impl EditorView {
             Float::Rich(_) => self.rich_float(area, window, cx).into_iter().collect(),
         }
     }
+}
+
+/// Writes `opening` as the first line of the list table a command inserts, keeping its selection on the same text.
+fn with_table_options(command: &mut Command, opening: &str) {
+    let Some(edit) = command.edits.iter_mut().find(|edit| edit.text.contains("::: table")) else {
+        return;
+    };
+    let at = edit.text.find("::: table").unwrap_or(0);
+    let old_end = at + edit.text[at..].find(['\r', '\n']).unwrap_or(edit.text.len() - at);
+    let grown = opening.len() as isize - (old_end - at) as isize;
+    let written_at = edit.range.start + at;
+    edit.text.replace_range(at..old_end, opening);
+    let shift = |offset: usize| {
+        if offset > written_at {
+            offset.wrapping_add_signed(grown)
+        } else {
+            offset
+        }
+    };
+    command.selection = Selection {
+        anchor: shift(command.selection.anchor),
+        head: shift(command.selection.head),
+    };
 }
 
 /// Lays a float out and draws it above everything else, later in this same frame, where its measured size puts it.

@@ -225,16 +225,15 @@ impl EditorView {
         )
     }
 
-    /// Shapes a table or figure for the current width.
-    pub(in crate::editor) fn shape_atom(&mut self, atom: &Atom, dim: bool, window: &Window) -> Whole {
+    /// Shapes a table or figure for `width`: the text's, or its column's inside two columns.
+    pub(in crate::editor) fn shape_atom(&mut self, atom: &Atom, dim: bool, width: Pixels, window: &Window) -> Whole {
         match &atom.kind {
-            AtomKind::Table(Ok(grid)) => Whole::Grid(self.shape_grid(grid.clone(), dim, window)),
-            _ => Whole::Figure(self.shape_figure(atom, dim, window)),
+            AtomKind::Table(Ok(grid)) => Whole::Grid(self.shape_grid(grid.clone(), dim, width, window)),
+            _ => Whole::Figure(self.shape_figure(atom, dim, width, window)),
         }
     }
 
-    fn shape_grid(&self, grid: Rc<Grid>, dim: bool, window: &Window) -> GridShape {
-        let width = self.column.text_width;
+    fn shape_grid(&self, grid: Rc<Grid>, dim: bool, width: Pixels, window: &Window) -> GridShape {
         let mut weights = vec![4usize; grid.columns];
         for row in &grid.rows {
             let mut column = 0;
@@ -306,7 +305,7 @@ impl EditorView {
         }
     }
 
-    fn shape_figure(&mut self, atom: &Atom, dim: bool, window: &Window) -> FigureShape {
+    fn shape_figure(&mut self, atom: &Atom, dim: bool, width: Pixels, window: &Window) -> FigureShape {
         let AtomKind::Figure(figure) = &atom.kind else {
             unreachable!("a table is shaped as a grid");
         };
@@ -314,7 +313,6 @@ impl EditorView {
         let text = self.session.active_buffer().text()[block.range.clone()].to_owned();
         let written = figure.path(&text).to_owned();
         let file = self.session.base_dir().join(&written);
-        let width = self.column.text_width;
         let found = self.rich.image_size(&file);
         let (image, problem) = match found {
             Ok((natural_width, natural_height)) if natural_width > 0. && natural_height > 0. => {

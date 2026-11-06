@@ -8,6 +8,7 @@
 
 mod accessible;
 mod commands;
+mod directives;
 mod display;
 mod element;
 mod float;
@@ -52,6 +53,7 @@ use accessible::{ShownBlock, a11y_text};
 use commands::convert::BlockType;
 use commands::marks::Mark;
 use commands::notes;
+pub use directives::FullWidthFromCaret;
 use display::{Syntax, display_lines, hidden_ranges};
 use element::Galley;
 use float::Float;
@@ -259,6 +261,8 @@ pub struct EditorView {
     comment_focus: HashMap<String, FocusHandle>,
     /// The pointer is in the left margin.
     gutter_shown: bool,
+    /// The layout directives of the active chapter. See [`directives`].
+    directives: directives::Directives,
     /// The caret last moved by a key, which typewriter scrolling follows. A click leaves the text where it is.
     caret_by_keys: bool,
     /// Misspelled words. See [`spelling`].
@@ -403,6 +407,7 @@ impl EditorView {
             open_comments: HashSet::new(),
             comment_focus: HashMap::new(),
             gutter_shown: false,
+            directives: directives::Directives::default(),
             #[cfg(any(debug_assertions, feature = "measure"))]
             gutter_pinned: false,
             caret_by_keys: false,
@@ -415,6 +420,7 @@ impl EditorView {
             style_generation: 0,
         };
         view.rich.atoms = rich::atoms(view.session.active_buffer().text(), &view.blocks);
+        view.read_directives();
         view.restart_blink(window, cx);
         view.refresh_rich(window, cx);
         view
@@ -564,6 +570,8 @@ impl EditorView {
         });
         self.source = self.source_chapters.contains(&self.session.active());
         self.selection = opening_selection(text, &self.blocks, view, self.source);
+        self.directives.options = None;
+        self.read_directives();
         self.reveal_at = self.selection.head;
         self.upstream = false;
         self.marked = None;
@@ -1015,8 +1023,18 @@ impl EditorView {
 
     // Layout and geometry
 
-    /// The height of a block: real if it has been shaped for this width, otherwise estimated.
+    /// The room a block takes in the text's stack of blocks. A run in two columns is as tall as its taller column, all
+    /// of it at its first block.
     fn block_height(&self, index: usize) -> Pixels {
+        match self.run_at(index) {
+            Some(run) if run.start == index => self.run_height(&run),
+            Some(_) => px(0.),
+            None => self.own_height(index),
+        }
+    }
+
+    /// The height of a block itself: real if it has been shaped for its width, otherwise estimated.
+    fn own_height(&self, index: usize) -> Pixels {
         let slot = &self.slots[index];
         if let Some(layout) = &slot.layout {
             return layout.height;
@@ -1025,20 +1043,22 @@ impl EditorView {
             return estimate;
         }
         let block = &self.blocks.as_slice()[index];
-        let estimate = if self.is_hidden_block(index) {
+        let estimate = if let Some(kind) = self.standalone_at_rest(index) {
+            self.standalone_room(kind)
+        } else if self.takes_no_room(index) {
             px(0.)
         } else {
             self.style.estimate_height(
                 block.kind,
                 &self.session.active_buffer().text()[block.range.clone()],
-                self.column.text_width,
+                self.block_width(index),
                 self.source,
             )
         };
-        // A hidden comment can show later without this block changing, so only a real estimate lasts.
+        // A hidden comment or fence line can show later without this block changing, so only a real estimate lasts.
         if !matches!(
             block.kind,
-            BlockKind::Comment | BlockKind::Blank | BlockKind::FootnoteDefinition
+            BlockKind::Comment | BlockKind::Blank | BlockKind::FootnoteDefinition | BlockKind::Directive
         ) && self.rich_atom(index).is_none()
         {
             slot.estimate.set(Some(estimate));
@@ -1085,12 +1105,18 @@ impl EditorView {
                     match before.kind {
                         BlockKind::Comment => self.comment_is_hidden(index - 1),
                         BlockKind::FootnoteDefinition => self.definition_is_hidden(index - 1),
-                        _ => false,
+                        BlockKind::Directive => self.opens_at_rest(index - 1),
+                        _ => self.closes_before_a_blank(index + 1),
                     }
                 }
             }
             _ => false,
         }
+    }
+
+    /// Whether a block takes no room: a hidden one, or a fence line the caret is away from, which still takes the caret.
+    fn takes_no_room(&self, index: usize) -> bool {
+        self.is_hidden_block(index) || self.fence_at_rest(index)
     }
 
     /// `target`, moved past the hidden blocks it falls in, on the side the caret is heading.
@@ -1152,6 +1178,7 @@ impl EditorView {
 
     /// Shapes a block for the current caret and width, or returns the shape it already has.
     fn layout_block(&mut self, index: usize, window: &Window) -> Rc<BlockLayout> {
+        let ghost_room = self.ghost_room(index, window);
         let block = self.blocks.as_slice()[index].clone();
         let text = self.session.active_buffer().text();
         let block_text = &text[block.range.clone()];
@@ -1166,14 +1193,15 @@ impl EditorView {
                 })
             })
             .clone();
-        let collapsed = self.is_hidden_block(index);
+        let collapsed = self.takes_no_room(index);
+        let standalone = self.standalone_at_rest(index);
         let whole_atom = self
             .rich_atom(index)
             .filter(|atom| !collapsed && !self.source && atom.first == index && self.atom_is_whole(atom))
             .cloned();
         let hidden = if self.source {
             Vec::new()
-        } else if collapsed || whole_atom.is_some() {
+        } else if collapsed || whole_atom.is_some() || standalone.is_some() {
             let whole = 0..block_text.len();
             vec![whole]
         } else {
@@ -1195,7 +1223,7 @@ impl EditorView {
             let end = marked.end.min(block.range.end);
             (start < end).then(|| start - block.range.start..end - block.range.start)
         });
-        let width = self.column.text_width;
+        let width = self.block_width(index);
         let mut chips = if self.source || collapsed || whole_atom.is_some() || syntax.spans.is_empty() {
             Vec::new()
         } else {
@@ -1209,14 +1237,25 @@ impl EditorView {
             chips.extend(self.review_chips(&block.range, block_text, &hidden, &chips));
             chips.sort_by_key(|chip| chip.range.start);
         }
-        let below = self.review_room(index) + self.note_room_at(index);
+        let below = self.review_room(index)
+            + self.note_room_at(index)
+            + standalone.map_or(px(0.), |kind| self.standalone_room(kind))
+            + ghost_room;
         let dim = self.is_dimmed(index);
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let list = self.blocks.as_slice();
         let gap = if separator {
             let upper = index.checked_sub(1).map(|upper| list[upper].kind);
             let lower = list.get(index + 1).map(|lower| lower.kind);
-            self.style.gap_between(upper, lower)
+            let gap = self.style.gap_between(upper, lower);
+            // At least the column gap stands between two columns and the text across both, as on the page.
+            let changes = index.checked_sub(1).is_some_and(|upper| self.changes_columns(upper))
+                || self.changes_columns(index + 1);
+            if changes {
+                gap.max(self.directives.column_gap())
+            } else {
+                gap
+            }
         } else {
             px(0.)
         };
@@ -1254,7 +1293,7 @@ impl EditorView {
         );
         let whole = whole_atom
             .as_ref()
-            .map(|atom| Box::new(self.shape_atom(atom, dim, window)));
+            .map(|atom| Box::new(self.shape_atom(atom, dim, width, window)));
         let layout = Rc::new(shape_block(
             ShapeRequest {
                 kind: block.kind,
@@ -1352,6 +1391,13 @@ impl EditorView {
         }
         let room = self.room_beside_text();
         self.column = column;
+        let two_columns = self.directives.two_columns();
+        self.place_columns();
+        if self.directives.two_columns() != two_columns {
+            for slot in &self.slots {
+                slot.estimate.set(None);
+            }
+        }
         if self.room_beside_text() != room {
             cx.emit(RoomChanged);
         }
@@ -1373,6 +1419,14 @@ impl EditorView {
             let mut y = viewport.top() - self.scroll.offset;
             let mut index = self.scroll.block;
             while index < block_count && y < viewport.bottom() {
+                // A run in two columns stands at its first block. One entered past it took its room above.
+                if let Some(run) = self.run_at(index) {
+                    if run.start == index {
+                        y += self.lay_out_run(run.clone(), y, window);
+                    }
+                    index = run.end;
+                    continue;
+                }
                 let layout = self.layout_block(index, window);
                 self.visible.push((index, y));
                 y += layout.height;
@@ -1405,8 +1459,10 @@ impl EditorView {
         let here = self.locate(self.selection.head, self.upstream, window);
         let layout = self.layout_block(here.block, window);
         let line = &layout.lines[here.line];
-        let caret_top = line.y + line.line_height * here.row as f32;
-        let caret_bottom = caret_top + line.line_height;
+        let line_height = line.line_height;
+        let (block, caret_top) = self.stacked(here.block, line.y + line_height * here.row as f32, window);
+        let here = Located { block, ..here };
+        let caret_bottom = caret_top + line_height;
         let height = self.column.viewport.size.height;
 
         if let Some(at) = self.caret_stays_at.take() {
@@ -1422,7 +1478,7 @@ impl EditorView {
             let at = height * tokens::TYPEWRITER_AT;
             self.scroll = Anchor {
                 block: here.block,
-                offset: caret_top + line.line_height * 0.5 - at,
+                offset: caret_top + line_height * 0.5 - at,
             };
             self.shape_back_from(here.block, at, window);
             self.normalize_scroll();
@@ -1442,7 +1498,8 @@ impl EditorView {
         let mut distance = caret_bottom - self.scroll.offset;
         let mut index = self.scroll.block;
         while index < here.block && distance <= height {
-            distance += self.layout_block(index, window).height;
+            self.layout_block(index, window);
+            distance += self.block_height(index);
             index += 1;
         }
         if index < here.block || distance > height {
@@ -1461,7 +1518,8 @@ impl EditorView {
         let mut block = index;
         while block > 0 && covered < distance {
             block -= 1;
-            covered += self.layout_block(block, window).height;
+            self.layout_block(block, window);
+            covered += self.block_height(block);
         }
     }
 
@@ -1484,18 +1542,13 @@ impl EditorView {
         }
     }
 
-    fn block_at_y(&self, y: Pixels) -> Option<usize> {
-        let at = self.visible.partition_point(|(_, top)| *top <= y);
-        at.checked_sub(1).map(|at| self.visible[at].0)
-    }
-
     /// The source offset nearest a window position, and whether it shows at the end of an upper row.
     fn offset_at(&mut self, position: Point<Pixels>, window: &Window) -> (usize, bool) {
-        let at = self
-            .visible
-            .partition_point(|(_, top)| *top <= position.y)
-            .saturating_sub(1);
-        let Some(&(index, top)) = self.visible.get(at) else {
+        let found = self
+            .block_at(position)
+            .or_else(|| self.visible.first().map(|(index, _)| *index));
+        let Some((index, top)) = found.and_then(|index| self.visible.iter().find(|(at, _)| *at == index).copied())
+        else {
             return (0, false);
         };
         let layout = self.layout_block(index, window);
@@ -1518,7 +1571,7 @@ impl EditorView {
             };
         }
         let row = (((relative_y - line.y) / line.line_height) as usize).min(line.rows.len() - 1);
-        let x = position.x - self.column.text_left - line.x;
+        let x = position.x - self.block_left(index) - line.x;
         let display = line.display_at_x(row, x.max(px(0.)));
         let upstream = display == line.rows[row].end && !line.is_last_row(row);
         (range.start + line.display.to_source(display), upstream)
@@ -1545,7 +1598,7 @@ impl EditorView {
         let layout = self.layout_block(here.block, window);
         let line = &layout.lines[here.line];
         let origin = point(
-            self.column.text_left + line.x + line.x_in_row(here.display, here.row),
+            self.block_left(here.block) + line.x + line.x_in_row(here.display, here.row),
             top + line.y + line.line_height * here.row as f32,
         );
         Some(Bounds::new(origin, size(tokens::CARET_WIDTH, line.line_height)))
@@ -1583,6 +1636,11 @@ impl Render for EditorView {
         }
         if self.menu_is_open() {
             context.add(MENU_CONTEXT);
+        }
+        if self.options_have_keys() {
+            context.add(directives::OPTIONS_CONTEXT);
+        } else if self.directives.options.is_some() && self.fence_under_caret().is_some() {
+            context.add(directives::FENCE_CONTEXT);
         }
         // Only why the chapter cannot be read. The text is nearly all there is.
         let header = (!self.status.is_empty()).then(|| {
@@ -1662,6 +1720,16 @@ impl Render for EditorView {
             .on_action(cx.listener(|this, _: &InsertImage, window, cx| this.choose_image(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertTable, window, cx| this.insert_table(window, cx)))
             .on_action(cx.listener(|this, _: &EditRich, window, cx| this.edit_rich_at_caret(window, cx)))
+            .on_action(cx.listener(Self::options_focus))
+            .on_action(cx.listener(Self::options_up))
+            .on_action(cx.listener(Self::options_down))
+            .on_action(cx.listener(Self::options_left))
+            .on_action(cx.listener(Self::options_right))
+            .on_action(cx.listener(Self::options_accept))
+            .on_action(cx.listener(Self::options_back))
+            .on_action(cx.listener(Self::options_unwrap))
+            .on_action(cx.listener(Self::full_width_from_caret))
+            .on_action(cx.listener(Self::ghost_options))
             .on_drop(cx.listener(Self::drop_paths))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll));
