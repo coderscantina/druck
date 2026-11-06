@@ -70,13 +70,17 @@ pub fn build(version: &str, current: &str) -> Shown {
     let mut read = 0;
     for (at, hunk) in hunks.iter().enumerate() {
         merged.push_str(&version[read..hunk.old.start]);
+        // The white space after a stretch's words is not struck or tinted.
         let mut stretch = |text: &str, tint, before: &str| {
             if !text.is_empty() {
                 merged.push_str(before);
                 let start = merged.len();
                 merged.push_str(text);
+                if text.trim_end().is_empty() {
+                    return;
+                }
                 stretches.push(Stretch {
-                    range: start..merged.len(),
+                    range: start..start + text.trim_end().len(),
                     tint,
                     passage: passage_of(at),
                 });
@@ -233,6 +237,8 @@ mod tests {
         let body = &shown.blocks[1];
         assert_eq!(tinted(body, Tint::Removed), ["very"]);
         assert_eq!(tinted(body, Tint::Added), ["quite"]);
+        let shown = build("The fire burnt very brightly.\n", "The fire burnt brightly.\n");
+        assert_eq!(tinted(&shown.blocks[0], Tint::Removed), ["very"]);
         assert_eq!(body.passage, Some(0));
         assert_eq!(shown.passage_count(), 1);
     }

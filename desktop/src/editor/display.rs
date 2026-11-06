@@ -284,13 +284,19 @@ fn display_line(
                 len: chip.text.len(),
                 source_len: chip.range.len(),
             });
-            shown_chips.push((display.len()..display.len() + chip.text.len(), chip.look));
+            // White space after a chip's words, such as the space an agent's removed words keep, is not struck or tinted.
+            let words = chip.text.trim_end().len();
+            shown_chips.push((display.len()..display.len() + words, chip.look));
             display.push_str(&chip.text);
             let style = RunStyle {
                 chip: Some(chip.look),
                 ..RunStyle::default()
             };
-            push_run(&mut runs, (chip.text.len(), style));
+            for (len, style) in [(words, style), (chip.text.len() - words, RunStyle::default())] {
+                if len > 0 {
+                    push_run(&mut runs, (len, style));
+                }
+            }
             at = chip.range.end;
         }
         if at < part.end {
@@ -612,6 +618,26 @@ mod tests {
         assert_eq!(line.to_source(4), 6);
         assert_eq!(line.to_source(7), 6);
         assert_eq!(line.to_source(8), 7);
+    }
+
+    #[test]
+    fn removed_words_are_struck_without_the_space_after_them() {
+        let text = "a b";
+        let syntax = syntax(BlockKind::Paragraph, text);
+        let chips = [Chip {
+            range: 2..2,
+            text: "gone ".to_owned(),
+            look: ChipLook::Removed,
+            atomic: false,
+        }];
+        let line = &display_lines(BlockKind::Paragraph, text, &syntax, &[], None, false, &chips)[0];
+        assert_eq!(line.text, "a gone b");
+        assert_eq!(line.chips, [(2..6, ChipLook::Removed)]);
+        let struck: Vec<usize> = (line.runs.iter())
+            .filter(|(_, style)| style.chip == Some(ChipLook::Removed))
+            .map(|(len, _)| *len)
+            .collect();
+        assert_eq!(struck, [4]);
     }
 
     #[test]
