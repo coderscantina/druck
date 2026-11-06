@@ -6,7 +6,8 @@
 //! [`export`] runs an export, [`state`] keeps what the app remembers, and [`strings`] is the string table.
 //!
 //! The views are one per file, and [`Hub`] ties them to the document: it listens to the editor and the preview, and runs
-//! the work behind each panel. It is mounted by [`mount`] and reached by the menus through [`install`].
+//! the work behind each panel, with export runs in `exporting` and search and find in `finding`. It is mounted by
+//! [`mount`] and reached by the menus through [`install`].
 //!
 //! # Strings for other slices
 //!
@@ -18,8 +19,10 @@ pub mod diagnostics;
 pub mod engine_text;
 pub mod export;
 pub mod export_panel;
+mod exporting;
 pub mod facts;
 pub mod find_bar;
+mod finding;
 pub mod footer;
 pub mod manifest;
 pub mod menus;
@@ -32,27 +35,21 @@ pub mod text;
 pub mod ui;
 
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{Duration, Instant};
 
-use druck::Failure;
-use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::input::MANIFEST;
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window,
     prelude::*,
 };
 
 use self::diagnostics::{DiagnosticsEvent, DiagnosticsPanel};
-use self::export::{Request, Stage, Target};
-use self::export_panel::{ExportEvent, ExportPanel, RunState, Setup};
-use self::find_bar::{FindBar, FindEvent};
+use self::export_panel::ExportPanel;
+use self::exporting::Exporting;
+use self::find_bar::FindBar;
+use self::finding::Finding;
 use self::footer::Footer;
 use self::menus::MenuState;
-use self::search::{Matcher, Options, Source};
-use self::search_panel::{SearchEvent, SearchPanel, Status};
+use self::search_panel::SearchPanel;
 use self::state::State;
 use self::strings::LanguageSetting;
 use self::text::Key;
@@ -60,20 +57,12 @@ use crate::editor::{CaretMoved, SessionChanged, TextChanged};
 use crate::inspector::Tab;
 use crate::preview::proof::Problem;
 use crate::preview::{Laid, ZoomChanged};
-use crate::session::{ChapterId, Kind};
+use crate::session::ChapterId;
 use crate::settings;
-use crate::source::EditKind;
 use crate::tokens::{self, Scheme, Tokens};
 use crate::workspace::{
     Mode, ModeChanged, NewSection, Parts, ShowPublish, ShowWrite, Slots, Workspace, ZoomIn, ZoomOut, ZoomReset,
 };
-
-/// How long typing in the search panel pauses before it searches.
-const SEARCH_PAUSE: Duration = Duration::from_millis(150);
-/// How often the export panel hears how far a run is.
-const PROGRESS_PAUSE: Duration = Duration::from_millis(100);
-/// Stack of the export thread, as the preview's layout thread has: the engine reads a nested theme.
-const EXPORT_STACK: usize = 64 * 1024 * 1024;
 
 // Preferences
 
@@ -365,54 +354,34 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     slots.overlays.push(hub.clone().into());
     let hub = hub.read(cx);
     slots.footer.push(hub.footer.clone().into());
-    let search = hub.search.downgrade();
+    let search = hub.finding.search.downgrade();
     slots.left.push(crate::workspace::SidePanel {
-        view: hub.search.clone().into(),
+        view: hub.finding.search.clone().into(),
         width: std::rc::Rc::new(move |window_width, cx| {
             (search.upgrade()).map_or(gpui::px(0.), |search| search.read(cx).width(window_width))
         }),
     });
-    slots.overlays.push(hub.find.clone().into());
+    slots.overlays.push(hub.finding.find.clone().into());
 }
 
 // The hub
-
-/// A running export.
-struct Running {
-    target: Target,
-    cancel: Cancel,
-    stage: Arc<AtomicU8>,
-    _tasks: Vec<Task<()>>,
-}
 
 pub struct Hub {
     parts: Parts,
     workspace: WeakEntity<Workspace>,
     diagnostics: Entity<DiagnosticsPanel>,
-    export: Entity<ExportPanel>,
-    search: Entity<SearchPanel>,
-    find: Entity<FindBar>,
+    exports: Exporting,
+    finding: Finding,
     footer: Entity<Footer>,
     facts: facts::Cache,
     facts_task: Task<()>,
     marks: std::collections::HashMap<ChapterId, crate::sidebar::Mark>,
-    /// Why the last export failed, with its errors, for the diagnostics panel.
-    export_failure: Option<(String, Vec<Diagnostic>)>,
-    /// Why the last change to the exports did not take.
-    export_edit_error: Option<String>,
-    running: Option<Running>,
-    search_task: Task<()>,
-    /// The count of a replacement, shown with the search that follows it.
-    replaced: Option<usize>,
     /// The places of the report's entries in its order, and the one being looked at.
     problem_places: Vec<Option<(ChapterId, usize)>>,
     current_problem: Option<usize>,
     /// `DRUCK_PROOF=3` looks at a problem once there are pages, for screenshots.
     #[cfg(any(debug_assertions, feature = "measure"))]
     proof_hook: Option<usize>,
-    /// Where the caret is, and where the find bar started.
-    caret: usize,
-    find_origin: usize,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -442,7 +411,9 @@ impl Hub {
             cx.subscribe_in(&parts.editor, window, |hub, _, _: &SessionChanged, window, cx| {
                 hub.session_changed(window, cx);
             }),
-            cx.subscribe(&parts.editor, |hub, _, CaretMoved(offset), _| hub.caret = *offset),
+            cx.subscribe(&parts.editor, |hub, _, CaretMoved(offset), _| {
+                hub.finding.caret = *offset
+            }),
             cx.subscribe(&parts.editor, |hub, _, _: &TextChanged, cx| {
                 hub.footer.update(cx, |footer, cx| footer.typed(cx));
             }),
@@ -456,24 +427,16 @@ impl Hub {
             parts,
             workspace,
             diagnostics,
-            export,
-            search,
-            find,
+            exports: Exporting::new(export),
+            finding: Finding::new(search, find),
             footer,
             facts: facts::Cache::default(),
             facts_task: Task::ready(()),
             marks: std::collections::HashMap::new(),
-            export_failure: None,
-            export_edit_error: None,
-            running: None,
-            search_task: Task::ready(()),
-            replaced: None,
             problem_places: Vec::new(),
             current_problem: None,
             #[cfg(any(debug_assertions, feature = "measure"))]
             proof_hook: crate::gate::var("DRUCK_PROOF").and_then(|at| at.parse().ok()),
-            caret: 0,
-            find_origin: 0,
             _subscriptions: subscriptions,
         };
         hub.refresh_export(window, cx);
@@ -522,7 +485,7 @@ impl Hub {
         } else {
             Vec::new()
         };
-        let notice = self.export_failure.as_ref().map(|(name, failed)| {
+        let notice = self.exports.failure.as_ref().map(|(name, failed)| {
             errors.extend(failed.iter().cloned());
             crate::t!(Key::ExportFailed, name = name)
         });
@@ -623,7 +586,7 @@ impl Hub {
         match event {
             DiagnosticsEvent::Select(at) => self.go_to_problem(*at, window, cx),
             DiagnosticsEvent::DismissNotice => {
-                self.export_failure = None;
+                self.exports.failure = None;
                 self.refresh_report(cx);
             }
         }
@@ -674,7 +637,7 @@ impl Hub {
         self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Publish, window, cx));
         self.parts.inspector.update(cx, |inspector, cx| inspector.show(tab, cx));
         if tab == Tab::Export {
-            self.export.update(cx, |panel, cx| panel.focus_first_run(window, cx));
+            (self.exports.panel).update(cx, |panel, cx| panel.focus_first_run(window, cx));
         }
     }
 
@@ -683,385 +646,6 @@ impl Hub {
         self.parts
             .inspector
             .update(cx, |inspector, cx| inspector.choose_theme(cx));
-    }
-
-    /// Reads the exports from the manifest as it is on disk, which every change to it writes at once.
-    fn refresh_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let session = self.parts.editor.read(cx).session();
-        let setup = match session.kind() {
-            Kind::Single { .. } => Setup {
-                single: true,
-                ..Setup::default()
-            },
-            Kind::Project { dir } => {
-                let read = std::fs::read_to_string(dir.join(MANIFEST))
-                    .map_err(|error| error.to_string())
-                    .and_then(|text| manifest::read(&text));
-                match read {
-                    Ok(defs) => Setup {
-                        single: false,
-                        defs,
-                        problem: self.export_edit_error.clone(),
-                        built_in_output: export::built_in_output(dir),
-                    },
-                    Err(problem) => Setup {
-                        single: false,
-                        defs: Vec::new(),
-                        problem: Some(format!("{} {problem}", crate::t!(Key::ManifestProblem))),
-                        built_in_output: String::new(),
-                    },
-                }
-            }
-        };
-        self.export.update(cx, |panel, cx| panel.set_setup(setup, window, cx));
-    }
-
-    fn export_event(
-        &mut self,
-        _: &Entity<ExportPanel>,
-        event: &ExportEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            ExportEvent::Run(target) => self.start_export(target.clone(), window, cx),
-            ExportEvent::Cancel => {
-                if let Some(running) = &self.running {
-                    running.cancel.cancel();
-                }
-            }
-            ExportEvent::Set { name, key, value } => self.set_export_field(name, key, value.clone(), window, cx),
-            ExportEvent::Add(name) => {
-                let output = format!("build/{name}.pdf");
-                self.set_export_field(name, "output", Some(output), window, cx);
-            }
-            ExportEvent::Open(path) => cx.open_with_system(path),
-            ExportEvent::Reveal(path) => cx.reveal_path(path),
-        }
-    }
-
-    /// Changes one value of an export in `druck.yaml` as a text splice the engine must read back as asked.
-    fn set_export_field(
-        &mut self,
-        name: &str,
-        key: &'static str,
-        value: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (edit_name, check_name) = (name.to_owned(), name.to_owned());
-        let written = value.as_deref().map(|value| manifest::written(key, value));
-        let result = self.parts.editor.update(cx, |editor, cx| {
-            editor.update_session(
-                |session| {
-                    session.write_settings(
-                        |text| manifest::set_field(text, &edit_name, key, written.as_deref()),
-                        |settings| manifest::agrees(settings, &check_name, key, value.as_deref()),
-                    )
-                },
-                window,
-                cx,
-            )
-        });
-        self.export_edit_error = result.err();
-        self.refresh_export(window, cx);
-    }
-
-    fn start_export(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        if self.running.is_some() {
-            return;
-        }
-        let session = self.parts.editor.read(cx).session();
-        let request = Request {
-            kind: session.kind().clone(),
-            joined: session.joined(),
-            target: target.clone(),
-        };
-        let cancel = Cancel::default();
-        let stage = Arc::new(AtomicU8::new(0));
-        let started = Instant::now();
-        self.export_failure = None;
-        self.refresh_report(cx);
-        self.export.update(cx, |panel, cx| {
-            panel.set_run(
-                RunState::Running {
-                    target: target.clone(),
-                    stage: Stage::Preparing,
-                },
-                cx,
-            );
-        });
-        let work = {
-            let (cancel, stage) = (cancel.clone(), stage.clone());
-            cx.background_spawn(async move {
-                std::thread::scope(|scope| {
-                    std::thread::Builder::new()
-                        .name("druck-export".into())
-                        .stack_size(EXPORT_STACK)
-                        .spawn_scoped(scope, || {
-                            export::run(request, &cancel, &|reached| {
-                                stage.store(reached as u8, Ordering::Relaxed)
-                            })
-                        })
-                        .expect("the system starts a thread")
-                        .join()
-                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-                })
-            })
-        };
-        let finish = cx.spawn_in(window, {
-            let target = target.clone();
-            async move |hub, cx| {
-                let result = work.await;
-                hub.update_in(cx, |hub, window, cx| {
-                    hub.finish_export(&target, result, started, window, cx)
-                })
-                .ok();
-            }
-        });
-        let progress = cx.spawn(async move |hub, cx| {
-            loop {
-                cx.background_executor().timer(PROGRESS_PAUSE).await;
-                let alive = hub
-                    .update(cx, |hub, cx| {
-                        let Some(running) = &hub.running else { return false };
-                        let stage = match running.stage.load(Ordering::Relaxed) {
-                            0 => Stage::Preparing,
-                            1 => Stage::Typesetting,
-                            _ => Stage::Writing,
-                        };
-                        let target = running.target.clone();
-                        hub.export
-                            .update(cx, |panel, cx| panel.set_run(RunState::Running { target, stage }, cx));
-                        true
-                    })
-                    .unwrap_or(false);
-                if !alive {
-                    break;
-                }
-            }
-        });
-        self.running = Some(Running {
-            target,
-            cancel,
-            stage,
-            _tasks: vec![finish, progress],
-        });
-    }
-
-    fn finish_export(
-        &mut self,
-        target: &Target,
-        result: Result<export::Written, Failure>,
-        started: Instant,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.running = None;
-        let state = match result {
-            Ok(written) => RunState::Done {
-                epub: written
-                    .output
-                    .extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("epub")),
-                output: written.output,
-                parts: written.parts,
-                seconds: started.elapsed().as_secs_f32(),
-            },
-            Err(Failure::Cancelled) => RunState::Cancelled,
-            Err(Failure::Errors(errors)) => {
-                let name = match target {
-                    Target::Named(name) => name.clone(),
-                    Target::Pdf => "PDF".to_owned(),
-                    Target::Epub => "EPUB".to_owned(),
-                };
-                self.export_failure = Some((name, errors));
-                self.parts
-                    .inspector
-                    .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
-                RunState::Failed
-            }
-        };
-        let finished = matches!(state, RunState::Done { .. });
-        self.export.update(cx, |panel, cx| panel.set_run(state, cx));
-        self.refresh_report(cx);
-        self.refresh_export(window, cx);
-        // The run button that had the keys is gone. An author who went on to the text keeps them there.
-        let in_the_text = self.parts.editor.read(cx).focus_handle(cx).contains_focused(window, cx)
-            || self
-                .parts
-                .preview
-                .read(cx)
-                .focus_handle(cx)
-                .contains_focused(window, cx);
-        if finished && !in_the_text {
-            self.export.update(cx, |panel, cx| panel.focus_result(window, cx));
-        }
-    }
-
-    // Search across the project
-
-    fn search_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.update(cx, |panel, cx| panel.open(window, cx));
-    }
-
-    fn search_event(
-        &mut self,
-        _: &Entity<SearchPanel>,
-        event: &SearchEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            SearchEvent::Changed => self.start_search(cx),
-            SearchEvent::Open(id, range) => self.open_place(*id, range.clone(), window, cx),
-            SearchEvent::ReplaceAll => self.replace(None, window, cx),
-            SearchEvent::ReplaceFile(id) => self.replace(Some(*id), window, cx),
-            SearchEvent::Closed => self.with_workspace(cx, |workspace, cx| workspace.focus_main(window, cx)),
-        }
-    }
-
-    /// Every chapter the search covers: the book, files not in it, notes, and research.
-    fn searchable(&self, cx: &Context<Self>) -> Vec<(ChapterId, String, Option<String>, std::path::PathBuf)> {
-        let session = self.parts.editor.read(cx).session();
-        let contents = session.contents();
-        let rows = contents
-            .book
-            .iter()
-            .chain(&contents.not_in_book)
-            .chain(&contents.notes)
-            .chain(&contents.research);
-        rows.filter_map(|row| {
-            let chapter = session.chapter(row.id)?;
-            let text = chapter.is_read().then(|| chapter.text().to_owned());
-            Some((row.id, row.title.clone(), text, chapter.path().to_owned()))
-        })
-        .collect()
-    }
-
-    fn start_search(&mut self, cx: &mut Context<Self>) {
-        let (query, replacement, options) = self.search.read(cx).request(cx);
-        let matcher = match Matcher::new(&query, options) {
-            Ok(Some(matcher)) => matcher,
-            Ok(None) => {
-                self.search_task = Task::ready(());
-                self.search
-                    .update(cx, |panel, cx| panel.set_results(Vec::new(), Status::Idle, cx));
-                return;
-            }
-            Err(message) => {
-                self.search_task = Task::ready(());
-                self.search.update(cx, |panel, cx| {
-                    panel.set_results(Vec::new(), Status::Invalid(message), cx)
-                });
-                return;
-            }
-        };
-        let sources = self.searchable(cx);
-        let after_replace = self.replaced.take();
-        self.search
-            .update(cx, |panel, cx| panel.set_status(Status::Searching, cx));
-        self.search_task = cx.spawn(async move |hub, cx| {
-            cx.background_executor().timer(SEARCH_PAUSE).await;
-            let found = cx
-                .background_spawn(async move {
-                    let sources: Vec<Source> = sources
-                        .into_iter()
-                        .filter_map(|(id, title, text, path)| {
-                            let text = text.or_else(|| std::fs::read_to_string(path).ok())?;
-                            Some(Source { id, title, text })
-                        })
-                        .collect();
-                    search::search(&sources, &matcher, &replacement)
-                })
-                .await;
-            hub.update(cx, |hub, cx| {
-                let status = after_replace.map_or(Status::Idle, Status::Replaced);
-                hub.search.update(cx, |panel, cx| panel.set_results(found, status, cx));
-            })
-            .ok();
-        });
-    }
-
-    /// Replaces in one chapter or in all, as one undo step per chapter, then searches again.
-    fn replace(&mut self, only: Option<ChapterId>, window: &mut Window, cx: &mut Context<Self>) {
-        let (query, replacement, options) = self.search.read(cx).request(cx);
-        if replacement.is_empty() {
-            return;
-        }
-        let Ok(Some(matcher)) = Matcher::new(&query, options) else {
-            return;
-        };
-        let ids: Vec<ChapterId> = self
-            .searchable(cx)
-            .into_iter()
-            .map(|(id, ..)| id)
-            .filter(|id| only.is_none_or(|only| only == *id))
-            .collect();
-        let count = self.parts.editor.update(cx, |editor, cx| {
-            editor.update_session(
-                |session| {
-                    let mut count = 0;
-                    for id in ids {
-                        session.load(id);
-                        let edits = matcher.edits(session.buffer(id).text(), &replacement);
-                        let made = edits.len();
-                        if made > 0 && session.edit_chapter(id, edits, EditKind::Discrete).is_ok() {
-                            count += made;
-                        }
-                    }
-                    count
-                },
-                window,
-                cx,
-            )
-        });
-        self.replaced = Some(count);
-        self.start_search(cx);
-    }
-
-    // Find in the open chapter
-
-    fn find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.find_origin = self.caret;
-        self.find.update(cx, |bar, cx| bar.open(window, cx));
-    }
-
-    fn find_event(&mut self, _: &Entity<FindBar>, event: &FindEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match event {
-            FindEvent::Query => self.go_to_match(self.find_origin, false, window, cx),
-            FindEvent::Next => self.step_find(false, window, cx),
-            FindEvent::Previous => self.step_find(true, window, cx),
-            FindEvent::Closed => {
-                let focus = self.parts.editor.read(cx).focus_handle(cx);
-                focus.focus(window, cx);
-            }
-        }
-    }
-
-    /// Selects the next match from the caret, or the one before it. The bar's own text decides what a match is.
-    fn step_find(&mut self, backwards: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.find.read(cx).is_open() {
-            self.find(window, cx);
-            return;
-        }
-        self.go_to_match(self.caret, backwards, window, cx);
-    }
-
-    fn go_to_match(&mut self, from: usize, backwards: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let query = self.find.read(cx).query(cx);
-        let matches = match Matcher::new(&query, Options::default()) {
-            Ok(Some(matcher)) => matcher.find(self.parts.editor.read(cx).text()),
-            _ => Vec::new(),
-        };
-        let position = search::next_match(&matches, from, backwards).map(|at| (at, matches[at].clone()));
-        if let Some((_, range)) = &position {
-            self.parts
-                .editor
-                .update(cx, |editor, cx| editor.select(range.clone(), window, cx));
-        }
-        let shown = position.map(|(at, _)| (at + 1, matches.len()));
-        self.find.update(cx, |bar, cx| bar.set_position(shown, cx));
     }
 
     // Settings, zoom, and what the menus toggle
