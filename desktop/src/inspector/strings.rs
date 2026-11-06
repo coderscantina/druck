@@ -47,7 +47,7 @@ crate::strings! {
         StyleIndexSubEntry => ("Index sub-entry", "Register-Untereintrag"),
 
         DetailsTitle => ("DETAILS", "DETAILS"),
-        CoverImageTitle => ("COVER IMAGE", "TITELBILD"),
+        CoverImageTitle => ("COVER", "COVER"),
         MetaTitle => ("META", "META"),
         FieldTitle => ("Title", "Titel"),
         FieldSubtitle => ("Subtitle", "Untertitel"),
