@@ -95,6 +95,16 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Writing UX note
+
+On 2026-11-06 the owner rated HTML variants of the writing surface in three rounds and the winners were built: heading ticks that unfold into the outline, a path bar with columns, an overview for the book's order, an optional bookshelf, directives drawn as their effect with margin brackets, placeholders as values with completion, styles shown only as their effect, and supporting material in a Write rail with a trail, margin pins, and a library. The rules are in [the design](DESIGN.md), what lost in its ratings section, the boards in [mockups](mockups/04-writing-ux/), and the choices in [decisions](DECISIONS.md#2026-11-06-heading-ticks) through the integration section. It was built by six agents in parallel and merged on branch `writing-ux-integration`, not merged into `writing-first-direction` and not pushed.
+
+Checks on the integration: `cargo test -p druck-desktop` 793 passed, 1 ignored; `cargo test` at the root 509 passed; `cargo clippy -p druck-desktop --all-targets -- -D warnings` and `cargo fmt --all --check` clean. Captures of the merged app on a demo book, dark and light, are in `.captures/writing-ux-integration` beside the repo, each slice's own in `.captures/writing-ux-<slice>`.
+
+Waiting on the owner: where a chapter's state (draft, revised, final) lives, proposed as `status:` per chapter in `druck.yaml`; whether reordering in the overview and the shelf needs an undo step, which the Binder's has never had; and the keys chosen: `Cmd+Alt+2` outline, `Cmd+Shift+J` columns, `Cmd+Escape` overview, `Cmd+Shift+\` bookshelf, `Cmd+Option+M` rail, `Cmd+Shift+O` library.
+
+Not verified: every pointer path (hover, dwell, clicks, drags), since mouse events do not reach the window here; each has a key path that was checked. `Cmd+[` and `Cmd+]` in the rail's panel were taken by the View menu in a capture window that was not key.
+
 ### Seventh review note
 
 On 2026-11-06 the seventh review's findings F1 to F21 went in, with the owner's decisions on F4, F9, and F19. This was the last fix round before the owner tests by hand. The choices are in [decisions](DECISIONS.md#2026-11-06-seventh-review-findings), and [the design](DESIGN.md) follows them. PNGs of the visual fixes are in `.captures/fixes-review-7-2026-11-06` beside the repo.
