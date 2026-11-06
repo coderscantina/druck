@@ -300,10 +300,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
             };
             let pdf = laid.pdf(&print, &cancel)?;
             print_diagnostics(&pdf.warnings, &job.working_dir);
-            // What stood in for a missing file shows in full. Typesetting rules, which name a page, are only counted.
-            let (rules, others): (Vec<_>, Vec<_>) = laid.warnings().iter().cloned().partition(|w| w.page.is_some());
-            print_diagnostics(&others, &job.working_dir);
-            match rules.len() {
+            match laid.warnings().len() {
                 0 => {}
                 1 => eprintln!("warning: 1 typesetting rule is broken, `druck check` names it"),
                 count => eprintln!("warning: {count} typesetting rules are broken, `druck check` lists them"),

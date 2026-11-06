@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 
 use crate::cancel::Cancel;
 use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
-use crate::renderer::{Failure, LayoutOptions, PdfOptions, Renderer};
+use crate::renderer::{Failure, LayoutOptions, Missing, PdfOptions, Renderer};
 use crate::resource::{Bytes, FileResolver, MemoryResolver, Origin, ResolveError, Resolver};
 use crate::text::bundled;
 
@@ -402,16 +402,14 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
     let renderer = Renderer::new();
     let input = document("Plain text.\n", memory_dir(), "doc.md", in_memory_theme());
 
-    // A missing font file has a stand-in, see `a_missing_font_file_has_a_bundled_face_stand_in_and_says_so`, and the
-    // warning still names the resource.
     let mut missing = MemoryResolver::new();
     missing.insert(Origin::Theme(memory_dir()), "theme.json", FONT_THEME.as_bytes());
-    let warned = rendered(&renderer, &missing, &input);
-    assert_eq!(warned.warnings[0].property.as_deref(), Some("fonts.Body.regular"));
+    let errors_of_missing = errors(try_pdf(&renderer, &missing, &input));
+    assert_eq!(errors_of_missing[0].property.as_deref(), Some("fonts.Body.regular"));
     assert_eq!(
-        warned.warnings[0].message,
+        errors_of_missing[0].message,
         format!(
-            "resource not found: \"body.otf\" relative to the theme in {}; Libertinus Serif stands in",
+            "resource not found: \"body.otf\" relative to the theme in {}",
             memory_dir().display()
         )
     );
@@ -430,12 +428,12 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
     );
 
     let picture = document("Text.\n\n![A](gone.png)\n", memory_dir(), "doc.md", no_theme());
-    let image_warning = rendered(&renderer, &missing, &picture).warnings.remove(0);
-    assert_eq!(image_warning.location, Some((3, 1).into()));
+    let image_error = errors(try_pdf(&renderer, &missing, &picture));
+    assert_eq!(image_error[0].location, Some((3, 1).into()));
     assert_eq!(
-        image_warning.message,
+        image_error[0].message,
         format!(
-            "image not found: \"gone.png\" relative to the document in {}; a box stands in",
+            "image not found: \"gone.png\" relative to the document in {}",
             memory_dir().display()
         )
     );
@@ -448,11 +446,22 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
     );
 }
 
+/// Renders as an editor does, with a stand-in for what is missing.
 fn rendered(renderer: &Renderer, resolver: &dyn Resolver, input: &Input) -> crate::renderer::Rendered {
     on_big_stack(|| {
-        renderer
-            .render(resolver, input, &PdfOptions::default(), &Cancel::default())
-            .unwrap_or_else(|failure| panic!("{failure:?}"))
+        let cancel = Cancel::default();
+        let configured = renderer
+            .job(resolver, input, &cancel)
+            .missing(Missing::StandIn)
+            .configure()
+            .unwrap_or_else(|failure| panic!("{failure:?}"));
+        let layout = configured
+            .layout(&LayoutOptions::default())
+            .unwrap_or_else(|failure| panic!("{failure:?}"));
+        let mut done = layout.pdf(&PdfOptions::default(), &cancel).expect("a PDF");
+        done.warnings
+            .splice(0..0, configured.warnings().iter().chain(layout.warnings()).cloned());
+        done
     })
 }
 
@@ -525,6 +534,7 @@ fn a_final_export_refuses_what_is_missing() {
     let cancel = Cancel::default();
     let configured = renderer
         .job(&resolver, &input, &cancel)
+        .missing(Missing::StandIn)
         .configure()
         .expect("configures");
     let Err(Failure::Errors(errors)) = configured.check_final("print") else {

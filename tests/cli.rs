@@ -322,19 +322,13 @@ fn reports_a_missing_theme_font_relative_to_the_theme() {
         json!({"version": 1, "fonts": {"Ghost": {"regular": "fonts/ghost.otf"}}}),
     );
     let document = sandbox.write("doc.md", "# Doc\n");
-    let run = sandbox.run(&["check", &document, "--theme", &theme]);
+    let stderr = sandbox.rejection(&[&document, "--theme", &theme]);
 
-    assert_eq!(
-        run.code, 0,
-        "a bundled face stands in for a missing font: {}",
-        run.stderr
-    );
     let expected = format!(
-        "warning: fonts.Ghost.regular: resource not found: \"fonts/ghost.otf\" relative to the theme in {}; \
-        Libertinus Serif stands in",
+        "fonts.Ghost.regular: resource not found: \"fonts/ghost.otf\" relative to the theme in {}",
         sandbox.root.display()
     );
-    assert!(run.stderr.contains(&expected), "{}", run.stderr);
+    assert!(stderr.contains(&expected), "{stderr}");
 }
 
 const REPO: &str = env!("CARGO_MANIFEST_DIR");
@@ -579,6 +573,7 @@ fn reports_image_problems_at_their_reference_with_the_resource() {
     let run = sandbox.run(&["render", &document]);
     let dir = sandbox.root.display();
     let expected = [
+        format!("{document}:3:1: image not found: \"images/missing.png\" relative to the document in {dir}"),
         format!(
             "{document}:5:1: image \"images/truncated.png\" relative to the document in {dir}: malformed PNG image"
         ),
@@ -608,16 +603,6 @@ fn reports_image_problems_at_their_reference_with_the_resource() {
     for line in &expected {
         assert!(run.stderr.contains(line.as_str()), "{line}\n{}", run.stderr);
     }
-
-    // A missing file alone renders, with a box standing in and a warning at its reference.
-    let missing = sandbox.write("missing.md", "Text.\n\n![a](images/missing.png)\n");
-    let run = sandbox.run(&["render", &missing]);
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    let warning = format!(
-        "warning: {missing}:3:1: image not found: \"images/missing.png\" relative to the document in {dir}; a box stands in"
-    );
-    assert!(run.stderr.contains(&warning), "{}", run.stderr);
-    assert!(sandbox.root.join("missing.pdf").exists());
 }
 
 #[test]
@@ -689,20 +674,14 @@ fn citation_sandbox(name: &str, body: &str, bib: &str) -> (Sandbox, String, Stri
 #[test]
 fn reports_a_missing_bibliography_file_by_property() {
     let sandbox = Sandbox::new("missing-bib");
-    let document = sandbox.write("doc.md", "---\nbibliography: refs.bib\n---\nText [@key].\n");
-    let run = sandbox.run(&["check", &document]);
+    let document = sandbox.write("doc.md", "---\nbibliography: refs.bib\n---\nText.\n");
+    let stderr = sandbox.rejection(&[&document]);
     let dir = sandbox.root.display();
-    assert_eq!(
-        run.code, 0,
-        "a missing bibliography leaves citations as their keys: {}",
-        run.stderr
-    );
     assert!(
-        run.stderr.contains(&format!(
-            "warning: bibliography: resource not found: \"refs.bib\" relative to the document in {dir}; citations show their keys"
+        stderr.contains(&format!(
+            "bibliography: resource not found: \"refs.bib\" relative to the document in {dir}"
         )),
-        "{}",
-        run.stderr
+        "{stderr}"
     );
 }
 
@@ -1056,10 +1035,7 @@ fn project_layout_citation_and_image_errors_name_the_chapter() {
         ],
     );
     let two = sandbox.in_book("manuscript/two.md");
-    let run = sandbox.run(&["check", &sandbox.book()]);
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    let warning = format!("{two}:3:1: image not found: \"gone.png\"");
-    assert!(run.stderr.contains(&warning), "wanted {warning} in: {}", run.stderr);
+    sandbox.assert_rejected(&[format!("{two}:3:1: image not found: \"gone.png\"")]);
 }
 
 #[test]

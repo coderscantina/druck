@@ -238,10 +238,13 @@ mod tests {
             ("Variable", Face::REGULAR, variable_file(false)),
             ("Collected", Face::REGULAR, in_collection),
         ]);
-        let Ok(files) =
-            crate::pipeline::read_resources(&FileResolver::new(), &config, &crate::cancel::Cancel::default())
-                .map(|(files, _)| files)
-        else {
+        let Ok(files) = crate::pipeline::read_resources(
+            &FileResolver::new(),
+            &config,
+            crate::Missing::Error,
+            &crate::cancel::Cancel::default(),
+        )
+        .map(|(files, _)| files) else {
             panic!("the files are there")
         };
         let embedded = embed(&config, &families(&["Collected", "Variable"]), &files).unwrap();

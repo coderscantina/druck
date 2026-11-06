@@ -117,7 +117,7 @@ mod tests {
     use druck::editor::resolved_config;
     use druck::input::{DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
     use druck::resource::{FileResolver, clock_date};
-    use druck::{LayoutOptions, Renderer};
+    use druck::{LayoutOptions, Missing, Renderer};
 
     #[test]
     fn the_default_theme_sets_body_text_in_bundled_libertinus_serif() {
@@ -140,7 +140,11 @@ mod tests {
         let renderer = Renderer::new();
         let resolver = FileResolver::new();
         let cancel = Cancel::default();
-        let Ok(configured) = renderer.job(&resolver, &input, &cancel).configure() else {
+        let Ok(configured) = renderer
+            .job(&resolver, &input, &cancel)
+            .missing(Missing::StandIn)
+            .configure()
+        else {
             panic!("configures")
         };
         let Ok(laid) = configured.layout(&LayoutOptions { source_map: false }) else {

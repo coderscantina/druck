@@ -11,7 +11,7 @@ use druck::diagnostic::Diagnostic;
 use druck::editor::resolved_config::{self, Config, FontStyle, Style, Weight};
 use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
-use druck::{Failure, LayoutOptions, Renderer};
+use druck::{Failure, LayoutOptions, Missing, Renderer};
 
 use super::fonts::{FontUse, fonts_in_use};
 use super::raster::{Painter, family_name, fingerprint};
@@ -268,7 +268,12 @@ impl Typesetter {
                 .spawn_scoped(scope, || {
                     let cancel = Cancel::default();
                     let (input, _) = self.input(joined).ok()?;
-                    let configured = self.renderer.job(&self.resolver, &input, &cancel).configure().ok()?;
+                    let configured = self
+                        .renderer
+                        .job(&self.resolver, &input, &cancel)
+                        .missing(Missing::StandIn)
+                        .configure()
+                        .ok()?;
                     druck::editor::rich::labels(&configured).ok()
                 })
                 .expect("the system starts a thread")
@@ -281,7 +286,11 @@ impl Typesetter {
         #[cfg(any(debug_assertions, feature = "measure"))]
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;
-        let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
+        let configured = self
+            .renderer
+            .job(&self.resolver, &input, cancel)
+            .missing(Missing::StandIn)
+            .configure()?;
         #[cfg(any(debug_assertions, feature = "measure"))]
         let configured_at = Instant::now();
         let laid = match configured.layout(&LayoutOptions { source_map: true }) {

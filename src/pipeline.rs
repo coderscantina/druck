@@ -17,7 +17,7 @@ use crate::date::Date;
 use crate::diagnostic::{Code, Diagnostic};
 use crate::image::Image;
 use crate::input::{Input, ThemeDirs, ThemeSelection};
-use crate::renderer::{Failure, Renderer};
+use crate::renderer::{Failure, Missing, Renderer};
 use crate::resource::{Bytes, Files, ResolveError, Resolver};
 use crate::text::{FontSet, bundled};
 use crate::{citations, document, installed, layout, markdown, output, theme_path};
@@ -31,6 +31,7 @@ pub struct JobContext<'r> {
     pub number: u64,
     /// The resources the configuration names, as read for this job.
     pub files: Files,
+    pub missing: Missing,
 }
 
 /// The document file as read, with where it came from.
@@ -179,12 +180,13 @@ pub(crate) fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, F
 }
 
 /// Reads every resource the configuration names, so everything in the job sees the same bytes. Errors name the
-/// resource, its origin, and the property. A missing bibliography or font file is a warning, returned beside the files,
-/// where the book can still be set honestly: citations show their keys, and a bundled face stands in for the font.
-/// Any other missing file fails before layout.
+/// resource, its origin, and the property. With [`Missing::StandIn`], a missing bibliography or font file is a warning,
+/// returned beside the files: citations show their keys, and a bundled face stands in for the font. Any other missing
+/// file fails before layout.
 pub fn read_resources(
     resolver: &dyn Resolver,
     config: &Config,
+    missing: Missing,
     cancel: &Cancel,
 ) -> Result<(Files, Vec<Diagnostic>), Failure> {
     let mut files = Files::default();
@@ -197,13 +199,17 @@ pub fn read_resources(
         cancel.check(CheckPoint::Resource)?;
         match resolver.read(&resource.origin, &resource.path) {
             Ok(data) => files.insert(resource.clone(), data),
-            Err(ResolveError::NotFound(_)) if property == "bibliography" && resource.file().is_some() => {
+            Err(ResolveError::NotFound(_))
+                if missing == Missing::StandIn && property == "bibliography" && resource.file().is_some() =>
+            {
                 let file = resource.file().expect("checked above");
                 let message = format!("resource not found: {resource}; citations show their keys");
                 let diagnostic = Diagnostic::warning(None, message).coded(Code::BibliographyNotFound { file });
                 warnings.push(diagnostic.property(Some(property)).resource(resource));
             }
-            Err(ResolveError::NotFound(_)) if stand_in_font(config, resource).is_some() => {
+            Err(ResolveError::NotFound(_))
+                if missing == Missing::StandIn && stand_in_font(config, resource).is_some() =>
+            {
                 let (family, path) = stand_in_font(config, resource).expect("checked above");
                 let data = bundled::font(path).expect("a stand-in is bundled");
                 files.insert(resource.clone(), Bytes::bundled(path, data));
@@ -342,7 +348,7 @@ fn load_images(
             Ok(data) => (job.renderer.images)
                 .image(&data, extension, job.number)
                 .map_err(|e| format!("image {resource}: {e}")),
-            Err(ResolveError::NotFound(_)) => {
+            Err(ResolveError::NotFound(_)) if job.missing == Missing::StandIn => {
                 let message = format!("image not found: {resource}; a box stands in");
                 let code = Code::ImageNotFound {
                     file: normalize(&dir.join(&file.path)),
@@ -351,6 +357,7 @@ fn load_images(
                 warnings.push(diagnostic.resource(&resource).at(file.at.line, file.at.column));
                 Ok(Image::missing(&file.path))
             }
+            Err(ResolveError::NotFound(_)) => Err(format!("image not found: {resource}")),
             Err(e) => Err(format!("cannot read image {resource}: {e}")),
         };
         match loaded {

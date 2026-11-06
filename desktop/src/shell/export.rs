@@ -8,7 +8,7 @@ use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
 use druck::input::{DocumentText, Input, MANIFEST, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{FileResolver, Origin, clock_date, source_date};
-use druck::{EpubOptions, Failure, LayoutOptions, PdfOptions, Renderer};
+use druck::{EpubOptions, Failure, LayoutOptions, Missing, PdfOptions, Renderer};
 
 use super::text::Key;
 use crate::session::{Joined, Kind, LiveResolver};
@@ -133,7 +133,10 @@ pub fn run(request: Request, cancel: &Cancel, stage: &dyn Fn(Stage)) -> Result<W
         today,
     };
     let renderer = Renderer::new();
-    let configured = renderer.job(&resolver, &input, cancel).configure()?;
+    let configured = renderer
+        .job(&resolver, &input, cancel)
+        .missing(Missing::StandIn)
+        .configure()?;
     if let Some(name) = &final_export {
         configured.check_final(name)?;
     }

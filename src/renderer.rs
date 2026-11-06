@@ -65,6 +65,7 @@ impl Renderer {
             resolver,
             input,
             cancel,
+            missing: Missing::default(),
             one_thread: PhantomData,
         }
     }
@@ -94,10 +95,28 @@ pub struct Job<'r> {
     resolver: &'r dyn Resolver,
     input: &'r Input,
     cancel: &'r Cancel,
+    missing: Missing,
     one_thread: PhantomData<Cell<()>>,
 }
 
+/// What a job does about an image, bibliography, or font file that is not there.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Missing {
+    /// The job fails with an error naming the resource.
+    #[default]
+    Error,
+    /// The job goes on with a stand-in and reports a warning, so an editor can keep showing pages: a box for an
+    /// image, citations as their keys for a bibliography, and a bundled face for a static font file.
+    StandIn,
+}
+
 impl<'r> Job<'r> {
+    /// Sets what the job does about a missing image, bibliography, or font file. The default is [`Missing::Error`].
+    pub fn missing(mut self, missing: Missing) -> Self {
+        self.missing = missing;
+        self
+    }
+
     /// Resolves and checks the configuration, and reads every resource it names. Errors here never reach layout.
     pub fn configure(self) -> Result<Configured<'r>, Failure> {
         let Self {
@@ -105,6 +124,7 @@ impl<'r> Job<'r> {
             resolver,
             input,
             cancel,
+            missing,
             ..
         } = self;
         let (config, document) = match &input.text {
@@ -117,9 +137,9 @@ impl<'r> Job<'r> {
             }
             DocumentText::Project(project) => project.configure(resolver, input)?,
         };
-        let (files, missing) = pipeline::read_resources(resolver, &config, cancel)?;
+        let (files, stand_ins) = pipeline::read_resources(resolver, &config, missing, cancel)?;
         let mut config = config;
-        config.warnings.extend(missing);
+        config.warnings.extend(stand_ins);
         Ok(Configured {
             job: JobContext {
                 renderer,
@@ -127,6 +147,7 @@ impl<'r> Job<'r> {
                 cancel,
                 number: renderer.begin(),
                 files,
+                missing,
             },
             config,
             document,
@@ -156,18 +177,20 @@ impl Configured<'_> {
         serde_json::to_string_pretty(&self.config).expect("configuration serializes")
     }
 
-    /// Fails with one error per open placeholder, and per image, bibliography, or font file that is not there, at its
-    /// real location, naming the final `export`.
+    /// Fails with one error per open placeholder, and with [`Missing::StandIn`] per image, bibliography, or font file
+    /// that is not there, at its real location, naming the final `export`.
     pub fn check_final(&self, export: &str) -> Result<(), Failure> {
         let mut errors = project::check_final(&self.config, &self.document, export)
             .err()
             .unwrap_or_default();
-        errors.extend(pipeline::missing_for_final(
-            &self.job,
-            &self.config,
-            &self.document,
-            export,
-        )?);
+        if self.job.missing == Missing::StandIn {
+            errors.extend(pipeline::missing_for_final(
+                &self.job,
+                &self.config,
+                &self.document,
+                export,
+            )?);
+        }
         if errors.is_empty() { Ok(()) } else { Err(errors.into()) }
     }
 
