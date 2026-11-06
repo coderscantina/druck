@@ -8,7 +8,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -30,7 +30,9 @@ use crate::preview::proof::BlockAt;
 use crate::preview::slip::Directive;
 use crate::preview::slip::{ProofSlip, SlipEvent};
 use crate::preview::slip_control;
-use crate::preview::{Ahead, BookType, DetailsWanted, PageClicked, PreviewView, ProblemsWanted, Typeset};
+use crate::preview::{
+    Ahead, BookType, DetailsWanted, PageClicked, PreviewView, ProblemsWanted, TextPlaceWanted, TypeRead, Typeset,
+};
 use crate::session::{Group, Session};
 use crate::settings;
 use crate::shell::text::Key;
@@ -196,6 +198,9 @@ impl Workspace {
             cx.subscribe(&model, |workspace, _, _: &SpecimenRequested, cx| {
                 workspace.specimen_requested(cx)
             }),
+            cx.subscribe(&preview, |workspace, _, TypeRead(book_type), cx| {
+                workspace.set_type(book_type, cx)
+            }),
             cx.subscribe_in(&preview, window, |workspace, _, Typeset(book_type), window, cx| {
                 workspace.set_type(book_type, cx);
                 workspace.show_caret(cx);
@@ -224,6 +229,13 @@ impl Workspace {
                     .inspector
                     .update(cx, |inspector, cx| inspector.show(Tab::Proof, cx));
             }),
+            cx.subscribe_in(
+                &preview,
+                window,
+                |workspace, _, TextPlaceWanted(path, line), window, cx| {
+                    workspace.show_text_place(path, *line, window, cx)
+                },
+            ),
             cx.subscribe(&preview, |workspace, _, _: &DetailsWanted, cx| {
                 workspace
                     .parts
@@ -520,6 +532,17 @@ impl Workspace {
         } else {
             self.retry_failed_layout(cx);
         }
+    }
+
+    /// Goes to a written place in Write: line `line` of the chapter file `path`.
+    fn show_text_place(&mut self, path: &Path, line: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, offset)) = crate::shell::report::place(self.parts.editor.read(cx).session(), path, line) else {
+            return;
+        };
+        self.show(Mode::Write, window, cx);
+        self.parts
+            .editor
+            .update(cx, |editor, cx| editor.show_place(id, offset, window, cx));
     }
 
     /// A file the book may lack changed: if the last layout failed, typesets again.

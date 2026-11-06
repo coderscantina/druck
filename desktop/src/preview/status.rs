@@ -70,7 +70,7 @@ impl PreviewView {
         let problem = self.layout.as_ref().and(self.diagnostics.first()).map(|first| {
             let more = self.diagnostics.len() - 1;
             let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
-            format!("{}{suffix}", in_words(first))
+            format!("{}{suffix}", in_words(first, &self.base))
         });
         let warnings = self.problems.iter().filter(|problem| problem.warning).count();
         let count = self.problems.len() - warnings;

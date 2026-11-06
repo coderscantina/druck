@@ -1,7 +1,9 @@
 //! The engine's messages in the app's languages. The engine says what it found as a [`Code`] with its values, so nothing
 //! here parses its English. A diagnostic with no code yet shows the engine's own words, see [the decision](../../../docs/DECISIONS.md#2026-11-05-review-findings).
 
-use druck::diagnostic::{Code, Diagnostic, PageName};
+use std::path::Path;
+
+use druck::diagnostic::{Code, Diagnostic, PageName, path_from};
 
 use super::strings::{Language, language};
 
@@ -67,6 +69,18 @@ crate::strings! {
             "{property}: the file {file} is not there",
             "{property}: die Datei {file} gibt es nicht"
         ),
+        ImageNotFound => (
+            "the image {file} is not there; a box stands in for it",
+            "das Bild {file} gibt es nicht; ein Kasten steht an seiner Stelle"
+        ),
+        FontNotFound => (
+            "the font file {file} of {family} is not there; {stand_in} stands in",
+            "die Schriftdatei {file} von {family} gibt es nicht; {stand_in} steht dafür"
+        ),
+        BibliographyNotFound => (
+            "the bibliography {file} is not there; citations show their keys",
+            "die Literaturdatei {file} gibt es nicht; Zitate zeigen ihren Schlüssel"
+        ),
         UnknownStyleOf => (
             "unknown style \"{name}\"; the theme's custom styles are {known}",
             "unbekannter Stil \"{name}\"; die eigenen Stile des Themas sind {known}"
@@ -105,18 +119,24 @@ fn decimal(lines: f64) -> String {
 }
 
 /// A diagnostic's message in the language now set: its code's words, or the engine's own with no code. It stands on
-/// its own in a list or a line, so it starts with a capital, where the engine's start lower case.
-pub fn message(diagnostic: &Diagnostic) -> String {
+/// its own in a list or a line, so it starts with a capital, where the engine's start lower case. With the book's
+/// folder `base`, the files a code names are given from there, as the Binder knows them, and paths below it in the
+/// engine's own words are shortened the same way.
+pub fn message_in(diagnostic: &Diagnostic, base: Option<&Path>) -> String {
     let words = (diagnostic.code.as_ref())
-        .and_then(|code| coded(code, diagnostic.page))
-        .unwrap_or_else(|| diagnostic.message.clone());
+        .and_then(|code| coded(code, diagnostic.page, base))
+        .unwrap_or_else(|| match base {
+            Some(base) => diagnostic.message.replace(&format!("{}/", base.display()), ""),
+            None => diagnostic.message.clone(),
+        });
     let mut chars = words.chars();
     chars
         .next()
         .map_or(words.clone(), |first| first.to_uppercase().chain(chars).collect())
 }
 
-fn coded(code: &Code, place: Option<usize>) -> Option<String> {
+fn coded(code: &Code, place: Option<usize>, base: Option<&Path>) -> Option<String> {
+    let file = |file: &Path| base.map_or_else(|| file.display().to_string(), |base| path_from(file, base));
     Some(match code {
         Code::PageShort { page, lines } => {
             crate::t!(Key::PageShort, page = page_of(page, place), lines = decimal(*lines))
@@ -151,10 +171,22 @@ fn coded(code: &Code, place: Option<usize>) -> Option<String> {
         Code::UndefinedLabel { label } => crate::t!(Key::UndefinedLabel, label = label),
         Code::UndefinedFootnote { label } => crate::t!(Key::UndefinedFootnote, label = label),
         Code::NoBibliography => crate::t!(Key::NoBibliography).to_owned(),
-        Code::MissingCitation { file, key } => crate::t!(Key::MissingCitation, file = file.display(), key = key),
-        Code::ResourceNotFound { property, file } => {
-            crate::t!(Key::ResourceNotFound, property = property, file = file.display())
+        Code::MissingCitation { file: path, key } => crate::t!(Key::MissingCitation, file = file(path), key = key),
+        Code::ResourceNotFound { property, file: path } => {
+            crate::t!(Key::ResourceNotFound, property = property, file = file(path))
         }
+        Code::ImageNotFound { file: path } => crate::t!(Key::ImageNotFound, file = file(path)),
+        Code::FontNotFound {
+            family,
+            file: path,
+            stand_in,
+        } => crate::t!(
+            Key::FontNotFound,
+            file = file(path),
+            family = family,
+            stand_in = stand_in
+        ),
+        Code::BibliographyNotFound { file: path } => crate::t!(Key::BibliographyNotFound, file = file(path)),
         Code::UnknownStyle { name, known } if known.is_empty() => crate::t!(Key::UnknownStyle, name = name),
         Code::UnknownStyle { name, known } => {
             crate::t!(Key::UnknownStyleOf, name = name, known = known.join(", "))
@@ -182,9 +214,9 @@ mod tests {
             lines: 1.4,
         });
         set_language(Language::German);
-        assert_eq!(message(&short), "Seite 12 endet 1,4 Zeilen über dem Seitenfuß");
+        assert_eq!(message_in(&short, None), "Seite 12 endet 1,4 Zeilen über dem Seitenfuß");
         set_language(Language::English);
-        assert_eq!(message(&short), "Page 12 ends 1.4 lines short of the bottom");
+        assert_eq!(message_in(&short, None), "Page 12 ends 1.4 lines short of the bottom");
     }
 
     #[test]
@@ -196,7 +228,7 @@ mod tests {
                 page: PageName::Numbered(printed.into()),
             });
             diagnostic.page = Some(index);
-            message(&diagnostic)
+            message_in(&diagnostic, None)
         };
         assert_eq!(
             at("iii", 2),
@@ -209,7 +241,24 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_image_names_its_file_from_the_book() {
+        let _guard = LANGUAGE_TEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_language(Language::German);
+        let missing = with_code(Code::ImageNotFound {
+            file: Path::new("/books/one/assets/gone.png").to_owned(),
+        });
+        assert_eq!(
+            message_in(&missing, Some(Path::new("/books/one"))),
+            "Das Bild assets/gone.png gibt es nicht; ein Kasten steht an seiner Stelle"
+        );
+        set_language(Language::English);
+    }
+
+    #[test]
     fn a_message_with_no_code_keeps_the_engines_words_with_a_capital() {
-        assert_eq!(message(&Diagnostic::error("the engine's words")), "The engine's words");
+        assert_eq!(
+            message_in(&Diagnostic::error("the engine's words"), None),
+            "The engine's words"
+        );
     }
 }

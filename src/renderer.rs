@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::cancel::Cancel;
 use crate::config::resolved::Config;
 use crate::config::source::{InputSource, Origin};
+use crate::config::theme::{FontStyle, Weight};
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::image::ImageCache;
@@ -19,6 +20,7 @@ use crate::input::{DocumentText, Input};
 use crate::output::{Layout, Pt};
 use crate::pipeline::{self, DocumentFile, JobContext};
 use crate::resource::Resolver;
+use crate::text::FontSet;
 use crate::text::face::FaceCache;
 use crate::{epub, project};
 
@@ -169,6 +171,14 @@ impl Configured<'_> {
         if errors.is_empty() { Ok(()) } else { Err(errors.into()) }
     }
 
+    /// The document's fonts, loaded as layout loads them, for a client that sets text in them before or without a
+    /// layout, such as when the layout fails.
+    pub fn fonts(&self) -> Result<DocumentFonts, Failure> {
+        Ok(DocumentFonts {
+            fonts: pipeline::load_fonts(&self.job, &self.config)?,
+        })
+    }
+
     /// Lays out the document, reporting everything a render reports before writing.
     pub fn layout(&self, options: &LayoutOptions) -> Result<Layout, Failure> {
         let typeset = pipeline::typeset(&self.job, &self.config, &self.document, self.today, options.source_map);
@@ -221,6 +231,20 @@ pub struct Rendered {
     pub warnings: Vec<Diagnostic>,
     /// The pages of a PDF, or the content documents of an EPUB.
     pub parts: usize,
+}
+
+/// The fonts of a configured document, see [`Configured::fonts`].
+pub struct DocumentFonts {
+    fonts: FontSet,
+}
+
+impl DocumentFonts {
+    /// The face a theme font family uses for text of `weight` (100 to 900) and slant, as [`Layout::font`] chooses it.
+    pub fn font(&self, family: &str, weight: u16, italic: bool) -> Option<&crate::output::Face> {
+        let style = if italic { FontStyle::Italic } else { FontStyle::Normal };
+        let id = self.fonts.nearest(family, Weight::of_font(weight), style)?;
+        Some(self.fonts.face_of(id))
+    }
 }
 
 /// What a layout includes besides its pages.

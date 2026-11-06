@@ -88,14 +88,19 @@ impl PreviewView {
             // A panic is caught inside the run, so this lock is not poisoned, and if it were the typesetter is still whole.
             let mut typesetter = typesetter.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             typesetter.set_theme(theme);
-            typesetter.run(joined, &cancel)
+            let result = typesetter.run(joined, &cancel);
+            (result, typesetter.take_failed_type())
         });
         cx.spawn(async move |this, cx| {
-            let result = layout.await;
+            let (result, failed_type) = layout.await;
             this.update(cx, |view, cx| {
                 let (publish, next) = view.scheduler.finished(number);
                 if publish {
                     view.publish(number, revision, specimen, result, cx);
+                    // Write keeps the theme's type when the pages cannot be set.
+                    if let Some(book_type) = failed_type.filter(|_| !specimen) {
+                        cx.emit(TypeRead(book_type));
+                    }
                 }
                 if let Some(next) = next {
                     view.start_layout(next, cx);

@@ -144,13 +144,14 @@ impl BookType {
         }
     }
 
-    fn of(config: &Config, laid: &druck::output::Layout) -> Self {
+    /// The type of `config`'s styles, with `font` finding a family's face as the engine chooses it.
+    fn of<'a>(config: &Config, font: impl Fn(&str, u16, bool) -> Option<&'a druck::output::Face>) -> Self {
         let mut files: Vec<Bytes> = Vec::new();
         let mut face = |style: &Style| {
-            let found = laid.font(&style.font, style.weight.get(), style.style == FontStyle::Italic);
+            let found = font(&style.font, style.weight.get(), style.style == FontStyle::Italic);
             // Bold and italic within a line come from the same family.
             for (weight, italic) in [(Weight::BOLD, false), (style.weight, true), (Weight::BOLD, true)] {
-                if let Some(other) = laid.font(&style.font, weight.get(), italic)
+                if let Some(other) = font(&style.font, weight.get(), italic)
                     && !files.contains(other.data())
                 {
                     files.push(other.data().clone());
@@ -216,6 +217,8 @@ pub struct Typesetter {
     renderer: Renderer,
     resolver: FileResolver,
     painter: Option<Arc<Painter>>,
+    /// The theme's type, read from its fonts when the last layout failed after the theme and fonts were in order.
+    failed_type: Option<BookType>,
 }
 
 impl Typesetter {
@@ -233,7 +236,13 @@ impl Typesetter {
             renderer: Renderer::new(),
             resolver: FileResolver::new(),
             painter: None,
+            failed_type: None,
         }
+    }
+
+    /// The theme's type for Write after a layout that failed, so Write keeps the book's type and needs no layout for it.
+    pub fn take_failed_type(&mut self) -> Option<BookType> {
+        self.failed_type.take()
     }
 
     /// Typesets the next runs in this theme, or in the document's when `None`.
@@ -275,7 +284,15 @@ impl Typesetter {
         let configured = self.renderer.job(&self.resolver, &input, cancel).configure()?;
         #[cfg(any(debug_assertions, feature = "measure"))]
         let configured_at = Instant::now();
-        let laid = configured.layout(&LayoutOptions { source_map: true })?;
+        let laid = match configured.layout(&LayoutOptions { source_map: true }) {
+            Ok(laid) => laid,
+            Err(failure) => {
+                let config = resolved_config::of(&configured);
+                self.failed_type = (configured.fonts().ok())
+                    .map(|fonts| BookType::of(config, |family, weight, italic| fonts.font(family, weight, italic)));
+                return Err(failure);
+            }
+        };
         #[cfg(any(debug_assertions, feature = "measure"))]
         let typeset = Instant::now();
         let config = resolved_config::of(&configured);
@@ -290,7 +307,7 @@ impl Typesetter {
         let fingerprints_from = Instant::now();
         let fingerprints = laid.pages().iter().map(fingerprint).collect();
         Ok(Layout {
-            book_type: BookType::of(config, &laid),
+            book_type: BookType::of(config, |family, weight, italic| laid.font(family, weight, italic)),
             fonts: fonts_in_use(config, &laid),
             laid,
             painter,

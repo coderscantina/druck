@@ -167,7 +167,7 @@ pub fn typeset(
 
 /// The faces the configuration names, from their files and among installed fonts. The installed fonts are looked
 /// at only when a style names such a family.
-fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Failure> {
+pub(crate) fn load_fonts(job: &JobContext, config: &Config) -> Result<FontSet, Failure> {
     let faces = &job.renderer.faces;
     if config.installed_fonts.is_empty() {
         return FontSet::load(config, &BTreeMap::new(), &job.files, faces, job.number, job.cancel);

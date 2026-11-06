@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use druck::diagnostic::{Diagnostic, Severity, Source, path_from};
+use druck::diagnostic::{Code, Diagnostic, Severity, Source, path_from};
 
 use super::facts::{Facts, Todo};
 use crate::session::{ChapterId, Kind as DocumentKind, Session};
@@ -96,7 +96,7 @@ impl Report {
 
 /// The chapter and offset a line of a file is at. A single file's lines count in the whole file, which its sections
 /// split without losing a line.
-fn place(session: &Session, path: &Path, line: usize) -> Option<(ChapterId, usize)> {
+pub fn place(session: &Session, path: &Path, line: usize) -> Option<(ChapterId, usize)> {
     match session.kind() {
         DocumentKind::Project { .. } => {
             let id = *session
@@ -136,9 +136,15 @@ fn entry(
     let base = session.base_dir();
     let page = diagnostic.page;
     let line = diagnostic.location.map(|location| location.line as usize);
-    let message = super::engine_text::message(diagnostic).replace(&format!("{}/", base.display()), "");
+    let message = super::engine_text::message_in(diagnostic, Some(&base));
+    // A file that is not there is wrong to the author while something stands in for it, so it counts as an error.
+    let stands_in = matches!(
+        diagnostic.code,
+        Some(Code::ImageNotFound { .. } | Code::FontNotFound { .. } | Code::BibliographyNotFound { .. })
+    );
     let kind = match diagnostic.severity {
         Severity::Error => Kind::Error,
+        Severity::Warning if stands_in => Kind::Error,
         Severity::Warning => Kind::Warning,
     };
     let found = match (&diagnostic.source, line) {

@@ -131,7 +131,8 @@ impl Layout {
         &self.laid.page_numbers
     }
 
-    /// The typesetting rules the layout breaks, since no better layout was found.
+    /// The typesetting rules the layout breaks, since no better layout was found, and what stands in for a missing
+    /// image. A typesetting rule names its page.
     pub fn warnings(&self) -> &[Diagnostic] {
         &self.laid.warnings
     }

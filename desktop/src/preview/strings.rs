@@ -5,6 +5,8 @@ crate::strings! {
         NoPagesYet => ("No pages yet", "Noch keine Seiten"),
         NoPages => ("No pages", "Keine Seiten"),
         OpenDetails => ("Book details", "Buchdaten"),
+        ShowInText => ("Show in text", "Im Text zeigen"),
+        AtLine => ("{file}, line {line}: {message}", "{file}, Zeile {line}: {message}"),
         OpenProof => ("Proof", "Korrektur"),
         PageOf => ("Page {page} of {pages}", "Seite {page} von {pages}"),
         PagesOf => ("Pages {first}\u{2013}{last} of {pages}", "Seiten {first}\u{2013}{last} von {pages}"),

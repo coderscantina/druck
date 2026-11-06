@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use druck::Failure;
-use druck::diagnostic::Diagnostic;
+use druck::diagnostic::{Diagnostic, Source, path_from};
 #[cfg(any(debug_assertions, feature = "measure"))]
 use druck::output::Item;
 use druck::output::{ChapterId, SourcePos};
@@ -98,6 +98,11 @@ struct Placed {
 /// New pages were published, with the theme's type they were set in.
 pub struct Typeset(pub BookType);
 
+/// The theme's type, read without pages after a layout failed.
+pub struct TypeRead(pub BookType);
+
+impl EventEmitter<TypeRead> for PreviewView {}
+
 impl EventEmitter<Typeset> for PreviewView {}
 
 /// A layout finished and its result counts, whether it made pages or only errors. The shell reads the diagnostics.
@@ -125,10 +130,17 @@ pub struct DetailsWanted;
 
 impl EventEmitter<DetailsWanted> for PreviewView {}
 
+/// The empty state's Show in text: the written place of what keeps the pages from being set, a file and its line.
+pub struct TextPlaceWanted(pub PathBuf, pub usize);
+
+impl EventEmitter<TextPlaceWanted> for PreviewView {}
+
 pub struct PreviewView {
     focus: FocusHandle,
     scheduler: Scheduler<Job>,
     typesetter: Arc<Mutex<Typesetter>>,
+    /// The book's folder, which messages name files from.
+    base: PathBuf,
     /// Typesets the bundled specimen in the same theme, for a view of every element.
     specimen_typesetter: Arc<Mutex<Typesetter>>,
     /// The theme to typeset with, if not the document's, which the next layout follows.
@@ -204,7 +216,9 @@ impl PreviewView {
     /// A view of the document in `theme`, or the theme it names.
     pub fn new(kind: Kind, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         bind_keys(cx);
+        let base = kind.base_dir();
         let view = Self {
+            base,
             // The keys rest here, but Tab walks only what can be pressed.
             focus: cx.focus_handle(),
             scheduler: Scheduler::new(),
@@ -790,10 +804,21 @@ impl PreviewView {
         if self.layout.is_some() || self.diagnostics.is_empty() {
             return None;
         }
-        let messages = self
+        let messages = (self.diagnostics.iter())
+            .map(|problem| div().text_color(tokens.text_quiet).child(in_words(problem, &self.base)));
+        let place = self
             .diagnostics
             .iter()
-            .map(|problem| div().text_color(tokens.text_quiet).child(in_words(problem)));
+            .find_map(|problem| match (&problem.source, problem.location) {
+                (Some(Source::Document(path)), Some(location)) => Some((path.clone(), location.line as usize)),
+                _ => None,
+            });
+        let has_place = place.is_some();
+        let show_in_text = place.map(|(path, line)| {
+            crate::shell::ui::small_button(tokens, "no-pages-text", crate::t!(Key::ShowInText))
+                .text_color(tokens.accent)
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(TextPlaceWanted(path.clone(), line))))
+        });
         Some(
             div()
                 .id("no-pages")
@@ -824,13 +849,14 @@ impl PreviewView {
                                 .pt(tokens::SPACE_1)
                                 .flex()
                                 .gap(tokens::SPACE_2)
+                                .children(show_in_text)
                                 .child(
                                     crate::shell::ui::small_button(
                                         tokens,
                                         "no-pages-details",
                                         crate::t!(Key::OpenDetails),
                                     )
-                                    .text_color(tokens.accent)
+                                    .when(!has_place, |button| button.text_color(tokens.accent))
                                     .on_click(cx.listener(|_, _, _, cx| cx.emit(DetailsWanted))),
                                 )
                                 .child(
@@ -843,12 +869,17 @@ impl PreviewView {
     }
 }
 
-/// A diagnostic in the language now set where it has a code, with the engine's own location where it has none.
-fn in_words(problem: &Diagnostic) -> String {
-    if problem.code.is_some() {
-        crate::shell::engine_text::message(problem)
-    } else {
-        problem.to_string()
+/// A diagnostic in the language now set where it has a code, with its file and line from the book's folder `base`.
+fn in_words(problem: &Diagnostic, base: &Path) -> String {
+    let message = crate::shell::engine_text::message_in(problem, Some(base));
+    let file = match &problem.source {
+        Some(Source::Document(path) | Source::Theme(path) | Source::Bibliography(path)) => Some(path_from(path, base)),
+        _ => None,
+    };
+    match (file, problem.location) {
+        (Some(file), Some(location)) => crate::t!(Key::AtLine, file = file, line = location.line, message = message),
+        (Some(file), None) => format!("{file}: {message}"),
+        _ => message,
     }
 }
 

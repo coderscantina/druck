@@ -141,10 +141,10 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
         let seen = results.clone();
         let writer = Writer::new(move |done| seen.lock().unwrap().push(done.result.is_ok()));
-        // Resolves, but names a font file that is not there, which the typesetter cannot load.
+        // Resolves, but names a variable font file that is not there, which has no stand-in, so the typesetter refuses.
         let broken = Commit {
             path: path.clone(),
-            text: "{ \"version\": 1, \"fonts\": { \"Ghost\": { \"regular\": \"fonts/ghost.otf\" } }, \"styles\": { \"body\": { \"font\": \"Ghost\" } } }\n".to_owned(),
+            text: "{ \"version\": 1, \"fonts\": { \"Ghost\": { \"regular\": { \"file\": \"fonts/ghost.otf\", \"variable\": true } } }, \"styles\": { \"body\": { \"font\": \"Ghost\" } } }\n".to_owned(),
         };
         let on_top = Commit {
             path: path.clone(),
