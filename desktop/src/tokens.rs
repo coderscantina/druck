@@ -291,6 +291,8 @@ pub const NOTE_CARD_BASE: Pixels = px(100.);
 pub const NOTE_CARD_LINE: Pixels = px(22.);
 /// How strongly the accent tints a selection, and a prompt's.
 pub const SELECTION_TINT: f32 = 0.25;
+/// How strongly the accent tints a find or search match that is not the selection.
+pub const MATCH_TINT: f32 = 0.12;
 pub const PROMPT_SELECTION_TINT: f32 = 0.3;
 /// A misspelled word's line.
 pub const MISSPELLED_TINT: f32 = 0.6;

@@ -6,8 +6,8 @@ use std::ops::Range;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, EventEmitter, Focusable, FontWeight, Pixels, ScrollHandle, SharedString, Subscription, Window,
-    div, svg,
+    Context, Entity, EventEmitter, Focusable, FontWeight, HighlightStyle, Hsla, Pixels, ScrollHandle, SharedString,
+    StyledText, Subscription, Window, div, svg,
 };
 
 use super::search::{FileHits, Options};
@@ -224,14 +224,13 @@ impl SearchPanel {
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .child(div().truncate().child(SharedString::from(hit.before.clone())))
+                                .child(div().truncate().child(marked(&hit.before, &hit.before_mark, tokens)))
                                 .when(replacing, |column| {
-                                    column.child(
-                                        div()
-                                            .truncate()
-                                            .text_color(tokens.accent)
-                                            .child(SharedString::from(hit.after.clone())),
-                                    )
+                                    column.child(div().truncate().text_color(tokens.accent).child(marked(
+                                        &hit.after,
+                                        &hit.after_mark,
+                                        tokens,
+                                    )))
                                 }),
                         )
                         .into_any_element(),
@@ -410,4 +409,13 @@ impl Render for SearchPanel {
 fn card_width(window_width: Pixels) -> Pixels {
     let text = tokens::GUTTER_WIDTH + tokens::TEXT_MIN_WIDTH + tokens::TEXT_MARGIN_RIGHT;
     (window_width - text - tokens::SPACE_4).clamp(tokens::SEARCH_CARD_MIN_WIDTH, tokens::SEARCH_CARD_WIDTH)
+}
+
+/// A hit's line with its match tinted, as the find bar tints matches in the text.
+fn marked(line: &str, mark: &std::ops::Range<usize>, tokens: &Tokens) -> StyledText {
+    let tint = HighlightStyle {
+        background_color: Some(Hsla::from(tokens.accent).opacity(tokens::MATCH_TINT)),
+        ..Default::default()
+    };
+    StyledText::new(SharedString::from(line.to_owned())).with_highlights([(mark.clone(), tint)])
 }

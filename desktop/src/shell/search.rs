@@ -106,6 +106,9 @@ pub struct Hit {
     pub line: usize,
     pub before: String,
     pub after: String,
+    /// Where the match stands in `before`, and its replacement in `after`.
+    pub before_mark: Range<usize>,
+    pub after_mark: Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,30 +118,40 @@ pub struct FileHits {
     pub hits: Vec<Hit>,
 }
 
-/// The longest stretch of a line a hit shows.
+/// How many characters of the line a hit shows before its match, so a row starts near it.
+const LEAD: usize = 20;
+/// The longest stretch of a line a hit shows after its match.
 const CONTEXT: usize = 120;
 
-/// The line holding `range`, shortened around it to fit one row, and `replacement` put in place of the match.
-fn line_of(text: &str, range: &Range<usize>, replacement: &str) -> (String, String) {
+/// The line holding `range`, shortened to start about [`LEAD`] characters before it at a word, and `replacement` put in
+/// place of the match, each with where the match stands in it.
+fn line_of(text: &str, range: &Range<usize>, replacement: &str) -> (String, String, Range<usize>, Range<usize>) {
     let start = text[..range.start].rfind('\n').map_or(0, |at| at + 1);
     let end = text[range.end..].find('\n').map_or(text.len(), |at| range.end + at);
-    let mut from = start.max(range.start.saturating_sub(CONTEXT / 2));
-    while !text.is_char_boundary(from) {
-        from += 1;
-    }
+    let lead = &text[start..range.start];
+    let from = match lead.char_indices().rev().nth(LEAD) {
+        Some((cut, _)) => {
+            let word = lead[cut..].find(' ').map_or(cut, |space| cut + space + 1);
+            start + word.min(lead.len())
+        }
+        None => start,
+    };
     let mut to = end.min(range.end + CONTEXT);
     while !text.is_char_boundary(to) {
         to -= 1;
     }
     let lead = if from > start { "\u{2026}" } else { "" };
     let tail = if to < end { "\u{2026}" } else { "" };
+    let mark_start = lead.len() + range.start - from;
     let before = format!("{lead}{}{tail}", &text[from..to]);
     let after = format!(
         "{lead}{}{replacement}{}{tail}",
         &text[from..range.start],
         &text[range.end..to]
     );
-    (before, after)
+    let before_mark = mark_start..mark_start + range.len();
+    let after_mark = mark_start..mark_start + replacement.len();
+    (before, after, before_mark, after_mark)
 }
 
 /// Every match in every source, in the order of the sources. A source without a match is left out. `replacement` shows
@@ -158,12 +171,14 @@ pub fn search(sources: &[Source], matcher: &Matcher, replacement: &str) -> Vec<F
                 .map(|(range, new)| {
                     line += source.text[counted..range.start].matches('\n').count();
                     counted = range.start;
-                    let (before, after) = line_of(&source.text, &range, &new);
+                    let (before, after, before_mark, after_mark) = line_of(&source.text, &range, &new);
                     Hit {
                         range,
                         line,
                         before,
                         after,
+                        before_mark,
+                        after_mark,
                     }
                 })
                 .collect();
@@ -260,6 +275,23 @@ mod tests {
         assert_eq!((hits[0].line, hits[1].line), (2, 3));
         assert_eq!(hits[1].before, "the cat ran");
         assert_eq!(hits[1].after, "the dog ran");
+        assert_eq!((hits[1].before_mark.clone(), hits[1].after_mark.clone()), (4..7, 4..7));
+    }
+
+    #[test]
+    fn a_hit_far_into_its_line_starts_near_it_at_a_word() {
+        let text = "Und so fragten sie nach der Gnade, die keiner verdient, und blieben.";
+        let sources = [Source {
+            id: a_chapter(),
+            title: "One".into(),
+            text: text.into(),
+        }];
+        let hit = &search(&sources, &matcher("Gnade", Options::default()), "")[0].hits[0];
+        assert_eq!(
+            hit.before,
+            "\u{2026}sie nach der Gnade, die keiner verdient, und blieben."
+        );
+        assert_eq!(&hit.before[hit.before_mark.clone()], "Gnade");
     }
 
     #[test]
