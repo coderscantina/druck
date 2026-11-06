@@ -25,6 +25,10 @@ crate::strings! {
         WantedSwitch => ("true or false", "true oder false"),
         WantedAppearance => ("\"system\", \"dark\", or \"light\"", "\"system\", \"dark\" oder \"light\""),
         WantedPlaceholders => ("\"chip\" or \"underline\"", "\"chip\" oder \"underline\""),
+        WantedKeptFor => (
+            "\"7-days\", \"30-days\", \"90-days\", or \"never\"",
+            "\"7-days\", \"30-days\", \"90-days\" oder \"never\""
+        ),
         WantedAccent => ("a color such as \"#2f8fb8\"", "eine Farbe wie \"#2f8fb8\""),
         WantedLanguage => ("\"system\", \"english\", or \"german\"", "\"system\", \"english\" oder \"german\""),
         WantedLineLength => (
@@ -72,6 +76,15 @@ crate::strings! {
         ),
         PlaceholdersChip => ("Chip", "Feld"),
         PlaceholdersUnderline => ("Dotted line", "Punktlinie"),
+        KeptFor => ("Delete kept versions after", "Aufbewahrte Versionen löschen nach"),
+        KeptForHint => (
+            "The side left out of a conflict is kept until then. Checked at launch.",
+            "Die bei einem Konflikt verworfene Seite wird bis dahin aufbewahrt. Prüfung beim Start."
+        ),
+        KeptForWeek => ("7 days", "7 Tage"),
+        KeptForMonth => ("30 days", "30 Tage"),
+        KeptForQuarter => ("90 days", "90 Tage"),
+        KeptForNever => ("Never", "Nie"),
         WarningMarks => ("Warning marks", "Warnungen markieren"),
         WarningMarksHint => (
             "Mark typesetting warnings on the pages with the Proof tab closed.",

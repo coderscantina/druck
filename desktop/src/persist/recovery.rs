@@ -3,12 +3,13 @@
 //! - A recovery copy holds a file's unsaved text. It goes when a save succeeds, so one that is still there at the next
 //!   open means the app did not get to save it, and the text comes back.
 //! - A kept copy holds a version a person chose against when settling a conflict, or the outside change an undo took
-//!   back. These stay, so nothing is lost for good by a decision made in a hurry.
+//!   back. These stay for the "Delete kept versions after" setting, 30 days unless changed, so nothing is lost for good
+//!   by a decision made in a hurry. [`sweep_kept`] deletes the older ones at launch.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -32,6 +33,31 @@ pub fn data_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| Some(home?.join(".local/share")));
     Some(share?.join("druck"))
+}
+
+/// Deletes kept copies last modified more than `max_age` ago, then the document folders that end up empty. The `kept`
+/// folder itself stays. `None` keeps everything. Housekeeping, so every error is ignored.
+pub fn sweep_kept(data: &Path, max_age: Option<Duration>) {
+    let Some(max_age) = max_age else {
+        return;
+    };
+    let Some(cutoff) = SystemTime::now().checked_sub(max_age) else {
+        return;
+    };
+    for folder in fs::read_dir(data.join(KEPT_FOLDER)).into_iter().flatten().flatten() {
+        let folder = folder.path();
+        for file in fs::read_dir(&folder).into_iter().flatten().flatten() {
+            let old = file
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| modified < cutoff);
+            if old {
+                fs::remove_file(file.path()).ok();
+            }
+        }
+        // Fails while copies remain, which is the point.
+        fs::remove_dir(&folder).ok();
+    }
 }
 
 /// A file's name in a folder keyed by its path, the same for the same path on every run.
@@ -184,6 +210,41 @@ mod tests {
         assert!(kept.starts_with(&copies.kept));
         assert!(kept.to_string_lossy().ends_with(".theirs.md"));
         assert_eq!(fs::read_to_string(&kept).unwrap(), "text");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// Writes a kept copy for `book` and makes it `days` old.
+    fn aged_copy(dir: &Path, book: &str, days: u64) -> PathBuf {
+        let kept = Copies::new(dir, Path::new(book))
+            .keep(&Path::new(book).join("a.md"), "mine", "text")
+            .unwrap();
+        let age = Duration::from_secs(days * 24 * 60 * 60);
+        let file = fs::File::options().write(true).open(&kept).unwrap();
+        file.set_modified(SystemTime::now() - age).unwrap();
+        kept
+    }
+
+    #[test]
+    fn the_sweep_deletes_old_kept_copies_and_the_folders_it_empties() {
+        let dir = data("sweep");
+        let old = aged_copy(&dir, "/books/old", 40);
+        let fresh = aged_copy(&dir, "/books/fresh", 2);
+        sweep_kept(&dir, Some(Duration::from_secs(30 * 24 * 60 * 60)));
+        assert!(!old.exists());
+        assert!(!old.parent().unwrap().exists());
+        assert!(fresh.exists());
+        sweep_kept(&dir, Some(Duration::ZERO));
+        assert!(!fresh.exists());
+        assert!(dir.join(KEPT_FOLDER).is_dir());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_sweep_with_no_age_keeps_everything() {
+        let dir = data("sweep-never");
+        let old = aged_copy(&dir, "/books/old", 4000);
+        sweep_kept(&dir, None);
+        assert!(old.exists());
         fs::remove_dir_all(dir).ok();
     }
 }

@@ -98,6 +98,10 @@ impl Prefs {
 /// Loads the settings and what was saved, and sets the language. `forced` is an appearance from the command line.
 pub fn init(forced: Option<Scheme>, cx: &mut App) {
     settings::init(cx);
+    if let Some(data) = crate::persist::recovery::data_dir() {
+        let max_age = settings::get(cx).kept_for.max_age();
+        std::thread::spawn(move || crate::persist::recovery::sweep_kept(&data, max_age));
+    }
     let file = state::state_file();
     let state = file.as_deref().map(State::load).unwrap_or_default();
     let applied = {

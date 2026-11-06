@@ -43,6 +43,29 @@ pub enum LineLength {
     Characters(u32),
 }
 
+/// How long a kept copy stays in the app data folder before the launch sweep deletes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeptFor {
+    Week,
+    #[default]
+    Month,
+    Quarter,
+    Forever,
+}
+
+impl KeptFor {
+    /// The age past which a kept copy goes, or `None` to keep them all.
+    pub fn max_age(self) -> Option<std::time::Duration> {
+        let days = match self {
+            Self::Week => 7,
+            Self::Month => 30,
+            Self::Quarter => 90,
+            Self::Forever => return None,
+        };
+        Some(std::time::Duration::from_secs(days * 24 * 60 * 60))
+    }
+}
+
 /// The shortest and longest line a person can ask for.
 const LINE_LENGTHS: std::ops::RangeInclusive<u64> = 20..=240;
 
@@ -67,6 +90,8 @@ pub struct Settings {
     pub agent: bool,
     /// How a placeholder's value shows in Write.
     pub placeholders: PlaceholderDisplay,
+    /// How long kept copies stay, see `persist::recovery::sweep_kept`.
+    pub kept_for: KeptFor,
 }
 
 impl Default for Settings {
@@ -85,6 +110,7 @@ impl Default for Settings {
             spelling: true,
             agent: false,
             placeholders: PlaceholderDisplay::Chip,
+            kept_for: KeptFor::Month,
         }
     }
 }
@@ -200,6 +226,27 @@ const FIELDS: &[Field] = &[
             json!(match settings.placeholders {
                 PlaceholderDisplay::Chip => "chip",
                 PlaceholderDisplay::Underline => "underline",
+            })
+        },
+    },
+    Field {
+        key: "delete_kept_after",
+        read: |settings, value| {
+            settings.kept_for = match value.as_str() {
+                Some("7-days") => KeptFor::Week,
+                Some("30-days") => KeptFor::Month,
+                Some("90-days") => KeptFor::Quarter,
+                Some("never") => KeptFor::Forever,
+                _ => return Err(wanted("delete_kept_after", crate::t!(Key::WantedKeptFor))),
+            };
+            Ok(())
+        },
+        write: |settings| {
+            json!(match settings.kept_for {
+                KeptFor::Week => "7-days",
+                KeptFor::Month => "30-days",
+                KeptFor::Quarter => "90-days",
+                KeptFor::Forever => "never",
             })
         },
     },
@@ -330,6 +377,28 @@ mod tests {
         assert_eq!(settings.line_length, LineLength::Characters(66));
         assert!(settings.binder);
         assert!(settings.selection_toolbar);
+    }
+
+    #[test]
+    fn kept_versions_go_after_thirty_days_unless_told_otherwise() {
+        assert_eq!(Settings::default().kept_for, KeptFor::Month);
+        let settings = parse(r#"{ "delete_kept_after": "never" }"#).expect("valid");
+        assert_eq!(settings.kept_for.max_age(), None);
+        assert!(parse(r#"{ "delete_kept_after": "soon" }"#).is_err());
+
+        let file = folder("kept").join("settings.json");
+        let before = Settings::default();
+        let after = Settings {
+            kept_for: KeptFor::Week,
+            ..before.clone()
+        };
+        write_changes(&file, &before, &after).expect("writes");
+        assert_eq!(
+            fs::read_to_string(&file).expect("reads"),
+            "{ \"delete_kept_after\": \"7-days\" }\n"
+        );
+        assert_eq!(load(&file), Ok(after));
+        fs::remove_dir_all(file.parent().expect("folder")).ok();
     }
 
     #[test]
