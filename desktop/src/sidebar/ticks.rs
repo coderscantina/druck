@@ -193,14 +193,21 @@ impl TicksView {
         };
         // The part as the path bar reads it, unless the open chapter is the file that opens it.
         let structure = book::structure(&self.data.contents.book, &|id| session.buffer(id).text());
-        let part = (structure.groups.iter())
+        let group = (structure.groups.iter())
             .find(|group| group.holds(read.chapter))
-            .filter(|group| group.opener.as_ref().is_none_or(|opener| opener.row.id != read.chapter))
-            .and_then(|group| group.title())
-            .map(str::to_owned);
+            .filter(|group| group.opener.as_ref().is_none_or(|opener| opener.row.id != read.chapter));
+        let opener = group
+            .and_then(|group| group.opener.as_ref())
+            .map(|opener| opener.row.id);
         let mut entries = Vec::new();
-        entries.extend(part.map(Entry::Part));
-        if let Some(row) = at.and_then(|at| at.checked_sub(1)).map(|at| book[at]) {
+        entries.extend(
+            group
+                .and_then(|group| group.title())
+                .map(|title| Entry::Part(title.to_owned())),
+        );
+        // The part's own page is the part line already, so it does not stand again as the chapter before.
+        if let Some(row) = (at.and_then(|at| at.checked_sub(1)).map(|at| book[at])).filter(|row| Some(row.id) != opener)
+        {
             entries.push(Entry::Chapter(row.id, label(row)));
         }
         let open_row = at.map(|at| book[at]);
