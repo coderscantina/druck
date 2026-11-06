@@ -217,8 +217,9 @@ fn matter_of(line: &str) -> Option<Matter> {
     }
 }
 
-/// Groups the book's rows by matter and part, in reading order.
-fn structure<'a>(rows: &[Row], text_of: &dyn Fn(ChapterId) -> &'a str) -> Book {
+/// Groups the book's rows by matter and part, in reading order. The one reading of the book's structure, which the
+/// bookshelf and the heading ticks' part line share with the path bar and the overview.
+pub fn structure<'a>(rows: &[Row], text_of: &dyn Fn(ChapterId) -> &'a str) -> Book {
     let has_matter = rows.iter().any(|row| {
         let text = text_of(row.id);
         Blocks::parse(text).as_slice().iter().any(|block| {

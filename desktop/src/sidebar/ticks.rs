@@ -14,6 +14,7 @@ use gpui::{
 use super::strings::Key;
 use super::{SidebarData, SidebarEvent};
 use crate::editor::EditorView;
+use crate::navigator::book;
 use crate::session::outline::{self, Heading};
 use crate::session::{ChapterId, Row};
 use crate::tokens::{self, Tokens};
@@ -190,12 +191,13 @@ impl TicksView {
             Some(number) => format!("{number} {}", row.title),
             None => row.title.clone(),
         };
-        let part = at.and_then(|at| {
-            book[..at]
-                .iter()
-                .rev()
-                .find_map(|row| outline::part_title(session.buffer(row.id).text()))
-        });
+        // The part as the path bar reads it, unless the open chapter is the file that opens it.
+        let structure = book::structure(&self.data.contents.book, &|id| session.buffer(id).text());
+        let part = (structure.groups.iter())
+            .find(|group| group.holds(read.chapter))
+            .filter(|group| group.opener.as_ref().is_none_or(|opener| opener.row.id != read.chapter))
+            .and_then(|group| group.title())
+            .map(str::to_owned);
         let mut entries = Vec::new();
         entries.extend(part.map(Entry::Part));
         if let Some(row) = at.and_then(|at| at.checked_sub(1)).map(|at| book[at]) {

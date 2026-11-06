@@ -94,23 +94,6 @@ pub fn headings(text: &str) -> Vec<Heading> {
         .collect()
 }
 
-/// The title of a part page: one level 1 heading and nothing else but directives and comments.
-pub fn part_title(text: &str) -> Option<String> {
-    let blocks = Blocks::parse(text);
-    let mut heading = None;
-    for block in blocks.as_slice() {
-        match block.kind {
-            BlockKind::Heading { level: 1 } if heading.is_none() => heading = Some(block.range.start),
-            BlockKind::Blank | BlockKind::Comment | BlockKind::Directive | BlockKind::FrontMatter => {}
-            _ => return None,
-        }
-    }
-    headings(text)
-        .into_iter()
-        .find(|h| Some(h.start) == heading)
-        .map(|h| h.title)
-}
-
 /// A heading line's words without their Markdown, and whether it says `{-}` or `{.unnumbered}`.
 pub fn heading_text(line: &str) -> (String, bool) {
     let words = heading_words(line);
@@ -251,15 +234,6 @@ mod tests {
             found,
             [(1, "One".into(), 0), (2, "Two b".into(), 11), (3, "Three".into(), 34)]
         );
-    }
-
-    #[test]
-    fn a_part_page_is_a_lone_heading_with_directives() {
-        assert_eq!(
-            part_title("# Part II {-}\n\n::: page-break\n").as_deref(),
-            Some("Part II")
-        );
-        assert_eq!(part_title("# Chapter\n\nText.\n"), None);
     }
 
     #[test]

@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 
-use crate::session::{ChapterId, Contents, Row};
+use crate::navigator::book::{Book, Kind};
+use crate::session::{ChapterId, Row};
 use crate::tokens::{
     SHELF_END_SLOT, SHELF_GROUP_GAP, SHELF_LOOSE_MIN_WIDTH, SPINE_GAP, SPINE_MAX_WIDTH, SPINE_MIN_WIDTH,
     SPINE_WORD_WIDTH,
@@ -20,7 +21,8 @@ pub struct Spine {
     pub number: Option<u32>,
     pub title: String,
     pub words: Option<usize>,
-    /// Front matter, back matter, a part's own file, and files not in the book have narrow spines with upright titles.
+    /// Front matter, back matter, a part's own file, an unnumbered chapter, and files not in the book have narrow spines
+    /// with upright titles.
     pub matter: bool,
 }
 
@@ -43,52 +45,28 @@ fn spine(row: &Row, words: &HashMap<ChapterId, usize>, matter: bool) -> Spine {
     }
 }
 
-/// Where a chapter of the book stands in it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Zone {
-    Front,
-    Body,
-    Back,
-}
-
-/// The groups of the shelf, in order. Nothing in a project says what a part or the matter is, so this reads it off the
-/// numbers. A chapter without one before the first numbered chapter is front matter and after the last is back matter,
-/// each in a group without a label. In between, a chapter without a number opens a part named by its title, unless the
-/// one before it is also without a number, as a part's own file and an interlude after it are. A book with no numbered
-/// chapter has no matter.
-pub fn groups(contents: &Contents, words: &HashMap<ChapterId, usize>) -> Vec<Group> {
-    let numbered = |row: &Row| row.number.is_some();
-    let first = contents.book.iter().position(numbered);
-    let last = contents.book.iter().rposition(numbered);
-    let mut groups: Vec<Group> = Vec::new();
-    let mut zone = None;
-    let mut previous_numbered = false;
-    for (at, row) in contents.book.iter().enumerate() {
-        let here = match (first, last) {
-            (Some(first), _) if at < first => Zone::Front,
-            (_, Some(last)) if at > last => Zone::Back,
-            _ => Zone::Body,
-        };
-        let matter = first.is_some() && !numbered(row);
-        let opens_part = here == Zone::Body && matter && previous_numbered;
-        if zone != Some(here) || opens_part {
-            groups.push(Group {
-                label: opens_part.then(|| row.title.clone()),
-                spines: Vec::new(),
+/// The groups of the shelf, in order, from the book's matter and parts as the path bar reads them: the front matter and
+/// the back matter without a label and with narrow spines, each part labelled by the file that opens it, which stands
+/// first as a narrow spine, and chapters before the first part without a label. Files not in the book stand last.
+pub fn groups(book: &Book, not_in_book: &[Row], words: &HashMap<ChapterId, usize>) -> Vec<Group> {
+    let mut groups: Vec<Group> = (book.groups.iter())
+        .map(|group| {
+            let matter = matches!(group.kind, Kind::FrontMatter | Kind::BackMatter);
+            let opener = group.opener.iter().map(|entry| spine(&entry.row, words, true));
+            let chapters =
+                (group.entries.iter()).map(|entry| spine(&entry.row, words, matter || entry.row.number.is_none()));
+            Group {
+                label: group.title().map(str::to_owned),
+                spines: opener.chain(chapters).collect(),
                 loose: false,
-            });
-            zone = Some(here);
-        }
-        if let Some(group) = groups.last_mut() {
-            group.spines.push(spine(row, words, matter));
-        }
-        previous_numbered = numbered(row);
-    }
-    if !contents.not_in_book.is_empty() {
+            }
+        })
+        .collect();
+    if !not_in_book.is_empty() {
         groups.push(Group {
             label: Some(crate::t!(super::strings::Key::NotInBook).to_owned()),
             // Files outside the book have no length that counts, so their spines are all the least width.
-            spines: (contents.not_in_book.iter())
+            spines: (not_in_book.iter())
                 .map(|row| spine(row, &HashMap::new(), true))
                 .collect(),
             loose: true,
@@ -149,7 +127,7 @@ pub fn fit(groups: &[Group], available: f32) -> Fit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{RowKind, Session};
+    use crate::session::{Contents, RowKind, Session};
 
     /// Rows with these titles: a number for each `Some`.
     fn contents(rows: &[(&str, bool)], loose: &[&str]) -> Contents {
@@ -201,27 +179,43 @@ mod tests {
             .collect()
     }
 
+    /// The shelf's groups for chapters with these titles, numbers, and texts, and files not in the book.
+    fn shelf(rows: &[(&str, bool, &str)], loose: &[&str], words: usize) -> Vec<Group> {
+        let titles: Vec<(&str, bool)> = rows.iter().map(|(title, numbered, _)| (*title, *numbered)).collect();
+        let contents = contents(&titles, loose);
+        let texts: HashMap<ChapterId, &str> = (contents.book.iter())
+            .zip(rows)
+            .map(|(row, (_, _, text))| (row.id, *text))
+            .collect();
+        let book = crate::navigator::book::structure(&contents.book, &|id| texts[&id]);
+        let words = contents.book.iter().map(|row| (row.id, words)).collect();
+        groups(&book, &contents.not_in_book, &words)
+    }
+
     #[test]
-    fn matter_stands_before_and_after_the_body_and_a_part_opens_a_labelled_group() {
-        let contents = contents(
+    fn matter_and_parts_are_the_path_bars_and_files_outside_the_book_stand_last() {
+        let groups = shelf(
             &[
-                ("Title", false),
-                ("Part I", false),
-                ("Interlude", false),
-                ("One", true),
-                ("Two", true),
-                ("Part II", false),
-                ("Three", true),
-                ("Notes", false),
+                (
+                    "Title",
+                    false,
+                    "::: front-matter\n\n# The Salt Road {-}\n\nBy Ines Hartmann.\n",
+                ),
+                ("Part I", false, "::: main-matter\n\n# Part I {-}\n"),
+                ("One", true, "# One\n\nText.\n"),
+                ("Two", true, "# Two\n\nText.\n"),
+                ("Part II", false, "# Part II {-}\n\n> A motto.\n"),
+                ("Three", true, "# Three\n\nText.\n"),
+                ("Notes", false, "::: back-matter\n\n# Notes {-}\n\nText.\n\nMore.\n"),
             ],
             &["Old ending"],
+            0,
         );
-        let groups = groups(&contents, &HashMap::new());
         assert_eq!(
             labels(&groups),
             [
-                (None, vec!["Title", "Part I", "Interlude"]),
-                (None, vec!["One", "Two"]),
+                (None, vec!["Title"]),
+                (Some("Part I"), vec!["Part I", "One", "Two"]),
                 (Some("Part II"), vec!["Part II", "Three"]),
                 (None, vec!["Notes"]),
                 (Some("Not in book"), vec!["Old ending"]),
@@ -229,22 +223,22 @@ mod tests {
         );
         assert!(groups[4].loose);
         assert!(groups[0].spines.iter().all(|spine| spine.matter));
-        assert!(groups[1].spines.iter().all(|spine| !spine.matter));
+        assert_eq!(
+            groups[1].spines.iter().map(|spine| spine.matter).collect::<Vec<_>>(),
+            [true, false, false]
+        );
     }
 
     #[test]
-    fn a_book_with_no_numbered_chapter_has_no_matter() {
-        let contents = contents(&[("A", false), ("B", false)], &[]);
-        let groups = groups(&contents, &HashMap::new());
-        assert_eq!(groups.len(), 1);
+    fn a_book_without_parts_or_matter_is_one_group_of_chapters() {
+        let groups = shelf(&[("A", true, "# A\n\nText.\n"), ("B", true, "# B\n\nText.\n")], &[], 0);
+        assert_eq!(labels(&groups), [(None, vec!["A", "B"])]);
         assert!(groups[0].spines.iter().all(|spine| !spine.matter));
     }
 
     fn numbered_book(count: usize) -> Vec<Group> {
-        let rows: Vec<_> = (0..count).map(|_| ("Chapter", true)).collect();
-        let contents = contents(&rows, &[]);
-        let words = contents.book.iter().map(|row| (row.id, 3000)).collect();
-        groups(&contents, &words)
+        let rows: Vec<_> = (0..count).map(|_| ("Chapter", true, "# Chapter\n\nText.\n")).collect();
+        shelf(&rows, &[], 3000)
     }
 
     #[test]

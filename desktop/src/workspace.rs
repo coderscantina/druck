@@ -455,8 +455,11 @@ impl Workspace {
         if window.window_title() != title {
             window.set_window_title(&title);
         }
+        let structure = crate::navigator::book::structure(&data.contents.book, &|id| {
+            session.chapter(id).map_or("", |chapter| chapter.text())
+        });
         self.parts.shelf.update(cx, |shelf, cx| {
-            shelf.set_contents(data.contents.clone(), data.active, cx)
+            shelf.set_contents(data.contents.clone(), structure, data.active, cx)
         });
         self.parts
             .ticks

@@ -22,6 +22,7 @@ use gpui::{
 
 use self::layout::{Group, Spine};
 use self::strings::Key;
+use crate::navigator::book::Book;
 use crate::session::{ChapterId, Contents};
 use crate::sidebar::Mark;
 use crate::tokens::{self, Tokens};
@@ -84,6 +85,8 @@ impl Render for DraggedSpine {
 
 pub struct BookshelfView {
     contents: Contents,
+    /// The book's matter and parts, as the path bar reads them.
+    structure: Book,
     active: Option<ChapterId>,
     figures: HashMap<ChapterId, Figures>,
     marks: HashMap<ChapterId, Mark>,
@@ -132,6 +135,7 @@ impl BookshelfView {
         ];
         Self {
             contents: Contents::default(),
+            structure: Book::default(),
             active: None,
             figures: HashMap::new(),
             marks: HashMap::new(),
@@ -150,9 +154,16 @@ impl BookshelfView {
         }
     }
 
-    pub fn set_contents(&mut self, contents: Contents, active: Option<ChapterId>, cx: &mut Context<Self>) {
-        if contents != self.contents || active != self.active {
+    pub fn set_contents(
+        &mut self,
+        contents: Contents,
+        structure: Book,
+        active: Option<ChapterId>,
+        cx: &mut Context<Self>,
+    ) {
+        if contents != self.contents || structure != self.structure || active != self.active {
             self.contents = contents;
+            self.structure = structure;
             self.active = active;
             self.regroup();
             cx.notify();
@@ -179,7 +190,7 @@ impl BookshelfView {
         let words = (self.figures.iter())
             .filter_map(|(id, figures)| Some((*id, figures.words?)))
             .collect();
-        self.groups = layout::groups(&self.contents, &words);
+        self.groups = layout::groups(&self.structure, &self.contents.not_in_book, &words);
     }
 
     /// Raises it for the moment, with the keys, or puts it away. For `Cmd+Shift+\`.

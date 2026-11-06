@@ -1874,3 +1874,11 @@ The slice of the [writing UX ratings](DESIGN.md#writing-ux-ratings-2026-11-06) t
 - **Debug hooks.** `DRUCK_MATERIAL` takes `rail`, `jump`, `library`, `step`, `item:<id>`, `pin:<id>`, `insert:<id>`, and `probe:<theme>`, comma-separated, run two frames after the workspace mounts so `DRUCK_SELECT` has placed the caret.
 
 Unverified: every pointer path, since a pointer cannot be automated here: the rest at the edge, clicks on rows, the trail, links, segments, filters, and pin buttons. The keys were sent by PID to a window that is never key, so `Cmd+[` reached the View menu's Previous problem before the panel; in a key window the panel's binding should win, but nobody has pressed it there.
+
+## 2026-11-06: Integrating the writing UX
+
+The six slices above were built in parallel and merged on `writing-ux-integration`.
+
+- **One reading of parts.** The slices had read parts three ways: the ticks from a chapter holding only a level 1 heading, the bookshelf from chapter numbers, and the path bar from the matter directives and the part template's shape. `navigator::book::structure` is now the only one. The bookshelf groups its spines from it, and the ticks take their part line from it, so an interlude after a numbered chapter no longer opens a part on the shelf, and a part page with a motto is a part at the edge too. `outline::part_title` and the shelf's reading by numbers are gone. Unnumbered chapters inside a part keep narrow spines.
+- **A style's name and a bracket's name.** Both stand in the left margin. When a styled paragraph or heading is the first block of a directive, the style's name ends before the bracket's name on that row instead of over it.
+- **One caret hook.** Two slices added `DRUCK_CARET`. The placeholders' form stays: `|` marks the caret's place in the words, and without one the caret goes after them, which is what the directives' form did.
