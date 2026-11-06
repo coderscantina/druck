@@ -27,7 +27,7 @@ pub mod theme_path {
 /// The resolved configuration: the theme validator runs `resolve` as a render does, and the preview reads the
 /// body style and the document's title and authors from `Config`.
 pub mod resolved_config {
-    pub use crate::config::front_matter::{FrontMatter, split as split_front_matter};
+    pub use crate::config::front_matter::{ChapterEntry, DEFAULT_STATUSES, FrontMatter, split as split_front_matter};
     pub use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
     pub use crate::config::resolved::{Config, Style};
     pub use crate::config::source::InputSource;

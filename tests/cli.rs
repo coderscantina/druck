@@ -1081,6 +1081,43 @@ fn project_chapter_problems_name_their_file_or_manifest_line() {
 }
 
 #[test]
+fn project_chapter_states_are_checked_and_otherwise_ignored() {
+    let chapter = ("manuscript/one.md", "Text.\n");
+    let manifest = "chapters:\n  - file: manuscript/one.md\n    status: revised\n";
+    let sandbox = project("project-status", manifest, &[chapter]);
+    let run = sandbox.run(&["check", &sandbox.book()]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+
+    let cases = [
+        (
+            "chapters:\n  - file: manuscript/one.md\n    status: done\n",
+            ":2:5: chapter \"manuscript/one.md\": status \"done\" is not one of the book's statuses: draft, revised, final",
+        ),
+        (
+            "statuses: [outline, done]\nchapters:\n  - {file: manuscript/one.md, status: draft}\n",
+            "status \"draft\" is not one of the book's statuses: outline, done",
+        ),
+        (
+            "statuses: [a, a]\nchapters: [manuscript/one.md]\n",
+            ":1:11: statuses: \"a\" is listed twice",
+        ),
+        (
+            "statuses: []\nchapters: [manuscript/one.md]\n",
+            "statuses: list at least one state",
+        ),
+        (
+            "chapters:\n  - file: manuscript/one.md\n    state: draft\n",
+            ":3:5: unknown field `state`",
+        ),
+    ];
+    for (index, (manifest, expected)) in cases.into_iter().enumerate() {
+        let sandbox = project(&format!("project-status-{index}"), manifest, &[chapter]);
+        let stderr = sandbox.rejection(&[&sandbox.book()]);
+        assert!(stderr.contains(expected), "wanted {expected} in: {stderr}");
+    }
+}
+
+#[test]
 fn project_warns_about_unlisted_chapters_and_leaves_them_out() {
     let sandbox = project(
         "project-unlisted",
@@ -1143,7 +1180,7 @@ fn project_manifest_errors_are_located_like_front_matter() {
     let document = sandbox.write("doc.md", "---\nchapters: [a.md]\n---\nText.\n");
     let stderr = sandbox.rejection(&[&document]);
     assert!(
-        stderr.contains("chapters and exports belong in a project's druck.yaml"),
+        stderr.contains("chapters, statuses, and exports belong in a project's druck.yaml"),
         "{stderr}"
     );
 }

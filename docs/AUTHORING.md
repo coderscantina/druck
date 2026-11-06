@@ -186,7 +186,7 @@ exports:
     output: build/mein-buch.epub
 ```
 
-`druck.yaml` takes every key of [front matter](#front-matter), with the same meaning and the same errors, plus `chapters` and `exports`. An unknown key is an error at its file and line. Paths in it are relative to the folder of `druck.yaml`.
+`druck.yaml` takes every key of [front matter](#front-matter), with the same meaning and the same errors, plus `chapters`, `statuses`, and `exports`. An unknown key is an error at its file and line. Paths in it are relative to the folder of `druck.yaml`.
 
 ### Chapters
 
@@ -204,6 +204,23 @@ warning: book/manuscript/01-one.md:27:1: a line of this paragraph on page 1 has 
 ```
 
 A problem that belongs to no single line, such as a page ending short, names `druck.yaml`.
+
+### Writing states
+
+An entry of `chapters` can be a mapping with the file and its writing state, to keep track of how far each chapter is. The states are `draft`, `revised`, and `final`, in that order, unless `statuses` lists the book's own. A book's list replaces the default one, and its order is the order of progress:
+
+```yaml
+statuses: [outline, draft, with-editor, final]
+chapters:
+  - manuscript/00-titelei.md
+  - file: manuscript/01-prolog.md
+    status: with-editor
+  - {file: manuscript/02-eins.md, status: draft}
+```
+
+- A chapter without `status` has no state. The desktop app shows none for it.
+- A status that is not in the list, a state listed twice, an empty list, or another key beside `file` and `status` is an error at its line in `druck.yaml`.
+- The states change nothing in the output. `check`, `render`, and a final export ignore them.
 
 ### Exports
 

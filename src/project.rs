@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde_saphyr::Spanned;
 
-use crate::config::front_matter::{self, Export, FrontMatter};
+use crate::config::front_matter::{self, ChapterEntry, Export, FrontMatter};
 use crate::config::resolved::Config;
 use crate::config::source::{ChapterMap, InputSource, Origin, normalize};
 use crate::diagnostic::{Code, Diagnostic};
@@ -56,6 +56,7 @@ impl Project {
         let chapters = settings.chapters.take().unwrap_or_default();
         let exports = settings.exports.take().unwrap_or_default();
         check_exports(&exports, &source)?;
+        check_statuses(&settings, &chapters, &source)?;
         let read = read_chapters(resolver, &chapters, dir, &source)?;
         let (map, text) = join(&read, manifest.clone())?;
         let listed: BTreeSet<&PathBuf> = read.iter().map(|chapter| &chapter.path).collect();
@@ -175,6 +176,47 @@ fn check_exports(exports: &BTreeMap<String, Spanned<Export>>, source: &InputSour
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
+/// Checks that `statuses` names distinct, non-empty states and that every chapter's status is one of them.
+fn check_statuses(
+    settings: &FrontMatter,
+    chapters: &[Spanned<ChapterEntry>],
+    source: &InputSource,
+) -> Result<(), Vec<Diagnostic>> {
+    let error = |message: String, location| at(Diagnostic::new(Some(source.clone()), message), location);
+    let mut errors = Vec::new();
+    if let Some(statuses) = &settings.statuses {
+        let mut seen = BTreeSet::new();
+        if statuses.value.is_empty() {
+            errors.push(error("statuses: list at least one state".into(), &statuses.referenced));
+        }
+        for status in &statuses.value {
+            if status.trim().is_empty() {
+                errors.push(error("statuses: a state needs a name".into(), &statuses.referenced));
+            } else if !seen.insert(status.as_str()) {
+                errors.push(error(
+                    format!("statuses: \"{status}\" is listed twice"),
+                    &statuses.referenced,
+                ));
+            }
+        }
+    }
+    let statuses = settings.statuses();
+    for chapter in chapters {
+        let Some(status) = &chapter.value.status else {
+            continue;
+        };
+        if !statuses.contains(status) {
+            let message = format!(
+                "chapter \"{}\": status \"{status}\" is not one of the book's statuses: {}",
+                chapter.value.file,
+                statuses.join(", ")
+            );
+            errors.push(error(message, &chapter.referenced));
+        }
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
 /// A chapter's absolute path and what reading it gave.
 struct ReadChapter {
     path: PathBuf,
@@ -184,7 +226,7 @@ struct ReadChapter {
 /// Reads the chapter files, checked against the project folder. Errors name the manifest line.
 fn read_chapters(
     resolver: &dyn Resolver,
-    chapters: &[Spanned<String>],
+    chapters: &[Spanned<ChapterEntry>],
     dir: &Path,
     source: &InputSource,
 ) -> Result<Vec<ReadChapter>, Vec<Diagnostic>> {
@@ -199,8 +241,8 @@ fn read_chapters(
     let mut seen = BTreeSet::new();
     let mut errors = Vec::new();
     for chapter in chapters {
-        let path = normalize(&dir.join(&chapter.value));
-        let name = &chapter.value;
+        let name = &chapter.value.file;
+        let path = normalize(&dir.join(name));
         let data = path.starts_with(dir).then(|| resolver.read(&origin, name));
         let problem = match &data {
             None => Some(format!("chapter \"{name}\" is outside the project folder")),

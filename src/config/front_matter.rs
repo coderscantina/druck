@@ -86,10 +86,73 @@ pub struct FrontMatter {
 
     /// Chapter files in reading order, relative to the manifest. `druck.yaml` only.
     #[serde(default, deserialize_with = "non_null")]
-    pub chapters: Option<Vec<Spanned<String>>>,
+    pub chapters: Option<Vec<Spanned<ChapterEntry>>>,
+    /// The writing states a chapter can be in, in order of progress. Unset means [`DEFAULT_STATUSES`]. `druck.yaml`
+    /// only. The engine checks them and does nothing else with them.
+    #[serde(default, deserialize_with = "non_null")]
+    pub statuses: Option<Spanned<Vec<String>>>,
     /// Named exports. `druck.yaml` only.
     #[serde(default, deserialize_with = "non_null")]
     pub exports: Option<BTreeMap<String, Spanned<Export>>>,
+}
+
+/// The writing states of a book that does not name its own.
+pub const DEFAULT_STATUSES: [&str; 3] = ["draft", "revised", "final"];
+
+impl FrontMatter {
+    /// The book's writing states in order of progress: its own `statuses`, or [`DEFAULT_STATUSES`].
+    pub fn statuses(&self) -> Vec<String> {
+        match &self.statuses {
+            Some(statuses) => statuses.value.clone(),
+            None => DEFAULT_STATUSES.map(str::to_owned).to_vec(),
+        }
+    }
+}
+
+/// One `chapters` entry: a file, written alone or as `{file: ..., status: ...}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChapterEntry {
+    /// The file, relative to the manifest.
+    pub file: String,
+    /// The chapter's writing state, one of the book's `statuses`.
+    pub status: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ChapterEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EntryVisitor;
+
+        impl<'de> Visitor<'de> for EntryVisitor {
+            type Value = ChapterEntry;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a chapter file, or a mapping with file and status")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<ChapterEntry, E> {
+                Ok(ChapterEntry {
+                    file: value.to_owned(),
+                    status: None,
+                })
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<ChapterEntry, A::Error> {
+                let (mut file, mut status) = (None, None);
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "file" if file.is_none() => file = Some(map.next_value::<String>()?),
+                        "status" if status.is_none() => status = Some(map.next_value::<String>()?),
+                        "file" | "status" => return Err(de::Error::duplicate_field("file or status")),
+                        other => return Err(de::Error::unknown_field(other, &["file", "status"])),
+                    }
+                }
+                let file = file.ok_or_else(|| de::Error::missing_field("file"))?;
+                Ok(ChapterEntry { file, status })
+            }
+        }
+
+        deserializer.deserialize_any(EntryVisitor)
+    }
 }
 
 /// One named way to build a project. Unset fields keep the document's settings.

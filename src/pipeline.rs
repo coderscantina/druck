@@ -609,7 +609,7 @@ fn parse_front_matter(text: &str, source: &InputSource) -> Result<FrontMatter, V
         return Ok(FrontMatter::default());
     };
     let settings = parse_settings(split.yaml, split.first_line, source)?;
-    let project_field = settings.chapters.is_some() || settings.exports.is_some();
+    let project_field = settings.chapters.is_some() || settings.statuses.is_some() || settings.exports.is_some();
     if project_field {
         return Err(vec![
             Diagnostic::new(Some(source.clone()), PROJECT_FIELDS).at(split.first_line, 1),
@@ -618,7 +618,7 @@ fn parse_front_matter(text: &str, source: &InputSource) -> Result<FrontMatter, V
     Ok(settings)
 }
 
-const PROJECT_FIELDS: &str = "chapters and exports belong in a project's druck.yaml";
+const PROJECT_FIELDS: &str = "chapters, statuses, and exports belong in a project's druck.yaml";
 
 /// Reads settings from YAML that starts at 1-based line `first_line` of `source`.
 pub fn parse_settings(yaml: &str, first_line: u64, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
@@ -682,7 +682,10 @@ pub(crate) fn parse_overrides(pairs: &[String], source: &InputSource) -> Result<
 
 /// Builds settings from a JSON object of settings.
 pub(crate) fn overrides_from_value(settings: Value, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
-    if settings.get("chapters").is_some() || settings.get("exports").is_some() {
+    if ["chapters", "statuses", "exports"]
+        .iter()
+        .any(|key| settings.get(key).is_some())
+    {
         let message = format!("--set: {PROJECT_FIELDS}");
         return Err(vec![Diagnostic::new(Some(source.clone()), message)]);
     }
