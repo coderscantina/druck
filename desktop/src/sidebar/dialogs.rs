@@ -8,7 +8,7 @@ use gpui::{
 
 use super::strings::Key;
 use crate::a11y::Control as _;
-use crate::inspector::input::{Submitted, TextInput};
+use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::session::templates::Group;
 use crate::session::{ChapterId, TEMPLATES, Template};
 use crate::tokens::{self, Tokens};
@@ -46,10 +46,17 @@ pub struct SectionDialog {
 
 impl SectionDialog {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let name = cx.new(|cx| TextInput::new(window, cx));
-        let subscriptions = vec![cx.subscribe_in(&name, window, |dialog, _, Submitted, window, cx| {
-            dialog.submit(window, cx)
-        })];
+        // A field that keeps its focus reports Escape, which closes the dialog. Otherwise Escape would only blur the
+        // field and the dialog would stay.
+        let name = cx.new(|cx| TextInput::new(window, cx).keep_focus_on_enter());
+        let subscriptions = vec![
+            cx.subscribe_in(&name, window, |dialog, _, Submitted, window, cx| {
+                dialog.submit(window, cx)
+            }),
+            cx.subscribe_in(&name, window, |dialog, _, Cancelled, window, cx| {
+                dialog.close(window, cx)
+            }),
+        ];
         Self {
             state: State::Closed,
             name,
