@@ -102,5 +102,9 @@ crate::strings! {
             "The agent's conversation cannot be kept for the next start: {error}",
             "Das Gespräch mit dem Agenten lässt sich nicht für den nächsten Start sichern: {error}"
         ),
+        CannotReadAgent => (
+            "The agent's earlier conversations cannot be read, so this one starts anew: {error}",
+            "Die früheren Gespräche mit dem Agenten lassen sich nicht lesen, dieses beginnt neu: {error}"
+        ),
     }
 }

@@ -11,6 +11,15 @@ crate::strings! {
             "settings.json ist nicht verwendbar: {problem}. Die Datei bleibt, wie sie ist."
         ),
 
+        Unwatched => (
+            "Changes to settings.json show at the next start, since its folder cannot be watched: {error}",
+            "Änderungen an settings.json wirken erst beim nächsten Start, da sein Ordner nicht beobachtet werden kann: {error}"
+        ),
+        Unwritten => (
+            "settings.json cannot be written, so the choice holds until the app quits: {error}",
+            "settings.json lässt sich nicht schreiben, die Wahl gilt bis zum Beenden: {error}"
+        ),
+
         ShouldBe => ("\"{key}\" should be {what}", "\"{key}\" sollte {what} sein"),
         OneObject => ("the file should hold one object", "die Datei sollte ein Objekt enthalten"),
         WantedSwitch => ("true or false", "true oder false"),

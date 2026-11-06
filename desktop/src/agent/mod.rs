@@ -275,7 +275,14 @@ impl AgentView {
             (session.location().to_owned(), session.base_dir())
         };
         let store = Store::open();
-        let remembered = store.as_ref().map(|store| store.get(&project)).unwrap_or_default();
+        let remembered = match store.as_ref().map(|store| store.get(&project)) {
+            Some(Err(error)) => {
+                let kind = crate::persist::sync::Problem::AgentSessionUnread;
+                crate::persist::report(&base, kind, Some(error.to_string()), cx);
+                Remembered::default()
+            }
+            found => found.and_then(Result::ok).unwrap_or_default(),
+        };
         let mut conversation = Conversation::new(base.clone());
         conversation.set_session_id(remembered.session.clone());
         let model = remembered

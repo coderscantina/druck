@@ -28,7 +28,17 @@ pub struct Store {
     settings: Settings,
     file: Option<PathBuf>,
     problem: Option<String>,
+    /// What went wrong around the file, while it is valid.
+    trouble: Option<Trouble>,
     _watching: Option<notify::RecommendedWatcher>,
+}
+
+#[derive(Clone, PartialEq)]
+enum Trouble {
+    /// The file's folder cannot be watched, so a hand edit waits for the next run.
+    Unwatched(String),
+    /// A choice or the new file could not be written.
+    Unwritten(String),
 }
 
 impl Global for Store {}
@@ -45,6 +55,7 @@ pub fn init(cx: &mut App) {
         settings,
         file,
         problem,
+        trouble: None,
         _watching: None,
     });
     watch(cx);
@@ -73,10 +84,13 @@ pub fn change(cx: &mut App, edit: impl FnOnce(&mut Settings)) {
     if store.settings == before {
         return;
     }
-    if let Some(file) = &store.file
-        && let Err(problem) = file::write_changes(file, &before, &store.settings)
-    {
-        store.problem = Some(problem);
+    let Some(file) = &store.file else {
+        return;
+    };
+    match file::write_changes(file, &before, &store.settings) {
+        Err(error) => store.trouble = Some(Trouble::Unwritten(error)),
+        Ok(()) if matches!(store.trouble, Some(Trouble::Unwritten(_))) => store.trouble = None,
+        Ok(()) => {}
     }
 }
 
@@ -86,16 +100,18 @@ pub fn open_file(cx: &mut App) {
         return;
     };
     if !file.exists() {
-        if let Some(folder) = file.parent() {
-            std::fs::create_dir_all(folder).ok();
+        let made = (file.parent().map_or(Ok(()), std::fs::create_dir_all))
+            .and_then(|()| crate::persist::atomic::write(&file, b"{\n}\n"));
+        if let Err(error) = made {
+            cx.global_mut::<Store>().trouble = Some(Trouble::Unwritten(error.to_string()));
+            return;
         }
-        std::fs::write(&file, "{\n}\n").ok();
     }
     cx.open_with_system(&file);
 }
 
-/// Follows the file's folder and takes a hand edit in as soon as it lands. A folder that cannot be watched only means
-/// a hand edit waits for the next run.
+/// Follows the file's folder and takes a hand edit in as soon as it lands. A folder that cannot be watched means a hand
+/// edit waits for the next run, which the problem line says.
 fn watch(cx: &mut App) {
     let Some(file) = cx.global::<Store>().file.clone() else {
         return;
@@ -103,7 +119,13 @@ fn watch(cx: &mut App) {
     let Some(folder) = file.parent().map(Path::to_owned) else {
         return;
     };
-    std::fs::create_dir_all(&folder).ok();
+    if let Err(error) = start_watching(&folder, &file, cx) {
+        cx.global_mut::<Store>().trouble = Some(Trouble::Unwatched(error));
+    }
+}
+
+fn start_watching(folder: &Path, file: &Path, cx: &mut App) -> Result<(), String> {
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     let (changed, mut changes) = futures::channel::mpsc::unbounded();
     let name = file.file_name().map(ToOwned::to_owned);
     let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -112,12 +134,8 @@ fn watch(cx: &mut App) {
             changed.unbounded_send(()).ok();
         }
     });
-    let Ok(mut watcher) = watcher else {
-        return;
-    };
-    if watcher.watch(&folder, notify::RecursiveMode::NonRecursive).is_err() {
-        return;
-    }
+    let mut watcher = watcher.map_err(|error| error.to_string())?;
+    (watcher.watch(folder, notify::RecursiveMode::NonRecursive)).map_err(|error| error.to_string())?;
     cx.global_mut::<Store>()._watching = Some(watcher);
     cx.spawn(async move |cx| {
         while changes.next().await.is_some() {
@@ -127,6 +145,7 @@ fn watch(cx: &mut App) {
         }
     })
     .detach();
+    Ok(())
 }
 
 /// Reads the file again. An invalid one keeps what was in use, and says why.
@@ -146,7 +165,8 @@ fn reload(cx: &mut App) {
     }
 }
 
-/// The line at the foot of the window that says the file cannot be used. It draws nothing otherwise.
+/// The line at the foot of the window that says the file cannot be used, or what went wrong around it. It draws nothing
+/// otherwise.
 pub struct ProblemLine;
 
 impl ProblemLine {
@@ -159,7 +179,14 @@ impl ProblemLine {
 impl Render for ProblemLine {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx);
-        div().when_some(problem(cx), |line, problem| {
+        let store = cx.global::<Store>();
+        let text = match (&store.problem, &store.trouble) {
+            (Some(problem), _) => Some(crate::t!(Key::Invalid, problem = problem)),
+            (None, Some(Trouble::Unwatched(error))) => Some(crate::t!(Key::Unwatched, error = error)),
+            (None, Some(Trouble::Unwritten(error))) => Some(crate::t!(Key::Unwritten, error = error)),
+            (None, None) => None,
+        };
+        div().when_some(text, |line, text| {
             line.flex_1()
                 .min_w_0()
                 .truncate()
@@ -167,7 +194,7 @@ impl Render for ProblemLine {
                 .text_size(tokens::TEXT_SMALL)
                 .text_color(tokens.accent)
                 .bg(tokens.canvas)
-                .child(crate::t!(Key::Invalid, problem = problem))
+                .child(text)
         })
     }
 }

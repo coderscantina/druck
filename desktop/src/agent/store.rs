@@ -42,14 +42,15 @@ impl Store {
         Self { file: dir.join(FILE) }
     }
 
-    /// What is kept for `project`. A missing or unreadable file keeps nothing.
-    pub fn get(&self, project: &Path) -> Remembered {
-        self.read().projects.remove(&key(project)).unwrap_or_default()
+    /// What is kept for `project`. A missing file keeps nothing, and one that cannot be read is an error.
+    pub fn get(&self, project: &Path) -> io::Result<Remembered> {
+        Ok(self.read()?.projects.remove(&key(project)).unwrap_or_default())
     }
 
-    /// Keeps `remembered` for `project`. Nothing at all removes its entry.
+    /// Keeps `remembered` for `project`. Nothing at all removes its entry. A file that cannot be read is left as it is,
+    /// since writing over it would lose every other project's entry.
     pub fn set(&self, project: &Path, remembered: &Remembered) -> io::Result<()> {
-        let mut all = self.read();
+        let mut all = self.read()?;
         if remembered == &Remembered::default() {
             all.projects.remove(&key(project));
         } else {
@@ -61,11 +62,12 @@ impl Store {
         atomic::write(&self.file, serde_json::to_string_pretty(&all)?.as_bytes())
     }
 
-    fn read(&self) -> Record {
-        fs::read_to_string(&self.file)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+    fn read(&self) -> io::Result<Record> {
+        match fs::read_to_string(&self.file) {
+            Ok(text) => Ok(serde_json::from_str(&text)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Record::default()),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -99,7 +101,7 @@ mod tests {
         };
         Store::in_dir(&dir).set(&project, &remembered).expect("set");
         // A new Store reads the file again, as a restarted app does.
-        assert_eq!(Store::in_dir(&dir).get(&project), remembered);
+        assert_eq!(Store::in_dir(&dir).get(&project).expect("get"), remembered);
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
@@ -119,13 +121,13 @@ mod tests {
                 },
             )
             .expect("set");
-        assert_eq!(store.get(&two), Remembered::default());
+        assert_eq!(store.get(&two).expect("get"), Remembered::default());
         assert_eq!(fs::read_dir(&one).expect("list").count(), 0);
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
     #[test]
-    fn forgetting_removes_the_entry_and_a_broken_file_keeps_nothing() {
+    fn forgetting_removes_the_entry_and_a_broken_file_is_an_error_left_as_it_is() {
         let dir = scratch("forget");
         let store = Store::in_dir(&dir);
         let project = dir.join("p");
@@ -139,9 +141,11 @@ mod tests {
             )
             .expect("set");
         store.set(&project, &Remembered::default()).expect("forget");
-        assert_eq!(store.get(&project), Remembered::default());
+        assert_eq!(store.get(&project).expect("get"), Remembered::default());
         fs::write(dir.join(FILE), "{ not json").expect("break it");
-        assert_eq!(store.get(&project), Remembered::default());
+        assert!(store.get(&project).is_err());
+        assert!(store.set(&project, &Remembered::default()).is_err());
+        assert_eq!(fs::read_to_string(dir.join(FILE)).expect("file"), "{ not json");
         fs::remove_dir_all(dir).expect("cleanup");
     }
 }

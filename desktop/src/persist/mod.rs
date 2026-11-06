@@ -1045,6 +1045,7 @@ impl Render for PersistView {
                 Problem::State(error) => crate::t!(Key::CannotSaveState, file = path.display(), error = error),
                 Problem::Fonts(error) => crate::t!(Key::CannotUseFonts, error = error),
                 Problem::AgentSession(error) => crate::t!(Key::CannotRememberAgent, error = error),
+                Problem::AgentSessionUnread(error) => crate::t!(Key::CannotReadAgent, error = error),
             };
             return root
                 .flex_1()
