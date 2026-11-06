@@ -137,10 +137,16 @@ fn entry(
     let page = diagnostic.page;
     let line = diagnostic.location.map(|location| location.line as usize);
     let message = super::engine_text::message_in(diagnostic, Some(&base));
-    // A file that is not there is wrong to the author while something stands in for it, so it counts as an error.
+    // A file or citation key that is not there is wrong to the author while something stands in for it, so it counts
+    // as an error.
     let stands_in = matches!(
         diagnostic.code,
-        Some(Code::ImageNotFound { .. } | Code::FontNotFound { .. } | Code::BibliographyNotFound { .. })
+        Some(
+            Code::ImageNotFound { .. }
+                | Code::FontNotFound { .. }
+                | Code::BibliographyNotFound { .. }
+                | Code::MissingCitation { .. }
+        )
     );
     let kind = match diagnostic.severity {
         Severity::Error => Kind::Error,
@@ -193,7 +199,8 @@ pub struct Refused<'a> {
 }
 
 /// The report for the engine's `errors` and `warnings`, an export that was `refused`, and the placeholders in the cache.
-/// `general` names the section of what belongs to no chapter. `page_place` says where a page's first text is written.
+/// Errors and placeholders come before warnings, each group in book order, and the list and the walk over it follow
+/// that order, so a chapter with both stands once in each group. `general` names the section of what belongs to no chapter. `page_place` says where a page's first text is written.
 pub fn build(
     session: &Session,
     errors: &[Diagnostic],
@@ -213,19 +220,20 @@ pub fn build(
                 .collect(),
         });
     }
-    let mut loose = Vec::new();
-    let mut by_chapter: HashMap<ChapterId, Vec<Entry>> = HashMap::new();
+    // What stops an export, then warnings, each in book order: with what belongs to no chapter first, then the chapters.
+    let mut grouped: HashMap<(bool, Option<ChapterId>), Vec<Entry>> = HashMap::new();
     for diagnostic in errors.iter().chain(warnings) {
-        match entry(session, diagnostic, page_place) {
-            (Some(id), entry) => by_chapter.entry(id).or_default().push(entry),
-            (None, entry) => loose.push(entry),
-        }
+        let (owner, entry) = entry(session, diagnostic, page_place);
+        grouped
+            .entry((entry.kind == Kind::Warning, owner))
+            .or_default()
+            .push(entry);
     }
     for id in session.book() {
         let Some(found) = facts.get(id) else { continue };
         let buffer = session.buffer(*id);
         for Todo { offset, text } in &found.todos {
-            by_chapter.entry(*id).or_default().push(Entry {
+            grouped.entry((false, Some(*id))).or_default().push(Entry {
                 kind: Kind::Todo,
                 line: Some(buffer.line_of(*offset)),
                 place: Some((*id, *offset)),
@@ -234,24 +242,18 @@ pub fn build(
             });
         }
     }
-    if !loose.is_empty() {
-        sections.push(Section {
-            chapter: None,
-            title: general.to_owned(),
-            entries: loose,
-        });
-    }
-    for id in session.book() {
-        let Some(mut entries) = by_chapter.remove(id) else {
-            continue;
-        };
-        // Errors first, then in reading order.
-        entries.sort_by_key(|entry| (entry.kind, entry.line));
-        sections.push(Section {
-            chapter: Some(*id),
-            title: session.title_of(*id),
-            entries,
-        });
+    for warnings in [false, true] {
+        for owner in std::iter::once(None).chain(session.book().iter().copied().map(Some)) {
+            let Some(mut entries) = grouped.remove(&(warnings, owner)) else {
+                continue;
+            };
+            entries.sort_by_key(|entry| entry.line);
+            sections.push(Section {
+                chapter: owner,
+                title: owner.map_or_else(|| general.to_owned(), |id| session.title_of(id)),
+                entries,
+            });
+        }
     }
     Report { sections }
 }
@@ -377,6 +379,44 @@ mod tests {
     }
 
     #[test]
+    fn errors_and_placeholders_come_before_warnings_each_in_book_order() {
+        let (dir, session) = project("order");
+        let [one, two] = [session.book()[0], session.book()[1]];
+        let mut error = warning(&session, "two.md", 5);
+        error.severity = Severity::Error;
+        let warnings = [warning(&session, "one.md", 1), warning(&session, "two.md", 3)];
+        let report = build(
+            &session,
+            &[error],
+            &warnings,
+            None,
+            &facts_of(&session),
+            "Project",
+            &|_| None,
+        );
+        let order: Vec<_> = report
+            .sections
+            .iter()
+            .map(|section| {
+                (
+                    section.chapter,
+                    section.entries.iter().map(|entry| entry.kind).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            order,
+            [
+                (Some(one), vec![Kind::Todo]),
+                (Some(two), vec![Kind::Error]),
+                (Some(one), vec![Kind::Warning]),
+                (Some(two), vec![Kind::Warning]),
+            ]
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn a_refused_exports_errors_come_first_with_their_places() {
         let (dir, session) = project("refused");
         let mut image = Diagnostic::error("export \"print\" is final, but this image is not there: a.png");
@@ -397,7 +437,7 @@ mod tests {
             &|_| None,
         );
         let titles: Vec<_> = report.sections.iter().map(|section| section.title.as_str()).collect();
-        assert_eq!(titles, ["Export \"print\"", "One"]);
+        assert_eq!(titles, ["Export \"print\"", "One", "One"]);
         let first = report.entries().next().expect("an entry");
         assert_eq!(first.kind, Kind::Error);
         assert_eq!(first.place.map(|(id, _)| id), Some(session.book()[1]));
