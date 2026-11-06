@@ -167,9 +167,11 @@ impl ProbeChoice {
                     },
                 )),
             )
-            .child(segment("probe-other", other, !book_on).on_click(cx.listener(|panel, _, _, cx| {
-                panel.probe.choose_next(cx);
-            })))
+            .child(
+                segment("probe-other", other, !book_on).on_click(cx.listener(|panel, _, _, cx| {
+                    panel.probe.choose_next(cx);
+                })),
+            )
             .into_any_element()
     }
 

@@ -84,9 +84,8 @@ impl Pins {
 
     /// Pins `item` to the paragraph `quote` names, unless it is pinned there already. Returns whether it was added.
     pub fn add(&mut self, pin: Pin) -> io::Result<bool> {
-        let there = (self.pins.iter()).any(|other| {
-            other.chapter == pin.chapter && other.quote == pin.quote && other.item == pin.item
-        });
+        let there = (self.pins.iter())
+            .any(|other| other.chapter == pin.chapter && other.quote == pin.quote && other.item == pin.item);
         if there {
             return Ok(false);
         }
@@ -143,7 +142,8 @@ impl Pins {
 mod tests {
     use super::*;
 
-    const TEXT: &str = "# Tolls\n\nHis wage was fixed and small: twelve Gulden a year, a house by the gate.\n\nShort one.\n";
+    const TEXT: &str =
+        "# Tolls\n\nHis wage was fixed and small: twelve Gulden a year, a house by the gate.\n\nShort one.\n";
 
     #[test]
     fn a_pin_quotes_its_paragraphs_opening_and_finds_it_again_after_edits_elsewhere() {
@@ -151,7 +151,9 @@ mod tests {
         assert_eq!(quote, "His wage was fixed and small: twelve Gulden a");
         assert_eq!(quote_at(TEXT, TEXT.len() - 3).as_deref(), Some("Short one."));
         assert_eq!(quote_at(TEXT, 2), None);
-        let edited = TEXT.replace("# Tolls", "# Tolls and tariffs").replace("the gate", "the bridge");
+        let edited = TEXT
+            .replace("# Tolls", "# Tolls and tariffs")
+            .replace("the gate", "the bridge");
         assert_eq!(anchor(&edited, &quote), Some(edited.find("His").unwrap()));
         assert_eq!(anchor("Gone.\n", &quote), None);
     }
@@ -169,7 +171,7 @@ mod tests {
         };
         assert!(pins.add(pin.clone()).unwrap());
         assert!(!pins.add(pin.clone()).unwrap());
-        assert_eq!(Pins::open(&base).all(), [pin.clone()]);
+        assert_eq!(Pins::open(&base).all(), std::slice::from_ref(&pin));
         let quotes = [("His wage".to_owned(), "Her wage".to_owned())];
         assert!(pins.requote("manuscript/05.md", &quotes).unwrap());
         assert_eq!(Pins::open(&base).all()[0].quote, "Her wage");

@@ -1060,11 +1060,11 @@ impl EditorView {
         self.step_pin(true, window, cx);
     }
 
-    /// Writes a figure of `file` at the caret, as the image command does: a file inside the book is referenced where it
-    /// is, one outside is copied in.
+    /// Writes a figure of `file` after the caret's block, as the image command does: a file inside the book is
+    /// referenced where it is, one outside is copied in. A selection stays as it is.
     pub fn insert_image_file(&mut self, file: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let at = self.selection.range();
-        self.take_image(file, at, window, cx);
+        let end = self.selection.range().end;
+        self.take_image(file, end..end, window, cx);
     }
 
     pub(super) fn next_pin(&mut self, _: &NextPin, window: &mut Window, cx: &mut Context<Self>) {
@@ -1133,7 +1133,13 @@ impl EditorView {
             .collect()
     }
 
-    fn pin_stack(&mut self, group: &PinGroup, window: &Window, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn pin_stack(
+        &mut self,
+        group: &PinGroup,
+        window: &Window,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let focus = self.pins.focus.get_or_insert_with(|| cx.focus_handle()).clone();
         let focused = focus.is_focused(window);
         let expanded = self.pins.step % group.cards.len().max(1);
@@ -1147,7 +1153,12 @@ impl EditorView {
             .text_color(tokens.text_quiet)
             .border_b_1()
             .border_color(tokens.divider)
-            .child(svg().path("icons/pin.svg").size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+            .child(
+                svg()
+                    .path("icons/pin.svg")
+                    .size(tokens::NOTE_ICON)
+                    .text_color(tokens.text_faint),
+            )
             .child(crate::t!(Key::Pinned, count = group.cards.len()));
         let rows: Vec<AnyElement> = (group.cards.iter().enumerate())
             .map(|(at, card)| {
@@ -1167,7 +1178,13 @@ impl EditorView {
                         .border_b_1()
                         .border_color(tokens.divider)
                         .hover(|row| row.bg(tokens.raised))
-                        .child(svg().flex_none().path(card.icon).size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+                        .child(
+                            svg()
+                                .flex_none()
+                                .path(card.icon)
+                                .size(tokens::NOTE_ICON)
+                                .text_color(tokens.text_faint),
+                        )
                         .child(div().min_w_0().truncate().child(card.title.clone()))
                         .on_click(cx.listener(move |editor, _, _, cx| {
                             editor.pins.step = step;
@@ -1215,7 +1232,13 @@ impl EditorView {
             .child(foot)
     }
 
-    fn pin_expanded(&self, card: &PinCard, focused: bool, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn pin_expanded(
+        &self,
+        card: &PinCard,
+        focused: bool,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let index = card.index;
         let button = |name: &'static str, label: String, verb: PinVerb, cx: &mut Context<Self>| {
             super::review::small_button((name, index), label, tokens)
@@ -1230,7 +1253,9 @@ impl EditorView {
             .gap(tokens::SPACE_1)
             .border_b_1()
             .border_color(tokens.divider)
-            .when(focused, |card| card.border_l(tokens::KEY_BAR).border_color(tokens.accent))
+            .when(focused, |card| {
+                card.border_l(tokens::KEY_BAR).border_color(tokens.accent)
+            })
             .child(
                 div()
                     .flex()
@@ -1238,7 +1263,13 @@ impl EditorView {
                     .gap(tokens::SPACE_1)
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(tokens.text)
-                    .child(svg().flex_none().path(card.icon).size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+                    .child(
+                        svg()
+                            .flex_none()
+                            .path(card.icon)
+                            .size(tokens::NOTE_ICON)
+                            .text_color(tokens.text_faint),
+                    )
                     .child(div().min_w_0().truncate().child(card.title.clone())),
             )
             .when(!card.meta.is_empty(), |column| {
@@ -1263,8 +1294,18 @@ impl EditorView {
                     .flex_wrap()
                     .gap(tokens::SPACE_1)
                     .child(button("pin-insert", card.insert.clone(), PinVerb::Insert, cx))
-                    .child(button("pin-open", crate::t!(Key::PinOpen).to_owned(), PinVerb::Open, cx))
-                    .child(button("pin-unpin", crate::t!(Key::Unpin).to_owned(), PinVerb::Unpin, cx)),
+                    .child(button(
+                        "pin-open",
+                        crate::t!(Key::PinOpen).to_owned(),
+                        PinVerb::Open,
+                        cx,
+                    ))
+                    .child(button(
+                        "pin-unpin",
+                        crate::t!(Key::Unpin).to_owned(),
+                        PinVerb::Unpin,
+                        cx,
+                    )),
             )
     }
 }
@@ -1324,6 +1365,26 @@ mod tests {
         for (pair, note) in placed.windows(2).zip(&notes) {
             assert!(pair[0] + note.height <= pair[1], "{placed:?}");
         }
+    }
+
+    #[test]
+    fn pins_move_with_edits_before_their_paragraph_and_stay_for_edits_after_it() {
+        let group = |anchor| PinGroup {
+            anchor,
+            cards: Vec::new(),
+        };
+        let mut pins = Pins {
+            groups: vec![group(10), group(40)],
+            ..Pins::default()
+        };
+        let splice = crate::source::buffer::Splice {
+            start: 20,
+            old_end: 25,
+            new_end: 32,
+        };
+        pins.shift(&splice);
+        let anchors: Vec<_> = pins.groups.iter().map(|group| group.anchor).collect();
+        assert_eq!(anchors, [10, 47]);
     }
 
     #[test]

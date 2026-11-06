@@ -74,7 +74,9 @@ impl Trail {
     /// The last places up to the current one, oldest first, with how many steps back each is.
     pub fn shown(&self) -> Vec<(usize, &Place)> {
         let from = (self.at + 1).saturating_sub(SHOWN);
-        (from..=self.at).map(|index| (self.at - index, &self.places[index])).collect()
+        (from..=self.at)
+            .map(|index| (self.at - index, &self.places[index]))
+            .collect()
     }
 
     /// Steps back `steps` places, for a click on the trail.
@@ -126,7 +128,11 @@ mod tests {
         for id in ["a", "b", "c"] {
             trail.go(item(id));
         }
-        let shown: Vec<_> = trail.shown().into_iter().map(|(steps, place)| (steps, place.clone())).collect();
+        let shown: Vec<_> = trail
+            .shown()
+            .into_iter()
+            .map(|(steps, place)| (steps, place.clone()))
+            .collect();
         assert_eq!(shown, [(2, item("a")), (1, item("b")), (0, item("c"))]);
         trail.back_by(2);
         assert_eq!(trail.current(), &item("a"));

@@ -99,8 +99,14 @@ mod tests {
 
     #[test]
     fn a_quotation_takes_the_books_marks_and_a_citation() {
-        assert_eq!(quotation(" They rounded. ", Some("s24"), "en"), "\u{201c}They rounded.\u{201d} [@s24]");
-        assert_eq!(quotation("\"Sie rundeten.\"", None, "de-AT"), "\u{201e}Sie rundeten.\u{201c}");
+        assert_eq!(
+            quotation(" They rounded. ", Some("s24"), "en"),
+            "\u{201c}They rounded.\u{201d} [@s24]"
+        );
+        assert_eq!(
+            quotation("\"Sie rundeten.\"", None, "de-AT"),
+            "\u{201e}Sie rundeten.\u{201c}"
+        );
     }
 
     #[test]

@@ -143,7 +143,9 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
             }
         }),
     });
-    slots.overlays.push(cx.new(|_| rail::RailEdge::new(material.clone())).into());
+    slots
+        .overlays
+        .push(cx.new(|_| rail::RailEdge::new(material.clone())).into());
     slots.overlays.push(library.into());
     cx.subscribe_in(&workspace, window, move |_, _, ModeChanged(mode), window, cx| {
         let mode = *mode;
@@ -160,9 +162,13 @@ impl Material {
             cx.subscribe(&editor, |material, _, _: &TextChanged, cx| material.text_changed(cx)),
             cx.subscribe(&editor, |_, _, PinClicked(index, verb), cx| {
                 let (index, verb) = (*index, *verb);
-                Current::<Material>::defer(cx, move |material, window, cx| material.pin_clicked(index, verb, window, cx));
+                Current::<Material>::defer(cx, move |material, window, cx| {
+                    material.pin_clicked(index, verb, window, cx)
+                });
             }),
-            cx.subscribe(&parts.inspector, |material, _, TabShown(tab), cx| material.tab_shown(*tab, cx)),
+            cx.subscribe(&parts.inspector, |material, _, TabShown(tab), cx| {
+                material.tab_shown(*tab, cx)
+            }),
         ];
         let mut material = Self {
             parts,
@@ -490,7 +496,9 @@ impl Material {
         if let Some(panel) = self.panel.clone() {
             panel.update(cx, |panel, cx| panel.open_item(&id, cx));
         }
-        self.parts.inspector.update(cx, |inspector, cx| inspector.show_quietly(tab, cx));
+        self.parts
+            .inspector
+            .update(cx, |inspector, cx| inspector.show_quietly(tab, cx));
         self.focus_panel(false, window, cx);
     }
 
@@ -524,7 +532,10 @@ impl Material {
                     let chapter = editor.session().active();
                     let caret = range.start + written.len();
                     let edit = crate::source::Edit::new(range, written);
-                    if editor.edit_outside(chapter, vec![edit], EditKind::Discrete, window, cx).is_ok() {
+                    if editor
+                        .edit_outside(chapter, vec![edit], EditKind::Discrete, window, cx)
+                        .is_ok()
+                    {
                         editor.jump_to(caret, window, cx);
                     }
                 });
@@ -541,7 +552,10 @@ impl Material {
                     let caret = editor.selection_range().end;
                     let (edit, after) = verbs::after_block(editor.text(), caret, &content);
                     let chapter = editor.session().active();
-                    if editor.edit_outside(chapter, vec![edit], EditKind::Discrete, window, cx).is_ok() {
+                    if editor
+                        .edit_outside(chapter, vec![edit], EditKind::Discrete, window, cx)
+                        .is_ok()
+                    {
                         editor.jump_to(after, window, cx);
                     }
                 });

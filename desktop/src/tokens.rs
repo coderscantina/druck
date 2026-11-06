@@ -335,7 +335,8 @@ pub const PIN_EXCERPT_LINES: usize = 6;
 /// The material panel in Write, wider than Publish's for reading, and how narrow it gets before it gives way.
 pub const MATERIAL_PANEL_WIDTH: Pixels = px(336.);
 pub const MATERIAL_PANEL_MIN_WIDTH: Pixels = px(280.);
-/// The faint tick at Write's right edge, the strip the pointer rests on to open the rail, and how long it rests.
+/// The faint tick at Write's right edge, the strip the pointer rests on to open the rail, and how long it rests. The
+/// strip stands left of the text's scrollbar, so a drag on the scrollbar never opens the rail.
 pub const MATERIAL_TICK: (Pixels, Pixels) = (px(3.), px(32.));
 pub const MATERIAL_TICK_INSET: Pixels = px(4.);
 pub const MATERIAL_TICK_OPACITY: f32 = 0.45;

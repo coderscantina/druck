@@ -64,7 +64,11 @@ impl Item {
 
     /// How a list names the item: a file by its name, a bibliography entry by its authors, year, and title.
     pub fn label(&self) -> &str {
-        if self.form == Form::Source { &self.title } else { self.name() }
+        if self.form == Form::Source {
+            &self.title
+        } else {
+            self.name()
+        }
     }
 
     /// The text's paragraphs without its headings, joined, for a short excerpt.
@@ -193,7 +197,10 @@ pub fn scan(base: &Path, works: &[Work]) -> Vec<Item> {
                         .find_map(|line| line.strip_prefix("# "))
                         .map(|title| title.trim().to_owned())
                 })
-                .unwrap_or_else(|| path.file_name().map_or(stem.clone(), |name| name.to_string_lossy().into()));
+                .unwrap_or_else(|| {
+                    path.file_name()
+                        .map_or(stem.clone(), |name| name.to_string_lossy().into())
+                });
             Some(Item {
                 kind,
                 form,
@@ -243,6 +250,9 @@ pub enum Where {
     Cited(usize),
 }
 
+/// Sections by their title, each with an offset in the chapter.
+type Places = Vec<(String, usize)>;
+
 /// One item's uses in the chapter: where, for its list's row, and the sections that cite it, for its header's links.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Uses {
@@ -254,7 +264,13 @@ pub struct Uses {
 
 /// A heading's words, without its markers and a closing `{...}`.
 fn heading_title(block: &str) -> String {
-    let line = block.lines().next().unwrap_or_default().trim().trim_start_matches('#').trim();
+    let line = block
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('#')
+        .trim();
     let line = match line.rfind('{') {
         Some(open) if line.ends_with('}') => line[..open].trim_end(),
         _ => line,
@@ -268,7 +284,7 @@ pub fn uses(items: &[Item], text: &str) -> Vec<Uses> {
     let blocks = Blocks::parse(text);
     let mut section = String::new();
     // In order of first use: the item, and each use's section and offset.
-    let mut found: Vec<(String, bool, Vec<(String, usize)>)> = Vec::new();
+    let mut found: Vec<(String, bool, Places)> = Vec::new();
     let mut note = |item: &str, figure: bool, section: &str, offset: usize| {
         let entry = match found.iter_mut().position(|(id, ..)| id == item) {
             Some(at) => &mut found[at],
@@ -299,7 +315,10 @@ pub fn uses(items: &[Item], text: &str) -> Vec<Uses> {
                     };
                     for cited in &citation.items {
                         let offset = block.range.start + cited.range.start;
-                        for item in items.iter().filter(|item| item.key.as_deref() == Some(cited.key.as_str())) {
+                        for item in items
+                            .iter()
+                            .filter(|item| item.key.as_deref() == Some(cited.key.as_str()))
+                        {
                             note(&item.id, false, &section, offset);
                         }
                     }
@@ -322,11 +341,7 @@ pub fn uses(items: &[Item], text: &str) -> Vec<Uses> {
                 (false, 1) => Where::Section(places[0].0.clone()),
                 (false, count) => Where::Cited(count),
             };
-            Uses {
-                item,
-                shown,
-                sections,
-            }
+            Uses { item, shown, sections }
         })
         .collect()
 }
@@ -340,7 +355,10 @@ pub fn mentions(text: &str, items: &[Item], own: &str) -> Vec<(Range<usize>, Str
         while let Some(at) = text[from..].find(name) {
             let start = from + at;
             let range = start..start + name.len();
-            if !found.iter().any(|(other, _)| other.start < range.end && range.start < other.end) {
+            if !found
+                .iter()
+                .any(|(other, _)| other.start < range.end && range.start < other.end)
+            {
                 found.push((range, item.id.clone()));
             }
             from = start + name.len();
@@ -431,7 +449,10 @@ mod tests {
     #[test]
     fn an_item_stands_for_its_front_matters_key_or_a_key_named_as_its_file() {
         let works = [work("salzmann2024")];
-        assert_eq!(key_of("key: klein1998", "interview", &works).as_deref(), Some("klein1998"));
+        assert_eq!(
+            key_of("key: klein1998", "interview", &works).as_deref(),
+            Some("klein1998")
+        );
         assert_eq!(key_of("", "Salzmann2024", &works).as_deref(), Some("salzmann2024"));
         assert_eq!(key_of("title: x", "interview", &works), None);
     }
@@ -441,7 +462,11 @@ mod tests {
         let base = std::env::temp_dir().join(format!("druck-material-{}", std::process::id()));
         fs::create_dir_all(base.join("research/scans")).unwrap();
         fs::create_dir_all(base.join("notes/probes")).unwrap();
-        fs::write(base.join("research/interview.md"), "---\ntitle: \"With Anna\"\ndate: 2024-03-14\nkey: s24\n---\n\nHow much?\n").unwrap();
+        fs::write(
+            base.join("research/interview.md"),
+            "---\ntitle: \"With Anna\"\ndate: 2024-03-14\nkey: s24\n---\n\nHow much?\n",
+        )
+        .unwrap();
         fs::write(base.join("research/scans/board.png"), b"").unwrap();
         fs::write(base.join("research/tariff.csv"), "a,b\n").unwrap();
         fs::write(base.join("research/.hidden.md"), "no").unwrap();
@@ -449,7 +474,10 @@ mod tests {
         fs::write(base.join("notes/probes/gate.md"), "The gate is shut.\n").unwrap();
         fs::write(base.join("notes/sketch.png"), b"").unwrap();
         let items = scan(&base, &[work("k")]);
-        let ids: Vec<_> = items.iter().map(|item| (item.id.as_str(), item.kind, item.form)).collect();
+        let ids: Vec<_> = items
+            .iter()
+            .map(|item| (item.id.as_str(), item.kind, item.form))
+            .collect();
         assert_eq!(
             ids,
             [
@@ -504,7 +532,10 @@ mod tests {
 
     #[test]
     fn a_query_matches_every_word_in_title_path_or_key() {
-        let items = [item("research/tariff.csv", Form::Table, None), item("notes/open.md", Form::Text, Some("tar"))];
+        let items = [
+            item("research/tariff.csv", Form::Table, None),
+            item("notes/open.md", Form::Text, Some("tar")),
+        ];
         let found: Vec<_> = matching(&items, "TAR").iter().map(|item| item.id.as_str()).collect();
         assert_eq!(found, ["research/tariff.csv", "notes/open.md"]);
         assert!(matching(&items, "tar csv nothing").is_empty());

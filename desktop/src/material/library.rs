@@ -17,7 +17,20 @@ use crate::workspace::TextColumn;
 
 const CONTEXT: &str = "Library";
 
-actions!(library, [InsertChosen, Filter1, Filter2, Filter3, Filter4, Filter5, Filter6, Filter7, Filter8]);
+actions!(
+    library,
+    [
+        InsertChosen,
+        Filter1,
+        Filter2,
+        Filter3,
+        Filter4,
+        Filter5,
+        Filter6,
+        Filter7,
+        Filter8
+    ]
+);
 
 pub fn bind_keys(cx: &mut App) {
     let context = Some(CONTEXT);
@@ -106,7 +119,12 @@ pub struct LibraryCard {
 }
 
 impl LibraryCard {
-    pub fn new(material: Entity<Material>, editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        material: Entity<Material>,
+        editor: Entity<EditorView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
                 .bare()
@@ -122,8 +140,12 @@ impl LibraryCard {
                 card.selected = 0;
                 cx.notify();
             }),
-            cx.subscribe_in(&input, window, |card, _, _: &Submitted, window, cx| card.open_in_rail(window, cx)),
-            cx.subscribe_in(&input, window, |card, _, _: &Cancelled, window, cx| card.close(window, cx)),
+            cx.subscribe_in(&input, window, |card, _, _: &Submitted, window, cx| {
+                card.open_in_rail(window, cx)
+            }),
+            cx.subscribe_in(&input, window, |card, _, _: &Cancelled, window, cx| {
+                card.close(window, cx)
+            }),
             cx.subscribe(&material, |_, _, _: &MaterialChanged, cx| cx.notify()),
         ];
         Self {
@@ -147,9 +169,17 @@ impl LibraryCard {
         }
         self.open = true;
         self.before = window.focused(cx);
+        // The card has the keys: no selection toolbar stands over it, and the selection stays.
+        self.editor.update(cx, |editor, cx| {
+            let range = editor.selection_range();
+            if !range.is_empty() {
+                editor.select(range, window, cx);
+            }
+        });
         self.selected = 0;
         self.filter = Filter::All;
-        self.input.update(cx, |input, cx| input.set_value(String::new(), true, cx));
+        self.input
+            .update(cx, |input, cx| input.set_value(String::new(), true, cx));
         let handle = self.input.focus_handle(cx);
         window.focus(&handle, cx);
         cx.notify();
@@ -224,7 +254,8 @@ impl LibraryCard {
             return;
         };
         self.close(window, cx);
-        self.material.update(cx, |material, cx| material.pin(&item.id, None, cx));
+        self.material
+            .update(cx, |material, cx| material.pin(&item.id, None, cx));
     }
 
     fn insert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -241,14 +272,22 @@ impl LibraryCard {
             return;
         };
         self.close(window, cx);
-        self.material.update(cx, |material, cx| material.open(&item.id, window, cx));
+        self.material
+            .update(cx, |material, cx| material.open(&item.id, window, cx));
     }
 
     fn filters(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let mut chips: Vec<AnyElement> = Vec::new();
         for filter in Filter::ALL {
             if filter.starts_group() {
-                chips.push(div().w(tokens::HAIRLINE).h(px(14.)).mx(tokens::SPACE_1).bg(tokens.divider).into_any_element());
+                chips.push(
+                    div()
+                        .w(tokens::HAIRLINE)
+                        .h(px(14.))
+                        .mx(tokens::SPACE_1)
+                        .bg(tokens.divider)
+                        .into_any_element(),
+                );
             }
             let on = filter == self.filter;
             let count = (filter != Filter::All).then(|| self.count(filter, cx));
@@ -320,7 +359,9 @@ impl LibraryCard {
                     .object_fit(ObjectFit::Contain)
                     .rounded(tokens::BOX_RADIUS)
             });
-        let excerpt = (item.form == Form::Text).then(|| item.prose()).filter(|text| !text.is_empty());
+        let excerpt = (item.form == Form::Text)
+            .then(|| item.prose())
+            .filter(|text| !text.is_empty());
         let body = self.editor.read(cx).body_font().family;
         let pins = material.pinned_count(&item.id);
         let path = item.path().unwrap_or(&item.id).to_owned();
@@ -333,9 +374,26 @@ impl LibraryCard {
             .flex_col()
             .gap(tokens::HAIR_GAP)
             .children(picture)
-            .child(div().mt(tokens::SPACE_2).font_weight(FontWeight::SEMIBOLD).truncate().child(item.title.clone()))
-            .child(div().text_size(tokens::TEXT_SMALL).text_color(tokens.text_faint).truncate().child(path))
-            .children(pinned.map(|pinned| div().text_size(tokens::TEXT_SMALL).text_color(tokens.text_faint).child(pinned)))
+            .child(
+                div()
+                    .mt(tokens::SPACE_2)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(item.title.clone()),
+            )
+            .child(
+                div()
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_faint)
+                    .truncate()
+                    .child(path),
+            )
+            .children(pinned.map(|pinned| {
+                div()
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_faint)
+                    .child(pinned)
+            }))
             .children(excerpt.map(|excerpt| {
                 div()
                     .mt(tokens::SPACE_1)
@@ -405,7 +463,13 @@ impl Render for LibraryCard {
                     .cursor_pointer()
                     .when(chosen, |row| row.bg(tokens.raised))
                     .hover(|row| row.bg(tokens.raised))
-                    .child(svg().flex_none().path(icon(item)).size(tokens::ICON_SIZE).text_color(tokens.text_faint))
+                    .child(
+                        svg()
+                            .flex_none()
+                            .path(icon(item))
+                            .size(tokens::ICON_SIZE)
+                            .text_color(tokens.text_faint),
+                    )
                     .child(div().flex_1().min_w_0().truncate().child(item.label().to_owned()))
                     .child(
                         div()
@@ -430,7 +494,9 @@ impl Render for LibraryCard {
         let fallback = (window_size.height - height - tokens::FOOTER_HEIGHT).max(tokens::TITLEBAR_HEIGHT);
         let top = match span {
             Some((_, bottom)) if bottom + tokens::SPACE_2 + height <= window_size.height => bottom + tokens::SPACE_2,
-            Some((top, _)) if top - tokens::SPACE_2 - height >= tokens::TITLEBAR_HEIGHT => top - tokens::SPACE_2 - height,
+            Some((top, _)) if top - tokens::SPACE_2 - height >= tokens::TITLEBAR_HEIGHT => {
+                top - tokens::SPACE_2 - height
+            }
             _ => fallback,
         };
         let count = crate::t!(Key::Count, all = all, shown = results.len());
@@ -477,9 +543,21 @@ impl Render for LibraryCard {
                     .gap(tokens::SPACE_2)
                     .border_b_1()
                     .border_color(tokens.divider)
-                    .child(svg().flex_none().path("icons/search.svg").size(tokens::ICON_SIZE).text_color(tokens.text_faint))
+                    .child(
+                        svg()
+                            .flex_none()
+                            .path("icons/search.svg")
+                            .size(tokens::ICON_SIZE)
+                            .text_color(tokens.text_faint),
+                    )
                     .child(div().flex_1().min_w_0().child(self.input.clone()))
-                    .child(div().flex_none().text_size(tokens::TEXT_SMALL).text_color(tokens.text_faint).child(count)),
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_faint)
+                            .child(count),
+                    ),
             )
             .child(self.filters(&tokens, cx))
             .child(

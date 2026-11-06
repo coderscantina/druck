@@ -39,6 +39,9 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
+/// An image's size in pixels, or why it cannot be read.
+type ImageSize = Result<(f32, f32), String>;
+
 /// A row of a list: a group's label before it, if it starts one, and the item with what stands at its end.
 struct Row {
     group: Option<&'static str>,
@@ -59,7 +62,7 @@ pub struct MaterialPanel {
     /// An open table's rows, read when it opened.
     table: Option<(String, Vec<Vec<String>>)>,
     /// An open image's size, read when it opened.
-    image_size: Option<(String, Result<(f32, f32), String>)>,
+    image_size: Option<(String, ImageSize)>,
     scroll: ScrollHandle,
     pub(super) probe: super::probe::ProbeChoice,
     _subscriptions: Vec<Subscription>,
@@ -87,7 +90,9 @@ impl MaterialPanel {
                 panel.selected = 0;
                 cx.notify();
             }),
-            cx.subscribe_in(&field, window, |panel, _, _: &Submitted, window, cx| panel.open(window, cx)),
+            cx.subscribe_in(&field, window, |panel, _, _: &Submitted, window, cx| {
+                panel.open(window, cx)
+            }),
             cx.subscribe_in(&field, window, |panel, _, _: &Cancelled, window, cx| {
                 panel.selected = 0;
                 window.focus(&panel.focus, cx);
@@ -156,7 +161,9 @@ impl MaterialPanel {
     fn load(&mut self, cx: &mut Context<Self>) {
         if let Place::Item(id) = self.trail.current().clone() {
             let material = self.material.read(cx);
-            let file = material.item(&id).and_then(|item| Some((item.form, material.base()?.join(item.path()?))));
+            let file = material
+                .item(&id)
+                .and_then(|item| Some((item.form, material.base()?.join(item.path()?))));
             match file {
                 Some((Form::Table, file)) if self.table.as_ref().is_none_or(|(seen, _)| *seen != id) => {
                     let rows = std::fs::read_to_string(file).map_or(Vec::new(), |text| super::model::csv_rows(&text));
@@ -206,7 +213,8 @@ impl MaterialPanel {
         let material = self.material.read(cx);
         let items = material.items();
         let query = self.query(cx);
-        let matches = |item: &Item| query.is_empty() || !super::model::matching(std::slice::from_ref(item), &query).is_empty();
+        let matches =
+            |item: &Item| query.is_empty() || !super::model::matching(std::slice::from_ref(item), &query).is_empty();
         let mut rows = Vec::new();
         if self.jumping(window, cx) {
             let recent: Vec<&Item> = (self.trail.recent().iter())
@@ -220,12 +228,16 @@ impl MaterialPanel {
                     end: Some(kind_label(item.kind).to_owned()),
                 });
             }
-            let others = items.iter().filter(|item| matches(item) && !recent.iter().any(|seen| seen.id == item.id));
+            let others = items
+                .iter()
+                .filter(|item| matches(item) && !recent.iter().any(|seen| seen.id == item.id));
             for (at, item) in others.enumerate() {
                 rows.push(Row {
                     group: (at == 0).then(|| crate::t!(Key::Matches)),
                     id: item.id.clone(),
-                    end: self.where_of(&item.id, cx).or_else(|| Some(kind_label(item.kind).to_owned())),
+                    end: self
+                        .where_of(&item.id, cx)
+                        .or_else(|| Some(kind_label(item.kind).to_owned())),
                 });
             }
             return rows;
@@ -244,7 +256,8 @@ impl MaterialPanel {
                 end: self.where_of(&item.id, cx),
             });
         }
-        let rest = (items.iter()).filter(|item| item.kind == *kind && matches(item) && !used.iter().any(|seen| seen.id == item.id));
+        let rest = (items.iter())
+            .filter(|item| item.kind == *kind && matches(item) && !used.iter().any(|seen| seen.id == item.id));
         for (at, item) in rest.enumerate() {
             rows.push(Row {
                 group: (at == 0).then(|| kind_label(*kind)),
@@ -306,7 +319,8 @@ impl MaterialPanel {
     fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.jumping(window, cx) {
             if let Some((id, _)) = self.chosen(window, cx) {
-                self.field.update(cx, |field, cx| field.set_value(String::new(), true, cx));
+                self.field
+                    .update(cx, |field, cx| field.set_value(String::new(), true, cx));
                 window.focus(&self.focus, cx);
                 self.open_item(&id, cx);
             }
@@ -340,7 +354,8 @@ impl MaterialPanel {
 
     fn pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((id, passage)) = self.chosen(window, cx) {
-            self.material.update(cx, |material, cx| material.pin(&id, passage.as_deref(), cx));
+            self.material
+                .update(cx, |material, cx| material.pin(&id, passage.as_deref(), cx));
         }
     }
 
@@ -373,12 +388,19 @@ impl MaterialPanel {
             .items_center()
             .justify_center()
             .rounded(tokens::RADIUS)
-            .when(can_go_back, |button| button.cursor_pointer().hover(|button| button.bg(tokens.raised)))
-            .child(svg().path("icons/chevron-left.svg").size(tokens::ICON_SIZE).text_color(if can_go_back {
-                tokens.text_quiet
-            } else {
-                tokens.text_faint
-            }))
+            .when(can_go_back, |button| {
+                button.cursor_pointer().hover(|button| button.bg(tokens.raised))
+            })
+            .child(
+                svg()
+                    .path("icons/chevron-left.svg")
+                    .size(tokens::ICON_SIZE)
+                    .text_color(if can_go_back {
+                        tokens.text_quiet
+                    } else {
+                        tokens.text_faint
+                    }),
+            )
             .on_click(cx.listener(|panel, _, _, cx| panel.back(cx)));
         let shown = self.trail.shown();
         let last = shown.len().saturating_sub(1);
@@ -401,7 +423,11 @@ impl MaterialPanel {
                     .px(tokens::SPACE_1)
                     .rounded(tokens::BOX_RADIUS)
                     .truncate()
-                    .when(current, |step| step.flex_none().font_weight(FontWeight::SEMIBOLD).text_color(tokens.text))
+                    .when(current, |step| {
+                        step.flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(tokens.text)
+                    })
                     .when(!current, |step| {
                         step.flex_shrink(1.)
                             .min_w_0()
@@ -454,9 +480,21 @@ impl MaterialPanel {
             .bg(tokens.field)
             .border_1()
             .border_color(if jumping { tokens.divider } else { tokens.field })
-            .child(svg().flex_none().path("icons/search.svg").size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+            .child(
+                svg()
+                    .flex_none()
+                    .path("icons/search.svg")
+                    .size(tokens::NOTE_ICON)
+                    .text_color(tokens.text_faint),
+            )
             .child(div().flex_1().min_w_0().child(self.field.clone()))
-            .child(div().flex_none().text_size(tokens::TEXT_SMALL).text_color(tokens.text_faint).child(hint))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_faint)
+                    .child(hint),
+            )
     }
 
     fn list(&self, window: &Window, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
@@ -514,8 +552,21 @@ impl MaterialPanel {
                     .cursor_pointer()
                     .when(chosen, |line| line.bg(tokens.raised))
                     .hover(|line| line.bg(tokens.raised))
-                    .child(svg().flex_none().path(icon(item)).size(tokens::ICON_SIZE).text_color(tokens.text_faint))
-                    .child(div().flex_1().min_w_0().truncate().text_color(tokens.text).child(item.label().to_owned()))
+                    .child(
+                        svg()
+                            .flex_none()
+                            .path(icon(item))
+                            .size(tokens::ICON_SIZE)
+                            .text_color(tokens.text_faint),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(tokens.text)
+                            .child(item.label().to_owned()),
+                    )
                     .when_some(row.end.clone(), |line, end| {
                         line.child(
                             div()
@@ -528,7 +579,9 @@ impl MaterialPanel {
                         )
                     })
                     .on_click(cx.listener(move |panel, _, window, cx| {
-                        panel.field.update(cx, |field, cx| field.set_value(String::new(), true, cx));
+                        panel
+                            .field
+                            .update(cx, |field, cx| field.set_value(String::new(), true, cx));
                         window.focus(&panel.focus, cx);
                         panel.open_item(&id, cx);
                     }))
@@ -541,7 +594,11 @@ impl MaterialPanel {
     fn item_view(&self, item: &Item, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let (items, uses, base) = {
             let material = self.material.read(cx);
-            (material.items().clone(), material.uses_of(&item.id).cloned(), material.base().cloned())
+            (
+                material.items().clone(),
+                material.uses_of(&item.id).cloned(),
+                material.base().cloned(),
+            )
         };
         let path = item.path().unwrap_or(item.id.as_str()).to_owned();
         let meta = match item.form {
@@ -550,7 +607,10 @@ impl MaterialPanel {
                 _ => path,
             },
             Form::Table => match self.table.as_ref().filter(|(seen, _)| *seen == item.id) {
-                Some((_, rows)) => format!("{path} \u{b7} {}", crate::t!(Key::Rows, count = rows.len().saturating_sub(1))),
+                Some((_, rows)) => format!(
+                    "{path} \u{b7} {}",
+                    crate::t!(Key::Rows, count = rows.len().saturating_sub(1))
+                ),
                 None => path,
             },
             Form::Source => format!("{} \u{b7} {}", item.id, crate::t!(Key::Entry)),
@@ -564,45 +624,50 @@ impl MaterialPanel {
                 None => path,
             },
         };
-        let cited = uses.as_ref().filter(|uses| !matches!(uses.shown, Where::Figure(_))).map(|uses| {
-            let count = match uses.shown {
-                Where::Cited(count) => count,
-                _ => 1,
-            };
-            let lead = match count {
-                1 => crate::t!(Key::CitedOnce).to_owned(),
-                2 => crate::t!(Key::CitedTwice).to_owned(),
-                _ => crate::t!(Key::CitedTimes, count = count),
-            };
-            let mut links: Vec<AnyElement> = Vec::new();
-            for (at, (section, offset)) in uses.sections.iter().enumerate() {
-                let offset = *offset;
-                let comma = at + 1 < uses.sections.len();
-                links.push(
-                    div()
-                        .id(("cited-in", at))
-                        .role(Role::Link)
-                        .aria_label(section.clone())
-                        .cursor_pointer()
-                        .text_color(tokens.link)
-                        .hover(|link| link.underline())
-                        .child(if comma { format!("{section},") } else { section.clone() })
-                        .on_click(cx.listener(move |panel, _, window, cx| {
-                            panel.material.update(cx, |material, cx| material.show_in_text(offset, window, cx));
-                        }))
-                        .into_any_element(),
-                );
-            }
-            div()
-                .mt(tokens::SPACE_2)
-                .flex()
-                .flex_wrap()
-                .gap(tokens::SPACE_1)
-                .text_size(tokens::TEXT_SMALL)
-                .text_color(tokens.text_quiet)
-                .child(lead)
-                .children(links)
-        });
+        let cited = uses
+            .as_ref()
+            .filter(|uses| !matches!(uses.shown, Where::Figure(_)))
+            .map(|uses| {
+                let count = match uses.shown {
+                    Where::Cited(count) => count,
+                    _ => 1,
+                };
+                let lead = match count {
+                    1 => crate::t!(Key::CitedOnce).to_owned(),
+                    2 => crate::t!(Key::CitedTwice).to_owned(),
+                    _ => crate::t!(Key::CitedTimes, count = count),
+                };
+                let mut links: Vec<AnyElement> = Vec::new();
+                for (at, (section, offset)) in uses.sections.iter().enumerate() {
+                    let offset = *offset;
+                    let comma = at + 1 < uses.sections.len();
+                    links.push(
+                        div()
+                            .id(("cited-in", at))
+                            .role(Role::Link)
+                            .aria_label(section.clone())
+                            .cursor_pointer()
+                            .text_color(tokens.link)
+                            .hover(|link| link.underline())
+                            .child(if comma { format!("{section},") } else { section.clone() })
+                            .on_click(cx.listener(move |panel, _, window, cx| {
+                                panel
+                                    .material
+                                    .update(cx, |material, cx| material.show_in_text(offset, window, cx));
+                            }))
+                            .into_any_element(),
+                    );
+                }
+                div()
+                    .mt(tokens::SPACE_2)
+                    .flex()
+                    .flex_wrap()
+                    .gap(tokens::SPACE_1)
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_quiet)
+                    .child(lead)
+                    .children(links)
+            });
         let id = item.id.clone();
         let insert = small_button("material-insert", insert_label(item).to_owned(), tokens)
             .text_color(tokens.accent)
@@ -610,13 +675,17 @@ impl MaterialPanel {
                 let id = id.clone();
                 move |panel, _, window, cx| {
                     let passage = panel.passage_text(cx);
-                    panel.material.update(cx, |material, cx| material.insert(&id, passage.as_deref(), window, cx));
+                    panel
+                        .material
+                        .update(cx, |material, cx| material.insert(&id, passage.as_deref(), window, cx));
                 }
             }));
         let pin = small_button("material-pin", crate::t!(Key::PinHere).to_owned(), tokens).on_click(cx.listener(
             move |panel, _, _, cx| {
                 let passage = panel.passage_text(cx);
-                panel.material.update(cx, |material, cx| material.pin(&id, passage.as_deref(), cx));
+                panel
+                    .material
+                    .update(cx, |material, cx| material.pin(&id, passage.as_deref(), cx));
             },
         ));
         let probe_choice = (item.kind == Kind::Probes).then(|| self.probe.choice(tokens, cx));
@@ -632,12 +701,31 @@ impl MaterialPanel {
                     .items_center()
                     .justify_between()
                     .gap(tokens::SPACE_2)
-                    .child(div().min_w_0().font_weight(FontWeight::SEMIBOLD).child(item.title.clone()))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(item.title.clone()),
+                    )
                     .children(probe_choice),
             )
-            .child(div().mt(tokens::HAIR_GAP).text_size(tokens::TEXT_SMALL).text_color(tokens.text_faint).child(meta))
+            .child(
+                div()
+                    .mt(tokens::HAIR_GAP)
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_faint)
+                    .child(meta),
+            )
             .children(cited)
-            .child(div().mt(tokens::SPACE_3).flex().flex_wrap().gap(tokens::SPACE_1).child(insert).child(pin));
+            .child(
+                div()
+                    .mt(tokens::SPACE_3)
+                    .flex()
+                    .flex_wrap()
+                    .gap(tokens::SPACE_1)
+                    .child(insert)
+                    .child(pin),
+            );
         let body = match item.form {
             Form::Text => self.reading(item, &items, tokens, cx),
             Form::Image => match base.as_ref().zip(item.path()) {
@@ -756,8 +844,13 @@ impl MaterialPanel {
                     .py(tokens::HAIR_GAP)
                     .border_b_1()
                     .border_color(tokens.divider)
-                    .when(at == 0, |line| line.font_weight(FontWeight::SEMIBOLD).text_color(tokens.text))
-                    .children(row.iter().map(|cell| div().flex_1().min_w_0().truncate().child(cell.clone())))
+                    .when(at == 0, |line| {
+                        line.font_weight(FontWeight::SEMIBOLD).text_color(tokens.text)
+                    })
+                    .children(
+                        row.iter()
+                            .map(|cell| div().flex_1().min_w_0().truncate().child(cell.clone())),
+                    )
                     .into_any_element()
             })
             .collect();

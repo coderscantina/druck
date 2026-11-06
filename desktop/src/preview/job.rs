@@ -300,7 +300,9 @@ impl Typesetter {
                         .ok()?;
                     let fonts = configured.fonts().ok()?;
                     let config = resolved_config::of(&configured);
-                    Some(BookType::of(config, |family, weight, italic| fonts.font(family, weight, italic)))
+                    Some(BookType::of(config, |family, weight, italic| {
+                        fonts.font(family, weight, italic)
+                    }))
                 })
                 .expect("the system starts a thread")
                 .join()

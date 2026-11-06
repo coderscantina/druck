@@ -79,7 +79,7 @@ impl Render for RailEdge {
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT)
             .bottom(tokens::FOOTER_HEIGHT)
-            .right_0()
+            .right(tokens::SCROLLBAR_WIDTH)
             .w(tokens::MATERIAL_EDGE)
             .flex()
             .items_center()
