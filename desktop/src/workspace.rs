@@ -228,7 +228,7 @@ impl Workspace {
         let proof_slip = preview.read(cx).slip().clone();
         let inspector = cx.new(|cx| InspectorView::new(theme, dirs, window, cx));
         let sidebar = cx.new(|cx| SidebarView::new(window, cx));
-        let ticks = cx.new(|_| TicksView::new());
+        let ticks = cx.new(|cx| TicksView::new(&editor, window, cx));
         let model = inspector.read(cx).model().clone();
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
@@ -699,6 +699,11 @@ impl Workspace {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
                 self.focus_main(window, cx);
             }
+            SidebarEvent::Jump(id, offset) => {
+                editor.update(cx, |editor, cx| editor.show_place(*id, *offset, window, cx));
+                self.focus_main(window, cx);
+            }
+            SidebarEvent::FocusText => self.focus_main(window, cx),
             SidebarEvent::Browse(id) => {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
             }

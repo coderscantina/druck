@@ -60,6 +60,7 @@ pub fn all() -> Vec<Command> {
         command(Key::ViewPublish, Anywhere, ShowPublish),
         command(Key::ToggleBinder, Anywhere, ToggleBinder),
         command(Key::FocusBinder, Anywhere, FocusBinder),
+        command(Key::FocusOutline, Write, FocusOutline),
         command(Key::FocusEditor, Anywhere, FocusEditor),
         command(Key::Find, Write, Find),
         command(Key::FindNext, Write, FindNext),

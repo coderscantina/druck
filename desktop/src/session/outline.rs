@@ -65,6 +65,52 @@ pub fn outline(text: &str) -> Outline {
     }
 }
 
+/// A heading of a chapter's text, for the ticks at the edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Heading {
+    pub level: u8,
+    pub title: String,
+    /// Where the heading's block starts in the text.
+    pub start: usize,
+}
+
+/// The headings of levels 1 to 3, in reading order.
+pub fn headings(text: &str) -> Vec<Heading> {
+    let blocks = Blocks::parse(text);
+    (blocks.as_slice().iter())
+        .filter_map(|block| match block.kind {
+            BlockKind::Heading { level } if level <= 3 => {
+                let line = text[block.range.clone()].lines().next().unwrap_or_default();
+                let words = heading_words(line);
+                let (bare, _) = split_attributes(&line[words]);
+                Some(Heading {
+                    level,
+                    title: plain_text(bare),
+                    start: block.range.start,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The title of a part page: one level 1 heading and nothing else but directives and comments.
+pub fn part_title(text: &str) -> Option<String> {
+    let blocks = Blocks::parse(text);
+    let mut heading = None;
+    for block in blocks.as_slice() {
+        match block.kind {
+            BlockKind::Heading { level: 1 } if heading.is_none() => heading = Some(block.range.start),
+            BlockKind::Blank | BlockKind::Comment | BlockKind::Directive | BlockKind::FrontMatter => {}
+            _ => return None,
+        }
+    }
+    headings(text)
+        .into_iter()
+        .find(|h| Some(h.start) == heading)
+        .map(|h| h.title)
+}
+
 /// Whether the text holds a `::: toc` and otherwise only directive lines and comments.
 fn is_only_contents(text: &str) -> bool {
     let mut has_toc = false;
@@ -183,6 +229,28 @@ pub fn slug(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headings_stop_at_level_three_and_read_their_words() {
+        let text = "# One {-}\n\n## Two *b*\n\n#### Four\n\n### Three\n";
+        let found: Vec<_> = headings(text)
+            .into_iter()
+            .map(|h| (h.level, h.title, h.start))
+            .collect();
+        assert_eq!(
+            found,
+            [(1, "One".into(), 0), (2, "Two b".into(), 11), (3, "Three".into(), 34)]
+        );
+    }
+
+    #[test]
+    fn a_part_page_is_a_lone_heading_with_directives() {
+        assert_eq!(
+            part_title("# Part II {-}\n\n::: page-break\n").as_deref(),
+            Some("Part II")
+        );
+        assert_eq!(part_title("# Chapter\n\nText.\n"), None);
+    }
 
     #[test]
     fn a_title_comes_from_the_first_heading_without_its_markup() {

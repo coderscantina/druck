@@ -16,5 +16,6 @@ crate::strings! {
         Name => ("Name", "Name"),
         RemoveFromBook => ("Remove from book", "Aus Buch entfernen"),
         Save => ("Save", "Sichern"),
+        Outline => ("Outline", "Gliederung"),
     }
 }

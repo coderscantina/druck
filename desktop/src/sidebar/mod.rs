@@ -86,6 +86,10 @@ pub struct SidebarData {
 
 pub enum SidebarEvent {
     Select(ChapterId),
+    /// Open a chapter with the caret at an offset of its text, for a heading of the outline.
+    Jump(ChapterId, usize),
+    /// Give the keys back to the text.
+    FocusText,
     /// Show a chapter in the galley while the keys stay in the sidebar, for arrowing through the list.
     Browse(ChapterId),
     /// Move a chapter so it stands before the one now at this place in the book.

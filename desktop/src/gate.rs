@@ -114,8 +114,10 @@ pub fn apply(parts: &Parts, workspace: Entity<Workspace>, window: &mut Window, c
 }
 
 fn apply_to_panes(parts: &Parts, window: &mut Window, cx: &mut App) {
-    if var("DRUCK_TICKS").is_some() {
-        parts.ticks.update(cx, |ticks, cx| ticks.pin_open(cx));
+    match var("DRUCK_TICKS").as_deref() {
+        Some("near") => parts.ticks.update(cx, |ticks, cx| ticks.pin_near(cx)),
+        Some(_) => parts.ticks.update(cx, |ticks, cx| ticks.pin_open(cx)),
+        None => {}
     }
     if var("DRUCK_GUTTER").is_some() {
         parts.editor.update(cx, |editor, cx| editor.pin_gutter(cx));

@@ -112,17 +112,22 @@ pub const TYPEWRITER_AT: f32 = 0.45;
 pub const WRITE_ZOOMS: [f32; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 /// Where Write's zoom starts until the author picks another, and where `Cmd+0` returns: body text of about 18 px.
 pub const WRITE_ZOOM_START: f32 = 1.25;
-/// A chapter's tick at the left edge, the current one longer.
-pub const TICK_WIDTH: Pixels = px(10.);
-pub const TICK_WIDTH_CURRENT: Pixels = px(18.);
+/// A heading's tick at the left edge: its width by level, the height, the step between two, and the strip they stand in.
+pub const TICK_WIDTHS: [Pixels; 3] = [px(16.), px(12.), px(8.)];
 pub const TICK_HEIGHT: Pixels = px(1.5);
-pub const TICK_ROW: Pixels = px(8.5);
+pub const TICK_STEP: Pixels = px(8.);
+pub const TICK_LEFT: Pixels = px(12.);
 pub const TICK_ZONE_WIDTH: Pixels = px(36.);
 pub const TICK_OPACITY: f32 = 0.65;
-/// The contents card that opens from the ticks.
-pub const CONTENTS_CARD_WIDTH: Pixels = px(240.);
-/// The widest the contents card grows for its longest title.
-pub const CONTENTS_CARD_MAX_WIDTH: Pixels = px(360.);
+/// How far the pointer's reach is along the strip, and how much wider the tick under it grows, against its width.
+pub const TICK_REACH: Pixels = px(40.);
+pub const TICK_GROWTH: f32 = 1.7;
+/// The outline a resting pointer unfolds from the ticks: its row, its width, how far a level moves a heading in, and
+/// how much of the text shows through the veil laid over it.
+pub const OUTLINE_ROW_HEIGHT: Pixels = px(20.);
+pub const OUTLINE_WIDTH: Pixels = px(260.);
+pub const OUTLINE_INDENT: Pixels = px(12.);
+pub const OUTLINE_TEXT_OPACITY: f32 = 0.62;
 /// The command palette: one card at the top centre of the window.
 pub const PALETTE_WIDTH: Pixels = px(480.);
 pub const PALETTE_TOP: Pixels = px(72.);

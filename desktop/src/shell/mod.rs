@@ -285,6 +285,7 @@ pub fn install(cx: &mut App) {
         with_hub(cx, Hub::binder_toggled);
     });
     cx.on_action(|_: &menus::FocusBinder, cx| with_hub(cx, Hub::focus_binder));
+    cx.on_action(|_: &menus::FocusOutline, cx| with_hub(cx, Hub::focus_outline));
     cx.on_action(|_: &menus::ToggleSpelling, cx| settings::change(cx, |s| s.spelling = !s.spelling));
     cx.on_action(|_: &menus::ToggleTypewriter, cx| settings::change(cx, |s| s.typewriter = !s.typewriter));
     cx.on_action(|_: &menus::ToggleDim, cx| settings::change(cx, |s| s.dim_paragraphs = !s.dim_paragraphs));
@@ -545,9 +546,6 @@ impl Hub {
         if marks != self.marks {
             self.marks.clone_from(&marks);
             self.parts
-                .ticks
-                .update(cx, |ticks, cx| ticks.set_marks(marks.clone(), cx));
-            self.parts
                 .sidebar
                 .update(cx, |sidebar, cx| sidebar.set_marks(marks, cx));
         }
@@ -731,6 +729,17 @@ impl Hub {
 
     fn focus_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Write, window, cx));
+    }
+
+    /// Moves the keys to the outline at the edge of the bare page, or to the Binder when that is shown instead.
+    fn focus_outline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if settings::get(cx).binder {
+            return self.focus_binder(window, cx);
+        }
+        self.with_workspace(cx, |workspace, cx| workspace.show(Mode::Write, window, cx));
+        self.parts
+            .ticks
+            .update(cx, |ticks, cx| ticks.open_with_keys(window, cx));
     }
 
     /// Moves the keys to the Binder, going to Write and showing it first if need be.

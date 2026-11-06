@@ -16,7 +16,7 @@ pub mod adopt;
 pub mod details;
 pub mod disk;
 mod joined;
-mod outline;
+pub mod outline;
 mod strings;
 pub mod templates;
 #[cfg(test)]
