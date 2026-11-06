@@ -1,9 +1,9 @@
 //! The engine's messages in the app's languages. The engine says what it found as a [`Code`] with its values, so nothing
 //! here parses its English. A diagnostic with no code yet shows the engine's own words, see [the decision](../../../docs/DECISIONS.md#2026-11-05-review-findings).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use druck::diagnostic::{Code, Diagnostic, PageName, path_from};
+use druck::diagnostic::{Code, Diagnostic, PageName};
 
 use super::strings::{Language, language};
 
@@ -135,8 +135,22 @@ pub fn message_in(diagnostic: &Diagnostic, base: Option<&Path>) -> String {
         .map_or(words.clone(), |first| first.to_uppercase().chain(chars).collect())
 }
 
+/// `file` from the book's folder `base`, with `..` for a file beside or above it, as Details names it. A file that shares
+/// no folder with the book but the root keeps its whole path.
+fn from_book(file: &Path, base: &Path) -> String {
+    let (file_parts, base_parts): (Vec<_>, Vec<_>) = (file.components().collect(), base.components().collect());
+    let shared = (file_parts.iter().zip(&base_parts)).take_while(|(a, b)| a == b).count();
+    if shared <= 1 {
+        return file.display().to_string();
+    }
+    let mut relative = PathBuf::new();
+    (shared..base_parts.len()).for_each(|_| relative.push(".."));
+    file_parts[shared..].iter().for_each(|part| relative.push(part));
+    relative.display().to_string()
+}
+
 fn coded(code: &Code, place: Option<usize>, base: Option<&Path>) -> Option<String> {
-    let file = |file: &Path| base.map_or_else(|| file.display().to_string(), |base| path_from(file, base));
+    let file = |file: &Path| base.map_or_else(|| file.display().to_string(), |base| from_book(file, base));
     Some(match code {
         Code::PageShort { page, lines } => {
             crate::t!(Key::PageShort, page = page_of(page, place), lines = decimal(*lines))
@@ -250,6 +264,13 @@ mod tests {
         assert_eq!(
             message_in(&missing, Some(Path::new("/books/one"))),
             "Das Bild assets/gone.png gibt es nicht; ein Kasten steht an seiner Stelle"
+        );
+        let beside = with_code(Code::BibliographyNotFound {
+            file: Path::new("/books/literatur.bib").to_owned(),
+        });
+        assert_eq!(
+            message_in(&beside, Some(Path::new("/books/one"))),
+            "Die Literaturdatei ../literatur.bib gibt es nicht; Zitate zeigen ihren Schlüssel"
         );
         set_language(Language::English);
     }
