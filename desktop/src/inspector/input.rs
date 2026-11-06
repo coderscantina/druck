@@ -14,7 +14,7 @@ use gpui::{
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
     InspectorElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     Render, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div,
-    fill, font, point, px, relative, size,
+    fill, font, point, px, relative, size, svg,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -240,6 +240,9 @@ pub struct TextInput {
     book_type: Option<(gpui::Font, Pixels)>,
     /// No frame of its own, for a field that stands on a card as its text.
     bare: bool,
+    /// A one-line field's height, and the faint icon at its start, such as a search's.
+    height: Pixels,
+    icon: Option<&'static str>,
     arrows_to_parent: bool,
     /// Shown in the quiet color while the field is empty.
     placeholder: Words,
@@ -290,6 +293,7 @@ impl TextInput {
                 cx.notify();
             }),
             cx.on_focus_out(&focus, window, |input, _, _, cx| {
+                crate::a11y::untab(&input.focus, cx);
                 input.marked = None;
                 input.commit(cx);
             }),
@@ -306,6 +310,8 @@ impl TextInput {
             pass_command_enter: false,
             book_type: None,
             bare: false,
+            height: tokens::FIELD_HEIGHT,
+            icon: None,
             arrows_to_parent: false,
             placeholder: Words::default(),
             label: Words::default(),
@@ -321,6 +327,18 @@ impl TextInput {
     /// Sets several lines in the interface's font, for writing rather than code.
     pub fn in_prose(mut self) -> Self {
         self.prose = true;
+        self
+    }
+
+    /// Sets a one-line field's height, for a row of controls that share one.
+    pub fn with_height(mut self, height: Pixels) -> Self {
+        self.height = height;
+        self
+    }
+
+    /// Shows a faint icon at a one-line field's start.
+    pub fn with_icon(mut self, path: &'static str) -> Self {
+        self.icon = Some(path);
         self
     }
 
@@ -1270,7 +1288,9 @@ impl Render for TextInput {
             .border_1()
             .border_color(if focused { tokens.text_faint } else { tokens.divider })
             .bg(tokens.field)
-            .focus_visible(move |style| style.shadow(vec![ring.clone()]));
+            .when(crate::a11y::tabbed_to(&self.focus, cx), |field| {
+                field.focus_visible(move |style| style.shadow(vec![ring.clone()]))
+            });
         if multiline {
             field
                 .py(tokens::SPACE_2)
@@ -1278,9 +1298,19 @@ impl Render for TextInput {
                 .child(InputElement { input: cx.entity() })
         } else {
             field
-                .h(tokens::FIELD_HEIGHT)
+                .h(self.height)
                 .flex()
                 .items_center()
+                .gap(tokens::SPACE_2)
+                .when_some(self.icon, |field, path| {
+                    field.child(
+                        svg()
+                            .flex_none()
+                            .path(path)
+                            .size(tokens::ICON_SIZE)
+                            .text_color(tokens.text_faint),
+                    )
+                })
                 .child(div().flex_1().min_w_0().child(InputElement { input: cx.entity() }))
         }
     }

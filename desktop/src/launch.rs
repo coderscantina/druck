@@ -146,8 +146,8 @@ impl Render for LaunchView {
             .justify_center()
             .key_context("Workspace")
             .track_focus(&self.focus)
-            .on_action(|_: &crate::workspace::FocusNext, window, cx| window.focus_next(cx))
-            .on_action(|_: &crate::workspace::FocusPrevious, window, cx| window.focus_prev(cx))
+            .on_action(|_: &crate::workspace::FocusNext, window, cx| crate::a11y::tab(true, window, cx))
+            .on_action(|_: &crate::workspace::FocusPrevious, window, cx| crate::a11y::tab(false, window, cx))
             .bg(tokens.canvas)
             .child(
                 div()

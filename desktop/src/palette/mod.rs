@@ -362,13 +362,10 @@ impl Render for Palette {
             .collect();
         let empty = rows.is_empty();
         let (left, width) = crate::workspace::TextColumn::over_text(cx, tokens::PALETTE_WIDTH);
-        div()
+        let card = div()
             .id("palette")
             .occlude()
-            .absolute()
-            .top(tokens::PALETTE_TOP)
-            .left(left)
-            .w(width)
+            .w_full()
             .flex()
             .flex_col()
             .bg(tokens.panel)
@@ -415,7 +412,16 @@ impl Render for Palette {
                     .when(crate::shell::ui::more_below(&self.scroll), |list| {
                         list.child(crate::shell::ui::foot_fade(&tokens))
                     }),
-            )
+            );
+        div()
+            .absolute()
+            .top(tokens::PALETTE_TOP)
+            .left(left)
+            .w(width)
+            .when(crate::workspace::TextColumn::over_write(cx), |over| {
+                over.child(crate::shell::ui::fade_under_card(&tokens))
+            })
+            .child(card)
             .into_any_element()
     }
 }

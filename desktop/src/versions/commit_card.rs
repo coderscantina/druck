@@ -261,13 +261,9 @@ impl CommitCard {
                 parts.push(ui::accent_line(tokens, crate::t!(Key::BothStand, chapter = chapter)).into_any_element());
             }
         }
-        if overview.changes.is_empty() && overview.merging.is_none() {
-            parts.push(
-                ui::quiet_line(tokens, crate::t!(Key::NothingChanged))
-                    .pt(tokens::SPACE_2)
-                    .into_any_element(),
-            );
-        } else {
+        // With nothing to commit, its quiet line stands beside the button.
+        let nothing = overview.changes.is_empty() && overview.merging.is_none();
+        if !nothing {
             let rows = overview.listed().map(|change| {
                 let view = view.read(cx);
                 let title = view.title_of(&change.path, &change.name, cx);
@@ -316,6 +312,16 @@ impl CommitCard {
         }
         let can_push = overview.remote.is_some() && installed;
         let row = Self::buttons()
+            .items_center()
+            .when(nothing, |row| {
+                row.child(
+                    div()
+                        .flex_1()
+                        .text_size(tokens::TEXT_SMALL)
+                        .text_color(tokens.text_quiet)
+                        .child(crate::t!(Key::NothingChanged)),
+                )
+            })
             .when(working, |row| {
                 row.child(
                     div()
@@ -378,13 +384,10 @@ impl Render for CommitCard {
             );
         }
         let (left, width) = TextColumn::over_text(cx, tokens::COMMIT_CARD_WIDTH);
-        div()
+        let card = div()
             .id("commit-card")
             .occlude()
-            .absolute()
-            .top(tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y)
-            .left(left)
-            .w(width)
+            .w_full()
             .flex()
             .flex_col()
             .bg(tokens.panel)
@@ -397,7 +400,16 @@ impl Render for CommitCard {
             .on_action(cx.listener(|card, _: &Close, window, cx| card.close(window, cx)))
             .on_action(cx.listener(|card, _: &CommitNow, window, cx| card.commit(false, window, cx)))
             .child(ui::section_label(&tokens, crate::t!(Key::CommitLabel)))
-            .children(parts)
+            .children(parts);
+        div()
+            .absolute()
+            .top(tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y)
+            .left(left)
+            .w(width)
+            .when(TextColumn::over_write(cx), |over| {
+                over.child(crate::shell::ui::fade_under_card(&tokens))
+            })
+            .child(card)
             .into_any_element()
     }
 }

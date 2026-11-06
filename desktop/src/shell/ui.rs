@@ -37,6 +37,23 @@ pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
         ))
 }
 
+/// Fades Write's text out under the bottom edge of a card that covers it, so no line shows cut there, as the pane's
+/// foot does. It stands before the card in a parent that holds both, so the card's shadow stays over it.
+pub fn fade_under_card(tokens: &Tokens) -> gpui::Div {
+    let solid: Hsla = tokens.canvas.into();
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .top_full()
+        .h(tokens::TEXT_FADE_HEIGHT)
+        .bg(linear_gradient(
+            tokens::FADE_DOWN,
+            linear_color_stop(solid, 0.),
+            linear_color_stop(solid.opacity(tokens::CLEAR), 1.),
+        ))
+}
+
 /// The small label at the top of a panel, on a divider.
 pub fn section_label(tokens: &Tokens, label: impl Into<SharedString>) -> gpui::Div {
     div()

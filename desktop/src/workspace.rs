@@ -179,6 +179,11 @@ impl TextColumn {
         ((text_left + (text_width - width) / 2.).max(Pixels::ZERO), width)
     }
 
+    /// Whether a card over the text stands over Write's text, which then fades under its edge.
+    pub fn over_write(cx: &App) -> bool {
+        cx.try_global::<Self>().is_some_and(|column| column.text.is_some())
+    }
+
     /// The left edge of a card `width` wide that asks something, near what asked: beside the Binder, or at the window's
     /// gutter while it is hidden, and beside the rail's panel in Publish.
     pub fn asking(cx: &App, width: Pixels) -> Pixels {
@@ -1135,8 +1140,8 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .key_context("Workspace")
-            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
+            .on_action(|_: &FocusNext, window, cx| crate::a11y::tab(true, window, cx))
+            .on_action(|_: &FocusPrevious, window, cx| crate::a11y::tab(false, window, cx))
             .on_action(cx.listener(|workspace, _: &Save, _, cx| {
                 workspace.parts.editor.update(cx, |_, cx| cx.emit(SaveRequested));
             }))

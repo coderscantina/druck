@@ -94,6 +94,8 @@ pub const ADVICE_TITLE: f32 = 0.9;
 pub const ADVICE_TEXT: f32 = 0.8;
 pub const ADVICE_SUGGESTION: f32 = 0.95;
 pub const ADVICE_LEADING: f32 = 1.4;
+/// How many lines of an agent note's quiet text show until it is opened.
+pub const ADVICE_QUIET_LINES: usize = 2;
 /// The buttons of the agent's cards and of a passage under review.
 pub const SMALL_BUTTON_HEIGHT: Pixels = px(22.);
 /// The room under a passage that holds its buttons, and how far below the text they stand.
@@ -203,7 +205,8 @@ pub const PALETTE_MAX_ROWS: usize = 12;
 /// The settings window.
 pub const SETTINGS_WINDOW: (f32, f32) = (860., 620.);
 pub const SETTINGS_NAV_WIDTH: Pixels = px(190.);
-pub const SETTINGS_SWATCH: Pixels = px(17.);
+/// The one height of a settings row's controls: the search, segments, the accent's swatches, and its hex field.
+pub const SETTINGS_CONTROL_HEIGHT: Pixels = px(26.);
 pub const SETTINGS_SWATCH_RADIUS: Pixels = px(4.);
 pub const SETTINGS_SWATCH_GAP: Pixels = px(5.);
 pub const SETTINGS_ROW_PADDING: Pixels = px(10.);
@@ -389,7 +392,7 @@ pub const COMPLETION_VALUE_WIDTH: Pixels = px(110.);
 /// The chosen name's value, large, in the book's type.
 pub const COMPLETION_VALUE_SIZE: Pixels = px(22.);
 /// Between a block's style name, far out in the left margin, and where the block gutter's icon stands.
-pub const STYLE_NAME_GAP: Pixels = px(8.);
+pub const STYLE_NAME_GAP: Pixels = px(24.);
 /// The scrollbar's thumb, at rest and under the pointer.
 pub const THUMB_FAINT: f32 = 0.4;
 pub const THUMB_STRONG: f32 = 0.8;

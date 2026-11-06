@@ -4,7 +4,7 @@
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, Context, Entity, FocusHandle, FontWeight, Rgba, SharedString, Stateful, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowKind, WindowOptions, div, point, px, rgb, size, svg,
+    Window, WindowBounds, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 
 use super::file::{Appearance, KeptFor, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
@@ -255,8 +255,14 @@ impl SettingsWindow {
                 .keep_focus_on_enter()
                 .with_label(Key::Search)
                 .with_placeholder(Key::Search)
+                .with_icon("icons/search.svg")
+                .with_height(tokens::SETTINGS_CONTROL_HEIGHT)
         });
-        let accent = cx.new(|cx| TextInput::new(window, cx).with_label(Key::Accent));
+        let accent = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .with_label(Key::Accent)
+                .with_height(tokens::SETTINGS_CONTROL_HEIGHT)
+        });
         let subscriptions = vec![
             cx.observe_global_in::<Store>(window, |view, window, cx| view.settings_changed(window, cx)),
             cx.observe_global_in::<Tokens>(window, |_, _, cx| cx.notify()),
@@ -334,7 +340,7 @@ impl SettingsWindow {
         });
         div()
             .flex_none()
-            .h(tokens::FIELD_HEIGHT - tokens::SPACE_1)
+            .h(tokens::SETTINGS_CONTROL_HEIGHT)
             .flex()
             .rounded(tokens::RADIUS)
             .overflow_hidden()
@@ -375,7 +381,7 @@ impl SettingsWindow {
                 .id(("accent", at))
                 .toggle(tokens, hex(color), on)
                 .flex_none()
-                .size(tokens::SETTINGS_SWATCH)
+                .size(tokens::SETTINGS_CONTROL_HEIGHT)
                 .rounded(tokens::SETTINGS_SWATCH_RADIUS)
                 .bg(rgb(shown))
                 .cursor_pointer()
@@ -715,22 +721,7 @@ impl Render for SettingsWindow {
                             .flex()
                             .flex_col()
                             .px(tokens::SPACE_4 + tokens::SPACE_1)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .py(tokens::SPACE_3)
-                                    .flex()
-                                    .items_center()
-                                    .gap(tokens::SPACE_2)
-                                    .child(
-                                        svg()
-                                            .flex_none()
-                                            .path("icons/search.svg")
-                                            .size(tokens::ICON_SIZE)
-                                            .text_color(tokens.text_faint),
-                                    )
-                                    .child(div().flex_1().min_w_0().child(self.search.clone())),
-                            )
+                            .child(div().flex_none().py(tokens::SPACE_3).child(self.search.clone()))
                             .when_some(notice, |body, notice| {
                                 body.child(
                                     div()

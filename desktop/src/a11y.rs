@@ -4,7 +4,7 @@
 //! control.
 
 use gpui::prelude::*;
-use gpui::{App, BoxShadow, Div, FocusHandle, Role, SharedString, Stateful, Toggled, Window, point, px};
+use gpui::{App, BoxShadow, Div, FocusHandle, Global, Role, SharedString, Stateful, Toggled, Window, point, px};
 
 use crate::tokens::{self, Tokens};
 
@@ -57,17 +57,42 @@ impl Control for Stateful<Div> {
     }
 }
 
+/// The stop Tab or Shift+Tab last gave the keys. A field shows its ring only there, not when a view gives it the keys
+/// as it opens, which gpui would also count as a keyboard's focus.
+#[derive(Default)]
+struct Tabbed(Option<FocusHandle>);
+
+impl Global for Tabbed {}
+
+/// Moves the keys to the next stop in the window, or the previous one.
+pub fn tab(forward: bool, window: &mut Window, cx: &mut App) {
+    if forward {
+        window.focus_next(cx);
+    } else {
+        window.focus_prev(cx);
+    }
+    cx.set_global(Tabbed(window.focused(cx)));
+}
+
+/// Whether Tab gave `focus` the keys.
+pub(crate) fn tabbed_to(focus: &FocusHandle, cx: &App) -> bool {
+    cx.try_global::<Tabbed>().and_then(|tabbed| tabbed.0.as_ref()) == Some(focus)
+}
+
+/// Forgets that Tab gave `focus` the keys, once it has lost them, so a view that gives them back shows no ring.
+pub(crate) fn untab(focus: &FocusHandle, cx: &mut App) {
+    if tabbed_to(focus, cx) {
+        cx.set_global(Tabbed(None));
+    }
+}
+
 /// Moves the keys to the next stop inside `card`, or the previous one, around its ends, so Tab stays in a card that
 /// asks. `card` is the handle its outer element tracks.
 pub fn cycle_within(card: &FocusHandle, forward: bool, window: &mut Window, cx: &mut App) {
     // The window's stops form one loop, so this comes back into the card unless it has none.
     const MOST_STOPS: usize = 1000;
     for _ in 0..MOST_STOPS {
-        if forward {
-            window.focus_next(cx);
-        } else {
-            window.focus_prev(cx);
-        }
+        tab(forward, window, cx);
         if card.contains_focused(window, cx) {
             return;
         }
