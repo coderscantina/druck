@@ -878,6 +878,42 @@ fn closing_with_nothing_unsaved_leaves_no_recovery_copy() {
     assert!(copies.load().is_empty());
 }
 
+/// A quit before the choice leaves the file with their side and the author's in a recovery copy. Reopened, it is Git's
+/// conflict again, though the two changed different sentences of one line.
+#[test]
+fn a_git_conflict_left_open_at_a_quit_comes_back_as_one() {
+    let mut fixture = Fixture::new();
+    let path = fixture.one();
+    let base = "# One\n\nFirst line. Of words.\n\nSecond line.\n";
+    let ours = "# One\n\nFirst line. Of my words.\n\nSecond line.\n";
+    let theirs = "# One\n\nFirst long line. Of words.\n\nSecond line.\n";
+    fixture.type_in(ONE, "First line.", "First line. Of my words.");
+    fixture.save();
+    fs::write(&path, theirs).unwrap();
+    fixture
+        .sync
+        .take_git_conflict(&mut fixture.session, &path, base, theirs);
+    assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Held);
+
+    let copies = fixture.sync.copies().unwrap().clone();
+    let mut session = Session::open(&fixture.dir).unwrap();
+    let mut sync = FileSync::new(Some(copies.clone()));
+    let git = [GitConflict {
+        path: path.clone(),
+        base: base.to_owned(),
+        theirs: theirs.to_owned(),
+    }];
+    for copy in copies.load() {
+        assert!(sync.restore_copy(&mut session, &copy, &git));
+    }
+    assert_eq!(sync.conflicts().collect::<Vec<_>>(), [path.as_path()]);
+    assert_eq!(session.file_text(&path).unwrap(), ours);
+    assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+    assert!(!sync.can_settle_a_conflict(&session));
+    assert_eq!(sync.write_all(&mut session), Closing::Held);
+    assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+}
+
 #[test]
 fn a_conflict_in_a_line_that_also_stands_earlier_is_marked_where_it_is() {
     let mut fixture = Fixture::new();

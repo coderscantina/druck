@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use super::atomic::{Outcome, content_hash};
 use super::merge::{Choice, Merged, Sides, edits_between, git_conflict, starting_point, three_way};
-use super::recovery::Copies;
+use super::recovery::{Copies, Recovered};
 use super::strings::Key;
 use super::watch::Ready;
 use crate::session::disk::Outgoing;
@@ -192,6 +192,14 @@ pub struct ConflictPassage {
     /// Where the author's side stands in the file's text.
     pub range: std::ops::Range<usize>,
     pub mine: String,
+    pub theirs: String,
+}
+
+/// A file a merge Git stopped on, with the merge base and their side from the index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitConflict {
+    pub path: PathBuf,
+    pub base: String,
     pub theirs: String,
 }
 
@@ -398,6 +406,31 @@ impl FileSync {
         );
         session.hold_file(path, true);
         Some(change)
+    }
+
+    /// Brings back a recovery copy as one undo step, then takes in what the file holds by now. A file of `git`, the
+    /// conflicts of a merge Git stopped on, that still holds their side had no choice made before the app went: it goes
+    /// back to the conflict line as Git reported it, never merged by sentences. Returns whether the copy brought back
+    /// anything.
+    pub fn restore_copy(&mut self, session: &mut Session, copy: &Recovered, git: &[GitConflict]) -> bool {
+        if session.file_text(&copy.path).as_deref() == Some(copy.text.as_str()) {
+            if let Some(copies) = &self.copies {
+                copies.clear(&copy.path);
+            }
+            return false;
+        }
+        if let Err(problem) = session.restore_text(&copy.path, &copy.base, &copy.text) {
+            self.report(&copy.path, Problem::Restore(problem));
+            return false;
+        }
+        let disk = fs::read(&copy.path).ok();
+        let undecided = (git.iter())
+            .find(|conflict| conflict.path == copy.path && disk.as_deref() == Some(conflict.theirs.as_bytes()));
+        match undecided {
+            Some(conflict) => self.take_git_conflict(session, &copy.path, &conflict.base, &conflict.theirs),
+            None => self.on_disk(session, &copy.path, disk),
+        };
+        true
     }
 
     /// Takes in what a file holds now. `disk` is `None` for a missing file.

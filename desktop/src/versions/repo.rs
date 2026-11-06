@@ -524,6 +524,22 @@ impl Repo {
             .collect()
     }
 
+    /// The branch a merge in the middle of happening brings in: a local, then a remote branch at its first `MERGE_HEAD`,
+    /// or that commit's short id. `None` with no merge.
+    pub fn merging_from(&self) -> Result<Option<String>> {
+        let Some(head) = self.merge_heads().first().copied() else {
+            return Ok(None);
+        };
+        let platform = self.repo.references()?;
+        for reference in platform.local_branches()?.chain(platform.remote_branches()?) {
+            let mut reference = reference.map_err(|error| Problem::Other(error.to_string()))?;
+            if reference.peel_to_id()?.detach() == head {
+                return Ok(Some(reference.name().shorten().to_str_lossy().into_owned()));
+            }
+        }
+        Ok(Some(head.to_hex_with_len(7).to_string()))
+    }
+
     /// A running operation this app does not finish.
     fn busy(&self) -> Option<String> {
         use gix::state::InProgress;

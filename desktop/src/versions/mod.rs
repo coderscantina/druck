@@ -51,7 +51,7 @@ use crate::editor::{SessionChanged, TextChanged};
 use crate::inspector::{Tab, TabShown};
 use crate::persist::merge::Choice;
 use crate::persist::recovery::data_dir;
-use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, GitMove, PersistView, Source};
+use crate::persist::{ChoiceWithoutConflict, Closing, FileChange, GitConflict, GitMove, PersistView, Source};
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Mode, Parts, Slots};
@@ -367,6 +367,9 @@ impl Versions {
         view.look_after_history(window, cx);
         view.warn_about_cloud(window, cx);
         view.say_what_opening_did(window, cx);
+        if view.book(cx).is_none() {
+            view.persist.update(cx, |persist, cx| persist.restore(None, window, cx));
+        }
         view.refresh(cx);
         view
     }
@@ -422,19 +425,33 @@ impl Versions {
         let Some(book) = self.book(cx) else {
             return;
         };
+        let first = !self.persist.read(cx).restored();
         let work = cx.background_spawn(async move {
             match Repo::open(&book) {
-                Ok(None) => RepoState::NoRepo,
+                Ok(None) => (RepoState::NoRepo, None),
                 Ok(Some(repo)) => match repo.overview(LOG_ROWS) {
-                    Ok(overview) => RepoState::Ready(Box::new(overview)),
-                    Err(problem) => RepoState::Broken(describe(&problem)),
+                    Ok(overview) => {
+                        let stopped = (first && overview.merging.is_some())
+                            .then(|| stopped_merge(&repo))
+                            .flatten();
+                        (RepoState::Ready(Box::new(overview)), stopped)
+                    }
+                    Err(problem) => (RepoState::Broken(describe(&problem)), None),
                 },
-                Err(problem) => RepoState::Broken(describe(&problem)),
+                Err(problem) => (RepoState::Broken(describe(&problem)), None),
             }
         });
         self.reading = cx.spawn(async move |view, cx| {
-            let state = work.await;
+            let (state, stopped) = work.await;
             view.update(cx, |view, cx| {
+                if first {
+                    with_view(cx, move |view, window, cx| {
+                        let persist = view.persist.clone();
+                        if persist.update(cx, |persist, cx| persist.restore(stopped, window, cx)) {
+                            view.merge.stopped();
+                        }
+                    });
+                }
                 if view.state != state {
                     view.state = state;
                     view.changed(cx);
@@ -909,6 +926,23 @@ impl Render for Versions {
             .child(side("both-take-theirs", Choice::Theirs))
             .into_any_element()
     }
+}
+
+/// A merge Git stopped on, as the app finds it when it opens: the branch it brings in, and the files in the book the
+/// conflict line can show.
+fn stopped_merge(repo: &Repo) -> Option<(String, Vec<GitConflict>)> {
+    let branch = repo.merging_from().ok()??;
+    let conflicts = (repo.conflicts().ok()?.into_iter())
+        .filter(|conflict| conflict.in_book && conflict.ours_exists)
+        .filter_map(|conflict| {
+            Some(GitConflict {
+                theirs: conflict.theirs?,
+                base: conflict.base.unwrap_or_default(),
+                path: conflict.path,
+            })
+        })
+        .collect::<Vec<_>>();
+    (!conflicts.is_empty()).then_some((branch, conflicts))
 }
 
 fn open_repo(book: &Path) -> Result<Repo, Problem> {

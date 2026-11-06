@@ -29,7 +29,7 @@ use self::merge::Choice;
 use self::recovery::{Copies, data_dir};
 use self::strings::Key;
 use self::sync::{ChangeKind, ConflictPassage, FileSync, Next, Pacer, Problem};
-pub use self::sync::{Closing, FileChange, GitMove, Source};
+pub use self::sync::{Closing, FileChange, GitConflict, GitMove, Source};
 use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::a11y::Control as _;
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
@@ -185,6 +185,8 @@ pub struct PersistView {
     merging: Option<String>,
     /// The first place the first conflict is about, as the conflict line shows it.
     passage: Option<ConflictPassage>,
+    /// Recovery copies wait for [`Self::restore`], so none is written over before it is read.
+    restored: bool,
     _incoming: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -288,12 +290,12 @@ impl PersistView {
             agent_working: false,
             merging: None,
             passage: None,
+            restored: false,
             _incoming: incoming,
             _subscriptions: subscriptions,
         };
         view.start_watching(cx);
         view.remove_leftovers(cx);
-        view.restore(window, cx);
         // Whatever changed between reading the files and the watcher starting.
         view.signals.unbounded_send(Signal::Everything).ok();
         view
@@ -463,43 +465,65 @@ impl PersistView {
         }
     }
 
-    /// Brings back what a run that did not finish left in recovery copies. Each is one undo step, and merges with
-    /// whatever the file holds by now.
-    fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Whether [`Self::restore`] has run.
+    pub fn restored(&self) -> bool {
+        self.restored
+    }
+
+    /// Brings back what a run that did not finish left in recovery copies, once. Each is one undo step, and merges with
+    /// whatever the file holds by now. Versions calls it after its first read of the repo, with the merge Git stopped
+    /// on, if any, as `(branch, conflicts)`: a file of it whose choice the last run left open goes back to the conflict
+    /// line. Returns whether one did.
+    pub fn restore(
+        &mut self,
+        merge: Option<(String, Vec<GitConflict>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if std::mem::replace(&mut self.restored, true) {
+            return false;
+        }
         let Some(copies) = self.sync.copies().cloned() else {
-            return;
+            return false;
         };
         let found = copies.load();
         if found.is_empty() {
-            return;
+            return false;
+        }
+        let (branch, git) = merge.unzip();
+        let git = git.unwrap_or_default();
+        if let Some(branch) = &branch {
+            self.sync.set_source(Source::Git(GitMove::Merge, branch.clone()));
         }
         let mut names = Vec::new();
         let sync = &mut self.sync;
         self.editor.update(cx, |editor, cx| {
             editor.update_session(
                 |session| {
-                    for copy in found {
-                        if session.file_text(&copy.path).as_deref() == Some(copy.text.as_str()) {
-                            copies.clear(&copy.path);
-                            continue;
+                    for copy in &found {
+                        if sync.restore_copy(session, copy, &git) {
+                            names.push(file_name(&copy.path));
                         }
-                        if let Err(problem) = session.restore_text(&copy.path, &copy.base, &copy.text) {
-                            sync.report(&copy.path, Problem::Restore(problem));
-                            continue;
-                        }
-                        names.push(file_name(&copy.path));
-                        sync.on_disk(session, &copy.path, std::fs::read(&copy.path).ok());
                     }
                 },
                 window,
                 cx,
             );
         });
+        self.sync.set_source(self.source());
+        let resumed = self.has_conflicts() && branch.is_some();
+        if resumed {
+            self.merging = branch;
+            self.update_watched_files(cx);
+            self.sync_passage(cx);
+            self.go_to_passage(window, cx);
+        }
         if !names.is_empty() {
             let text = format!("{} {}", crate::t!(Key::Restored), names.join(", "));
             self.show_note(text, window, cx);
             self.edited(window, cx);
         }
+        resumed
     }
 
     // Saving
@@ -693,7 +717,7 @@ impl PersistView {
 
     /// Stores a recovery copy of every file with unsaved text that changed since its last copy, on another thread.
     fn store_recovery(&mut self, cx: &mut Context<Self>) {
-        let Some(copies) = self.sync.copies().cloned() else {
+        let Some(copies) = self.sync.copies().cloned().filter(|_| self.restored) else {
             return;
         };
         let mut unsaved = self.session(cx).unsaved();
