@@ -436,10 +436,12 @@ impl PreviewView {
         (self.problems.len(), started.elapsed())
     }
 
+    /// Pages older than the diagnostics were set from other text, so their lines would mark the wrong words: they get
+    /// no marks until a layout succeeds.
     fn mark_problems(&mut self) {
         self.marks = match &self.layout {
-            Some(layout) => proof::resolve(&layout.laid, &self.problems),
-            None => Marks::default(),
+            Some(layout) if self.diagnostics.is_empty() => proof::resolve(&layout.laid, &self.problems),
+            _ => Marks::default(),
         };
     }
 

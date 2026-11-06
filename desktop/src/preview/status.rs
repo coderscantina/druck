@@ -77,11 +77,16 @@ impl PreviewView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        // With no pages the whole message stands where they would, see `empty_state`.
+        // With no pages the whole message stands where they would, see `empty_state`. With pages, they are the last good
+        // ones, and the line says so.
         let problem = self.layout.as_ref().and(self.diagnostics.first()).map(|first| {
             let more = self.diagnostics.len() - 1;
             let suffix = if more > 0 { format!(" (+{more})") } else { String::new() };
-            format!("{}{suffix}", in_words(first, &self.base))
+            format!(
+                "{} {}{suffix}",
+                crate::t!(Key::LastGoodPages),
+                in_words(first, &self.base)
+            )
         });
         let warnings = self.problems.iter().filter(|problem| problem.warning).count();
         let count = self.problems.len() - warnings;

@@ -4,6 +4,7 @@ crate::strings! {
     pub enum Key {
         NoPagesYet => ("No pages yet", "Noch keine Seiten"),
         NoPages => ("No pages", "Keine Seiten"),
+        LastGoodPages => ("Last good pages:", "Letzte gute Seiten:"),
         OpenDetails => ("Book details", "Buchdaten"),
         ShowInText => ("Show in text", "Im Text zeigen"),
         AtLine => ("{file}, line {line}: {message}", "{file}, Zeile {line}: {message}"),

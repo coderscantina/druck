@@ -187,7 +187,10 @@ impl PreviewView {
                 self.mark_problems();
                 cx.emit(Typeset(book_type));
             }
-            Err(Failure::Errors(diagnostics)) => self.diagnostics = diagnostics,
+            Err(Failure::Errors(diagnostics)) => {
+                self.diagnostics = diagnostics;
+                self.mark_problems();
+            }
             Err(Failure::Cancelled) => {}
         }
         // The specimen's warnings and errors are about the specimen, not the document the diagnostics list shows.
