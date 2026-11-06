@@ -915,6 +915,389 @@ fn from_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
     offset(range.start)..offset(range.end)
 }
 
+/// One item pinned to a paragraph, as the material module shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinCard {
+    /// The pin's place in the book's list of pins, which [`PinClicked`] names.
+    pub index: usize,
+    pub icon: &'static str,
+    pub title: String,
+    /// One quiet line: a date, a size, or the kind.
+    pub meta: String,
+    /// The passage pinned, or the item's opening, in the book's face.
+    pub excerpt: Option<String>,
+    /// What Shift+Return does with it, such as Quote with citation.
+    pub insert: String,
+}
+
+/// The pins on one paragraph of the open chapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinGroup {
+    /// Where the paragraph starts.
+    pub anchor: usize,
+    pub cards: Vec<PinCard>,
+}
+
+/// What a pin's verbs ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinVerb {
+    Open,
+    Insert,
+    Unpin,
+}
+
+/// A pin's verb was asked for, by its button or its key.
+pub struct PinClicked(pub usize, pub PinVerb);
+
+impl gpui::EventEmitter<PinClicked> for EditorView {}
+
+gpui::actions!(pins, [NextPin, PreviousPin, OpenPin, InsertPin, Unpin]);
+
+const PIN_CONTEXT: &str = "PinStack";
+
+/// Option+Down in the text steps into the pins of the caret's paragraph. In their stack the verbs have their keys.
+pub fn bind_pin_keys(cx: &mut App) {
+    let stack = Some(PIN_CONTEXT);
+    cx.bind_keys([
+        gpui::KeyBinding::new("alt-down", NextPin, Some(super::keys::CONTEXT)),
+        gpui::KeyBinding::new("alt-down", NextPin, stack),
+        gpui::KeyBinding::new("alt-up", PreviousPin, stack),
+        gpui::KeyBinding::new("enter", OpenPin, stack),
+        gpui::KeyBinding::new("shift-enter", InsertPin, stack),
+        gpui::KeyBinding::new("backspace", Unpin, stack),
+        gpui::KeyBinding::new("escape", Cancel, stack),
+    ]);
+}
+
+/// The pins of the open chapter, and how they show.
+#[derive(Default)]
+pub(super) struct Pins {
+    groups: Vec<PinGroup>,
+    /// The rail's panel is open: pins fold to markers beside the text.
+    folded: bool,
+    /// Which pin of the caret's paragraph is expanded.
+    step: usize,
+    focus: Option<FocusHandle>,
+}
+
+impl Pins {
+    /// Moves the anchors with a change of the text, so typing does not wait for the material module to look again.
+    pub(super) fn shift(&mut self, splice: &crate::source::buffer::Splice) {
+        for group in &mut self.groups {
+            if group.anchor > splice.start {
+                group.anchor = if group.anchor >= splice.old_end {
+                    group.anchor + splice.new_end - splice.old_end
+                } else {
+                    splice.new_end
+                };
+            }
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.groups.clear();
+        self.step = 0;
+    }
+
+    /// Whether the pins want the margin.
+    pub(super) fn want_margin(&self) -> bool {
+        !self.groups.is_empty() && !self.folded
+    }
+}
+
+impl EditorView {
+    /// Shows these pins beside the open chapter's paragraphs. `folded` puts them beside the text as markers, for while
+    /// the rail's panel takes the room.
+    pub fn set_pins(&mut self, groups: Vec<PinGroup>, folded: bool, cx: &mut Context<Self>) {
+        if self.pins.groups != groups || self.pins.folded != folded {
+            self.pins.groups = groups;
+            self.pins.folded = folded;
+            cx.notify();
+        }
+    }
+
+    /// Where the paragraphs the pins stand on start now, after the edits since they were set.
+    pub fn pin_anchors(&self) -> Vec<usize> {
+        self.pins.groups.iter().map(|group| group.anchor).collect()
+    }
+
+    /// The window y of the bottom of the caret's block, when it is on screen, for a card that opens under it.
+    pub fn caret_block_bottom(&self) -> Option<Pixels> {
+        let index = self.blocks.index_at(self.selection.head);
+        let (_, top) = self.visible.iter().find(|(visible, _)| *visible == index)?;
+        Some(*top + self.slots[index].layout.as_ref()?.height)
+    }
+
+    /// The group on the caret's paragraph.
+    fn caret_pins(&self) -> Option<usize> {
+        let block = self.blocks.index_at(self.selection.head);
+        (self.pins.groups.iter()).position(|group| self.blocks.index_at(group.anchor) == block)
+    }
+
+    /// Steps to the next or previous pin of the caret's paragraph and gives the stack the keys.
+    pub(super) fn step_pin(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(group) = self.caret_pins() else {
+            return;
+        };
+        let count = self.pins.groups[group].cards.len();
+        let focus = self.pins.focus.get_or_insert_with(|| cx.focus_handle()).clone();
+        if focus.is_focused(window) {
+            self.pins.step = if forward {
+                (self.pins.step + 1) % count
+            } else {
+                (self.pins.step + count - 1) % count
+            };
+        } else {
+            self.pins.step %= count;
+        }
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Steps into the caret's pins as Option+Down does. For screenshots.
+    #[cfg(any(debug_assertions, feature = "measure"))]
+    pub fn step_pin_for_gate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.step_pin(true, window, cx);
+    }
+
+    /// Writes a figure of `file` at the caret, as the image command does: a file inside the book is referenced where it
+    /// is, one outside is copied in.
+    pub fn insert_image_file(&mut self, file: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let at = self.selection.range();
+        self.take_image(file, at, window, cx);
+    }
+
+    pub(super) fn next_pin(&mut self, _: &NextPin, window: &mut Window, cx: &mut Context<Self>) {
+        self.step_pin(true, window, cx);
+    }
+
+    fn pin_verb(&mut self, verb: PinVerb, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(group) = self.caret_pins() else {
+            return;
+        };
+        let cards = &self.pins.groups[group].cards;
+        if let Some(card) = cards.get(self.pins.step % cards.len().max(1)) {
+            cx.emit(PinClicked(card.index, verb));
+        }
+        if verb != PinVerb::Unpin {
+            window.focus(&self.focus, cx);
+        }
+    }
+
+    /// The pins for this frame's margin flow: a short rule for each, or the caret's paragraph's stack open.
+    pub(super) fn pin_notes(&mut self, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, Pixels)> {
+        if self.column.note_left.is_none() || self.pins.folded || self.source {
+            return Vec::new();
+        }
+        let tokens = Tokens::get(cx).clone();
+        let open = self.caret_pins();
+        let mut notes = Vec::new();
+        let groups = self.pins.groups.clone();
+        for (index, group) in groups.iter().enumerate() {
+            let Some(y) = self.first_line_top(group.anchor) else {
+                continue;
+            };
+            let element = if open == Some(index) {
+                self.pin_stack(group, window, &tokens, cx).into_any_element()
+            } else {
+                pin_rules(group.cards.len(), None, &tokens)
+                    .id(("pins", group.anchor))
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener({
+                        let anchor = group.anchor;
+                        move |editor, _, window, cx| editor.jump_to(anchor, window, cx)
+                    }))
+                    .into_any_element()
+            };
+            notes.push((element, y));
+        }
+        notes
+    }
+
+    /// The pins folded to markers right of the text, with their count, while the rail's panel is open or the margin does
+    /// not fit.
+    pub(super) fn pin_markers(&self, cx: &mut Context<Self>) -> Vec<(AnyElement, Point<Pixels>)> {
+        if self.source || !(self.pins.folded || self.column.note_left.is_none()) {
+            return Vec::new();
+        }
+        let tokens = Tokens::get(cx).clone();
+        let left = self.column.text_left + self.column.text_width + tokens::SPACE_2;
+        (self.pins.groups.iter())
+            .filter_map(|group| {
+                let y = self.first_line_top(group.anchor)?;
+                let count = group.cards.len();
+                let marker = pin_rules(count, (count > 1).then_some(count), &tokens);
+                Some((marker.into_any_element(), point(left, y + tokens::PIN_RULE_TOP)))
+            })
+            .collect()
+    }
+
+    fn pin_stack(&mut self, group: &PinGroup, window: &Window, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let focus = self.pins.focus.get_or_insert_with(|| cx.focus_handle()).clone();
+        let focused = focus.is_focused(window);
+        let expanded = self.pins.step % group.cards.len().max(1);
+        let header = div()
+            .h(tokens::PIN_HEADER_HEIGHT)
+            .px(tokens::SPACE_2)
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_1)
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(tokens.text_quiet)
+            .border_b_1()
+            .border_color(tokens.divider)
+            .child(svg().path("icons/pin.svg").size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+            .child(crate::t!(Key::Pinned, count = group.cards.len()));
+        let rows: Vec<AnyElement> = (group.cards.iter().enumerate())
+            .map(|(at, card)| {
+                if at == expanded {
+                    self.pin_expanded(card, focused, tokens, cx).into_any_element()
+                } else {
+                    let step = at;
+                    div()
+                        .id(("pin-row", card.index))
+                        .h(tokens::LIST_ROW_HEIGHT)
+                        .px(tokens::SPACE_2)
+                        .flex()
+                        .items_center()
+                        .gap(tokens::SPACE_1)
+                        .cursor_pointer()
+                        .text_color(tokens.text_quiet)
+                        .border_b_1()
+                        .border_color(tokens.divider)
+                        .hover(|row| row.bg(tokens.raised))
+                        .child(svg().flex_none().path(card.icon).size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+                        .child(div().min_w_0().truncate().child(card.title.clone()))
+                        .on_click(cx.listener(move |editor, _, _, cx| {
+                            editor.pins.step = step;
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                }
+            })
+            .collect();
+        let foot = div()
+            .h(tokens::PIN_HEADER_HEIGHT)
+            .px(tokens::SPACE_2)
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_3)
+            .text_color(tokens.text_faint)
+            .child(crate::t!(Key::PinNextKey))
+            .child(crate::t!(Key::PinInsertKey));
+        div()
+            .id(("pin-stack", group.anchor))
+            .track_focus(&focus)
+            .key_context(PIN_CONTEXT)
+            .role(Role::Group)
+            .aria_label(crate::t!(Key::Pinned, count = group.cards.len()))
+            .on_action(cx.listener(|editor, _: &NextPin, window, cx| editor.step_pin(true, window, cx)))
+            .on_action(cx.listener(|editor, _: &PreviousPin, window, cx| editor.step_pin(false, window, cx)))
+            .on_action(cx.listener(|editor, _: &OpenPin, window, cx| editor.pin_verb(PinVerb::Open, window, cx)))
+            .on_action(cx.listener(|editor, _: &InsertPin, window, cx| editor.pin_verb(PinVerb::Insert, window, cx)))
+            .on_action(cx.listener(|editor, _: &Unpin, window, cx| editor.pin_verb(PinVerb::Unpin, window, cx)))
+            .on_action(cx.listener(|editor, _: &Cancel, window, cx| window.focus(&editor.focus, cx)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .w(tokens::NOTE_WIDTH)
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .bg(tokens.panel)
+            .border_1()
+            .border_color(tokens.divider)
+            .rounded(tokens::RADIUS)
+            .font_family(tokens::FONT_UI)
+            .text_size(tokens::TEXT_SMALL)
+            .line_height(tokens::PIN_LINE_HEIGHT)
+            .child(header)
+            .children(rows)
+            .child(foot)
+    }
+
+    fn pin_expanded(&self, card: &PinCard, focused: bool, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let index = card.index;
+        let button = |name: &'static str, label: String, verb: PinVerb, cx: &mut Context<Self>| {
+            super::review::small_button((name, index), label, tokens)
+                .when(verb == PinVerb::Insert, |button| button.text_color(tokens.accent))
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(PinClicked(index, verb))))
+        };
+        let body = self.style.body.clone();
+        div()
+            .p(tokens::SPACE_2)
+            .flex()
+            .flex_col()
+            .gap(tokens::SPACE_1)
+            .border_b_1()
+            .border_color(tokens.divider)
+            .when(focused, |card| card.border_l(tokens::KEY_BAR).border_color(tokens.accent))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(tokens::SPACE_1)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(tokens.text)
+                    .child(svg().flex_none().path(card.icon).size(tokens::NOTE_ICON).text_color(tokens.text_faint))
+                    .child(div().min_w_0().truncate().child(card.title.clone())),
+            )
+            .when(!card.meta.is_empty(), |column| {
+                column.child(div().text_color(tokens.text_faint).child(card.meta.clone()))
+            })
+            .when_some(card.excerpt.clone(), |column, excerpt| {
+                column.child(
+                    div()
+                        .my(tokens::SPACE_1)
+                        .font_family(body.family.clone())
+                        .text_size(tokens::PIN_EXCERPT_TEXT)
+                        .line_height(tokens::PIN_EXCERPT_LINE)
+                        .text_color(tokens.text_quiet)
+                        .max_h(tokens::PIN_EXCERPT_LINE * tokens::PIN_EXCERPT_LINES as f32)
+                        .overflow_hidden()
+                        .child(excerpt),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(tokens::SPACE_1)
+                    .child(button("pin-insert", card.insert.clone(), PinVerb::Insert, cx))
+                    .child(button("pin-open", crate::t!(Key::PinOpen).to_owned(), PinVerb::Open, cx))
+                    .child(button("pin-unpin", crate::t!(Key::Unpin).to_owned(), PinVerb::Unpin, cx)),
+            )
+    }
+}
+
+/// Short rules in the divider's color, one for each pin, with the count beside them when it is given.
+fn pin_rules(count: usize, shown_count: Option<usize>, tokens: &Tokens) -> gpui::Div {
+    let one = count == 1;
+    div()
+        .flex()
+        .items_start()
+        .gap(tokens::SPACE_1)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(tokens::PIN_RULE_GAP)
+                .children((0..count.min(tokens::PIN_RULES_SHOWN)).map(|_| {
+                    div()
+                        .w(tokens::NOTE_RULE)
+                        .h(if one { tokens::PIN_RULE } else { tokens::PIN_RULE_SHORT })
+                        .bg(tokens.divider)
+                })),
+        )
+        .children(shown_count.map(|count| {
+            div()
+                .mt(tokens::PIN_RULE_SHORT)
+                .text_size(tokens::PIN_COUNT_TEXT)
+                .line_height(tokens::PIN_COUNT_TEXT)
+                .text_color(tokens.text_faint)
+                .child(count.to_string())
+        }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

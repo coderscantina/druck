@@ -12,6 +12,9 @@ crate::strings! {
         TabGit => ("GIT", "GIT"),
         TabExport => ("EXPORT", "EXPORT"),
         TabAgent => ("AGENT", "AGENT"),
+        TabResearch => ("RESEARCH", "RECHERCHE"),
+        TabNotes => ("NOTES", "NOTIZEN"),
+        TabProbes => ("PROBES", "PROBEN"),
 
         StyleBody => ("Regular text", "Fließtext"),
         StyleHeading1 => ("Heading 1", "Überschrift 1"),

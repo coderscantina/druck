@@ -72,6 +72,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
         cx,
     );
     crate::editor::mount(parts, window, cx);
+    crate::material::mount(parts, slots, window, cx);
 }
 
 /// Opens the only window, with a document or with the launch screen. `error` says why a document asked for did not
@@ -99,6 +100,7 @@ pub fn open(
     shell::install(cx);
     crate::palette::install(cx);
     crate::versions::install(cx);
+    crate::material::install(cx);
     cx.on_app_quit(|cx| {
         shell::save_at_exit(cx);
         async {}

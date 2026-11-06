@@ -30,6 +30,7 @@ mod gate {
 }
 mod inspector;
 mod launch;
+mod material;
 mod open_urls;
 mod palette;
 mod persist;

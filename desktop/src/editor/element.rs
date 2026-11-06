@@ -155,9 +155,11 @@ impl Element for Galley {
             let caret = frame.caret.or_else(|| view.caret_bounds(window));
             let floats = view.floats(&selection, caret, window, cx);
             let margin = view.margin_element();
-            let rows = view.review_rows(cx);
+            let mut rows = view.review_rows(cx);
+            rows.extend(view.pin_markers(cx));
             let mut advice = view.advice_elements(cx);
             advice.extend(view.comment_notes(window, cx));
+            advice.extend(view.pin_notes(window, cx));
             advice.sort_by_key(|(_, y)| *y);
             (frame, floats, margin, rows, advice)
         });
