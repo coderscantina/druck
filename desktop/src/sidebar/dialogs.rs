@@ -2,8 +2,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, SharedString,
-    Subscription, Window, div, svg,
+    Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, ScrollHandle,
+    SharedString, Subscription, Window, div, svg,
 };
 
 use super::strings::Key;
@@ -40,6 +40,7 @@ pub struct SectionDialog {
     card: FocusHandle,
     /// What had the keys before the dialog opened, to give them back.
     before: Option<FocusHandle>,
+    templates: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -54,6 +55,7 @@ impl SectionDialog {
             name,
             card: cx.focus_handle(),
             before: None,
+            templates: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -166,7 +168,7 @@ impl SectionDialog {
 }
 
 impl Render for SectionDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
         let state = self.state.clone();
         if matches!(state, State::Closed) {
@@ -189,6 +191,11 @@ impl Render for SectionDialog {
                     .child(crate::t!(Key::Name)),
             )
             .child(div().flex_1().min_w_0().child(self.name.clone()));
+        let more_below = crate::shell::ui::more_below(&self.templates);
+        // The list's height is known after its first layout, which the fade needs.
+        if matches!(state, State::NewSection) && self.templates.bounds().size.height == gpui::Pixels::ZERO {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
         let body = match state {
             State::NewSection => {
                 let groups = Group::ALL.iter().map(|&group| {
@@ -210,13 +217,19 @@ impl Render for SectionDialog {
                         .children(rows)
                 });
                 div()
-                    .id("templates")
-                    .max_h(tokens::DIALOG_LIST_HEIGHT)
-                    .overflow_y_scroll()
+                    .relative()
                     .border_t_1()
                     .border_color(tokens.divider)
-                    .pt(tokens::SPACE_2)
-                    .children(groups.collect::<Vec<_>>())
+                    .child(
+                        div()
+                            .id("templates")
+                            .max_h(tokens::DIALOG_LIST_HEIGHT)
+                            .overflow_y_scroll()
+                            .track_scroll(&self.templates)
+                            .pt(tokens::SPACE_2)
+                            .children(groups.collect::<Vec<_>>()),
+                    )
+                    .when(more_below, |list| list.child(crate::shell::ui::foot_fade(&tokens)))
                     .into_any_element()
             }
             State::Edit { id, removable, .. } => div()

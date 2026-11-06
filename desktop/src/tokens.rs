@@ -210,6 +210,8 @@ pub const PROOF_HEADING_HEIGHT: Pixels = px(28.);
 pub const PROOF_DOT_TOP: Pixels = px(5.);
 /// The project search card, and the line number beside a hit.
 pub const SEARCH_CARD_WIDTH: Pixels = px(440.);
+/// The column a commit's leading symbol, such as a gitmoji, stands in on every history row.
+pub const COMMIT_SYMBOL_WIDTH: Pixels = px(18.);
 /// The search card narrows to this in a small window, so the text keeps its least width beside it.
 pub const SEARCH_CARD_MIN_WIDTH: Pixels = px(280.);
 pub const SEARCH_RESULTS_HEIGHT: Pixels = px(340.);
@@ -443,7 +445,7 @@ impl Tokens {
                 text_quiet: rgb(0x5e5e5e),
                 text_faint: rgb(0x8f8f8f),
                 accent: rgb(accent.unwrap_or(OXIDE_ON_LIGHT)),
-                switch_on: rgb(0xa0a0a0),
+                switch_on: rgb(0x5a5a5a),
                 switch_knob: rgb(0xffffff),
                 link: rgb(0x2f5d8a),
                 error: rgb(0xb5442c),

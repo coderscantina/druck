@@ -353,7 +353,7 @@ impl Render for GitPanel {
         let now = super::history::now_ms() / 1000;
         let history: Vec<_> = (overview.log.iter())
             .map(|commit| {
-                ui::change_row(&tokens, commit.summary.clone(), dates::short(commit.time, now)).into_any_element()
+                ui::commit_row(&tokens, commit.summary.clone(), dates::short(commit.time, now)).into_any_element()
             })
             .collect();
         let branch_rows: Vec<_> = if self.branches_open {

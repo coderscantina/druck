@@ -102,9 +102,18 @@ pub fn button(tokens: &Tokens, id: impl Into<ElementId>, label: impl Into<Shared
         .child(label)
 }
 
-/// A file's or commit's row in a list of changes: its title, and quiet words at the end.
+/// A file's row in a list of changes: its title, and quiet words at the end.
 pub fn change_row(tokens: &Tokens, title: String, words: String) -> gpui::Div {
-    let (lead, title) = split_lead(&title);
+    row(tokens, &title, words, false)
+}
+
+/// A commit's row in history. Its leading symbol's column stands on every row, so titles with and without one align.
+pub fn commit_row(tokens: &Tokens, summary: String, words: String) -> gpui::Div {
+    row(tokens, &summary, words, true)
+}
+
+fn row(tokens: &Tokens, title: &str, words: String, keep_lead: bool) -> gpui::Div {
+    let (lead, title) = split_lead(title);
     div()
         .flex_none()
         .min_h(tokens::VERSIONS_ROW_HEIGHT)
@@ -114,7 +123,14 @@ pub fn change_row(tokens: &Tokens, title: String, words: String) -> gpui::Div {
         .gap(tokens::SPACE_2)
         .text_size(tokens::TEXT_SMALL)
         .text_color(tokens.text_quiet)
-        .children(lead.map(|lead| div().flex_none().child(lead.to_owned())))
+        .when(keep_lead || lead.is_some(), |row| {
+            row.child(
+                div()
+                    .flex_none()
+                    .when(keep_lead, |column| column.w(tokens::COMMIT_SYMBOL_WIDTH))
+                    .children(lead.map(str::to_owned)),
+            )
+        })
         .child(div().flex_1().min_w_0().truncate().child(title.to_owned()))
         .child(div().flex_none().text_color(tokens.text_faint).child(words))
 }
