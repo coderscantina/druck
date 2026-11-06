@@ -291,9 +291,7 @@ impl FileSync {
         let theirs = pending.theirs.as_deref()?;
         let text = session.file_text(path)?;
         let merged = pending.merged(&text, theirs);
-        let (mine, theirs) = merged.first_conflict()?;
-        // Whole lines of this very text, unless the first side's lines hold nothing.
-        let start = (!mine.is_empty()).then(|| text.find(mine)).flatten().unwrap_or(0);
+        let (start, mine, theirs) = merged.first_conflict()?;
         Some(ConflictPassage {
             range: start..start + mine.len(),
             mine: mine.to_owned(),

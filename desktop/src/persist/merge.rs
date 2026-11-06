@@ -119,7 +119,12 @@ pub fn keep_one(text: &str, choice: Choice) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Chunk {
     Clean(String),
-    Conflict { mine: String, theirs: String },
+    /// `at` is where `mine` starts in the author's text.
+    Conflict {
+        mine: String,
+        theirs: String,
+        at: usize,
+    },
 }
 
 /// How a person settled the conflicts in a merge.
@@ -142,10 +147,10 @@ impl Merged {
         !self.chunks.iter().any(|chunk| matches!(chunk, Chunk::Conflict { .. }))
     }
 
-    /// The first place both sides changed, as each side wrote it.
-    pub fn first_conflict(&self) -> Option<(&str, &str)> {
+    /// The first place both sides changed: where it starts in the author's text, and as each side wrote it.
+    pub fn first_conflict(&self) -> Option<(usize, &str, &str)> {
         self.chunks.iter().find_map(|chunk| match chunk {
-            Chunk::Conflict { mine, theirs } => Some((mine.as_str(), theirs.as_str())),
+            Chunk::Conflict { mine, theirs, at } => Some((*at, mine.as_str(), theirs.as_str())),
             Chunk::Clean(_) => None,
         })
     }
@@ -158,7 +163,7 @@ impl Merged {
                 (Chunk::Clean(clean), _) => text.push_str(clean),
                 (Chunk::Conflict { mine, .. }, Choice::Mine) => text.push_str(mine),
                 (Chunk::Conflict { theirs, .. }, Choice::Theirs) => text.push_str(theirs),
-                (Chunk::Conflict { mine, theirs }, Choice::Both) => {
+                (Chunk::Conflict { mine, theirs, .. }, Choice::Both) => {
                     text.push_str(&marker(BOTH_MINE, sides.mine));
                     push_line(&mut text, mine);
                     text.push_str(BOTH_BETWEEN);
@@ -221,6 +226,7 @@ pub fn git_conflict(base: &str, mine: &str, theirs: &str) -> Merged {
         merged.chunks = vec![Chunk::Conflict {
             mine: mine.to_owned(),
             theirs: theirs.to_owned(),
+            at: 0,
         }];
     }
     merged
@@ -363,13 +369,15 @@ fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, mer
             end = end.max(grown);
         }
         merged.clean(&base[at..start]);
-        let mine_part = side(mine, &mine_hunks[mine_from..next_mine], start, end);
-        let theirs_part = side(theirs, &their_hunks[theirs_from..next_theirs], start, end);
+        let mine_range = side(&mine_hunks[mine_from..next_mine], start, end);
+        let mine_part = mine_range.clone().map(|range| &mine[range]);
+        let theirs_part = side(&their_hunks[theirs_from..next_theirs], start, end).map(|range| &theirs[range]);
         match (mine_part, theirs_part) {
             (Some(part), None) | (None, Some(part)) => merged.clean(part),
             (Some(mine_part), Some(theirs_part)) if mine_part == theirs_part => merged.clean(mine_part),
             (Some(mine_part), Some(theirs_part)) => {
-                settle(&base[start..end], mine_part, theirs_part, rules, merged);
+                let at = mine_range.map_or(0, |range| mine[..range.start].iter().map(|token| token.len()).sum());
+                settle(&base[start..end], mine_part, theirs_part, at, rules, merged);
             }
             (None, None) => {}
         }
@@ -378,17 +386,18 @@ fn merge_tokens(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, mer
     merged.clean(&base[at..]);
 }
 
-/// What one side made of the base tokens `start..end`, given its hunks there. `None` if it changed nothing there.
-fn side<'a, 'b>(tokens: &'a [&'b str], hunks: &[Hunk], start: usize, end: usize) -> Option<&'a [&'b str]> {
+/// Which of one side's tokens it made of the base tokens `start..end`, given its hunks there. `None` if it changed
+/// nothing there.
+fn side(hunks: &[Hunk], start: usize, end: usize) -> Option<Range<usize>> {
     let (first, last) = (hunks.first()?, hunks.last()?);
     let from = first.other.start - (first.base.start - start);
     let to = last.other.end + (end - last.base.end);
-    Some(&tokens[from..to])
+    Some(from..to)
 }
 
 /// Both sides changed these tokens differently. Tries the same merge on sentences, and otherwise keeps both as a
-/// conflict.
-fn settle(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, merged: &mut Merged) {
+/// conflict, which starts at byte `at` of the author's text.
+fn settle(base: &[&str], mine: &[&str], theirs: &[&str], at: usize, rules: Rules, merged: &mut Merged) {
     let (base, mine, theirs) = (base.concat(), mine.concat(), theirs.concat());
     if rules.by_sentences {
         let inner_rules = Rules {
@@ -412,7 +421,7 @@ fn settle(base: &[&str], mine: &[&str], theirs: &[&str], rules: Rules, merged: &
             return;
         }
     }
-    merged.chunks.push(Chunk::Conflict { mine, theirs });
+    merged.chunks.push(Chunk::Conflict { mine, theirs, at });
 }
 
 /// Which lines changed from `old` to `new`, as pairs of line ranges, for showing whole lines. See [`edits_between`] for
@@ -565,7 +574,10 @@ mod tests {
             "Er sah. Da war gar nichts.\n",
         );
         let merged = three_way(base, mine, theirs);
-        assert_eq!(merged.first_conflict(), Some((mine, theirs)));
+        assert_eq!(
+            merged.first_conflict().map(|(_, mine, theirs)| (mine, theirs)),
+            Some((mine, theirs))
+        );
         let merged = three_way(
             "The quick brown fox jumps over the lazy dog.\n",
             "The slow brown fox jumps over the lazy dog.\n",
@@ -596,7 +608,10 @@ mod tests {
         );
         assert!(three_way(base, mine, theirs).is_clean());
         let merged = git_conflict(base, mine, theirs);
-        assert_eq!(merged.first_conflict(), Some((mine, theirs)));
+        assert_eq!(
+            merged.first_conflict().map(|(_, mine, theirs)| (mine, theirs)),
+            Some((mine, theirs))
+        );
         assert_eq!(merged.one_side(Choice::Theirs), theirs);
     }
 
@@ -611,7 +626,10 @@ mod tests {
     #[test]
     fn a_git_conflict_the_lines_do_not_show_is_the_whole_file() {
         let merged = git_conflict("a\n", "b\n", "b\n");
-        assert_eq!(merged.first_conflict(), Some(("b\n", "b\n")));
+        assert_eq!(
+            merged.first_conflict().map(|(_, mine, theirs)| (mine, theirs)),
+            Some(("b\n", "b\n"))
+        );
     }
 
     const SIDES: Sides = Sides {

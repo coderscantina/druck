@@ -877,3 +877,14 @@ fn closing_with_nothing_unsaved_leaves_no_recovery_copy() {
     assert_eq!(fixture.sync.write_all(&mut fixture.session), Closing::Saved);
     assert!(copies.load().is_empty());
 }
+
+#[test]
+fn a_conflict_in_a_line_that_also_stands_earlier_is_marked_where_it_is() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "Second line.", "First line.");
+    fixture.outside(ONE, "# One\n\nFirst line.\n\nTheirs.\n");
+    let path = fixture.one();
+    let passage = fixture.sync.conflict_passage(&fixture.session, &path).unwrap();
+    let at = fixture.text(ONE).rfind("First line.").unwrap();
+    assert_eq!(passage.range, at..at + "First line.\n".len());
+}
