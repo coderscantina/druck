@@ -488,7 +488,7 @@ impl Render for LibraryCard {
         let window_size = window.viewport_size();
         let width = tokens::LIBRARY_WIDTH.min(window_size.width - tokens::SPACE_4 * 2.);
         let left = TextColumn::centred(cx, width).min(window_size.width - width - tokens::SPACE_4);
-        let height = tokens::LIBRARY_PANES_HEIGHT + tokens::TOOLBAR_HEIGHT * 3.;
+        let height = tokens::LIBRARY_PANES_HEIGHT + tokens::LIBRARY_BAR_HEIGHT * 3.;
         // Under the caret's paragraph, else above it, else as low as the window lets it stand.
         let span = self.editor.read(cx).caret_block_span();
         let fallback = (window_size.height - height - tokens::FOOTER_HEIGHT).max(tokens::TITLEBAR_HEIGHT);
@@ -536,7 +536,7 @@ impl Render for LibraryCard {
             .child(
                 div()
                     .flex_none()
-                    .h(tokens::TOOLBAR_HEIGHT + tokens::SPACE_2)
+                    .h(tokens::LIBRARY_BAR_HEIGHT + tokens::SPACE_2)
                     .px(tokens::SPACE_3)
                     .flex()
                     .items_center()

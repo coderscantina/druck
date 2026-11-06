@@ -396,6 +396,22 @@ pub(super) fn rows_of(shown: &str, size: Pixels, width: Pixels, window: &Window,
         .map_or(0, |lines| lines.iter().map(|line| line.wrap_boundaries.len() + 1).sum())
 }
 
+/// How wide `text` stands on one line in the UI face at `size`.
+pub(super) fn width_of(text: &str, size: Pixels, window: &Window, tokens: &Tokens) -> Pixels {
+    let run = TextRun {
+        len: text.len(),
+        font: font(tokens::FONT_UI),
+        color: tokens.text_faint.into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(SharedString::from(text.to_owned()), size, &[run], None)
+        .width
+}
+
 /// The width a comment wraps at in the margin.
 fn text_width() -> Pixels {
     tokens::NOTE_WIDTH - tokens::SPACE_2 - tokens::NOTE_RULE

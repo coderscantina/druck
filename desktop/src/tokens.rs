@@ -49,9 +49,10 @@ pub const FIELD_HEIGHT: Pixels = px(30.);
 pub const RADIUS: Pixels = px(6.);
 /// The card that shows the other side of a conflict, over the conflict line.
 pub const CONFLICT_CARD_WIDTH: Pixels = px(420.);
-/// The floating toolbar and its buttons.
-pub const TOOLBAR_HEIGHT: Pixels = px(36.);
-pub const TOOLBAR_BUTTON: Pixels = px(28.);
+/// The floating toolbar and its buttons, within one line's pitch at Write's starting zoom so it stands on the line
+/// above the selection.
+pub const TOOLBAR_HEIGHT: Pixels = px(28.);
+pub const TOOLBAR_BUTTON: Pixels = px(24.);
 pub const TOOLBAR_SEPARATOR: Pixels = px(9.);
 /// A list that floats over the galley: the slash menu and a block's convert menu.
 pub const MENU_WIDTH: Pixels = px(248.);
@@ -526,6 +527,8 @@ pub const LIBRARY_WIDTH: Pixels = px(680.);
 pub const LIBRARY_RESULTS_WIDTH: Pixels = px(372.);
 pub const LIBRARY_PANES_HEIGHT: Pixels = px(236.);
 pub const LIBRARY_IMAGE_HEIGHT: Pixels = px(112.);
+/// The library's search bar, and the room its other rows take.
+pub const LIBRARY_BAR_HEIGHT: Pixels = px(36.);
 
 /// The accent presets. The first is the default, oxide red, which is darker on a light surface.
 pub const ACCENTS: [u32; 6] = [0xe06c4f, 0xd9a441, 0x4fae7b, 0x2f8fb8, 0x6b73e0, 0xb86bd6];
@@ -614,9 +617,9 @@ pub struct Tokens {
     pub canvas: Rgba,
     /// The surface behind Publish's pages, darker than a white page in the light appearance.
     pub pages_canvas: Rgba,
-    /// Binder, rail, and cards.
+    /// Binder, the rail's panel and its active tab, and cards.
     pub panel: Rgba,
-    /// A raised block in a panel, such as the document identity or the active rail tab.
+    /// A raised block in a panel, such as the document identity or a chosen row.
     pub raised: Rgba,
     /// A softly filled field.
     pub field: Rgba,

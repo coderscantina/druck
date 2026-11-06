@@ -302,14 +302,17 @@ impl EditorView {
         let dismiss = button("note-dismiss", Key::Dismiss, NoteAction::Dismiss, cx);
         let text_size = body_size * tokens::ADVICE_TEXT;
         let text_width = tokens::NOTE_WIDTH - tokens::SPACE_3 - tokens::NOTE_RULE;
-        let long = super::margin::rows_of(&text, text_size, text_width, window, tokens) > tokens::ADVICE_QUIET_LINES;
         let open = self.open_advice.contains(&id);
+        let label = crate::t!(if open { Key::NoteLess } else { Key::NoteMore });
+        let measure = |text: &str| f32::from(super::margin::width_of(text, text_size, window, tokens));
+        let room = measure(label) + f32::from(tokens::SPACE_1);
+        let clipped = clipped(&text, tokens::ADVICE_QUIET_LINES, f32::from(text_width), room, measure);
+        let long = clipped.is_some();
         let more = long.then(|| {
-            let label = crate::t!(if open { Key::NoteLess } else { Key::NoteMore });
             div()
                 .id(("note-more", id as usize))
                 .button(tokens, label)
-                .mt(-tokens::SPACE_1)
+                .flex_none()
                 .cursor_pointer()
                 .text_color(tokens.text_quiet)
                 .hover(|link| link.text_color(tokens.text))
@@ -344,14 +347,26 @@ impl EditorView {
                     .text_color(tokens.text)
                     .child(note.title.clone()),
             )
-            .child(
-                div()
-                    .when(long && !open, |text| {
-                        text.line_clamp(tokens::ADVICE_QUIET_LINES).text_ellipsis()
-                    })
-                    .child(text),
-            )
-            .children(more)
+            .map(|column| match clipped.filter(|_| !open) {
+                // Its last line ends in an ellipsis with More after it.
+                Some(mut lines) => {
+                    let last = lines.pop().unwrap_or_default();
+                    column.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .children(lines.into_iter().map(|line| div().whitespace_nowrap().child(line)))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(tokens::SPACE_1)
+                                    .child(div().whitespace_nowrap().child(last))
+                                    .children(more),
+                            ),
+                    )
+                }
+                None => column.child(text).children(more.map(|more| more.mt(-tokens::SPACE_1))),
+            })
             .when_some(note.suggestion.clone().filter(|_| !gone), |column, suggestion| {
                 column.child(
                     div()
@@ -390,6 +405,56 @@ impl EditorView {
     }
 }
 
+/// The first `lines` lines of `text` broken at words to fit `width`, the last ending in an ellipsis with `room` left
+/// after it, or `None` when the whole text fits in that many lines.
+fn clipped(text: &str, lines: usize, width: f32, room: f32, measure: impl Fn(&str) -> f32) -> Option<Vec<String>> {
+    let mut words = text.split_whitespace().peekable();
+    let mut shown: Vec<String> = (1..lines).map(|_| take_line(&mut words, width, &measure)).collect();
+    let mut rest = words.clone();
+    take_line(&mut rest, width, &measure);
+    rest.peek()?;
+    let ellipsis = "\u{2026}";
+    let mut last = String::new();
+    while let Some(word) = words.peek() {
+        let longer = if last.is_empty() {
+            (*word).to_owned()
+        } else {
+            format!("{last} {word}")
+        };
+        if measure(&format!("{longer}{ellipsis}")) + room > width {
+            break;
+        }
+        last = longer;
+        words.next();
+    }
+    let mut last = last.trim_end_matches([',', ';', ':']).to_owned();
+    last.push_str(ellipsis);
+    shown.push(last);
+    Some(shown)
+}
+
+/// The words of one line up to `width`, at least one so a long word still moves on.
+fn take_line<'a>(
+    words: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+    width: f32,
+    measure: &impl Fn(&str) -> f32,
+) -> String {
+    let mut line = String::new();
+    while let Some(word) = words.peek() {
+        let longer = if line.is_empty() {
+            (*word).to_owned()
+        } else {
+            format!("{line} {word}")
+        };
+        if !line.is_empty() && measure(&longer) > width {
+            break;
+        }
+        line = longer;
+        words.next();
+    }
+    line
+}
+
 #[cfg(test)]
 #[allow(clippy::single_range_in_vec_init, reason = "a list of byte ranges that holds one")]
 mod tests {
@@ -402,6 +467,16 @@ mod tests {
             removed: vec![(10, "old".to_owned())],
             end: 10,
         }
+    }
+
+    #[test]
+    fn a_clipped_note_ends_at_a_word_with_room_for_more() {
+        let measure = |text: &str| text.chars().count() as f32;
+        assert_eq!(clipped("one two three", 2, 10., 4., measure), None);
+        let lines = clipped("one two three four five six", 2, 10., 4., measure);
+        assert_eq!(lines, Some(vec!["one two".to_owned(), "three\u{2026}".to_owned()]));
+        let lines = clipped("one two three, four five six", 2, 10., 3., measure);
+        assert_eq!(lines, Some(vec!["one two".to_owned(), "three\u{2026}".to_owned()]));
     }
 
     #[test]

@@ -927,11 +927,7 @@ impl EditorView {
         let (label, top) = self.chapter_label()?;
         let tokens = Tokens::get(cx);
         let size = self.chapter_label_size();
-        // gpui sets no letter spacing, so a thin space, about 0.15 em, stands between the letters.
-        let spaced = (label.to_uppercase().chars())
-            .map(|letter| letter.to_string())
-            .collect::<Vec<_>>()
-            .join("\u{2009}");
+        let spaced = tracked(&label.to_uppercase());
         // Lining figures stand as tall as the capitals, where a book face's old-style ones would sit at x-height.
         let font = Font {
             features: FontFeatures(std::sync::Arc::new(vec![("lnum".into(), 1)])),
@@ -1096,4 +1092,33 @@ pub(super) fn prepaint_float(mut element: AnyElement, spot: Spot, window: &mut W
         Spot::Caret(target, area) => placed_at_caret(target, size, area),
     };
     window.defer_draw(element, origin, 2, None);
+}
+
+/// Tracks a label's letters apart with thin spaces, about 0.15 em, since gpui sets no letter spacing. Digits keep
+/// together and spaces stay as written: "KAPITEL 1", "11".
+fn tracked(label: &str) -> String {
+    let mut out = String::with_capacity(label.len() * 4);
+    let mut previous = None::<char>;
+    for character in label.chars() {
+        if previous.is_some_and(char::is_alphabetic) && character.is_alphabetic() {
+            out.push('\u{2009}');
+        }
+        out.push(character);
+        previous = Some(character);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tracked;
+
+    #[test]
+    fn tracks_letters_and_keeps_numbers_tight() {
+        assert_eq!(tracked("01"), "01");
+        assert_eq!(
+            tracked("KAPITEL 11"),
+            "K\u{2009}A\u{2009}P\u{2009}I\u{2009}T\u{2009}E\u{2009}L 11"
+        );
+    }
 }

@@ -502,6 +502,7 @@ impl Desk<'_> {
         let text = div()
             .font_family(self.font.clone())
             .text_size(tokens::NAV_DESK_LABEL_TEXT)
+            .line_height(tokens::NAV_DESK_TITLE_LEADING)
             .text_color(tokens.text_quiet)
             .line_clamp(2)
             .child(label.to_owned());
@@ -521,9 +522,7 @@ impl Desk<'_> {
                 .ml(-tokens::NAV_DESK_CARD_Y)
                 .rounded(tokens::RADIUS)
                 .cursor_pointer()
-                .when(focused, |label| {
-                    label.bg(tokens.raised).shadow(vec![crate::a11y::ring(tokens)])
-                })
+                .when(focused, |label| label.shadow(vec![crate::a11y::ring(tokens)]))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |navigator, event: &gpui::ClickEvent, window, cx| {
                     navigator.entry_clicked(id, event.click_count(), window, cx)
@@ -613,9 +612,7 @@ impl Desk<'_> {
             })
             .when(aside && !focused, |card| card.border_dashed())
             .when(focused, |card| {
-                card.bg(tokens.raised)
-                    .rounded(tokens::RADIUS)
-                    .shadow(vec![crate::a11y::ring(tokens)])
+                card.rounded(tokens::RADIUS).shadow(vec![crate::a11y::ring(tokens)])
             })
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

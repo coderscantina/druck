@@ -240,8 +240,9 @@ pub struct TextInput {
     book_type: Option<(gpui::Font, Pixels)>,
     /// No frame of its own, for a field that stands on a card as its text.
     bare: bool,
-    /// A one-line field's height, and the faint icon at its start, such as a search's.
+    /// A one-line field's height and text size, and the faint icon at its start, such as a search's.
     height: Pixels,
+    text_size: Pixels,
     icon: Option<&'static str>,
     arrows_to_parent: bool,
     /// Shown in the quiet color while the field is empty.
@@ -311,6 +312,7 @@ impl TextInput {
             book_type: None,
             bare: false,
             height: tokens::FIELD_HEIGHT,
+            text_size: tokens::TEXT_BODY,
             icon: None,
             arrows_to_parent: false,
             placeholder: Words::default(),
@@ -333,6 +335,12 @@ impl TextInput {
     /// Sets a one-line field's height, for a row of controls that share one.
     pub fn with_height(mut self, height: Pixels) -> Self {
         self.height = height;
+        self
+    }
+
+    /// Sets a one-line field's text size, for a row of small controls.
+    pub fn with_text_size(mut self, size: Pixels) -> Self {
+        self.text_size = size;
         self
     }
 
@@ -1054,7 +1062,7 @@ impl TextInput {
             let size = if self.multiline {
                 tokens::TEXT_SMALL + tokens::HAIRLINE
             } else {
-                tokens::TEXT_BODY
+                self.text_size
             };
             (font(family), size)
         });

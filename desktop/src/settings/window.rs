@@ -262,6 +262,7 @@ impl SettingsWindow {
             TextInput::new(window, cx)
                 .with_label(Key::Accent)
                 .with_height(tokens::SETTINGS_CONTROL_HEIGHT)
+                .with_text_size(tokens::TEXT_SMALL)
         });
         let subscriptions = vec![
             cx.observe_global_in::<Store>(window, |view, window, cx| view.settings_changed(window, cx)),

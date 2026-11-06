@@ -305,8 +305,16 @@ impl InspectorView {
             .flex()
             .items_center()
             .justify_center()
-            .when(active, |button| button.bg(tokens.raised).rounded_r(tokens::RADIUS))
-            .hover(|button| button.bg(tokens.raised))
+            // The active tab stands on the panel's ground with no divider before it, so the two read as one surface.
+            .when(active, |button| {
+                button.bg(tokens.panel).rounded_r(tokens::RADIUS).pl(tokens::HAIRLINE)
+            })
+            .when(!active, |button| {
+                button
+                    .border_l_1()
+                    .border_color(tokens.divider)
+                    .hover(|button| button.bg(tokens.raised))
+            })
             .child(svg().path(tab.icon()).size(tokens::ICON_SIZE).text_color(if active {
                 tokens.text
             } else {
@@ -371,11 +379,9 @@ impl Render for InspectorView {
             .w(tokens::RAIL_WIDTH)
             .flex()
             .flex_col()
-            .justify_between()
-            .bg(tokens.panel)
-            .border_l_1()
-            .border_color(tokens.divider)
+            .bg(tokens.canvas)
             .child(div().flex().flex_col().children(top))
+            .child(div().flex_1().border_l_1().border_color(tokens.divider))
             .child(div().flex().flex_col().children(bottom));
         div()
             .when(self.write, |root| root.size_full())

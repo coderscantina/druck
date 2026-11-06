@@ -64,12 +64,17 @@ impl DetailsPanel {
         let mut fields = Vec::new();
         for field in [Field::Title, Field::Subtitle, Field::Authors, Field::Date] {
             let input = cx.new(|cx| {
-                TextInput::new(window, cx).with_label(match field {
+                let input = TextInput::new(window, cx).with_label(match field {
                     Field::Title => Key::FieldTitle,
                     Field::Subtitle => Key::FieldSubtitle,
                     Field::Authors => Key::FieldAuthors,
                     _ => Key::FieldDate,
-                })
+                });
+                if field == Field::Date {
+                    input.with_placeholder(Key::DateHint)
+                } else {
+                    input
+                }
             });
             subscriptions.push(cx.subscribe(&input, move |_, _, Committed(text), cx| {
                 cx.emit(DetailsEdit::Field(field, text.clone()));

@@ -56,6 +56,7 @@ crate::strings! {
         FieldSubtitle => ("Subtitle", "Untertitel"),
         FieldAuthors => ("Authors", "Autoren"),
         FieldDate => ("Date", "Datum"),
+        DateHint => ("Such as 2026-03-01", "Etwa 2026-03-01"),
         FieldLanguage => ("Language", "Sprache"),
         NoCover => ("No cover", "Kein Cover"),
         FieldBibliography => ("Bibliography", "Literatur"),

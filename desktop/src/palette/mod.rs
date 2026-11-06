@@ -20,6 +20,7 @@ use crate::shell::{self, menus};
 use crate::sidebar;
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Current, Mode, Parts, Slots, Workspace};
+use crate::workspace::{FocusNext, FocusPrevious};
 
 actions!(palette, [FindChapter, RunCommand]);
 
@@ -376,6 +377,9 @@ impl Render for Palette {
             .key_context("Palette")
             .on_action(cx.listener(|palette, _: &input::Up, _, cx| palette.step(false, cx)))
             .on_action(cx.listener(|palette, _: &input::Down, _, cx| palette.step(true, cx)))
+            // Its field is its one stop, so Tab and Shift+Tab stay there.
+            .on_action(|_: &FocusNext, _, _| {})
+            .on_action(|_: &FocusPrevious, _, _| {})
             .on_mouse_down_out(cx.listener(|palette, _: &MouseDownEvent, window, cx| palette.close(window, cx)))
             .child(
                 div()

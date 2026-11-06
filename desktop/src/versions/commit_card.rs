@@ -12,7 +12,7 @@ use super::strings::Key;
 use super::{RepoState, Versions, change_words, ui, unreviewed_changes};
 use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
 use crate::tokens::{self, Tokens};
-use crate::workspace::TextColumn;
+use crate::workspace::{FocusNext, FocusPrevious, TextColumn};
 
 actions!(commit_card, [Close, CommitNow]);
 
@@ -399,6 +399,12 @@ impl Render for CommitCard {
             .key_context("CommitCard")
             .on_action(cx.listener(|card, _: &Close, window, cx| card.close(window, cx)))
             .on_action(cx.listener(|card, _: &CommitNow, window, cx| card.commit(false, window, cx)))
+            .on_action(
+                cx.listener(|card, _: &FocusNext, window, cx| crate::a11y::cycle_within(&card.focus, true, window, cx)),
+            )
+            .on_action(cx.listener(|card, _: &FocusPrevious, window, cx| {
+                crate::a11y::cycle_within(&card.focus, false, window, cx)
+            }))
             .child(ui::section_label(&tokens, crate::t!(Key::CommitLabel)))
             .children(parts);
         div()
