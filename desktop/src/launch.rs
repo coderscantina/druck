@@ -91,8 +91,6 @@ impl LaunchView {
             .flex()
             .items_center()
             .gap(tokens::SPACE_3)
-            .border_b_1()
-            .border_color(tokens.divider)
             .cursor_pointer()
             .hover(|row| row.bg(tokens.raised))
             .child(
@@ -160,16 +158,13 @@ impl Render for LaunchView {
                     .rounded(tokens::RADIUS)
                     .child(
                         div()
-                            .p(tokens::SPACE_3)
+                            .px(tokens::SPACE_3)
+                            .py(tokens::SPACE_2)
                             .border_b_1()
                             .border_color(tokens.divider)
-                            .child(
-                                div()
-                                    .text_size(tokens::TEXT_TITLE)
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Druck"),
-                            )
-                            .child(div().text_color(tokens.text_quiet).child(crate::t!(Key::Tagline))),
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_quiet)
+                            .child("Druck"),
                     )
                     .when_some(self.offer.clone(), |card, (dir, offer)| {
                         card.child(
@@ -184,6 +179,8 @@ impl Render for LaunchView {
                             Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
                                 .track_focus(&self.offer_focus)
                                 .ring_while_focused(&tokens)
+                                .border_b_1()
+                                .border_color(tokens.divider)
                                 .text_color(tokens.accent)
                                 .on_click(cx.listener(move |_, _, _, cx| {
                                     cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
@@ -201,6 +198,8 @@ impl Render for LaunchView {
                             crate::t!(Key::Open),
                             crate::t!(Key::OpenHint),
                         )
+                        .border_b_1()
+                        .border_color(tokens.divider)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
                     )
                     .child(

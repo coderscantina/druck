@@ -708,7 +708,7 @@ impl Render for SettingsWindow {
                             .bg(tokens.panel)
                             .border_r_1()
                             .border_color(tokens.divider)
-                            .pt(tokens::SPACE_2)
+                            .pt(tokens::SPACE_3 - (tokens::LIST_ROW_HEIGHT - tokens::FIELD_HEIGHT) / 2.)
                             .children(nav)
                             .child(div().flex_1())
                             .child(link),

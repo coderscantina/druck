@@ -656,7 +656,7 @@ impl EditorView {
             )
         };
         let note_lines = (self.advice_anchors().into_iter())
-            .flat_map(|anchor| self.range_rectangles(anchor, &blocks, true))
+            .flat_map(|anchor| self.ink_rectangles(anchor, &blocks))
             .map(rule_under)
             .collect();
         let conflict_rows: Vec<_> = (self.conflict_mark.clone().into_iter())
@@ -781,6 +781,21 @@ impl EditorView {
         blocks: &[FrameBlock],
         past_chip: bool,
     ) -> Vec<Bounds<Pixels>> {
+        self.rectangles(selection, blocks, past_chip, false)
+    }
+
+    /// Like `range_rectangles` past a chip, but each row's rectangle ends at its last glyph, before trailing spaces.
+    fn ink_rectangles(&self, selection: std::ops::Range<usize>, blocks: &[FrameBlock]) -> Vec<Bounds<Pixels>> {
+        self.rectangles(selection, blocks, true, true)
+    }
+
+    fn rectangles(
+        &self,
+        selection: std::ops::Range<usize>,
+        blocks: &[FrameBlock],
+        past_chip: bool,
+        ink: bool,
+    ) -> Vec<Bounds<Pixels>> {
         if selection.is_empty() {
             return Vec::new();
         }
@@ -826,14 +841,18 @@ impl EditorView {
                 }
                 for (row, range) in line.rows.iter().enumerate() {
                     let start = from.max(range.start);
-                    let end = to.min(range.end);
+                    let mut end = to.min(range.end);
+                    if ink && start < end {
+                        end = start + line.display.text[start..end].trim_end().len();
+                    }
                     let last = line.is_last_row(row);
-                    if start > end || (start == end && !(last && crosses_line_end)) {
+                    let past_end = last && crosses_line_end && !ink;
+                    if start > end || (start == end && !past_end) {
                         continue;
                     }
                     let x0 = line.x_in_row(start, row);
                     let mut x1 = line.x_in_row(end, row);
-                    if last && crosses_line_end {
+                    if past_end {
                         x1 += newline_width;
                     }
                     rectangles.push(Bounds::new(
