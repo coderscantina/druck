@@ -4,7 +4,7 @@
 crate::strings! {
     pub enum Key {
         Commit => ("Commit", "Commit"),
-        CommitLabel => ("COMMIT", "COMMIT"),
+        CommitLabel => ("Commit", "Commit"),
         CommitAndPush => ("Commit and push", "Commit und Push"),
         Message => ("Message", "Nachricht"),
         NothingChanged => ("Nothing changed since the last commit.", "Seit dem letzten Commit hat sich nichts geändert."),
@@ -80,7 +80,7 @@ crate::strings! {
         YourName => ("Name", "Name"),
         YourEmail => ("Email", "E-Mail"),
 
-        GitLabel => ("GIT", "GIT"),
+        GitLabel => ("Git", "Git"),
         BranchGroup => ("Branch", "Branch"),
         ChangesGroup => ("Changes", "Änderungen"),
         HistoryGroup => ("History", "Verlauf"),

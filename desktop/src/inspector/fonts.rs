@@ -253,7 +253,7 @@ impl FontsPanel {
             .join(", ");
         parts.push(value_row(tokens, Key::UsedBy, used_by, None));
 
-        parts.push(widgets::section(tokens, crate::t!(Key::Faces).to_uppercase()).into_any_element());
+        parts.push(widgets::section(tokens, crate::t!(Key::Faces)).into_any_element());
         for face in &font.faces {
             let label = FACES
                 .iter()
@@ -263,7 +263,7 @@ impl FontsPanel {
         }
 
         if let Some(info) = &family.info {
-            parts.push(widgets::section(tokens, crate::t!(Key::License).to_uppercase()).into_any_element());
+            parts.push(widgets::section(tokens, crate::t!(Key::License)).into_any_element());
             let license = match &info.license {
                 Some(license) => div()
                     .text_size(tokens::TEXT_SMALL)
@@ -276,7 +276,7 @@ impl FontsPanel {
                 parts.push(padded(widgets::note(tokens, url.clone())).into_any_element());
             }
             if info.is_variable() {
-                parts.push(widgets::section(tokens, crate::t!(Key::Axes).to_uppercase()).into_any_element());
+                parts.push(widgets::section(tokens, crate::t!(Key::Axes)).into_any_element());
                 parts.push(padded(widgets::note(tokens, Key::AxesNote)).into_any_element());
                 for axis in &info.axes {
                     let range = format!("{} / {} / {}", number(axis.min), number(axis.default), number(axis.max));
@@ -361,7 +361,7 @@ impl FontsPanel {
 
     fn top(&self, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let Some(selected) = &self.selected else {
-            return widgets::header(tokens, crate::t!(Key::FontsTitle).to_uppercase()).into_any_element();
+            return widgets::header(tokens, crate::t!(Key::FontsTitle)).into_any_element();
         };
         widgets::bar(tokens)
             .child(
@@ -382,7 +382,7 @@ impl FontsPanel {
                     .child("‹")
                     .on_click(cx.listener(|panel, _, _, cx| panel.select(None, cx))),
             )
-            .child(div().min_w_0().truncate().child(selected.to_uppercase()))
+            .child(div().min_w_0().truncate().child(selected.clone()))
             .into_any_element()
     }
 }

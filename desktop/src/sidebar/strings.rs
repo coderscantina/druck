@@ -2,11 +2,11 @@
 
 crate::strings! {
     pub enum Key {
-        Manifest => ("MANIFEST", "MANIFEST"),
-        Contents => ("CONTENTS", "INHALT"),
-        NotInBook => ("NOT IN BOOK", "NICHT IM BUCH"),
-        Notes => ("NOTES", "NOTIZEN"),
-        Research => ("RESEARCH", "RECHERCHE"),
+        Manifest => ("Manifest", "Manifest"),
+        Contents => ("Contents", "Inhalt"),
+        NotInBook => ("Not in book", "Nicht im Buch"),
+        Notes => ("Notes", "Notizen"),
+        Research => ("Research", "Recherche"),
 
         NewSection => ("New section", "Neuer Abschnitt"),
         Details => ("Details", "Angaben"),

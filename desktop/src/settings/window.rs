@@ -549,7 +549,7 @@ impl SettingsWindow {
             .text_size(tokens::TEXT_SMALL)
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(tokens.text_quiet)
-            .child(label.to_uppercase())
+            .child(label)
     }
 
     /// The rows of one category, or what the search finds in all of them.

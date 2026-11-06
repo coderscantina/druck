@@ -5,7 +5,7 @@ use super::approval::SessionLabel;
 crate::strings! {
     pub enum Key {
         RemoveChip => ("Remove", "Entfernen"),
-        Title => ("AGENT", "AGENT"),
+        Title => ("Agent", "Agent"),
         Close => ("Close", "Schließen"),
         SelectionPlaceholder => ("Say what to change\u{2026}", "Sag, was sich ändern soll\u{2026}"),
         ReviewHereOne => ("1 change to review in this chapter", "1 Änderung in diesem Kapitel zu prüfen"),

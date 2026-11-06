@@ -5,6 +5,6 @@ crate::strings! {
         Tagline => ("Write it, then make it a book.", "Schreib es, dann mach ein Buch daraus."),
         Open => ("Open", "Öffnen"),
         OpenHint => ("A Markdown file or a project folder", "Eine Markdown-Datei oder ein Projektordner"),
-        NewProject => ("NEW PROJECT", "NEUES PROJEKT"),
+        NewProject => ("New project", "Neues Projekt"),
     }
 }

@@ -4,17 +4,17 @@
 crate::strings! {
     #[derive(Hash)]
     pub enum Key {
-        TabStyles => ("STYLES", "STILE"),
-        TabFonts => ("FONTS", "SCHRIFTEN"),
-        TabImages => ("IMAGES", "BILDER"),
-        TabDetails => ("DETAILS", "DETAILS"),
-        TabProof => ("PROOF", "KORREKTUR"),
-        TabGit => ("GIT", "GIT"),
-        TabExport => ("EXPORT", "EXPORT"),
-        TabAgent => ("AGENT", "AGENT"),
-        TabResearch => ("RESEARCH", "RECHERCHE"),
-        TabNotes => ("NOTES", "NOTIZEN"),
-        TabProbes => ("PROBES", "PROBEN"),
+        TabStyles => ("Styles", "Stile"),
+        TabFonts => ("Fonts", "Schriften"),
+        TabImages => ("Images", "Bilder"),
+        TabDetails => ("Details", "Details"),
+        TabProof => ("Proof", "Korrektur"),
+        TabGit => ("Git", "Git"),
+        TabExport => ("Export", "Export"),
+        TabAgent => ("Agent", "Agent"),
+        TabResearch => ("Research", "Recherche"),
+        TabNotes => ("Notes", "Notizen"),
+        TabProbes => ("Probes", "Proben"),
 
         StyleBody => ("Regular text", "Fließtext"),
         StyleHeading1 => ("Heading 1", "Überschrift 1"),
@@ -49,9 +49,9 @@ crate::strings! {
         StyleIndexEntry => ("Index entry", "Registereintrag"),
         StyleIndexSubEntry => ("Index sub-entry", "Register-Untereintrag"),
 
-        DetailsTitle => ("DETAILS", "DETAILS"),
-        CoverImageTitle => ("COVER", "COVER"),
-        MetaTitle => ("META", "META"),
+        DetailsTitle => ("Details", "Details"),
+        CoverImageTitle => ("Cover", "Cover"),
+        MetaTitle => ("Meta", "Meta"),
         FieldTitle => ("Title", "Titel"),
         FieldSubtitle => ("Subtitle", "Untertitel"),
         FieldAuthors => ("Authors", "Autoren"),
@@ -75,8 +75,8 @@ crate::strings! {
         // Shared
         Back => ("Back", "Zurück"),
         Reset => ("Reset", "Zurücksetzen"),
-        Inherited => ("DEFAULT", "STANDARD"),
-        Customized => ("CUSTOM", "EIGEN"),
+        Inherited => ("Default", "Standard"),
+        Customized => ("Custom", "Eigen"),
         NoTheme => (
             "No theme file is open. Start the app with --theme PATH or name a theme in the document.",
             "Keine Theme-Datei geöffnet. Starte die App mit --theme PFAD oder nenne ein Theme im Dokument."
@@ -138,14 +138,14 @@ crate::strings! {
         ShowSpecimen => ("Show the specimen", "Muster zeigen"),
 
         // Fonts
-        FontsTitle => ("FONTS", "SCHRIFTEN"),
+        FontsTitle => ("Fonts", "Schriften"),
         AddFont => ("Add a font file", "Schriftdatei hinzufügen"),
         ChooseFile => ("Choose", "Wählen"),
         Typeface => ("Typeface", "Schriftart"),
         TotalSize => ("Total size", "Gesamtgröße"),
         Format => ("Format", "Format"),
         Source => ("Source", "Quelle"),
-        License => ("LICENSE", "LIZENZ"),
+        License => ("License", "Lizenz"),
         NoLicense => ("The font file carries no license text.", "Die Schriftdatei enthält keinen Lizenztext."),
         Truetype => ("TrueType", "TrueType"),
         Opentype => ("OpenType", "OpenType"),
@@ -157,7 +157,7 @@ crate::strings! {
             "This font's license restricts embedding. Druck embeds it anyway, so check that the license allows this.",
             "Die Lizenz dieser Schrift schränkt das Einbetten ein. Druck bettet sie trotzdem ein, prüfe daher die Lizenz."
         ),
-        Axes => ("VARIABLE AXES", "VARIABLE ACHSEN"),
+        Axes => ("Variable axes", "Variable Achsen"),
         AxesNote => (
             "Shown for reference. The weights a theme asks for set the axis.",
             "Zur Ansicht. Die angeforderten Schnitte setzen die Achse."
@@ -196,13 +196,13 @@ crate::strings! {
         CustomSize => ("Custom", "Eigen"),
         Width => ("Width", "Breite"),
         Height => ("Height", "Höhe"),
-        Margins => ("MARGINS", "RÄNDER"),
+        Margins => ("Margins", "Ränder"),
         MarginTop => ("Top", "Oben"),
         MarginBottom => ("Bottom", "Unten"),
         MarginInner => ("Inner", "Innen"),
         MarginOuter => ("Outer", "Außen"),
         Mirror => ("Mirror margins on even pages", "Gerade Seiten spiegeln"),
-        Columns => ("TEXT", "TEXT"),
+        Columns => ("Text", "Text"),
         ColumnGap => ("Column gap", "Spaltenabstand"),
         TextWidth => ("Narrower prose width", "Schmalere Textbreite"),
         TextWidthHint => ("Empty for the full frame", "Leer für den ganzen Satzspiegel"),
@@ -264,7 +264,7 @@ crate::strings! {
         SectionVersion => ("Format version", "Formatversion"),
         SectionSchema => ("Schema", "Schema"),
         SectionSource => ("Theme source", "Theme-Quelle"),
-        RelatedStyles => ("STYLES", "STILE"),
+        RelatedStyles => ("Styles", "Stile"),
 
         // Chapter openings and contents
         StartOn => ("Start on", "Beginnt auf"),
@@ -296,8 +296,8 @@ crate::strings! {
         PagesFirst => ("First", "Erste"),
         PagesBody => ("Other", "Übrige"),
         PagesTitle => ("Title", "Titel"),
-        BandHeader => ("HEADER", "KOPFZEILE"),
-        BandFooter => ("FOOTER", "FUSSZEILE"),
+        BandHeader => ("Header", "Kopfzeile"),
+        BandFooter => ("Footer", "Fußzeile"),
         BandEmpty => ("Nothing stands here.", "Hier steht nichts."),
         SlotText => ("Text", "Text"),
         SlotHint => (
@@ -307,7 +307,7 @@ crate::strings! {
 
         // Picker
         Theme => ("Theme", "Theme"),
-        ProjectThemes => ("PROJECT", "PROJEKT"),
+        ProjectThemes => ("Project", "Projekt"),
         SharedThemes => ("Shared", "Gemeinsam"),
         NewSharedTheme => ("New shared theme", "Neues gemeinsames Theme"),
         Duplicate => ("Duplicate", "Duplizieren"),
