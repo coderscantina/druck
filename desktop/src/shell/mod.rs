@@ -389,7 +389,7 @@ impl Hub {
         let diagnostics = cx.new(|_| DiagnosticsPanel::new());
         let export = cx.new(|cx| ExportPanel::new(window, cx));
         let search = cx.new(|cx| SearchPanel::new(window, cx));
-        let find = cx.new(|cx| FindBar::new(window, cx));
+        let find = cx.new(|cx| FindBar::new(parts.editor.clone(), window, cx));
         let footer = cx.new(|cx| Footer::new(parts.editor.clone(), cx));
         parts.inspector.update(cx, |inspector, _| {
             inspector.mount(Tab::Proof, diagnostics.clone().into());
@@ -415,6 +415,7 @@ impl Hub {
             }),
             cx.subscribe(&parts.editor, |hub, _, _: &TextChanged, cx| {
                 hub.footer.update(cx, |footer, cx| footer.typed(cx));
+                hub.refresh_found(cx);
             }),
             cx.observe_global_in::<settings::Store>(window, |hub, window, cx| hub.settings_changed(window, cx)),
             cx.subscribe_in(&diagnostics, window, Self::diagnostics_event),
@@ -466,6 +467,7 @@ impl Hub {
     }
 
     fn session_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.refresh_found(cx);
         self.refresh_export(window, cx);
         self.refresh_facts(cx);
         self.update_footer(cx);

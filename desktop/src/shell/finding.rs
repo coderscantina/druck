@@ -185,6 +185,7 @@ impl Hub {
             FindEvent::Next => self.step_find(false, window, cx),
             FindEvent::Previous => self.step_find(true, window, cx),
             FindEvent::Closed => {
+                self.refresh_found(cx);
                 let focus = self.parts.editor.read(cx).focus_handle(cx);
                 focus.focus(window, cx);
             }
@@ -201,11 +202,7 @@ impl Hub {
     }
 
     fn go_to_match(&mut self, from: usize, backwards: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let query = self.finding.find.read(cx).query(cx);
-        let matches = match Matcher::new(&query, Options::default()) {
-            Ok(Some(matcher)) => matcher.find(self.parts.editor.read(cx).text()),
-            _ => Vec::new(),
-        };
+        let matches = self.refresh_found(cx);
         let position = search::next_match(&matches, from, backwards).map(|at| (at, matches[at].clone()));
         if let Some((_, range)) = &position {
             self.parts
@@ -214,5 +211,19 @@ impl Hub {
         }
         let shown = position.map(|(at, _)| (at + 1, matches.len()));
         self.finding.find.update(cx, |bar, cx| bar.set_position(shown, cx));
+    }
+
+    /// Finds the bar's text in the open chapter as it is now, and has the text tint the matches while the bar is open.
+    pub(super) fn refresh_found(&mut self, cx: &mut Context<Self>) -> Vec<std::ops::Range<usize>> {
+        let bar = self.finding.find.read(cx);
+        let matcher = (bar.is_open())
+            .then(|| Matcher::new(&bar.query(cx), Options::default()).ok().flatten())
+            .flatten();
+        let matches = matcher.map_or_else(Vec::new, |matcher| matcher.find(self.parts.editor.read(cx).text()));
+        let tinted = matches.clone();
+        self.parts
+            .editor
+            .update(cx, |editor, cx| editor.set_find_matches(tinted, cx));
+        matches
     }
 }

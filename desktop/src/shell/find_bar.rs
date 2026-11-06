@@ -1,11 +1,14 @@
 //! The find bar of the galley: a small card at the top of the window, opened by Cmd+F, that finds in the open chapter.
+//! It stands in the empty margin left of the text when it fits there, and otherwise over the text's corner.
 
 use gpui::prelude::*;
 use gpui::{Context, Entity, EventEmitter, Focusable, SharedString, Subscription, Window, div, svg};
 
 use super::text::Key;
 use crate::a11y::Control as _;
+use crate::editor::EditorView;
 use crate::inspector::input::{Cancelled, Edited, Submitted, TextInput};
+use crate::workspace::TextColumn;
 use crate::tokens::{self, Tokens};
 
 pub enum FindEvent {
@@ -20,6 +23,8 @@ impl EventEmitter<FindEvent> for FindBar {}
 
 pub struct FindBar {
     open: bool,
+    /// The text the bar finds in, which says where the margin is.
+    editor: Entity<EditorView>,
     input: Entity<TextInput>,
     /// Which match the caret is at and how many there are, once the query has found any.
     position: Option<(usize, usize)>,
@@ -27,7 +32,7 @@ pub struct FindBar {
 }
 
 impl FindBar {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .keep_focus_on_enter()
@@ -43,6 +48,7 @@ impl FindBar {
         ];
         Self {
             open: false,
+            editor,
             input,
             position: None,
             _subscriptions: subscriptions,
@@ -72,6 +78,14 @@ impl FindBar {
 
     pub fn query(&self, cx: &gpui::App) -> String {
         self.input.read(cx).text().to_owned()
+    }
+
+    /// The bar's left edge: in the margin, ending before the text's block gutter, when the margin holds it, and otherwise
+    /// over the text's corner, as a card that asks stands.
+    fn left(&self, cx: &gpui::App) -> gpui::Pixels {
+        let corner = TextColumn::asking(cx, tokens::FIND_BAR_WIDTH);
+        let in_margin = self.editor.read(cx).text_left() - tokens::GUTTER_WIDTH - tokens::FIND_BAR_WIDTH;
+        if in_margin >= corner { in_margin } else { corner }
     }
 
     /// Shows which match the caret is at, counting from 1, out of how many; `None` when there are none.
@@ -117,7 +131,7 @@ impl Render for FindBar {
             .occlude()
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT + tokens::SECTION_HEIGHT)
-            .left(tokens::SIDEBAR_WIDTH + tokens::SPACE_4)
+            .left(self.left(cx))
             .w(tokens::FIND_BAR_WIDTH)
             .p(tokens::SPACE_2)
             .flex()

@@ -188,6 +188,8 @@ pub struct EditorView {
     advice: Vec<review::Advice>,
     /// The passage a conflict on the line at the foot is about.
     conflict_mark: Option<Range<usize>>,
+    /// The find bar's matches in the open chapter, tinted where they show.
+    find_matches: Vec<Range<usize>>,
     /// The card that floats under the selection while it has the keys.
     selection_prompt: Option<AnyView>,
     /// The column up and down keep to, kept across lines that are too short for it.
@@ -356,6 +358,7 @@ impl EditorView {
             review: Vec::new(),
             advice: Vec::new(),
             conflict_mark: None,
+            find_matches: Vec::new(),
             selection_prompt: None,
             goal_x: None,
             reveal_at: selection.head,
@@ -605,6 +608,19 @@ impl EditorView {
             self.conflict_mark = mark;
             cx.notify();
         }
+    }
+
+    /// Tints the find bar's `matches` in the open chapter, or none.
+    pub fn set_find_matches(&mut self, matches: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        if self.find_matches != matches {
+            self.find_matches = matches;
+            cx.notify();
+        }
+    }
+
+    /// Where the text starts across the window, as last drawn.
+    pub fn text_left(&self) -> Pixels {
+        self.column.text_left
     }
 
     /// The theme's body font, for text elsewhere in the book's type.

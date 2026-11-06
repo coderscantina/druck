@@ -50,6 +50,8 @@ pub struct Frame {
     note_lines: Vec<Bounds<Pixels>>,
     /// The line under the passage a conflict is about.
     conflict_lines: Vec<Bounds<Pixels>>,
+    /// The find bar's matches on screen.
+    found: Vec<Bounds<Pixels>>,
     /// Misspelled words, from the rectangles a selection of them would have.
     misspelled: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
@@ -227,6 +229,7 @@ impl Element for Galley {
         let colors = Tokens::get(cx);
         let accent = colors.accent;
         let selection_color = Hsla::from(accent).opacity(tokens::SELECTION_TINT);
+        let found_color = Hsla::from(accent).opacity(tokens::MATCH_TINT);
         let thumb_color = Hsla::from(colors.text_faint).opacity(if frame.scrollbar_strong {
             tokens::THUMB_STRONG
         } else {
@@ -248,6 +251,9 @@ impl Element for Galley {
             }
             for line in &frame.conflict_lines {
                 window.paint_quad(fill(*line, accent));
+            }
+            for rectangle in &frame.found {
+                window.paint_quad(fill(*rectangle, found_color));
             }
             for rectangle in &frame.selection {
                 window.paint_quad(fill(*rectangle, selection_color));
@@ -466,6 +472,14 @@ impl EditorView {
             .flat_map(|mark| self.range_rectangles(mark, &blocks, true))
             .map(rule_under)
             .collect();
+        let on_screen = (self.visible.first().zip(self.visible.last())).map(|((first, _), (last, _))| {
+            let list = self.blocks.as_slice();
+            list[*first].range.start..list[*last].range.end
+        });
+        let found = (self.find_matches.iter())
+            .filter(|found| on_screen.as_ref().is_some_and(|shown| found.start < shown.end && shown.start < found.end))
+            .flat_map(|found| self.range_rectangles(found.clone(), &blocks, false))
+            .collect();
         let misspelled = self
             .spelling_ranges()
             .into_iter()
@@ -484,6 +498,7 @@ impl EditorView {
             marks,
             note_lines,
             conflict_lines,
+            found,
             misspelled,
             caret,
             hitbox,
