@@ -784,7 +784,8 @@ impl PreviewView {
                 .filter(move |_| shown)
                 .map(move |mark| (mark, tint, warning))
         });
-        let slip = self.slip_marks.iter().map(|mark| (mark, tokens::MARK_TINT, false));
+        // The slip's paragraph has the outline alone: the card says which it is.
+        let slip = self.slip_marks.iter().map(|mark| (mark, 0., false));
         problems
             .chain(slip)
             .filter(|(mark, ..)| mark.page == sheet.page)
