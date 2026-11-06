@@ -20,16 +20,34 @@ fn a_chapter_opens_where_the_session_put_its_caret() {
         opening_selection(text, &blocks, view(title), false),
         Selection::caret(title)
     );
-    // In the galley a caret inside the notes above the first text moves after them, and the source view keeps it.
+    // In the galley a caret inside the notes above the first text moves after them and the title's hanging marker, and
+    // the source view keeps it.
     let text = "<!-- note -->\n\n# T\n";
     let blocks = Blocks::parse(text);
-    assert_eq!(opening_selection(text, &blocks, view(0), false), Selection::caret(15));
+    assert_eq!(opening_selection(text, &blocks, view(0), false), Selection::caret(17));
     assert_eq!(opening_selection(text, &blocks, view(0), true), Selection::caret(0));
     // A kept place past the end of a shorter text is clamped.
     assert_eq!(
         opening_selection(text, &blocks, view(99), false),
         Selection::caret(text.len())
     );
+}
+
+#[test]
+fn a_chapter_opens_with_the_caret_in_its_title_text() {
+    let view = ChapterView {
+        selection: Selection::caret(0),
+        scroll: None,
+    };
+    let text = "## Leben\n\nText.\n";
+    let blocks = Blocks::parse(text);
+    let caret = opening_selection(text, &blocks, view, false).head;
+    assert_eq!(caret, "## ".len());
+    // A letter typed there goes into the title, which stays a heading.
+    let typed = format!("{}X{}", &text[..caret], &text[caret..]);
+    let blocks = Blocks::parse(&typed);
+    assert_eq!(blocks.as_slice()[0].kind, BlockKind::Heading { level: 2 });
+    assert!(typed.starts_with("## XLeben"));
 }
 
 #[test]

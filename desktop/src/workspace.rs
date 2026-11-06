@@ -179,6 +179,11 @@ impl TextColumn {
         ((text_left + (text_width - width) / 2.).max(Pixels::ZERO), width)
     }
 
+    /// The top of a card over the text, the palette and the commit card alike: level with the text's top margin.
+    pub fn card_top() -> Pixels {
+        tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y
+    }
+
     /// Whether a card over the text stands over Write's text, which then fades under its edge.
     pub fn over_write(cx: &App) -> bool {
         cx.try_global::<Self>().is_some_and(|column| column.text.is_some())

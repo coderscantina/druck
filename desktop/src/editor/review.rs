@@ -6,10 +6,7 @@
 use std::ops::Range;
 
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, AnyView, Context, Div, EventEmitter, FontWeight, MouseButton, Pixels, Point, Stateful, Window, div,
-    point,
-};
+use gpui::{AnyElement, AnyView, Context, Div, EventEmitter, MouseButton, Pixels, Point, Stateful, Window, div, point};
 
 use super::EditorView;
 use super::display::{Chip, ChipLook};
@@ -341,7 +338,7 @@ impl EditorView {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
-                    .font_weight(FontWeight::MEDIUM)
+                    .font_weight(tokens::ADVICE_TITLE_WEIGHT)
                     .text_size(body_size * tokens::ADVICE_TITLE)
                     .line_height(body_size * tokens::ADVICE_TITLE * tokens::ADVICE_LEADING)
                     .text_color(tokens.text)

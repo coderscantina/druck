@@ -326,20 +326,21 @@ impl Column {
     pub fn place(viewport: Bounds<Pixels>, measure: Pixels, notes: bool, centre: Pixels) -> Self {
         let left = viewport.left() + tokens::GUTTER_WIDTH;
         let right = viewport.right() - tokens::TEXT_MARGIN_RIGHT;
+        // Notes keep the same margin clear of the scrollbar as the text keeps of the pane's edge.
+        let note_right = right - tokens::SCROLLBAR_WIDTH;
         let note_room = tokens::NOTE_GAP + tokens::NOTE_WIDTH;
-        let notes_fit = notes && right - left - note_room >= measure.max(tokens::TEXT_MIN_WIDTH);
-        let room = right - left - if notes_fit { note_room } else { px(0.) };
+        let notes_fit = notes && note_right - left - note_room >= measure.max(tokens::TEXT_MIN_WIDTH);
+        let room = if notes_fit { note_right - note_room } else { right } - left;
         // Never wider than the room, so a line is never cut by the pane's edge or covered by a panel.
         let text_width = measure.min(room).max(tokens::TEXT_MIN_WIDTH.min(room));
         let centred = centre - text_width * 0.5;
-        let last = right - text_width - if notes_fit { note_room } else { px(0.) };
-        let text_left = centred.min(last).max(left);
+        let text_left = centred.min(left + room - text_width).max(left);
         Self {
             viewport,
             text_left,
             text_width,
             note_left: notes_fit.then(|| {
-                let free = right - text_left - text_width - tokens::NOTE_WIDTH;
+                let free = note_right - text_left - text_width - tokens::NOTE_WIDTH;
                 text_left + text_width + (free * 0.5).clamp(tokens::NOTE_GAP, tokens::NOTE_GAP_WIDE)
             }),
         }
@@ -840,7 +841,7 @@ mod tests {
         assert_eq!(bare.text_width, px(460.));
         assert_eq!(bare.note_left, None);
         assert_eq!(noted.text_left, bare.text_left);
-        assert_eq!(noted.note_left, Some(px(977.)));
+        assert_eq!(noted.note_left, Some(px(972.)));
     }
 
     #[test]

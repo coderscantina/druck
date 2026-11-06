@@ -54,7 +54,8 @@ impl EditorView {
             Motion::Right => (motion::right(text, head), false),
             Motion::WordLeft => (motion::prev_word(text, head), false),
             Motion::WordRight => (motion::next_word(text, head), false),
-            Motion::DocStart => (self.chapter_edge(false), false),
+            Motion::DocStart if extend => (self.chapter_edge(false), false),
+            Motion::DocStart => (past_heading_marker(text, &self.blocks, self.chapter_edge(false)), false),
             Motion::DocEnd => (self.chapter_edge(true), false),
             Motion::LineStart => self.row_edge(false, window),
             Motion::LineEnd => self.row_edge(true, window),
@@ -381,6 +382,21 @@ impl EditorView {
 /// The start of a chapter's first text that shows, its title, or with `end` the end of its last, never inside a note
 /// folded away above or below it: the author opens a note by going to it on purpose. `expanded` says which comments
 /// their gutter marker shows in the flow.
+/// Where a heading's text starts when `offset` is that heading's start: past its `#` marker and the space after it, which
+/// hang in the margin, so a typed letter goes into the title.
+pub(super) fn past_heading_marker(text: &str, blocks: &Blocks, offset: usize) -> usize {
+    let block = &blocks.as_slice()[blocks.index_at(offset)];
+    if !matches!(block.kind, BlockKind::Heading { .. }) || block.range.start != offset {
+        return offset;
+    }
+    let line = &text[block.range.clone()];
+    let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
+    if hashes == 0 {
+        return offset;
+    }
+    offset + hashes + line[hashes..].bytes().take_while(|byte| *byte == b' ').count()
+}
+
 pub(super) fn chapter_edge(text: &str, blocks: &Blocks, end: bool, expanded: impl Fn(usize) -> bool) -> usize {
     let blocks = blocks.as_slice();
     let folded = |index: usize| {

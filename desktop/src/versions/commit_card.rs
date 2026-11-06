@@ -409,7 +409,7 @@ impl Render for CommitCard {
             .children(parts);
         div()
             .absolute()
-            .top(tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y)
+            .top(TextColumn::card_top())
             .left(left)
             .w(width)
             .when(TextColumn::over_write(cx), |over| {

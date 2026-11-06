@@ -2,7 +2,7 @@
 //! never hardcode them. Publish's pages use the theme's own values instead.
 
 use clap::ValueEnum;
-use gpui::{App, BoxShadow, Global, Pixels, Rgba, WindowAppearance, hsla, px, rgb};
+use gpui::{App, BoxShadow, FontWeight, Global, Pixels, Rgba, WindowAppearance, hsla, px, rgb};
 
 use crate::preview::job::{BookType, Face};
 
@@ -94,6 +94,9 @@ pub const CHAPTER_LABEL_LEADING: f32 = 1.3;
 pub const ADVICE_TITLE: f32 = 0.9;
 pub const ADVICE_TEXT: f32 = 0.8;
 pub const ADVICE_SUGGESTION: f32 = 0.95;
+/// An agent note's title in the system font's medium face. The font matcher reads that face as 530 and answers 500
+/// with regular, so the weight asked for stands just above 500.
+pub const ADVICE_TITLE_WEIGHT: FontWeight = FontWeight(510.);
 pub const ADVICE_LEADING: f32 = 1.4;
 /// How many lines of an agent note's quiet text show until it is opened.
 pub const ADVICE_QUIET_LINES: usize = 2;
@@ -201,7 +204,6 @@ pub const SPINE_CARD_WIDTH: Pixels = px(204.);
 pub const PALETTE_WIDTH: Pixels = px(480.);
 /// How far a card over the text reaches past the text on each side.
 pub const CARD_OVERHANG: Pixels = px(28.);
-pub const PALETTE_TOP: Pixels = px(72.);
 pub const PALETTE_MAX_ROWS: usize = 12;
 /// The settings window.
 pub const SETTINGS_WINDOW: (f32, f32) = (860., 620.);
@@ -255,6 +257,8 @@ pub const VERSIONS_ROW_HEIGHT: Pixels = px(24.);
 pub const VERSIONS_BUTTON_HEIGHT: Pixels = px(22.);
 /// The angle of a fade that darkens toward the foot of a list.
 pub const FADE_DOWN: f32 = 180.;
+/// The solid band at the foot of a list that scrolls, deep enough to cover the glyphs of a row its edge cuts.
+pub const LIST_FOOT_COVER: Pixels = px(12.);
 /// The timeline's strip: commits as tall marks, local history as small ticks, and the position.
 pub const STRIP_HEIGHT: Pixels = px(50.);
 pub const STRIP_COMMIT_WIDTH: Pixels = px(2.);

@@ -319,19 +319,21 @@ const START_OF_CHAPTER: Anchor = Anchor {
 };
 
 /// Where the caret stands as a chapter opens: the place the session kept for it, and in the galley the first visible
-/// text rather than inside the notes hidden above it.
+/// text rather than inside the notes hidden above it, and a heading's text rather than its hanging marker.
 fn opening_selection(text: &str, blocks: &Blocks, view: ChapterView, source: bool) -> Selection {
     let clamp = |offset: usize| text.floor_char_boundary(offset.min(text.len()));
     let selection = Selection {
         anchor: clamp(view.selection.anchor),
         head: clamp(view.selection.head),
     };
-    match notes::leading_region(text, blocks) {
-        Some(region) if !source && selection.is_empty() && region.contains(&selection.head) => {
-            Selection::caret(region.end)
-        }
-        _ => selection,
+    if source || !selection.is_empty() {
+        return selection;
     }
+    let head = match notes::leading_region(text, blocks) {
+        Some(region) if region.contains(&selection.head) => region.end,
+        _ => selection.head,
+    };
+    Selection::caret(selection::past_heading_marker(text, blocks, head))
 }
 
 /// What the settings say about the text.

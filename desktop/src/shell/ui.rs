@@ -20,20 +20,22 @@ pub fn foot_fade(tokens: &Tokens) -> gpui::Div {
     foot_fade_on(tokens.panel)
 }
 
-/// The fade over the foot of a list on `ground` that has more below. Its parent is `relative`.
+/// The fade over the foot of a list on `ground` that has more below, ending in a band of solid ground so a row the
+/// edge cuts shows no cut glyphs. Its parent is `relative`.
 pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
     let solid: Hsla = ground.into();
     let clear = solid.opacity(tokens::CLEAR);
+    let height = tokens::VERSIONS_ROW_HEIGHT + tokens::LIST_FOOT_COVER;
     div()
         .absolute()
         .left_0()
         .right_0()
         .bottom_0()
-        .h(tokens::VERSIONS_ROW_HEIGHT)
+        .h(height)
         .bg(linear_gradient(
             tokens::FADE_DOWN,
             linear_color_stop(clear, 0.),
-            linear_color_stop(solid, 1.),
+            linear_color_stop(solid, tokens::VERSIONS_ROW_HEIGHT / height),
         ))
 }
 

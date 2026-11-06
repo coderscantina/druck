@@ -878,15 +878,16 @@ impl EditorView {
     }
 
     /// The room the chapter's first text keeps above it for the opening notes' line and the chapter's label, so the
-    /// text's top margin stands above the whole opening.
+    /// text's top margin stands above the whole opening. A body line stands between the notes' line and what follows,
+    /// so the line reads apart from the title.
     pub(super) fn opening_room(&self, index: usize) -> Pixels {
         if self.source || self.first_text_block() != Some(index) {
             return px(0.);
         }
         let label = self.chapter_label_text().map_or(px(0.), |_| self.chapter_label_room());
-        let line = self
-            .opening_line_block()
-            .map_or(px(0.), |_| tokens::NOTE_LINE_HEIGHT + tokens::SPACE_2);
+        let line = self.opening_line_block().map_or(px(0.), |_| {
+            tokens::NOTE_LINE_HEIGHT + self.style.body_size * self.style.leading
+        });
         label + line
     }
 

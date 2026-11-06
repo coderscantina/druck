@@ -419,7 +419,7 @@ impl Render for Palette {
             );
         div()
             .absolute()
-            .top(tokens::PALETTE_TOP)
+            .top(crate::workspace::TextColumn::card_top())
             .left(left)
             .w(width)
             .when(crate::workspace::TextColumn::over_write(cx), |over| {
