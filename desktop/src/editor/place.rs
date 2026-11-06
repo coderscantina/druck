@@ -48,6 +48,18 @@ pub fn at_caret(target: Rect, width: f32, height: f32, area: Rect, gap: f32) -> 
     (target.left.min(area.right - gap - width).max(area.left + gap), y)
 }
 
+/// The left edge nearest `left` for something `width` wide inside `reach`, whose sides both stand at least `room` clear
+/// of every word, given as its left and right, so it cuts no glyph. `None` when no such place exists.
+pub fn clear_of(left: f32, width: f32, words: &[(f32, f32)], reach: (f32, f32), room: f32) -> Option<f32> {
+    const SLACK: f32 = 0.01;
+    let clear = |x: f32| (words.iter()).all(|&(start, end)| x <= start - room + SLACK || x >= end + room - SLACK);
+    let edges = (words.iter()).flat_map(|&(start, end)| [start - room, end + room]);
+    std::iter::once(left)
+        .chain(edges.flat_map(|edge| [edge, edge - width]))
+        .filter(|x| *x >= reach.0 && x + width <= reach.1 && clear(*x) && clear(x + width))
+        .min_by(|a, b| (a - left).abs().total_cmp(&(b - left).abs()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +125,14 @@ mod tests {
             bottom: 590.,
         };
         assert_eq!(beside(tall, 100., 30., AREA, 6.).1, 34.);
+    }
+
+    #[test]
+    fn the_toolbar_finds_the_nearest_place_clear_of_glyphs() {
+        let words = [(0., 60.), (65., 120.), (125., 200.), (205., 300.), (305., 330.)];
+        // Clearing either edge's word alone puts the other edge into one; past the line's end both edges are clear.
+        assert_eq!(clear_of(110., 150., &words, (0., 500.), 2.), Some(202.));
+        assert_eq!(clear_of(110., 150., &words, (0., 250.), 2.), None);
+        assert_eq!(clear_of(340., 150., &words, (0., 500.), 2.), Some(340.));
     }
 }

@@ -955,36 +955,46 @@ impl EditorView {
         reach: (Pixels, Pixels),
         window: &Window,
     ) -> Pixels {
-        let room = tokens::SPACE_1 * 0.5;
-        let mut shifts = vec![px(0.)];
-        for edge in [left, left + width] {
-            if let Some((start, end)) = self.word_under(edge, row, window) {
-                shifts.extend([start - room - edge, end + room - edge]);
-            }
-        }
-        shifts.sort_by(|a, b| f32::from(a.abs()).total_cmp(&f32::from(b.abs())));
-        shifts
-            .into_iter()
-            .map(|shift| left + shift)
-            .filter(|moved| *moved >= reach.0 && *moved + width <= reach.1)
-            .find(|moved| {
-                self.word_under(*moved, row, window).is_none() && self.word_under(*moved + width, row, window).is_none()
-            })
-            .unwrap_or(left)
+        let words = self.row_words(row, reach, window);
+        let reach = (f32::from(reach.0), f32::from(reach.1));
+        let room = f32::from(tokens::SPACE_1 * 0.5);
+        place::clear_of(f32::from(left), f32::from(width), &words, reach, room).map_or(left, px)
     }
 
-    /// The left and right of the word whose glyphs `x` falls on, in the row at `row`.
-    fn word_under(&mut self, x: Pixels, row: Pixels, window: &Window) -> Option<(Pixels, Pixels)> {
-        let (offset, _) = self.offset_at(point(x, row), window);
+    /// The left and right of each word on the row at `row` between the sides of `reach`.
+    fn row_words(&mut self, row: Pixels, reach: (Pixels, Pixels), window: &Window) -> Vec<(f32, f32)> {
+        let (from, _) = self.offset_at(point(reach.0, row), window);
+        let (to, _) = self.offset_at(point(reach.1, row), window);
         let text = self.session.active_buffer().text();
-        let block = self.blocks.as_slice()[self.blocks.index_at(offset)].range.clone();
-        let start =
-            (text[block.start..offset].rfind(char::is_whitespace)).map_or(block.start, |at| block.start + at + 1);
-        let end = (text[offset..block.end].find(char::is_whitespace)).map_or(block.end, |at| offset + at);
-        let first = self.offset_bounds(start, false, window)?;
-        let last = self.offset_bounds(end, true, window)?;
+        let block = self.blocks.as_slice()[self.blocks.index_at(from)].range.clone();
+        let (from, to) = (from.min(to).max(block.start), from.max(to).min(block.end));
+        // Out to whole words, since the row's ends may fall inside one.
+        let from = (text[block.start..from].rfind(char::is_whitespace)).map_or(block.start, |at| block.start + at + 1);
+        let to = (text[to..block.end].find(char::is_whitespace)).map_or(block.end, |at| to + at);
+        let mut spans = Vec::new();
+        let mut start = None;
+        for (at, ch) in text[from..to].char_indices().map(|(at, ch)| (from + at, ch)) {
+            match (ch.is_whitespace(), start) {
+                (true, Some(word)) => {
+                    spans.push((word, at));
+                    start = None;
+                }
+                (false, None) => start = Some(at),
+                _ => {}
+            }
+        }
+        spans.extend(start.map(|word| (word, to)));
         let on_row = |bounds: Bounds<Pixels>| bounds.top() <= row && row < bounds.bottom();
-        (on_row(first) && on_row(last) && first.left() < x && x < last.left()).then(|| (first.left(), last.left()))
+        spans
+            .into_iter()
+            .filter_map(|(start, end)| {
+                let first = self
+                    .offset_bounds(start, false, window)
+                    .filter(|bounds| on_row(*bounds))?;
+                let last = self.offset_bounds(end, true, window).filter(|bounds| on_row(*bounds))?;
+                Some((f32::from(first.left()), f32::from(last.left())))
+            })
+            .collect()
     }
 
     // The frame's floats

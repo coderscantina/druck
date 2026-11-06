@@ -45,7 +45,8 @@ pub const DIALOG_WIDTH: Pixels = px(380.);
 pub const DIALOG_LIST_HEIGHT: Pixels = px(440.);
 pub const LAUNCH_WIDTH: Pixels = px(440.);
 pub const TEXT_TITLE: Pixels = px(20.);
-pub const FIELD_HEIGHT: Pixels = px(30.);
+/// The one height of a field, and of a bordered button or control beside it, in floats, panels, and settings.
+pub const FIELD_HEIGHT: Pixels = px(28.);
 pub const RADIUS: Pixels = px(6.);
 /// The card that shows the other side of a conflict, over the conflict line.
 pub const CONFLICT_CARD_WIDTH: Pixels = px(420.);
@@ -210,8 +211,6 @@ pub const PALETTE_MAX_ROWS: f32 = 11.5;
 /// The settings window.
 pub const SETTINGS_WINDOW: (f32, f32) = (860., 620.);
 pub const SETTINGS_NAV_WIDTH: Pixels = px(190.);
-/// The one height of a settings row's controls: the search, segments, the accent's swatches, and its hex field.
-pub const SETTINGS_CONTROL_HEIGHT: Pixels = px(26.);
 pub const SETTINGS_SWATCH_RADIUS: Pixels = px(4.);
 pub const SETTINGS_SWATCH_GAP: Pixels = px(5.);
 pub const SETTINGS_ROW_PADDING: Pixels = px(10.);
@@ -510,9 +509,9 @@ pub const MATERIAL_PANEL_WIDTH: Pixels = px(336.);
 pub const MATERIAL_PANEL_MIN_WIDTH: Pixels = px(280.);
 /// The faint tick at Write's right edge, the strip the pointer rests on to open the rail, and how long it rests. The
 /// strip stands left of the text's scrollbar, so a drag on the scrollbar never opens the rail.
-pub const MATERIAL_TICK: (Pixels, Pixels) = (px(3.), px(32.));
+pub const MATERIAL_TICK: (Pixels, Pixels) = (px(2.), px(16.));
 pub const MATERIAL_TICK_INSET: Pixels = px(4.);
-pub const MATERIAL_TICK_OPACITY: f32 = 0.45;
+pub const MATERIAL_TICK_OPACITY: f32 = 0.3;
 pub const MATERIAL_EDGE: Pixels = px(24.);
 /// How tall the band around the tick is that the pointer rests on, and how the tick grows while it is there.
 pub const MATERIAL_EDGE_BAND: Pixels = px(120.);

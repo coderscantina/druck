@@ -437,6 +437,10 @@ impl Hub {
             cx.observe_global_in::<settings::Store>(window, |hub, window, cx| hub.settings_changed(window, cx)),
             cx.subscribe_in(&diagnostics, window, Self::diagnostics_event),
             cx.subscribe_in(&export, window, Self::export_event),
+            cx.observe(&export, |hub, export, cx| {
+                let running = export.read(cx).is_running();
+                hub.with_workspace(cx, |workspace, cx| workspace.set_exporting(running, cx));
+            }),
             cx.subscribe_in(&search, window, Self::search_event),
             cx.subscribe_in(&find, window, Self::find_event),
         ];

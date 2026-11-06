@@ -68,8 +68,8 @@ pub struct TicksView {
     lit: Option<usize>,
     /// Whether the keys are in the outline.
     keyed: bool,
-    /// How far down the view the open outline's top stands, so the lit row unfolds under the pointer.
-    top: Pixels,
+    /// The tick the outline unfolded at and its row, which stands where the tick was, so the pointer stays on it.
+    anchor: Option<(usize, usize)>,
     /// Counts the unfoldings, so each one fades in afresh.
     opened: usize,
     /// The outline just folded, fading out where it stood.
@@ -131,7 +131,7 @@ impl TicksView {
             entries: Vec::new(),
             lit: None,
             keyed: false,
-            top: px(0.),
+            anchor: None,
             opened: 0,
             fading: None,
             leaving: Task::ready(()),
@@ -212,9 +212,9 @@ impl TicksView {
                     .ok();
             });
             self.fading = Some(Fading {
+                top: self.top(),
                 entries: std::mem::take(&mut self.entries),
                 lit: self.lit,
-                top: self.top,
                 opened: self.opened,
                 _done: done,
             });
@@ -244,6 +244,13 @@ impl TicksView {
         let lowest = room - step * count as f32 - tokens::SPACE_4;
         let top = (self.title_middle - step / 2.).min(lowest).max(tokens::SPACE_4);
         (step, top)
+    }
+
+    /// How far down the view the open outline's top stands: its anchor row level with the anchor tick's middle.
+    fn top(&self) -> Pixels {
+        let (step, strip_top) = self.strip(self.room);
+        let anchor = (self.anchor).map(|(tick, row)| (strip_top + step * (tick as f32 + 0.5), row));
+        outline_top(self.room, self.entries.len(), anchor)
     }
 
     /// Opens the outline at `heading`, or at the caret's.
@@ -305,20 +312,7 @@ impl TicksView {
         self.lit = wanted
             .filter(|index| entries.get(*index).is_some_and(Entry::selectable))
             .or_else(|| entries.iter().position(Entry::selectable));
-        // The lit row stands where its tick was, so the heading under the pointer stays under it.
-        let room = self.room;
-        let height = tokens::OUTLINE_ROW_HEIGHT * entries.len() as f32 + tokens::SPACE_1 * 2.;
-        let lowest = (room - height - tokens::SPACE_4).max(tokens::SPACE_4);
-        let centred = ((room - height) / 2.).max(tokens::SPACE_4);
-        self.top = match (at, self.lit) {
-            (Some(index), Some(lit)) => {
-                let (step, strip_top) = self.strip(room);
-                let tick = strip_top + step * (index as f32 + 0.5);
-                let row = tokens::SPACE_1 + tokens::OUTLINE_ROW_HEIGHT * (lit as f32 + 0.5);
-                (tick - row).clamp(tokens::SPACE_4, lowest)
-            }
-            _ => centred,
-        };
+        self.anchor = at.zip(self.lit);
         self.entries = entries;
         self.opened += 1;
         self.fading = None;
@@ -572,10 +566,7 @@ impl TicksView {
                     }
                 });
                 match entry {
-                    Entry::Part(name) => row
-                        .text_size(tokens::TEXT_SMALL)
-                        .text_color(tokens.text_faint)
-                        .child(name.clone()),
+                    Entry::Part(name) => row.text_color(tokens.text_quiet).child(name.clone()),
                     Entry::Title(name) => row
                         .text_color(tokens.text)
                         .font_weight(FontWeight::BOLD)
@@ -668,6 +659,7 @@ impl Render for TicksView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let fresh = self.refresh(cx);
         self.title_middle = self.editor.read(cx).title_middle();
+        self.room = window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::FOOTER_HEIGHT;
         #[cfg(any(debug_assertions, feature = "measure"))]
         if !fresh && self.pinned.is_some() {
             self.repin(cx);
@@ -675,13 +667,12 @@ impl Render for TicksView {
         #[cfg(not(any(debug_assertions, feature = "measure")))]
         let _ = fresh;
         let tokens = Tokens::get(cx).clone();
-        let room = window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::FOOTER_HEIGHT;
-        self.room = room;
+        let room = self.room;
         let count = self.headings().len();
         let veil = Hsla::from(tokens.canvas).opacity(1. - tokens::OUTLINE_TEXT_OPACITY);
         let root = div().id("heading-ticks").absolute().top_0().left_0();
         if self.unfolded() {
-            let (top, opened) = (self.top, self.opened);
+            let (top, opened) = (self.top(), self.opened);
             let outline = self
                 .outline(&self.entries, self.lit, true, &tokens, cx)
                 .top(top)
@@ -759,5 +750,34 @@ impl Render for TicksView {
             Some(fading) => root.size_full().child(fading).child(strip).into_any_element(),
             None => root.w(tokens::TICK_ZONE_WIDTH).h(room).child(strip).into_any_element(),
         }
+    }
+}
+
+/// Where an outline of `rows` stands in a view of `room`: with `anchor`'s row level with its middle, kept inside the
+/// view, or centred without one.
+fn outline_top(room: Pixels, rows: usize, anchor: Option<(Pixels, usize)>) -> Pixels {
+    let height = tokens::OUTLINE_ROW_HEIGHT * rows as f32 + tokens::SPACE_1 * 2.;
+    let lowest = (room - height - tokens::SPACE_4).max(tokens::SPACE_4);
+    match anchor {
+        Some((middle, row)) => {
+            let row_middle = tokens::SPACE_1 + tokens::OUTLINE_ROW_HEIGHT * (row as f32 + 0.5);
+            (middle - row_middle).clamp(tokens::SPACE_4, lowest)
+        }
+        None => ((room - height) / 2.).max(tokens::SPACE_4),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_anchor_row_unfolds_where_its_tick_was() {
+        // Row 3's middle is 4 + 20 * 3.5 = 74 px below the top: a tick at 159 puts the top at 85.
+        assert_eq!(outline_top(px(800.), 7, Some((px(159.), 3))), px(85.));
+        // Near the view's edges it stays inside it.
+        assert_eq!(outline_top(px(800.), 7, Some((px(20.), 3))), tokens::SPACE_4);
+        assert_eq!(outline_top(px(200.), 7, Some((px(190.), 0))), px(36.));
+        assert_eq!(outline_top(px(800.), 7, None), px(326.));
     }
 }

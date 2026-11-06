@@ -237,6 +237,8 @@ pub struct Workspace {
     jump: Option<String>,
     /// Something in Write wants the author, who is elsewhere: a dot on the switch.
     write_attention: bool,
+    /// An export is running: the title bar's Export is quiet meanwhile.
+    exporting: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -373,6 +375,7 @@ impl Workspace {
             explicit: asked,
             jump: None,
             write_attention: false,
+            exporting: false,
             _subscriptions: subscriptions,
         };
         workspace.theme_setting = workspace.parts.editor.read(cx).session().theme_setting();
@@ -425,6 +428,13 @@ impl Workspace {
     pub fn set_write_attention(&mut self, wanted: bool, cx: &mut Context<Self>) {
         if self.write_attention != wanted {
             self.write_attention = wanted;
+            cx.notify();
+        }
+    }
+
+    pub fn set_exporting(&mut self, running: bool, cx: &mut Context<Self>) {
+        if self.exporting != running {
+            self.exporting = running;
             cx.notify();
         }
     }
@@ -982,20 +992,12 @@ impl Workspace {
         div().flex().items_center().gap(tokens::HAIR_GAP).children(buttons)
     }
 
-    /// Publish's Export button: the action that moves on, so it has the accent.
+    /// Publish's Export button: the action that moves on, so it has accent text, quiet while a run goes.
     fn export_button(&self, tokens: &Tokens) -> impl IntoElement + use<> {
-        let label = crate::t!(Key::ExportRun);
-        div()
-            .id("title-export")
-            .button(tokens, label)
-            .px(tokens::SPACE_2)
-            .rounded(tokens::RADIUS)
-            .cursor_pointer()
-            .text_color(tokens.accent)
-            .hover(|button| button.bg(tokens.raised))
+        crate::shell::ui::small_button(tokens, "title-export", crate::t!(Key::ExportRun))
+            .when(!self.exporting, |button| button.text_color(tokens.accent))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::shell::menus::ShowExport), cx))
-            .child(label)
     }
 }
 

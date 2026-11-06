@@ -240,8 +240,7 @@ pub struct TextInput {
     book_type: Option<(gpui::Font, Pixels)>,
     /// No frame of its own, for a field that stands on a card as its text.
     bare: bool,
-    /// A one-line field's height and text size, and the faint icon at its start, such as a search's.
-    height: Pixels,
+    /// A one-line field's text size, and the faint icon at its start, such as a search's.
     text_size: Pixels,
     icon: Option<&'static str>,
     arrows_to_parent: bool,
@@ -311,7 +310,6 @@ impl TextInput {
             pass_command_enter: false,
             book_type: None,
             bare: false,
-            height: tokens::FIELD_HEIGHT,
             text_size: tokens::TEXT_BODY,
             icon: None,
             arrows_to_parent: false,
@@ -329,12 +327,6 @@ impl TextInput {
     /// Sets several lines in the interface's font, for writing rather than code.
     pub fn in_prose(mut self) -> Self {
         self.prose = true;
-        self
-    }
-
-    /// Sets a one-line field's height, for a row of controls that share one.
-    pub fn with_height(mut self, height: Pixels) -> Self {
-        self.height = height;
         self
     }
 
@@ -1306,7 +1298,7 @@ impl Render for TextInput {
                 .child(InputElement { input: cx.entity() })
         } else {
             field
-                .h(self.height)
+                .h(tokens::FIELD_HEIGHT)
                 .flex()
                 .items_center()
                 .gap(tokens::SPACE_2)

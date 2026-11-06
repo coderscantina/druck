@@ -256,12 +256,10 @@ impl SettingsWindow {
                 .with_label(Key::Search)
                 .with_placeholder(Key::Search)
                 .with_icon("icons/search.svg")
-                .with_height(tokens::SETTINGS_CONTROL_HEIGHT)
         });
         let accent = cx.new(|cx| {
             TextInput::new(window, cx)
                 .with_label(Key::Accent)
-                .with_height(tokens::SETTINGS_CONTROL_HEIGHT)
                 .with_text_size(tokens::TEXT_SMALL)
         });
         let subscriptions = vec![
@@ -341,7 +339,7 @@ impl SettingsWindow {
         });
         div()
             .flex_none()
-            .h(tokens::SETTINGS_CONTROL_HEIGHT)
+            .h(tokens::FIELD_HEIGHT)
             .flex()
             .rounded(tokens::RADIUS)
             .overflow_hidden()
@@ -382,7 +380,7 @@ impl SettingsWindow {
                 .id(("accent", at))
                 .toggle(tokens, hex(color), on)
                 .flex_none()
-                .size(tokens::SETTINGS_CONTROL_HEIGHT)
+                .size(tokens::FIELD_HEIGHT)
                 .rounded(tokens::SETTINGS_SWATCH_RADIUS)
                 .bg(rgb(shown))
                 .cursor_pointer()
