@@ -151,6 +151,9 @@ pub struct PreviewView {
     fit: f32,
     /// The page to bring to the middle of the view on the next frame, once the new zoom is known.
     centre_on: Option<usize>,
+    /// The page a change of zoom last kept in the middle, with the scroll it left. While the view has not moved since,
+    /// the next change keeps the same page, so a step out to the contact sheet and back returns to the starting spread.
+    held: Option<(usize, f32)>,
     scroll: (f32, f32),
     view: (f32, f32),
     /// The first page on screen in the last frame.
@@ -224,6 +227,7 @@ impl PreviewView {
             current_zoom: 1.0,
             fit: 1.0,
             centre_on: None,
+            held: None,
             scroll: (0.0, 0.0),
             view: (0.0, 0.0),
             page: 0,
@@ -574,9 +578,9 @@ impl PreviewView {
         };
         // The page at the middle stays there through a change of size or arrangement.
         let keep = (zoom != self.current_zoom || fit != self.fit)
-            .then(|| {
-                self.sheets(self.current_zoom)?
-                    .page_at_middle(self.scroll.1, self.view.1)
+            .then(|| match self.held {
+                Some((page, scroll)) if scroll == self.scroll.1 => Some(page),
+                _ => (self.sheets(self.current_zoom)?).page_at_middle(self.scroll.1, self.view.1),
             })
             .flatten();
         self.fit = fit;
@@ -584,7 +588,8 @@ impl PreviewView {
         let Some(sheets) = self.sheets(zoom) else {
             return (Vec::new(), false);
         };
-        if let Some(page) = self.centre_on.take().or(keep) {
+        let kept = self.centre_on.take().or(keep);
+        if let Some(page) = kept {
             self.scroll.1 = sheets.scroll_to_centre(page.min(sheets.len().saturating_sub(1)), self.view.1);
         }
         #[cfg(any(debug_assertions, feature = "measure"))]
@@ -599,6 +604,9 @@ impl PreviewView {
         }
         self.scroll.0 = clamp_scroll(self.scroll.0, sheets.width(), self.view.0);
         self.scroll.1 = clamp_scroll(self.scroll.1, sheets.height(), self.view.1);
+        if let Some(page) = kept {
+            self.held = Some((page, self.scroll.1));
+        }
 
         let visible = sheets.visible(self.scroll.1, self.view.1);
         self.page = visible.start;
