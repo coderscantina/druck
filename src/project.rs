@@ -12,6 +12,7 @@ use crate::config::front_matter::{self, Export, FrontMatter};
 use crate::config::resolved::Config;
 use crate::config::source::{ChapterMap, InputSource, Origin, normalize};
 use crate::diagnostic::{Code, Diagnostic};
+use crate::document;
 use crate::input::{DocumentText, ExportSettings, Input};
 use crate::pipeline::{self, DocumentFile};
 use crate::renderer::PdfOptions;
@@ -137,11 +138,9 @@ impl Project {
     }
 }
 
-/// The errors for a final export of a document with open placeholders, at their real locations.
-pub fn check_final(config: &Config, document: &DocumentFile, export: &str) -> Result<(), Vec<Diagnostic>> {
-    let errors: Vec<_> = pipeline::parse(config, document)?
-        .todos
-        .into_iter()
+/// The errors for a final export of a document with open placeholders in its parsed `content`, at their real locations.
+pub fn open_placeholders(content: &document::Document, document: &DocumentFile, export: &str) -> Vec<Diagnostic> {
+    (content.todos.iter())
         .map(|todo| {
             let message = format!(
                 "export \"{export}\" is final, but this placeholder is open: {}",
@@ -149,8 +148,7 @@ pub fn check_final(config: &Config, document: &DocumentFile, export: &str) -> Re
             );
             Diagnostic::new(Some(document.source.clone()), message).at(todo.at.line, todo.at.column)
         })
-        .collect();
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+        .collect()
 }
 
 fn at(diagnostic: Diagnostic, location: &serde_saphyr::Location) -> Diagnostic {

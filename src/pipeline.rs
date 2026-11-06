@@ -197,22 +197,20 @@ pub fn read_resources(
             continue;
         }
         cancel.check(CheckPoint::Resource)?;
-        match resolver.read(&resource.origin, &resource.path) {
-            Ok(data) => files.insert(resource.clone(), data),
-            Err(ResolveError::NotFound(_))
-                if missing == Missing::StandIn && property == "bibliography" && resource.file().is_some() =>
-            {
-                let file = resource.file().expect("checked above");
+        let read = resolver.read(&resource.origin, &resource.path);
+        let stand_in = match &read {
+            Err(ResolveError::NotFound(_)) if missing == Missing::StandIn => stand_in(config, &property, resource),
+            _ => None,
+        };
+        match (read, stand_in) {
+            (_, Some(StandIn::Bibliography(file))) => {
                 let message = format!("resource not found: {resource}; citations show their keys");
                 let diagnostic = Diagnostic::warning(None, message).coded(Code::BibliographyNotFound { file });
                 warnings.push(diagnostic.property(Some(property)).resource(resource));
             }
-            Err(ResolveError::NotFound(_))
-                if missing == Missing::StandIn && stand_in_font(config, resource).is_some() =>
-            {
-                let (family, path) = stand_in_font(config, resource).expect("checked above");
-                let data = bundled::font(path).expect("a stand-in is bundled");
-                files.insert(resource.clone(), Bytes::bundled(path, data));
+            (_, Some(StandIn::Font { family, face })) => {
+                let data = bundled::font(face).expect("a stand-in is bundled");
+                files.insert(resource.clone(), Bytes::bundled(face, data));
                 let stand_in = STAND_IN_FAMILY.to_owned();
                 let message = format!("resource not found: {resource}; {stand_in} stands in");
                 let code = Code::FontNotFound {
@@ -227,7 +225,8 @@ pub fn read_resources(
                         .resource(resource),
                 );
             }
-            Err(e) => {
+            (Ok(data), None) => files.insert(resource.clone(), data),
+            (Err(e), None) => {
                 let not_found = matches!(e, ResolveError::NotFound(_));
                 let message = match e {
                     ResolveError::NotFound(_) => format!("resource not found: {resource}"),
@@ -254,21 +253,35 @@ pub fn read_resources(
 /// The family whose bundled faces stand in for a font file that is not there.
 const STAND_IN_FAMILY: &str = "Libertinus Serif";
 
-/// The family of a static font file `resource` is, and the bundled face of the same weight and slant that can stand in
-/// for it. A variable font or a face of a collection has no honest stand-in, since its axes and index would not match.
-fn stand_in_font(config: &Config, resource: &Resource) -> Option<(String, &'static str)> {
+/// What stands in for a resource that is not there.
+enum StandIn {
+    /// Citations show their keys.
+    Bibliography(PathBuf),
+    /// The bundled `face` of the font's weight and slant, under its `family`.
+    Font { family: String, face: &'static str },
+}
+
+/// What can stand in for `resource`, named by `property`: the bibliography's file, or a static font file. A variable
+/// font or a face of a collection has no honest stand-in, since its axes and index would not match.
+fn stand_in(config: &Config, property: &str, resource: &Resource) -> Option<StandIn> {
+    if property == "bibliography" {
+        return resource.file().map(StandIn::Bibliography);
+    }
     let (family, face) = (config.fonts.iter()).find_map(|(family, files)| {
         let (face, file) = files.iter().find(|(_, file)| file.resource == *resource)?;
         (!file.variable && file.index == 0).then_some((family, *face))
     })?;
     let bold = face.weight.get() >= 600;
-    let path = match (bold, face.style == FontStyle::Italic) {
+    let face = match (bold, face.style == FontStyle::Italic) {
         (false, false) => "fonts/LibertinusSerif-Regular.otf",
         (false, true) => "fonts/LibertinusSerif-Italic.otf",
         (true, false) => "fonts/LibertinusSerif-Bold.otf",
         (true, true) => "fonts/LibertinusSerif-BoldItalic.otf",
     };
-    Some((family.clone(), path))
+    Some(StandIn::Font {
+        family: family.clone(),
+        face,
+    })
 }
 
 /// Parses the BibTeX file the configuration names, if any. One that is named and was not there, which reading the
@@ -375,15 +388,15 @@ fn load_images(
     }
 }
 
-/// The errors for a final export of a document that names a file that is not there: an image of the text, the
-/// bibliography, or a font. Other exports run with what stands in.
+/// The errors for a final export of a document that names a file that is not there: an image of its parsed `content`,
+/// the bibliography, or a font. Other exports run with what stands in.
 pub(crate) fn missing_for_final(
     job: &JobContext,
     config: &Config,
+    content: &document::Document,
     document: &DocumentFile,
     export: &str,
-) -> Result<Vec<Diagnostic>, Failure> {
-    let content = parse(config, document)?;
+) -> Vec<Diagnostic> {
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let mut errors = Vec::new();
     for file in &content.images {
@@ -408,7 +421,7 @@ pub(crate) fn missing_for_final(
             errors.push(error);
         }
     }
-    Ok(errors)
+    errors
 }
 
 /// Resolves and checks the configuration for one Markdown document `name` in the folder `dir`.

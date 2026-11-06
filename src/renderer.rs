@@ -180,16 +180,16 @@ impl Configured<'_> {
     /// Fails with one error per open placeholder, and with [`Missing::StandIn`] per image, bibliography, or font file
     /// that is not there, at its real location, naming the final `export`.
     pub fn check_final(&self, export: &str) -> Result<(), Failure> {
-        let mut errors = project::check_final(&self.config, &self.document, export)
-            .err()
-            .unwrap_or_default();
+        let content = pipeline::parse(&self.config, &self.document)?;
+        let mut errors = project::open_placeholders(&content, &self.document, export);
         if self.job.missing == Missing::StandIn {
             errors.extend(pipeline::missing_for_final(
                 &self.job,
                 &self.config,
+                &content,
                 &self.document,
                 export,
-            )?);
+            ));
         }
         if errors.is_empty() { Ok(()) } else { Err(errors.into()) }
     }
