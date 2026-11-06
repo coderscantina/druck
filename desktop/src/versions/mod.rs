@@ -37,6 +37,7 @@ use gpui::{
 
 use self::commit_card::{CardField, CommitCard};
 use self::git_cli::{Git, Merged, Refused};
+pub use self::history::Moment;
 use self::history::{History, Orphan};
 pub use self::local::label_history;
 use self::merge::PendingMerge;
@@ -637,7 +638,7 @@ impl Versions {
             let (Some(git), Some(book)) = (view.git.clone(), view.book(cx)) else {
                 return;
             };
-            view.label_all(&crate::t!(Key::BeforeSwitch, branch = branch), cx);
+            view.label_all(Moment::Switch(branch.clone()), cx);
             let source = Source::Git(GitMove::Switch, branch.clone());
             view.persist
                 .update(cx, |persist, _| persist.hold_outside_changes(source));

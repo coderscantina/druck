@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use super::strings::Key;
 use crate::persist::atomic;
 
 const DAY: i64 = 24 * 60 * 60 * 1000;
@@ -45,7 +46,50 @@ pub struct Snapshot {
     pub hash: String,
     /// Why it was taken, when it was not a pause.
     #[serde(rename = "l", default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    pub label: Option<Label>,
+}
+
+/// Why a snapshot was taken. Stored as what happened, and worded in the app's language when shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Label {
+    Moment(Moment),
+    /// Words an older version stored, shown as they were written.
+    Words(String),
+}
+
+/// What was about to happen when a labelled snapshot was taken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Moment {
+    AgentTurn,
+    Outside,
+    Restore,
+    /// A switch to the named branch.
+    Switch(String),
+    /// A merge of the named branch.
+    Merge(String),
+    Pull,
+}
+
+impl Label {
+    pub fn words(&self) -> String {
+        match self {
+            Label::Words(words) => words.clone(),
+            Label::Moment(Moment::AgentTurn) => crate::t!(Key::BeforeTurn).to_owned(),
+            Label::Moment(Moment::Outside) => crate::t!(Key::BeforeOutside).to_owned(),
+            Label::Moment(Moment::Restore) => crate::t!(Key::BeforeRestore).to_owned(),
+            Label::Moment(Moment::Switch(branch)) => crate::t!(Key::BeforeSwitch, branch = branch),
+            Label::Moment(Moment::Merge(branch)) => crate::t!(Key::BeforeMerge, branch = branch),
+            Label::Moment(Moment::Pull) => crate::t!(Key::BeforePull).to_owned(),
+        }
+    }
+}
+
+impl From<Moment> for Label {
+    fn from(moment: Moment) -> Self {
+        Label::Moment(moment)
+    }
 }
 
 /// A log's first line.
@@ -120,7 +164,7 @@ impl History {
     }
 
     /// Records what a file holds now. A text equal to the last snapshot and no label records nothing.
-    pub fn snapshot(&self, path: &Path, text: &str, label: Option<&str>, time: i64) -> io::Result<()> {
+    pub fn snapshot(&self, path: &Path, text: &str, label: Option<&Label>, time: i64) -> io::Result<()> {
         let hash = blob_id(text.as_bytes());
         let _writing = self.lock();
         let log = self.log_of(path);
@@ -142,7 +186,7 @@ impl History {
         lines.push_str(&line(&Snapshot {
             time,
             hash,
-            label: label.map(str::to_owned),
+            label: label.cloned(),
         }));
         fs::OpenOptions::new()
             .create(true)
@@ -478,12 +522,12 @@ mod tests {
     fn a_log_keeps_its_format() {
         let (dir, history) = store("format");
         let path = dir.join("a.md");
-        history.snapshot(&path, "text", Some("label"), 5).unwrap();
+        history.snapshot(&path, "text", Some(&Moment::Pull.into()), 5).unwrap();
         history.snapshot(&path, "more", None, 6).unwrap();
         let log = fs::read_to_string(history.log_of(&path)).unwrap();
         let lines: Vec<&str> = log.lines().collect();
         assert_eq!(lines[0], format!("{{\"path\":\"{}\"}}", path.display()));
-        assert!(lines[1].starts_with("{\"t\":5,\"h\":") && lines[1].ends_with(",\"l\":\"label\"}"));
+        assert!(lines[1].starts_with("{\"t\":5,\"h\":") && lines[1].ends_with(",\"l\":\"pull\"}"));
         assert!(lines[2].starts_with("{\"t\":6,\"h\":") && !lines[2].contains("\"l\""));
         fs::remove_dir_all(dir).ok();
     }
@@ -510,13 +554,33 @@ mod tests {
         history.snapshot(&path, "one", None, 1).unwrap();
         history.snapshot(&path, "one", None, 2).unwrap();
         assert_eq!(read_log(&history.log_of(&path)).len(), 1);
-        history.snapshot(&path, "one", Some("Before agent turn"), 3).unwrap();
+        history
+            .snapshot(&path, "one", Some(&Moment::AgentTurn.into()), 3)
+            .unwrap();
         history.snapshot(&path, "two", None, 4).unwrap();
         let versions = history.versions(&path);
         assert_eq!(versions.len(), 2);
-        assert_eq!(versions[0].label.as_deref(), Some("Before agent turn"));
+        assert_eq!(versions[0].label, Some(Moment::AgentTurn.into()));
         assert_eq!(versions[1].label, None);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_label_is_stored_as_what_happened_and_old_words_still_read() {
+        let stored = line(&Snapshot {
+            time: 1,
+            hash: "a".to_owned(),
+            label: Some(Moment::Switch("main".to_owned()).into()),
+        });
+        assert!(stored.contains(r#""l":{"switch":"main"}"#), "{stored}");
+        let read = |json: &str| serde_json::from_str::<Snapshot>(json).unwrap().label;
+        assert_eq!(read(stored.trim()), Some(Moment::Switch("main".to_owned()).into()));
+        assert_eq!(
+            read(r#"{"t":1,"h":"a","l":"agent-turn"}"#),
+            Some(Moment::AgentTurn.into())
+        );
+        let old = read(r#"{"t":1,"h":"a","l":"Vor einem Pull"}"#).unwrap();
+        assert_eq!(old.words(), "Vor einem Pull");
     }
 
     #[test]
@@ -525,7 +589,7 @@ mod tests {
         let at = |time: i64, label: Option<&str>| Snapshot {
             time,
             hash: time.to_string(),
-            label: label.map(str::to_owned),
+            label: label.map(|words| Label::Words(words.to_owned())),
         };
         let snapshots = [
             at(now - 31 * DAY, None),

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{App, Context, WeakEntity, Window};
 
-use super::history::{History, now_ms};
+use super::history::{History, Label, Moment, now_ms};
 use super::pacing::Due;
 use super::strings::Key;
 use super::{Current, REFRESH_PAUSE, Versions};
@@ -20,7 +20,7 @@ use crate::session::{ChapterId, Kind, Session};
 /// Records what every file of the document holds now in its local history, with a label: before an agent's turn, and
 /// before anything else that may change the text. A file that then does not change adds no mark to its timeline. The
 /// work happens off the main thread.
-pub fn label_history(session: &Session, label: &str, cx: &App) {
+pub fn label_history(session: &Session, label: impl Into<Label>, cx: &App) {
     let Some(current) = cx.try_global::<Current>() else {
         return;
     };
@@ -30,7 +30,7 @@ pub fn label_history(session: &Session, label: &str, cx: &App) {
     store_off_thread(
         store,
         files_with_text(session),
-        Some(label.to_owned()),
+        Some(label.into()),
         current.view.clone(),
         cx,
     );
@@ -47,7 +47,7 @@ fn files_with_text(session: &Session) -> Vec<(PathBuf, String)> {
 fn store_off_thread(
     store: Arc<History>,
     files: Vec<(PathBuf, String)>,
-    label: Option<String>,
+    label: Option<Label>,
     view: WeakEntity<Versions>,
     cx: &App,
 ) {
@@ -55,7 +55,7 @@ fn store_off_thread(
         let now = now_ms();
         (files.into_iter())
             .map(|(path, text)| {
-                let result = store.snapshot(&path, &text, label.as_deref(), now);
+                let result = store.snapshot(&path, &text, label.as_ref(), now);
                 (path, result.err().map(|error| error.to_string()))
             })
             .collect::<Vec<_>>()
@@ -186,7 +186,7 @@ impl Versions {
     }
 
     /// Labels the current state of every file with text.
-    pub(super) fn label_all(&self, label: &str, cx: &mut Context<Self>) {
+    pub(super) fn label_all(&self, label: Moment, cx: &mut Context<Self>) {
         label_history(self.session(cx), label, cx);
     }
 
@@ -239,11 +239,11 @@ impl Versions {
         };
         let (path, base) = (change.path.clone(), change.base.clone());
         let after = self.session(cx).file_text(&path);
-        let label = crate::t!(Key::BeforeOutside);
+        let label = Label::from(Moment::Outside);
         self.pacing.taken(&path, Instant::now());
         cx.background_spawn(async move {
             let now = now_ms();
-            store.snapshot(&path, &base, Some(label), now).ok();
+            store.snapshot(&path, &base, Some(&label), now).ok();
             if let Some(after) = after {
                 store.snapshot(&path, &after, None, now + 1).ok();
             }

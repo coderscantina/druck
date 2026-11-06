@@ -148,6 +148,7 @@ crate::strings! {
             "{count} Dateien hier haben keinen lokalen Verlauf, gleichnamige anderswo schon. ⌘Y zeigt sie."
         ),
 
+        BeforeTurn => ("Before agent turn", "Vor dem Agent-Schritt"),
         BeforeOutside => ("Before a change from outside", "Vor einer Änderung von außen"),
         BeforeRestore => ("Before a restore", "Vor dem Wiederherstellen"),
         BeforeSwitch => ("Before switching to {branch}", "Vor dem Wechsel zu {branch}"),

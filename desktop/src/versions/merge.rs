@@ -106,17 +106,16 @@ pub(super) fn merge_job(
 
 impl Versions {
     pub(super) fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_merge(MergeFrom::Upstream, crate::t!(Key::BeforePull).to_owned(), window, cx);
+        self.run_merge(MergeFrom::Upstream, Moment::Pull, window, cx);
     }
 
     pub(super) fn merge_branch(&mut self, branch: String, window: &mut Window, cx: &mut Context<Self>) {
-        let label = crate::t!(Key::BeforeMerge, branch = branch);
-        self.run_merge(MergeFrom::Branch(branch), label, window, cx);
+        self.run_merge(MergeFrom::Branch(branch.clone()), Moment::Merge(branch), window, cx);
     }
 
     /// Merges into the current branch through `git`. While it runs, the files' changes are not taken in, because a file
     /// `git` leaves in conflict holds marker lines for a moment. Then what overlaps goes to the existing conflict line.
-    pub(super) fn run_merge(&mut self, from: MergeFrom, label: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn run_merge(&mut self, from: MergeFrom, label: Moment, window: &mut Window, cx: &mut Context<Self>) {
         if self.working || self.git.is_none() {
             return;
         }
@@ -124,7 +123,7 @@ impl Versions {
             let (Some(git), Some(book)) = (view.git.clone(), view.book(cx)) else {
                 return;
             };
-            view.label_all(&label, cx);
+            view.label_all(label, cx);
             let session = view.session(cx);
             let takeable: HashSet<PathBuf> = (session.files().into_iter())
                 .filter(|path| session.file_text(path).is_some() && session.chapter_of_file(path).is_some())

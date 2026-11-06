@@ -816,7 +816,7 @@ impl AgentView {
 
     /// Marks local history, so a whole turn can be taken back from the timeline.
     fn label_local_history_before_turn(&mut self, cx: &mut Context<Self>) {
-        crate::versions::label_history(self.editor.read(cx).session(), crate::t!(Key::BeforeTurn), cx);
+        crate::versions::label_history(self.editor.read(cx).session(), crate::versions::Moment::AgentTurn, cx);
     }
 
     fn project_now(&self, cx: &App) -> TurnStart {

@@ -16,7 +16,7 @@ use gpui::{
     point, px, size,
 };
 
-use super::history::{History, now_ms};
+use super::history::{History, Label, Moment, now_ms};
 use super::repo::Repo;
 use super::shown::{self, Shown, ShownBlock};
 use super::strings::Key;
@@ -74,7 +74,7 @@ enum Mark {
     },
     Local {
         blob: String,
-        label: Option<String>,
+        label: Option<Label>,
         time_ms: i64,
     },
 }
@@ -418,7 +418,7 @@ impl Timeline {
         }
         let path = self.path.clone();
         let editor = self.editor.clone();
-        super::label_history(editor.read(cx).session(), crate::t!(Key::BeforeRestore), cx);
+        super::label_history(editor.read(cx).session(), Moment::Restore, cx);
         let result = editor.update(cx, |editor, cx| {
             editor.update_session(
                 |session| session.apply_to_file(&path, &edits, EditKind::Discrete),
@@ -453,7 +453,7 @@ impl Timeline {
                 parts.push(dates::long(mark.time_ms() / 1000, now));
                 match mark {
                     Mark::Commit { summary, .. } => parts.push(summary.clone()),
-                    Mark::Local { label: Some(label), .. } => parts.push(label.clone()),
+                    Mark::Local { label: Some(label), .. } => parts.push(label.words()),
                     Mark::Local { label: None, .. } => parts.push(crate::t!(Key::LocalHistory).to_owned()),
                 }
             }
