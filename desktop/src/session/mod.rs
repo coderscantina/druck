@@ -817,6 +817,18 @@ impl Session {
         self.active = id;
     }
 
+    /// Opens at the place the author left: the chapter of `file` with the caret at `offset`, scrolled to `scroll`. A
+    /// place the book no longer has leaves it as it opened.
+    pub fn start_at(&mut self, file: &Path, offset: usize, scroll: Option<(usize, f32)>) {
+        if let Some((id, at)) = self.locate(file, offset) {
+            self.set_active(id);
+            self.known_mut(id).view = ChapterView {
+                selection: Selection::caret(at),
+                scroll,
+            };
+        }
+    }
+
     /// Makes the book's first chapter with a heading the active one, with the caret after its title, as a new project
     /// opens.
     pub fn start_after_first_title(&mut self) {

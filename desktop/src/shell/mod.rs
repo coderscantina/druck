@@ -36,10 +36,7 @@ pub mod ui;
 
 use std::path::Path;
 
-use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window,
-    prelude::*,
-};
+use gpui::{App, AppContext, Context, Entity, Focusable, Global, PromptLevel, Task, WeakEntity, Window, prelude::*};
 
 use self::diagnostics::{DiagnosticsEvent, DiagnosticsPanel};
 use self::export_panel::ExportPanel;
@@ -60,7 +57,7 @@ use crate::session::ChapterId;
 use crate::settings;
 use crate::tokens::{self, Scheme, Tokens};
 use crate::workspace::{
-    Mode, ModeChanged, NewSection, Parts, ShowPublish, ShowWrite, Slots, Workspace, ZoomIn, ZoomOut, ZoomReset,
+    Current, Mode, ModeChanged, NewSection, Parts, ShowPublish, ShowWrite, Slots, Workspace, ZoomIn, ZoomOut, ZoomReset,
 };
 
 // Preferences
@@ -146,8 +143,26 @@ pub fn remember_window(size: (f32, f32), cx: &mut App) {
     cx.global_mut::<Prefs>().window = Some(size);
 }
 
-/// Writes the state when the window closes or the app quits.
+/// Writes the state when the window closes or the app quits, with the place the author is at in the open book.
 pub fn save_at_exit(cx: &mut App) {
+    let at = Current::<Hub>::view(cx).and_then(|hub| hub.read(cx).parts.editor.read(cx).place());
+    if let (Some(last), Some((file, offset, scroll))) = (&mut cx.global_mut::<Prefs>().state.last, at) {
+        last.at = Some((file, offset));
+        last.scroll = Some(scroll);
+    }
+    save_prefs(cx);
+}
+
+/// The book to open at the start, where the author left it: the one open when the app last went, unless they closed it.
+/// A measurement run opens what it is told to.
+pub fn last_document(cx: &App) -> Option<state::Place> {
+    let prefs = cx.global::<Prefs>();
+    prefs.persist.then(|| prefs.state.last.clone()).flatten()
+}
+
+/// The author closed the book, so the next start shows the launch card.
+pub fn document_closed(cx: &mut App) {
+    cx.global_mut::<Prefs>().state.last = None;
     save_prefs(cx);
 }
 
@@ -192,7 +207,12 @@ fn settings_changed(cx: &mut App) {
 
 /// Adds a document to the recent list, in the app and in the dock.
 pub fn document_opened(path: &Path, cx: &mut App) {
-    cx.global_mut::<Prefs>().state.remember(path);
+    let state = &mut cx.global_mut::<Prefs>().state;
+    state.remember(path);
+    // Reopening the last book keeps its place until the app goes.
+    if state.last.as_ref().is_none_or(|last| last.document != path) {
+        state.last = Some(state::Place::start_of(path));
+    }
     cx.add_recent_document(path);
     save_prefs(cx);
     refresh_menus(cx);
@@ -225,23 +245,9 @@ pub fn refresh_menus(cx: &mut App) {
 // Reaching the document from actions
 
 /// The hub of the document, and the window it is in, for the actions that have no view of their own to land on.
-struct Current(WeakEntity<Hub>, AnyWindowHandle);
-
-impl Global for Current {}
-
 /// Runs `work` on the hub once the action that asked for it has finished, since the window is busy until then.
 fn with_hub(cx: &mut App, work: impl FnOnce(&mut Hub, &mut Window, &mut Context<Hub>) + 'static) {
-    cx.defer(move |cx| {
-        let Some((hub, window)) = cx
-            .try_global::<Current>()
-            .and_then(|current| Some((current.0.upgrade()?, current.1)))
-        else {
-            return;
-        };
-        window
-            .update(cx, |_, window, cx| hub.update(cx, |hub, cx| work(hub, window, cx)))
-            .ok();
-    });
+    Current::<Hub>::defer(cx, work);
 }
 
 fn with_window(cx: &mut App, work: impl FnOnce(&mut Window, &mut App) + 'static) {
@@ -345,7 +351,7 @@ fn about(window: &mut Window, cx: &mut App) {
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let workspace = cx.entity().downgrade();
     let hub = cx.new(|cx| Hub::new(parts.clone(), workspace.clone(), window, cx));
-    cx.set_global(Current(hub.downgrade(), window.window_handle()));
+    Current::set(&hub, window, cx);
     refresh_menus(cx);
     let problem_line = cx.new(settings::ProblemLine::new);
     slots.footer.push(problem_line.into());

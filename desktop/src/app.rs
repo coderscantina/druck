@@ -118,10 +118,8 @@ pub fn open(
         px(fit(wanted_height, least_height, display.map(|display| display.height))),
     );
     let measuring = crate::gate::measuring();
-    // Macs stop painting a covered window. A measurement run floats on the last display without taking focus.
-    let display_id = measuring
-        .then(|| cx.displays().last().map(|display| display.id()))
-        .flatten();
+    // A measurement run floats on its own display without taking focus.
+    let display_id = crate::gate::capture_display(cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(display_id, window_size, cx))),
         titlebar: Some(TitlebarOptions {
@@ -170,14 +168,14 @@ pub fn open(
     crate::gate::at_launch(cx);
 }
 
-/// What to do once the document is saved.
 /// Where a document opens.
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum Opening {
     /// Where its chapters' places say, the start of the first chapter for a document just opened.
     AsSaved,
     /// A new project: after the title of its first chapter with one, so the author can start writing.
     AfterFirstTitle,
+    /// Where the author left it when the app last went.
+    Left(shell::state::Place),
 }
 
 type After = Box<dyn FnOnce(&mut Shell, &mut Window, &mut Context<Shell>)>;
@@ -206,6 +204,7 @@ impl Shell {
             shell::save_at_exit(cx);
             true
         });
+        let failed = error.is_some();
         let launch = cx.new(|cx| LaunchView::new(error, cx));
         LaunchView::take_focus(&launch, window, cx);
         let subscriptions = vec![
@@ -216,7 +215,8 @@ impl Shell {
             }),
         ];
         // A document opened from the Finder or dropped on the Dock icon. One window holds one document, so the first
-        // of several wins.
+        // of several wins. What the Finder handed over before the window opened is taken now.
+        let handed = (documents.try_recv().ok()).and_then(|paths| paths.into_iter().next());
         let opened = cx.spawn_in(window, async move |shell, cx| {
             while let Some(paths) = documents.next().await {
                 let Some(path) = paths.into_iter().next() else {
@@ -237,8 +237,18 @@ impl Shell {
             _subscriptions: subscriptions,
             _documents: opened,
         };
-        if let Some(session) = session {
-            shell.show_session(session, theme, window, cx);
+        // `--open` comes first, then a document the Finder handed over, then the book open when the app last went. The
+        // launch card shows only without any, or with why the last book did not open.
+        match (session, handed, failed) {
+            (Some(session), _, _) => shell.show_session(session, theme, window, cx),
+            (None, Some(path), false) => shell.open_path(&path, window, cx),
+            (None, None, false) => {
+                if let Some(last) = shell::last_document(cx) {
+                    let path = last.document.clone();
+                    shell.replace_document(&path, Opening::Left(last), window, cx);
+                }
+            }
+            (None, _, true) => {}
         }
         // `DRUCK_NEW_PROJECT=book:/path` makes a project there as the save panel would, for screenshots.
         #[cfg(any(debug_assertions, feature = "measure"))]
@@ -349,6 +359,7 @@ impl Shell {
             cx,
             Box::new(|shell, window, cx| {
                 shell.workspace = None;
+                shell::document_closed(cx);
                 window.set_window_title("Druck");
                 LaunchView::take_focus(&shell.launch, window, cx);
                 cx.notify();
@@ -438,8 +449,14 @@ impl Shell {
     fn replace_document(&mut self, path: &Path, opening: Opening, window: &mut Window, cx: &mut Context<Self>) {
         match Session::open(path) {
             Ok(mut session) => {
-                if opening == Opening::AfterFirstTitle {
-                    session.start_after_first_title();
+                match opening {
+                    Opening::AsSaved => {}
+                    Opening::AfterFirstTitle => session.start_after_first_title(),
+                    Opening::Left(place) => {
+                        if let Some((file, offset)) = &place.at {
+                            session.start_at(file, *offset, place.scroll);
+                        }
+                    }
                 }
                 self.launch.update(cx, |launch, cx| launch.set_error(None, None, cx));
                 self.show_session(session, None, window, cx);

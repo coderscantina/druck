@@ -210,6 +210,20 @@ fn offsets_in_a_project_are_the_chapter_files() {
 }
 
 #[test]
+fn a_book_opens_again_where_the_author_left_it() {
+    let (folder, mut session) = project("left");
+    let two = folder.0.join("manuscript/two.md");
+    let at = session.buffer(session.book()[1]).text().find("Second").expect("there");
+    session.start_at(&two, at, Some((2, 8.)));
+    assert_eq!(session.active(), session.book()[1]);
+    let view = session.active_chapter().view;
+    assert_eq!((view.selection, view.scroll), (Selection::caret(at), Some((2, 8.))));
+    // A place in a file the book no longer has leaves it where it opened.
+    session.start_at(&folder.0.join("manuscript/gone.md"), 3, None);
+    assert_eq!(session.active(), session.book()[1]);
+}
+
+#[test]
 fn the_joined_text_follows_the_engines_rule() {
     let (_folder, session) = project("joined");
     let joined = session.joined();

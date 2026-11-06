@@ -530,6 +530,13 @@ impl EditorView {
         }
     }
 
+    /// Where the author is in the book, to open there next time: the chapter's file, the caret's offset in it, and the
+    /// view's top block and how far into it. A note or research file has no place in the book.
+    pub fn place(&self) -> Option<(std::path::PathBuf, usize, (usize, f32))> {
+        let (file, offset) = self.session.file_position(self.session.active(), self.selection.head)?;
+        Some((file, offset, (self.scroll.block, f32::from(self.scroll.offset))))
+    }
+
     /// Keeps the galley's place in the active chapter, to come back to it.
     fn store_view(&mut self) {
         let view = ChapterView {

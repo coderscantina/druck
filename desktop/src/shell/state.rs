@@ -1,4 +1,5 @@
-//! What the app remembers between runs: the window's size, the recent documents, and each mode's zoom. It lives in the
+//! What the app remembers between runs: the window's size, the recent documents, the book open when it went and the place
+//! in it, and each mode's zoom. It lives in the
 //! operating system's app data folder and never in a project. What the author sets is in `settings.json`, see
 //! [`crate::settings`]. Holds no gpui types.
 
@@ -19,10 +20,33 @@ pub struct State {
     pub window: Option<(f32, f32)>,
     /// Most recent first.
     pub recent: Vec<PathBuf>,
+    /// The document open when the app last went, which the next start opens again. `None` once the author closed it.
+    pub last: Option<Place>,
     /// Write's text zoom, where 1 is 100 percent.
     pub write_zoom: Option<f32>,
     /// The pages' zoom. `None` fits them to the pane.
     pub publish_zoom: Option<f32>,
+}
+
+/// A document and where the author was in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub document: PathBuf,
+    /// The chapter's file and the caret's offset in it, once known.
+    pub at: Option<(PathBuf, usize)>,
+    /// The block at the top of the view and how far into it.
+    pub scroll: Option<(usize, f32)>,
+}
+
+impl Place {
+    /// A document just opened, at its start.
+    pub fn start_of(document: &Path) -> Self {
+        Self {
+            document: document.to_owned(),
+            at: None,
+            scroll: None,
+        }
+    }
 }
 
 impl State {
@@ -64,7 +88,19 @@ impl State {
 struct Record {
     window: Option<WindowRecord>,
     recent: Vec<String>,
+    last: Option<PlaceRecord>,
     zoom: ZoomRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PlaceRecord {
+    document: String,
+    #[serde(default)]
+    file: Option<String>,
+    #[serde(default)]
+    offset: usize,
+    #[serde(default)]
+    scroll: Option<(usize, f32)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,6 +123,12 @@ impl From<&State> for Record {
             recent: (state.recent.iter())
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect(),
+            last: state.last.as_ref().map(|place| PlaceRecord {
+                document: place.document.to_string_lossy().into_owned(),
+                file: (place.at.as_ref()).map(|(file, _)| file.to_string_lossy().into_owned()),
+                offset: place.at.as_ref().map_or(0, |(_, offset)| *offset),
+                scroll: place.scroll,
+            }),
             zoom: ZoomRecord {
                 write: state.write_zoom,
                 publish: state.publish_zoom,
@@ -103,6 +145,11 @@ impl From<Record> for State {
                 .window
                 .and_then(|window| Some((positive(window.width)?, positive(window.height)?))),
             recent: record.recent.into_iter().map(PathBuf::from).take(RECENT).collect(),
+            last: record.last.map(|place| Place {
+                document: PathBuf::from(place.document),
+                at: place.file.map(|file| (PathBuf::from(file), place.offset)),
+                scroll: place.scroll,
+            }),
             write_zoom: record.zoom.write.and_then(positive),
             publish_zoom: record.zoom.publish.and_then(positive),
         }
@@ -134,6 +181,11 @@ mod tests {
             ..State::default()
         };
         state.remember(Path::new("/books/one"));
+        state.last = Some(Place {
+            document: PathBuf::from("/books/one"),
+            at: Some((PathBuf::from("/books/one/manuscript/02.md"), 418)),
+            scroll: Some((7, 12.5)),
+        });
         state.save(&file).expect("saves");
         assert_eq!(State::load(&file), state);
         fs::remove_dir_all(file.parent().expect("folder")).ok();
