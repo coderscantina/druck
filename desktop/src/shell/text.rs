@@ -106,6 +106,7 @@ crate::strings! {
         FocusOutline => ("Go to the outline", "Zur Gliederung"),
         GoToPath => ("Go to a file or section", "Zu Datei oder Abschnitt"),
         BookOverview => ("Overview of the book", "Übersicht des Buchs"),
+        ToggleBookshelf => ("Bookshelf", "Bücherregal"),
         Minimize => ("Minimize", "Im Dock ablegen"),
         WindowZoom => ("Zoom", "Zoomen"),
         HelpWeb => ("Druck documentation", "Druck-Dokumentation"),

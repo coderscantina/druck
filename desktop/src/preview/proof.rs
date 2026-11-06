@@ -256,6 +256,17 @@ pub fn first_place(laid: &Layout, page: usize) -> Option<(PathBuf, usize)> {
     })
 }
 
+/// How many pages open with text of each file: the pages a chapter has when its file starts pages of its own.
+pub fn pages_by_file(laid: &Layout) -> std::collections::HashMap<PathBuf, usize> {
+    let mut pages = std::collections::HashMap::new();
+    for page in 0..laid.pages().len() {
+        if let Some((file, _)) = first_place(laid, page) {
+            *pages.entry(file).or_insert(0) += 1;
+        }
+    }
+    pages
+}
+
 /// Where each problem stands on these pages. Text is marked on the problem's page if it names one and the text is
 /// there. A problem with a page and no text marks that page's body.
 pub fn resolve(laid: &Layout, problems: &[Problem]) -> Marks {

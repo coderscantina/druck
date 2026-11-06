@@ -120,6 +120,12 @@ fn apply_to_panes(parts: &Parts, window: &mut Window, cx: &mut App) {
         Some(_) => parts.ticks.update(cx, |ticks, cx| ticks.pin_open(cx)),
         None => {}
     }
+    // `DRUCK_SHELF` raises the bookshelf and keeps it up, with the spine at this place in the book lit like a hover.
+    if let Some(hover) = var("DRUCK_SHELF") {
+        parts
+            .shelf
+            .update(cx, |shelf, cx| shelf.pin_for_gate(hover.parse().ok(), cx));
+    }
     if var("DRUCK_GUTTER").is_some() {
         parts.editor.update(cx, |editor, cx| editor.pin_gutter(cx));
     }
