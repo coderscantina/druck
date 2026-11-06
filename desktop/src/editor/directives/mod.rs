@@ -162,6 +162,8 @@ pub(super) struct Directives {
     pub ghost_table: Option<GhostTable>,
     /// Where the lit name stood in the last frame, which the options stand under.
     anchor: Option<Bounds<Pixels>>,
+    /// Each name on screen in the last frame, with the end of its opening line, where a click puts the caret.
+    names: Vec<(Bounds<Pixels>, usize)>,
     /// The ghost's table as last shaped, for the options and width it was shaped with.
     ghost_grid: Option<(TableOptions, Pixels, Rc<Whole>)>,
 }
@@ -427,6 +429,25 @@ impl EditorView {
             }
             _ => self.directives.options = None,
         }
+    }
+
+    /// Puts the caret on the opening line of the directive whose name is at `position`. Returns whether there was one.
+    pub(super) fn click_name(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(&(_, at)) = self
+            .directives
+            .names
+            .iter()
+            .find(|(bounds, _)| bounds.contains(&position))
+        else {
+            return false;
+        };
+        self.set_selection(crate::source::Selection::caret(at), false, window, cx);
+        true
     }
 
     /// Whether the options have the keys, so the text's own keys stand aside.

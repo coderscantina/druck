@@ -191,7 +191,10 @@ impl EditorView {
         self.caret_by_keys = false;
         self.commit_rich_float(window, cx);
         self.close_float(cx);
-        if self.scrollbar_mouse_down(event.position, cx) || self.gutter_mouse_down(event.position, cx) {
+        if self.scrollbar_mouse_down(event.position, cx)
+            || self.click_name(event.position, window, cx)
+            || self.gutter_mouse_down(event.position, cx)
+        {
             return;
         }
         if event.click_count == 1 && !event.modifiers.shift && self.rich_mouse_down(event.position, window, cx) {

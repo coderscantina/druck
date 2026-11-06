@@ -215,6 +215,7 @@ impl EditorView {
     ) -> Marks {
         let mut marks = Marks::default();
         self.directives.anchor = None;
+        self.directives.names.clear();
         if self.source || indices.is_empty() {
             return marks;
         }
@@ -262,6 +263,12 @@ impl EditorView {
                         Bounds::new(*at, size(line.width, tokens::TEXT_SMALL * 1.5))
                     });
                 self.directives.anchor = Some(anchor);
+            }
+            if let Some((line, at)) = &name {
+                let range = &self.blocks.as_slice()[region.open].range;
+                let end = range.start + self.session.active_buffer().text()[range.clone()].trim_end().len();
+                let bounds = Bounds::new(*at, size(line.width, tokens::TEXT_SMALL * 1.5));
+                self.directives.names.push((bounds, end));
             }
             let standalone = !region.kind.has_body();
             if standalone
