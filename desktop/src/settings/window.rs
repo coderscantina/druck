@@ -22,18 +22,27 @@ use crate::tokens::{self, ACCENTS, Tokens};
 pub enum Category {
     Appearance,
     Writing,
+    Publishing,
     Language,
     Agent,
     Keys,
 }
 
 impl Category {
-    const ALL: [Self; 5] = [Self::Appearance, Self::Writing, Self::Language, Self::Agent, Self::Keys];
+    const ALL: [Self; 6] = [
+        Self::Appearance,
+        Self::Writing,
+        Self::Publishing,
+        Self::Language,
+        Self::Agent,
+        Self::Keys,
+    ];
 
     fn label(self) -> Key {
         match self {
             Self::Appearance => Key::CategoryAppearance,
             Self::Writing => Key::CategoryWriting,
+            Self::Publishing => Key::CategoryPublishing,
             Self::Language => Key::CategoryLanguage,
             Self::Agent => Key::CategoryAgent,
             Self::Keys => Key::CategoryKeys,
@@ -44,6 +53,7 @@ impl Category {
     fn from_name(name: &str) -> Self {
         match name {
             "writing" => Self::Writing,
+            "publishing" => Self::Publishing,
             "language" => Self::Language,
             "agent" => Self::Agent,
             "keys" => Self::Keys,
@@ -113,7 +123,7 @@ const ROWS: &[Row] = &[
         control: Control::Switch(|s| s.binder, |s, on| s.binder = on),
     },
     Row {
-        category: Category::Writing,
+        category: Category::Publishing,
         label: Key::WarningMarks,
         hint: Key::WarningMarksHint,
         control: Control::Switch(|s| s.warning_marks, |s, on| s.warning_marks = on),
@@ -510,9 +520,11 @@ impl SettingsWindow {
                     }
                 }
             } else {
+                // The category's name finds its rows too.
+                let name = crate::t!(category.label());
                 for row in ROWS.iter().filter(|row| row.category == category) {
                     let (label, hint) = (crate::t!(row.label), crate::t!(row.hint));
-                    if matches(query, label, hint) {
+                    if matches(query, label, hint) || matches(query, name, "") {
                         let end = self.control(row, tokens, cx);
                         rows.push(Self::row(label, Some(hint), end, tokens).into_any_element());
                     }

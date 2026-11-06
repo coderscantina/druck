@@ -34,6 +34,7 @@ crate::strings! {
         CategoryAppearance => ("Appearance", "Darstellung"),
         CategoryWriting => ("Writing", "Schreiben"),
         CategoryLanguage => ("Language and spelling", "Sprache"),
+        CategoryPublishing => ("Publishing", "Publizieren"),
         CategoryAgent => ("Agent", "Agent"),
         CategoryKeys => ("Keys", "Tasten"),
 
