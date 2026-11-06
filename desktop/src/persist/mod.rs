@@ -41,8 +41,6 @@ use crate::workspace::{Parts, Slots};
 
 actions!(persist, [KeepMine, TakeTheirs, SeeBoth]);
 
-/// How long a passing note stays on screen.
-const NOTE_TIME: Duration = Duration::from_secs(6);
 /// How often to look for a folder that went away, only while it is away.
 const GONE_POLL: Duration = Duration::from_secs(2);
 /// How soon to try again while an input method is composing or a write is running.
@@ -841,7 +839,8 @@ impl PersistView {
         self.sync_passage(cx);
     }
 
-    fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// A passing note on the saving line, the window's one place for them.
+    pub fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.show_note_about(text, None, window, cx);
     }
 
@@ -856,7 +855,7 @@ impl PersistView {
         self.note = Some(text.into());
         self.note_file = file;
         self.note_task = cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor().timer(NOTE_TIME).await;
+            cx.background_executor().timer(tokens::NOTE_TIME).await;
             view.update(cx, |view, cx| {
                 view.note = None;
                 view.note_file = None;

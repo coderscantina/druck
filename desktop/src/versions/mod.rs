@@ -32,8 +32,7 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyWindowHandle, App, Context, Entity, Global, KeyBinding, SharedString, Subscription, Task, WeakEntity, Window,
-    actions, div,
+    AnyWindowHandle, App, Context, Entity, Global, KeyBinding, Subscription, Task, WeakEntity, Window, actions, div,
 };
 
 use self::commit_card::{CardField, CommitCard};
@@ -67,8 +66,6 @@ const REFRESH_PAUSE: Duration = Duration::from_millis(1500);
 const SCRIPT_STEP: Duration = Duration::from_secs(3);
 /// How often the open panel looks whether another tool moved the repo.
 const PANEL_LOOK: Duration = Duration::from_secs(5);
-/// How long a passing note stays.
-const NOTE_TIME: Duration = Duration::from_secs(8);
 /// How often an open panel may fetch, as `git fetch` goes over the network.
 const FETCH_GAP: Duration = Duration::from_secs(300);
 /// Commits a panel lists. A long history stays usable through the terminal.
@@ -271,8 +268,6 @@ pub struct Versions {
     working: bool,
     /// What went wrong last, shown in the card and the panel until the next action.
     error: Option<String>,
-    note: Option<SharedString>,
-    note_task: Task<()>,
     pacing: Pacing,
     pacing_running: bool,
     /// Each chapter's file when last looked at, to tell a rename.
@@ -360,8 +355,6 @@ impl Versions {
             panel,
             working: false,
             error: None,
-            note: None,
-            note_task: Task::ready(()),
             pacing: Pacing::default(),
             pacing_running: false,
             paths: HashMap::new(),
@@ -882,29 +875,19 @@ impl Versions {
     }
 
     fn show_note(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.note = Some(text.into());
-        self.note_task = cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor().timer(NOTE_TIME).await;
-            view.update(cx, |view, cx| {
-                view.note = None;
-                cx.notify();
-            })
-            .ok();
-        });
-        cx.notify();
+        self.persist
+            .update(cx, |persist, cx| persist.show_note(text, window, cx));
     }
 }
 
 impl Render for Versions {
-    /// A passing note at the window's foot, in the saving state's form.
+    /// The line at the window's foot while See both's markers stand during a merge, in the saving state's form.
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::get(cx).clone();
-        let both = self.merge.both_stand_in().is_some();
-        let (text, color): (SharedString, _) = match (self.merge.both_stand_in(), &self.note) {
-            (Some((_, chapter)), _) => (crate::t!(Key::BothStand, chapter = chapter).into(), tokens.accent),
-            (None, Some(note)) => (note.clone(), tokens.text_quiet),
-            (None, None) => return div().into_any_element(),
+        let Some((_, chapter)) = self.merge.both_stand_in() else {
+            return div().into_any_element();
         };
+        let text = crate::t!(Key::BothStand, chapter = chapter);
         let side = |id, choice| {
             crate::persist::foot_button(&tokens, id, choice)
                 .on_click(cx.listener(move |view, _, window, cx| view.keep_one_side(choice, window, cx)))
@@ -918,12 +901,10 @@ impl Render for Versions {
             .px(tokens::SPACE_3)
             .bg(tokens.canvas)
             .text_size(tokens::TEXT_SMALL)
-            .text_color(color)
+            .text_color(tokens.accent)
             .child(div().min_w_0().truncate().child(text))
-            .when(both, |line| {
-                line.child(side("both-keep-mine", Choice::Mine))
-                    .child(side("both-take-theirs", Choice::Theirs))
-            })
+            .child(side("both-keep-mine", Choice::Mine))
+            .child(side("both-take-theirs", Choice::Theirs))
             .into_any_element()
     }
 }

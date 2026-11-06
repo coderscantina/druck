@@ -73,6 +73,8 @@ pub const TEXT_MARGIN_RIGHT: Pixels = px(24.);
 /// The least width the text keeps, about 40 characters, before the Binder gives way.
 pub const TEXT_MIN_WIDTH: Pixels = px(320.);
 /// A margin note, and the gap between it and the text.
+/// How long a passing note stays at the window's foot.
+pub const NOTE_TIME: std::time::Duration = std::time::Duration::from_secs(6);
 pub const NOTE_WIDTH: Pixels = px(220.);
 pub const NOTE_GAP: Pixels = px(28.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
