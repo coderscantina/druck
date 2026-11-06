@@ -416,7 +416,7 @@ pub(super) fn paint_lines(
         }
         let origin = point(left + line.x, top);
         line.shaped
-            .paint(origin, line.line_height, TextAlign::Left, None, window, cx)
+            .paint(origin, line.line_height, line.align, None, window, cx)
             .ok();
     }
 }

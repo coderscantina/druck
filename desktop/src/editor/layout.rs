@@ -4,8 +4,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, SharedString, StrikethroughStyle, TextRun,
-    UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, size,
+    Bounds, Font, FontStyle, FontWeight, Hsla, LineLayout, Pixels, SharedString, StrikethroughStyle, TextAlign,
+    TextRun, UnderlineStyle, Window, WrapBoundary, WrappedLine, WrappedLineLayout, font, point, px, size,
 };
 
 use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
@@ -321,6 +321,8 @@ pub struct ShapedSourceLine {
     pub chips: Vec<(Bounds<Pixels>, ChipLook)>,
     /// How far in the first row starts, for a paragraph the theme indents.
     pub indent: Pixels,
+    /// How each row sits in the width the line was shaped for.
+    pub align: TextAlign,
 }
 
 impl ShapedSourceLine {
@@ -516,6 +518,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
             bullet,
             chips: chip_boxes,
             indent: row_indent,
+            align: TextAlign::Left,
         });
         y += height;
     }
@@ -704,6 +707,7 @@ mod tests {
             bullet: None,
             chips: Vec::new(),
             indent,
+            align: TextAlign::Left,
         }
     }
 

@@ -7,8 +7,8 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, ContentMask, Pixels, Point, SharedString, Size, Window, fill, img, point,
-    px, size,
+    AnyElement, App, AvailableSpace, Bounds, ContentMask, Pixels, Point, SharedString, Size, TextAlign, Window, fill,
+    img, point, px, size,
 };
 
 use crate::editor::EditorView;
@@ -277,8 +277,8 @@ impl EditorView {
                 let room = (covered - tokens::CELL_X * 2.).max(tokens::CELL_MIN_WIDTH);
                 let mut layout = self.shape_inline(&cell_at_rest(&cell.text), room, index == 0, None, dim, window);
                 match grid.aligns.get(column).copied().unwrap_or_default() {
-                    Align::Center => align_rows(&mut layout, room, 0.5),
-                    Align::Right => align_rows(&mut layout, room, 1.),
+                    Align::Center => align_rows(&mut layout, room, TextAlign::Center),
+                    Align::Right => align_rows(&mut layout, room, TextAlign::Right),
                     _ => {}
                 }
                 height = height.max(layout.height + tokens::CELL_Y * 2.);
@@ -341,7 +341,7 @@ impl EditorView {
         let caption_text = figure.caption(&text);
         let caption = (!caption_text.is_empty()).then(|| {
             let mut caption = self.shape_inline(caption_text, width, false, None, dim, window);
-            align_rows(&mut caption, width, 0.5);
+            align_rows(&mut caption, width, TextAlign::Center);
             caption
         });
         let space = self.style.body_size * tokens::PARAGRAPH_GAP;
@@ -363,16 +363,25 @@ impl EditorView {
     }
 }
 
-/// Moves each line of one row `fraction` of the way across the slack of `room`: a half centres it, a whole sets it
-/// right. A line that wraps keeps its place, since its rows share one shaping.
-fn align_rows(layout: &mut BlockLayout, room: Pixels, fraction: f32) {
+/// Aligns every row of every line in `room`, which is the width the lines were shaped for. The rows are painted
+/// aligned, so only the chips behind them move.
+fn align_rows(layout: &mut BlockLayout, room: Pixels, align: TextAlign) {
     for line in &mut layout.lines {
-        if line.rows.len() == 1 {
-            let shift = (room - line.shaped.unwrapped_layout.width) * fraction;
-            line.x += shift;
-            for (chip, _) in &mut line.chips {
-                chip.origin.x += shift;
-            }
+        line.align = align;
+        let shaped = &line.shaped.unwrapped_layout;
+        let shifts: Vec<Pixels> = (line.rows.iter())
+            .map(|row| {
+                let slack = room - (shaped.x_for_index(row.end) - shaped.x_for_index(row.start));
+                match align {
+                    TextAlign::Left => px(0.),
+                    TextAlign::Center => slack * 0.5,
+                    TextAlign::Right => slack,
+                }
+            })
+            .collect();
+        for (chip, _) in &mut line.chips {
+            let row = ((chip.origin.y - line.y) / line.line_height) as usize;
+            chip.origin.x += shifts[row.min(shifts.len() - 1)];
         }
     }
 }
