@@ -28,6 +28,10 @@ crate::strings! {
             "In {chapter} stehen beide Fassungen."
         ),
         GitFailed => ("git failed", "git ist fehlgeschlagen"),
+        PushRejected => (
+            "The remote has commits you do not have. Pull first.",
+            "Auf dem Remote liegen Commits, die du nicht hast. Erst Pull."
+        ),
         NoWorktree => ("the repo has no worktree", "das Repo hat keinen Arbeitsordner"),
         NoCommitYet => ("the repo has no commit yet", "das Repo hat noch keinen Commit"),
         UnknownIndexEntry => (

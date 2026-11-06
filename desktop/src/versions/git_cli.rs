@@ -182,19 +182,27 @@ struct Output {
 }
 
 impl Output {
+    /// What Git said that matters: its first line of `error:`, `fatal:`, or `!`, which comes after lines such as push's
+    /// `To <remote>`, or else its first line. A push the remote refused for commits it has is worded here.
     fn said(&self) -> String {
         let text = if self.stderr.trim().is_empty() {
             &self.stdout
         } else {
             &self.stderr
         };
-        text.lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .unwrap_or(crate::t!(Key::GitFailed))
+        let lines = || text.lines().map(str::trim).filter(|line| !line.is_empty());
+        let mut faults = lines().filter(|line| ["error:", "fatal:", "!"].iter().any(|start| line.starts_with(start)));
+        let Some(line) = faults.next().or_else(|| lines().next()) else {
+            return crate::t!(Key::GitFailed).to_owned();
+        };
+        if line.starts_with("! [rejected]") {
+            return crate::t!(Key::PushRejected).to_owned();
+        }
+        (line
             .trim_start_matches("error: ")
             .trim_start_matches("fatal: ")
-            .to_owned()
+            .trim_start_matches("! "))
+        .to_owned()
     }
 
     fn refused(&self) -> Refused {
@@ -238,5 +246,27 @@ mod tests {
             output("fatal: invalid reference: nope\n").refused(),
             Refused::Said("invalid reference: nope".to_owned())
         );
+    }
+
+    #[test]
+    fn a_fault_is_told_before_the_lines_around_it() {
+        let output = |stderr: &str| Output {
+            success: false,
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+        };
+        let rejected = "To /books/remote.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to '/books/remote.git'\nhint: Updates were rejected\n";
+        assert_eq!(output(rejected).said(), crate::t!(Key::PushRejected));
+        let declined = "To /books/remote.git\n ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push\n";
+        assert_eq!(
+            output(declined).said(),
+            "[remote rejected] main -> main (pre-receive hook declined)"
+        );
+        let unreachable = "From nowhere\nfatal: 'origin' does not appear to be a git repository\n";
+        assert_eq!(
+            output(unreachable).said(),
+            "'origin' does not appear to be a git repository"
+        );
+        assert_eq!(output("Already up to date.\n").said(), "Already up to date.");
     }
 }
