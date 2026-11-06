@@ -511,6 +511,49 @@ fn a_missing_bibliography_leaves_citations_as_their_keys_and_says_so() {
 }
 
 #[test]
+fn a_citation_key_the_bibliography_lacks_stands_in_as_its_key_only_when_asked() {
+    let bib = "@book{smith2020, author={Smith, Ann}, title={Wide}, year={2020}, publisher={P}}\n";
+    let text = "---\nbibliography: refs.bib\n---\n\nAs [@smith2020] and [@gone] wrote.\n";
+    let mut resolver = MemoryResolver::new();
+    resolver.insert(Origin::Document(memory_dir()), "refs.bib", bib.as_bytes());
+    let input = document(text, memory_dir(), "doc.md", no_theme());
+
+    let done = rendered(&Renderer::new(), &resolver, &input);
+    assert!(done.parts > 0);
+    let warning = done
+        .warnings
+        .iter()
+        .find(|warning| warning.code.is_some())
+        .expect("a warning");
+    assert!(warning.is_warning());
+    assert_eq!(
+        warning.code,
+        Some(crate::diagnostic::Code::MissingCitation {
+            file: memory_dir().join("refs.bib"),
+            key: "gone".to_owned()
+        })
+    );
+    assert_eq!(warning.location, Some((5, 22).into()));
+
+    let strict = errors(try_pdf(&Renderer::new(), &resolver, &input));
+    assert_eq!(strict.len(), 1);
+    assert!(!strict[0].is_warning());
+
+    let cancel = Cancel::default();
+    let renderer = Renderer::new();
+    let configured = renderer
+        .job(&resolver, &input, &cancel)
+        .missing(Missing::StandIn)
+        .configure()
+        .expect("configures");
+    let Err(Failure::Errors(refused)) = configured.check_final("print") else {
+        panic!("a final export refuses a missing citation key");
+    };
+    assert_eq!(refused.len(), 1);
+    assert!(refused[0].message.contains("is final, but no entry in"), "{refused:?}");
+}
+
+#[test]
 fn a_missing_font_file_has_a_bundled_face_stand_in_and_says_so() {
     let mut resolver = MemoryResolver::new();
     resolver.insert(Origin::Theme(memory_dir()), "theme.json", FONT_THEME.as_bytes());

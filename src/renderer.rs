@@ -106,7 +106,8 @@ pub enum Missing {
     #[default]
     Error,
     /// The job goes on with a stand-in and reports a warning, so an editor can keep showing pages: a box for an
-    /// image, citations as their keys for a bibliography, and a bundled face for a static font file.
+    /// image, citations as their keys for a bibliography, a bundled face for a static font file, and a citation
+    /// whose key the bibliography lacks as its keys.
     StandIn,
 }
 
@@ -177,8 +178,8 @@ impl Configured<'_> {
         serde_json::to_string_pretty(&self.config).expect("configuration serializes")
     }
 
-    /// Fails with one error per open placeholder, and with [`Missing::StandIn`] per image, bibliography, or font file
-    /// that is not there, at its real location, naming the final `export`.
+    /// Fails with one error per open placeholder, and with [`Missing::StandIn`] per image, bibliography, font file, or
+    /// citation key that is not there, at its real location, naming the final `export`.
     pub fn check_final(&self, export: &str) -> Result<(), Failure> {
         let content = pipeline::parse(&self.config, &self.document)?;
         let mut errors = project::open_placeholders(&content, &self.document, export);
@@ -189,7 +190,7 @@ impl Configured<'_> {
                 &content,
                 &self.document,
                 export,
-            ));
+            )?);
         }
         if errors.is_empty() { Ok(()) } else { Err(errors.into()) }
     }

@@ -117,12 +117,14 @@ fn prepare_parsed(
         &content,
         bibliography.as_ref(),
         unresolved,
+        job.missing,
         config,
         &document.source,
         job.cancel,
     )?;
     let dir = document.path.parent().expect("an absolute file path has a parent");
-    let (images, warnings) = load_images(job, &content.images, dir, &document.source)?;
+    let (images, mut warnings) = load_images(job, &content.images, dir, &document.source)?;
+    warnings.extend(cited.warnings.iter().cloned());
     let theme_images = load_theme_images(job, config)?;
     Ok(Prepared {
         content,
@@ -388,15 +390,15 @@ fn load_images(
     }
 }
 
-/// The errors for a final export of a document that names a file that is not there: an image of its parsed `content`,
-/// the bibliography, or a font. Other exports run with what stands in.
+/// The errors for a final export of a document that names a file or citation key that is not there: an image of its
+/// parsed `content`, the bibliography, a font, or a key the bibliography lacks. Other exports run with what stands in.
 pub(crate) fn missing_for_final(
     job: &JobContext,
     config: &Config,
     content: &document::Document,
     document: &DocumentFile,
     export: &str,
-) -> Vec<Diagnostic> {
+) -> Result<Vec<Diagnostic>, Failure> {
     let dir = document.path.parent().expect("an absolute file path has a parent");
     let mut errors = Vec::new();
     for file in &content.images {
@@ -410,18 +412,34 @@ pub(crate) fn missing_for_final(
             errors.push(diagnostic.at(file.at.line, file.at.column));
         }
     }
+    let mut refuse = |warning: &Diagnostic| {
+        let mut error = warning.clone();
+        error.severity = crate::diagnostic::Severity::Error;
+        error.message = format!("export \"{export}\" is final, but {}", warning.message);
+        errors.push(error);
+    };
     for warning in &config.warnings {
         if matches!(
             warning.code,
             Some(Code::BibliographyNotFound { .. } | Code::FontNotFound { .. })
         ) {
-            let mut error = warning.clone();
-            error.severity = crate::diagnostic::Severity::Error;
-            error.message = format!("export \"{export}\" is final, but {}", warning.message);
-            errors.push(error);
+            refuse(warning);
         }
     }
-    errors
+    if let Some(bibliography) = load_bibliography(job, config)? {
+        let source = &document.source;
+        let cited = citations::resolve(
+            content,
+            Some(&bibliography),
+            false,
+            Missing::StandIn,
+            config,
+            source,
+            job.cancel,
+        )?;
+        cited.warnings.iter().for_each(refuse);
+    }
+    Ok(errors)
 }
 
 /// Resolves and checks the configuration for one Markdown document `name` in the folder `dir`.

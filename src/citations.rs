@@ -7,9 +7,9 @@ use crate::bibliography::{Bibliography, Citations, Part, Reference};
 use crate::cancel::{Cancel, CheckPoint};
 use crate::config::resolved::Config;
 use crate::config::source::InputSource;
-use crate::diagnostic::{Code, Diagnostic};
+use crate::diagnostic::{Code, Diagnostic, Severity};
 use crate::document::{Block, Document, Inline, Location};
-use crate::renderer::Failure;
+use crate::renderer::{Failure, Missing};
 
 /// The formatted citations of a document and the works they cite.
 #[derive(Debug, Default)]
@@ -19,6 +19,8 @@ pub struct Cited {
     pub citations: Vec<Vec<Part>>,
     /// `None` for a document without citations.
     pub section: Option<Section>,
+    /// With [`Missing::StandIn`], a warning for each key the bibliography lacks, at the key.
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// The cited works in bibliography order, with their `.bib` file for diagnostics.
@@ -36,11 +38,13 @@ impl Cited {
 
 /// Formats the citations of `document`, read from `source`. Citations without a bibliography and keys the
 /// bibliography lacks are errors at the citation and the key. With `unresolved`, the bibliography is named but its file
-/// is not there, which was reported as it was read, so each citation shows its keys and links nowhere.
+/// is not there, which was reported as it was read, so each citation shows its keys and links nowhere. With
+/// [`Missing::StandIn`], a citation with a key the bibliography lacks does the same and warns at the key.
 pub fn resolve(
     document: &Document,
     bibliography: Option<&Bibliography>,
     unresolved: bool,
+    missing: Missing,
     config: &Config,
     source: &InputSource,
     cancel: &Cancel,
@@ -53,6 +57,7 @@ pub fn resolve(
         return Ok(Cited {
             citations: document.citations.iter().map(keys_only).collect(),
             section: None,
+            warnings: Vec::new(),
         });
     }
     let Some(bibliography) = bibliography else {
@@ -65,21 +70,30 @@ pub fn resolve(
     let mut citations = Citations::new(bibliography);
     let mut ids = vec![None; document.citations.len()];
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
     for index in order {
         cancel.check(CheckPoint::Citation)?;
         let citation = &document.citations[index];
         match citations.add(&citation.syntax) {
             Ok(id) => ids[index] = Some(id),
-            Err(missing) => errors.extend(missing.into_iter().map(|missing| {
-                let file = bibliography.path();
-                let message = format!("no entry in {} has the key `{}`", file.display(), missing.key);
-                error(citation.keys[missing.item], message)
-                    .coded(Code::MissingCitation {
+            Err(lacking) => {
+                for lacking in lacking {
+                    let file = bibliography.path();
+                    let message = format!("no entry in {} has the key `{}`", file.display(), lacking.key);
+                    let code = Code::MissingCitation {
                         file: file.to_owned(),
-                        key: missing.key.clone(),
-                    })
-                    .naming(file)
-            })),
+                        key: lacking.key,
+                    };
+                    let mut diagnostic = error(citation.keys[lacking.item], message).coded(code).naming(file);
+                    match missing {
+                        Missing::Error => errors.push(diagnostic),
+                        Missing::StandIn => {
+                            diagnostic.severity = Severity::Warning;
+                            warnings.push(diagnostic);
+                        }
+                    }
+                }
+            }
         }
     }
     if !errors.is_empty() {
@@ -88,12 +102,11 @@ pub fn resolve(
     }
 
     let rendered = citations.finish(config.document.citation_style, config.document.lang);
-    let parts = ids
-        .into_iter()
-        .map(|id| {
-            rendered
-                .citation(id.expect("every citation is in the reading order"))
-                .to_vec()
+    warnings.sort_by_key(|diagnostic| diagnostic.position);
+    let parts = (ids.into_iter().zip(&document.citations))
+        .map(|(id, citation)| match id {
+            Some(id) => rendered.citation(id).to_vec(),
+            None => keys_only(citation),
         })
         .collect();
     Ok(Cited {
@@ -102,6 +115,7 @@ pub fn resolve(
             source: bibliography.source(),
             references: rendered.into_references(),
         }),
+        warnings,
     })
 }
 

@@ -65,6 +65,7 @@ fn render_cited(config: &Config, body: &str, bib: Option<&str>, images: &[Image]
         &document,
         bibliography.as_ref(),
         false,
+        crate::renderer::Missing::Error,
         config,
         &source(),
         &Cancel::default(),
