@@ -44,6 +44,9 @@ pub enum Standalone {
     Table,
     PageBreak,
     Toc,
+    Bibliography,
+    /// A `::: table` of rows from a list.
+    ListTable,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +67,8 @@ pub struct Context {
     pub open_directives: Vec<String>,
     /// Whether the book has a `::: toc` already.
     pub has_toc: bool,
+    /// Whether the book places its bibliography already.
+    pub has_bibliography: bool,
     /// Whether the bibliography holds a work to cite.
     pub has_works: bool,
     /// Whether the book has a label to refer to.
@@ -180,27 +185,51 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         "icons/block-table.svg",
         Action::Insert(Standalone::Table),
     ));
-    items.push(label(Key::Image, "icons/images.svg", Action::OpenImage));
-    if !held {
-        items.push(label(Key::Keep, "icons/block-directive.svg", Action::Wrap("keep")));
+    // Written after a list, its rows would read as that list's.
+    if !held && context.block != Some(BlockKind::List) {
+        items.push(label(
+            Key::ListTable,
+            "icons/block-table.svg",
+            Action::Insert(Standalone::ListTable),
+        ));
     }
+    items.push(label(Key::Image, "icons/images.svg", Action::OpenImage));
     if open.is_empty() {
         items.push(label(
             Key::Columns,
-            "icons/block-directive.svg",
+            "icons/directive-columns.svg",
             Action::Wrap("columns"),
         ));
-        items.push(label(Key::Bottom, "icons/block-directive.svg", Action::Wrap("bottom")));
+    }
+    if open.last().is_some_and(|name| name == "columns") {
+        items.push(label(
+            Key::FullWidth,
+            "icons/directive-full-width.svg",
+            Action::Wrap("full-width"),
+        ));
+    }
+    if !held {
+        items.push(label(Key::Keep, "icons/directive-keep.svg", Action::Wrap("keep")));
+    }
+    if open.is_empty() {
+        items.push(label(Key::Bottom, "icons/directive-bottom.svg", Action::Wrap("bottom")));
     }
     if !held {
         items.push(label(
             Key::PageBreak,
-            "icons/block-directive.svg",
+            "icons/directive-page-break.svg",
             Action::Insert(Standalone::PageBreak),
         ));
     }
     if open.is_empty() && !context.has_toc {
         items.push(label(Key::Toc, "icons/contents.svg", Action::Insert(Standalone::Toc)));
+    }
+    if !held && context.has_works && !context.has_bibliography {
+        items.push(label(
+            Key::Bibliography,
+            "icons/book.svg",
+            Action::Insert(Standalone::Bibliography),
+        ));
     }
     let in_note = context.block == Some(BlockKind::FootnoteDefinition);
     let in_heading = matches!(context.block, Some(BlockKind::Heading { .. }));
@@ -275,8 +304,31 @@ pub fn open_directives(text: &str, blocks: &Blocks, offset: usize) -> Vec<String
 
 /// Whether this text has a table of contents.
 pub fn holds_toc(text: &str) -> bool {
+    holds_directive(text, "toc")
+}
+
+/// Whether this text has a directive line naming `name` alone.
+pub fn holds_directive(text: &str, name: &str) -> bool {
     text.lines()
-        .any(|line| line.starts_with(":::") && line.trim_start_matches(':').trim() == "toc")
+        .any(|line| line.starts_with(":::") && line.trim_start_matches(':').trim() == name)
+}
+
+/// Whether choosing a wrapping entry for `slash` wraps the block it stands in, because its line holds other text, rather
+/// than writing a new block with a placeholder.
+pub fn wraps_block(text: &str, blocks: &Blocks, slash: Range<usize>) -> bool {
+    let index = blocks.index_at(slash.start);
+    let block = &blocks.as_slice()[index];
+    let body = body_range(text, &block.range);
+    let body = body.start..body.end.max(slash.end);
+    let line = line_of(text, &body, slash.start);
+    let lead = line_markers(block.kind, &text[block.range.clone()])
+        .iter()
+        .find(|marker| {
+            let start = block.range.start + marker.range.start;
+            line.start <= start && start <= line.end
+        })
+        .map_or(line.start, |marker| block.range.start + marker.range.end);
+    !(text[lead.min(slash.start)..slash.start].trim().is_empty() && text[slash.end..line.end].trim().is_empty())
 }
 
 /// What an entry writes on an empty line, without a final line ending, and the part of it the writer replaces first.
@@ -328,6 +380,12 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
             let end = text.len();
             (text, end..end)
         }
+        Action::Insert(Standalone::Bibliography) => {
+            let text = "::: bibliography".to_owned();
+            let end = text.len();
+            (text, end..end)
+        }
+        Action::Insert(Standalone::ListTable) => list_table("::: table", eol, language),
         Action::Insert(Standalone::Table) => {
             let (column, cell) = (
                 Key::PlaceholderColumn.text(language),
@@ -347,6 +405,18 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
     })
 }
 
+/// A list table of two columns, its header and one row, under the directive line `opening`, with its first placeholder.
+pub fn list_table(opening: &str, eol: &str, language: Language) -> (String, Range<usize>) {
+    let column = Key::PlaceholderColumn.text(language);
+    let cell = Key::PlaceholderCell.text(language);
+    let before = format!("{opening}{eol}- - ");
+    let start = before.len();
+    (
+        format!("{before}{column}{eol}  - {column}{eol}- - {cell}{eol}  - {cell}{eol}:::"),
+        start..start + column.len(),
+    )
+}
+
 /// The command for choosing `action` with `slash..caret` as the typed slash and query. A new section is the session's to
 /// make, so here it only takes the typed text away.
 pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, language: Language) -> Option<Command> {
@@ -359,15 +429,7 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
         return finish(text, vec![Edit::new(slash.clone(), "")], Selection::caret(slash.start));
     }
     let line = line_of(text, &body, slash.start);
-    let lead = line_markers(block.kind, &text[block.range.clone()])
-        .iter()
-        .find(|marker| {
-            let start = block.range.start + marker.range.start;
-            line.start <= start && start <= line.end
-        })
-        .map_or(line.start, |marker| block.range.start + marker.range.end);
-    let others_on_line =
-        !(text[lead.min(slash.start)..slash.start].trim().is_empty() && text[slash.end..line.end].trim().is_empty());
+    let others_on_line = wraps_block(text, blocks, slash.clone());
     let only_line = line.start == body.start && line.end >= body.end;
 
     if !others_on_line && only_line {

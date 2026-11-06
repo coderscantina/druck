@@ -116,6 +116,11 @@ impl GalleyStyle {
         px(self.book.measure * self.scale())
     }
 
+    /// The room between two columns, as the theme sets it, at this zoom.
+    pub fn column_gap(&self) -> Pixels {
+        px(self.book.column_gap * self.scale())
+    }
+
     /// The width of about this many characters of body text.
     pub fn width_of_characters(&self, count: u32) -> Pixels {
         self.estimated_char_width() * count as f32

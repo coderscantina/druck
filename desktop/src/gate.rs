@@ -25,7 +25,7 @@
 //! outside the views.
 //!
 //! For captures, no window needs to be frontmost or key. `DRUCK_GATE=2` floats on the last display without focus, and these
-//! need no keystrokes at all: `DRUCK_MODE`, `DRUCK_TAB`, `DRUCK_CHAPTER`, `DRUCK_SELECT`, `DRUCK_SECTION`, `DRUCK_SLIP`,
+//! need no keystrokes at all: `DRUCK_MODE`, `DRUCK_TAB`, `DRUCK_CHAPTER`, `DRUCK_SELECT`, `DRUCK_CARET`, `DRUCK_SECTION`, `DRUCK_SLIP`,
 //! `DRUCK_VERSIONS`, `DRUCK_VERSIONS_RUN`, and the scripted actions of `DRUCK_AGENT_SCRIPT`. Keys sent by
 //! `CGEventPostToPid` reach the process without it being frontmost, and never reach another window.
 

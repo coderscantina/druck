@@ -389,7 +389,7 @@ impl EditorView {
         if position.x < self.column.text_left || position.x > self.column.text_left + self.column.text_width {
             return false;
         }
-        let Some(index) = self.block_at_y(position.y) else {
+        let Some(index) = self.block_at(position) else {
             return false;
         };
         let top = self
@@ -416,7 +416,7 @@ impl EditorView {
         }
         let layout = self.layout_block(index, window);
         let relative_y = position.y - top;
-        let x = position.x - self.column.text_left;
+        let x = position.x - self.block_left(index);
         let chip = layout.lines.iter().flat_map(|line| &line.chips).find(|(bounds, _)| {
             bounds.left() <= x && x <= bounds.right() && bounds.top() <= relative_y && relative_y <= bounds.bottom()
         });

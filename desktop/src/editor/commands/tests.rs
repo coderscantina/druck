@@ -413,6 +413,7 @@ fn context_for(text: &str, blocks: &Blocks, slash_at: usize) -> Context {
     Context {
         open_directives: slash::open_directives(text, blocks, slash_at),
         has_toc: slash::holds_toc(text),
+        has_bibliography: slash::holds_directive(text, "bibliography"),
         has_works: true,
         has_labels: true,
         block: Some(blocks.as_slice()[blocks.index_at(slash_at)].kind),

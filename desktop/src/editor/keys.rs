@@ -161,4 +161,6 @@ pub fn bind_keys(cx: &mut App) {
         // Takes a placeholder's ghost. In other menus it does nothing, as in the text.
         KeyBinding::new("tab", MenuComplete, context),
     ]);
+    // After the menu's, so a directive's options win while they have the keys.
+    super::directives::bind_keys(cx);
 }

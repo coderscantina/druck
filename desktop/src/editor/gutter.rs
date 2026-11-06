@@ -67,6 +67,14 @@ impl EditorView {
         for (block, (index, _)) in blocks.iter().zip(self.visible.clone()) {
             let range = self.blocks.as_slice()[index].range.clone();
             let line_height = block.layout.first_line_height();
+            // A block in a second column has its marker in the gap between the columns.
+            let x = block.left - tokens::COMMENT_MARKER_INSET;
+            let at = |top: Pixels, line_height: Pixels| {
+                Bounds::new(
+                    point(x, top + (line_height - tokens::COMMENT_ICON) * 0.5),
+                    size(tokens::COMMENT_ICON, tokens::COMMENT_ICON),
+                )
+            };
             if block.layout.collapsed {
                 if block.kind == BlockKind::Comment {
                     let in_notes = leading.as_ref().is_some_and(|leading| leading.contains(&range.start));
@@ -142,10 +150,10 @@ impl EditorView {
             cx.notify();
             return true;
         }
-        let Some(block) = self.block_at_y(position.y) else {
+        let Some(block) = self.block_at(position) else {
             return false;
         };
-        if self.blocks.as_slice()[block].kind == BlockKind::Blank || self.is_hidden_block(block) {
+        if self.blocks.as_slice()[block].kind == BlockKind::Blank || self.takes_no_room(block) {
             return false;
         }
         let top = self
@@ -201,8 +209,8 @@ impl EditorView {
             })
             .unwrap_or(0);
         for &(index, top) in &self.visible {
-            let height = self.block_height(index);
-            if list[index].kind != BlockKind::Blank && y < top + height * 0.5 && !self.is_hidden_block(index) {
+            let height = self.own_height(index);
+            if list[index].kind != BlockKind::Blank && y < top + height * 0.5 && !self.takes_no_room(index) {
                 return index.max(earliest);
             }
         }
@@ -246,11 +254,12 @@ impl EditorView {
             .map(|(_, top)| *top)
             .or_else(|| {
                 let (last, top) = *self.visible.last()?;
-                Some(top + self.block_height(last))
+                Some(top + self.own_height(last))
             })?;
+        let line = before.min(self.blocks.as_slice().len() - 1);
         Some(Bounds::new(
-            point(self.column.text_left, y - tokens::HAIRLINE),
-            size(self.column.text_width, tokens::KEY_BAR),
+            point(self.block_left(line), y - tokens::HAIRLINE),
+            size(self.block_width(line), tokens::KEY_BAR),
         ))
     }
 }
@@ -264,11 +273,11 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
     if !frame.gutter_shown {
         return;
     }
-    let x = frame.column.text_left - tokens::GUTTER_WIDTH + tokens::GUTTER_ICON_INSET;
     for block in &frame.blocks {
         let (Some(icon), false) = (block.icon, block.layout.collapsed) else {
             continue;
         };
+        let x = block.icon_x;
         let line_height = block.layout.first_line_height();
         let bounds = Bounds::new(
             point(x, block.top + (line_height - tokens::GUTTER_ICON) * 0.5),

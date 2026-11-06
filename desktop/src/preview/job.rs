@@ -124,6 +124,8 @@ pub struct BookType {
     pub code: Face,
     /// The width of the book's prose on the page, in points.
     pub measure: f32,
+    /// The room between two columns, in points.
+    pub column_gap: f32,
     /// The font files of every face above, for the toolkit.
     pub files: Vec<Bytes>,
 }
@@ -191,6 +193,7 @@ impl BookType {
             footnote: face(&styles.footnote),
             code: face(&styles.code_block),
             measure: config.page.prose_width.0 as f32,
+            column_gap: config.page.column_gap.0 as f32,
             files,
         }
     }

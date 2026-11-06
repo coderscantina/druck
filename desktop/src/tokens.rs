@@ -406,6 +406,27 @@ pub const NAV_DESK_CARD_TITLE: Pixels = px(15.);
 pub const NAV_DESK_FIRST_LINE: Pixels = px(12.5);
 pub const NAV_DESK_TITLE_LEADING: Pixels = px(19.);
 pub const NAV_DESK_FIRST_LINE_LEADING: Pixels = px(17.);
+/// Layout directives in Write. Brackets stand in the gutter's left strip, left of its type icons, one step further
+/// right per directive they stand in, and their names end a gap left of the outermost.
+pub const BRACKET_INSET: Pixels = px(2.);
+pub const BRACKET_STEP: Pixels = px(4.);
+pub const BRACKET_TICK: Pixels = px(3.);
+/// The deepest step a bracket takes; deeper ones share it.
+pub const BRACKET_DEPTHS: usize = 3;
+pub const BRACKET_NAME_GAP: Pixels = px(6.);
+/// How far a bracket's ends stay inside its text's first and last lines.
+pub const BRACKET_END_INSET: Pixels = px(3.);
+/// Each of two columns holds at least this many characters of body text, or the text shows one column.
+pub const COLUMN_MIN_CHARACTERS: u32 = 24;
+/// A new page's gap between two sheet edges, in body lines, and the tint between the edges.
+pub const PAGE_GAP_LINES: f32 = 2.5;
+pub const SHEET_GAP_TINT: f32 = 0.04;
+/// A directive's options under its name, and their small segmented choice.
+pub const OPTIONS_WIDTH: Pixels = px(262.);
+pub const SEGMENT_HEIGHT: Pixels = px(18.);
+pub const SEGMENT_RADIUS: Pixels = px(3.);
+/// A directive the slash menu would insert, drawn into the text before it is.
+pub const GHOST_OPACITY: f32 = 0.42;
 
 /// The paint order of a card that asks a question, above the proof slip (1) and the text's floats (2).
 pub const LAYER_QUESTION: usize = 3;
@@ -477,6 +498,7 @@ pub fn stand_in_type() -> BookType {
             ..face(8.6, 400, 1.4, 0., 7.5)
         },
         measure: 330.,
+        column_gap: 16.,
         files: Vec::new(),
         body,
     }

@@ -7,9 +7,10 @@ use super::menus::*;
 use super::text::Key;
 use crate::app::{NewArticle, NewBook, NewPaper, Open, Quit};
 use crate::editor::{
-    Copy, Cut, EditRich, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, OpenLink, Paste,
-    Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers, ToggleQuote,
-    ToggleSmallCaps, ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline, Undo,
+    Copy, Cut, EditRich, FullWidthFromCaret, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable,
+    OpenLink, Paste, Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers,
+    ToggleQuote, ToggleSmallCaps, ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+    Undo,
 };
 use crate::persist::ShowKeptCopies;
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
@@ -94,6 +95,7 @@ pub fn all() -> Vec<Command> {
         command(Key::InsertReference, Write, InsertReference),
         command(Key::InsertImage, Write, InsertImage),
         command(Key::InsertTable, Write, InsertTable),
+        command(Key::FullWidthFromCaret, Write, FullWidthFromCaret),
         command(Key::EditAtCaret, Write, EditRich),
         command(Key::NextMisspelled, Write, ShowSpelling),
         command(Key::CheckSpelling, Anywhere, ToggleSpelling),
