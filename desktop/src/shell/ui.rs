@@ -17,10 +17,13 @@ pub fn more_below(scroll: &ScrollHandle) -> bool {
 
 /// The fade over the foot of a list on the panel colour that has more below. Its parent is `relative`.
 pub fn foot_fade(tokens: &Tokens) -> gpui::Div {
-    let (clear, solid) = (
-        Hsla::from(tokens.panel).opacity(tokens::CLEAR),
-        Hsla::from(tokens.panel),
-    );
+    foot_fade_on(tokens.panel)
+}
+
+/// The fade over the foot of a list on `ground` that has more below. Its parent is `relative`.
+pub fn foot_fade_on(ground: impl Into<Hsla>) -> gpui::Div {
+    let solid: Hsla = ground.into();
+    let clear = solid.opacity(tokens::CLEAR);
     div()
         .absolute()
         .left_0()

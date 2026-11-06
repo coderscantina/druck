@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::resolved_config::{self, Config, FontStyle, Style, Weight};
+use druck::editor::resolved_config::{self, Config, FontStyle, NumberFormat, Style, Weight};
 use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Missing, Renderer};
@@ -126,8 +126,28 @@ pub struct BookType {
     pub measure: f32,
     /// The room between two columns, in points.
     pub column_gap: f32,
+    /// How the theme numbers a chapter, when it does.
+    pub chapter_number: Option<ChapterNumber>,
     /// The font files of every face above, for the toolkit.
     pub files: Vec<Bytes>,
+}
+
+/// How the theme writes a chapter's number above or before its title: the format, and the label before it if any.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ChapterNumber {
+    pub format: NumberFormat,
+    pub label: Option<String>,
+}
+
+impl ChapterNumber {
+    /// The chapter numbered `number`, from 1, as the theme writes it, such as "01" or "Kapitel 1".
+    pub fn of(&self, number: u32) -> String {
+        let number = self.format.format(number as usize);
+        match &self.label {
+            Some(label) => format!("{label} {number}"),
+            None => number,
+        }
+    }
 }
 
 impl BookType {
@@ -194,6 +214,12 @@ impl BookType {
             code: face(&styles.code_block),
             measure: config.page.prose_width.0 as f32,
             column_gap: config.page.column_gap.0 as f32,
+            chapter_number: (config.document.numbered_headings && config.document.numbering_depth.get() >= 1).then(
+                || ChapterNumber {
+                    format: config.chapters.number_format,
+                    label: config.chapters.number_label.then(|| config.labels.chapter.clone()),
+                },
+            ),
             files,
         }
     }

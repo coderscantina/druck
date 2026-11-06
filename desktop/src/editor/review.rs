@@ -282,9 +282,12 @@ impl EditorView {
         let id = note.id;
         let button = |name: &'static str, label: Key, action: NoteAction, cx: &mut Context<Self>| {
             small_button((name, id as usize), crate::t!(label).to_owned(), tokens)
+                .px(tokens::SPACE_3)
+                .text_size(tokens::TEXT_BODY)
                 .when(action == NoteAction::Apply, |button| button.text_color(tokens.accent))
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(NoteClicked(id, action))))
         };
+        let body_size = self.style.body_size;
         let gone = note.anchor.is_none();
         let text = if gone {
             crate::t!(Key::NoteTextGone).to_owned()
@@ -299,20 +302,22 @@ impl EditorView {
             .w(tokens::NOTE_WIDTH)
             .flex()
             .flex_col()
-            .gap(tokens::SPACE_1)
-            .pl(tokens::SPACE_2)
+            .gap(tokens::SPACE_2)
+            .pl(tokens::SPACE_3)
             .py(tokens::SPACE_1)
             .bg(tokens.canvas)
             .border_l_1()
             .border_color(tokens.accent)
             .font_family(tokens::FONT_UI)
-            .text_size(tokens::NOTE_TEXT)
-            .line_height(tokens::NOTE_LINE_HEIGHT)
+            .text_size(body_size * tokens::ADVICE_TEXT)
+            .line_height(body_size * tokens::ADVICE_TEXT * tokens::ADVICE_LEADING)
             .text_color(tokens.text_quiet)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
+                    .text_size(body_size * tokens::ADVICE_TITLE)
+                    .line_height(body_size * tokens::ADVICE_TITLE * tokens::ADVICE_LEADING)
                     .text_color(tokens.text)
                     .child(note.title.clone()),
             )
@@ -321,7 +326,8 @@ impl EditorView {
                 column.child(
                     div()
                         .font_family(body.family.clone())
-                        .text_size(tokens::TEXT_BODY)
+                        .text_size(body_size * tokens::ADVICE_SUGGESTION)
+                        .line_height(body_size * tokens::ADVICE_SUGGESTION * tokens::ADVICE_LEADING)
                         .text_color(tokens.text)
                         .child(suggestion),
                 )
@@ -331,7 +337,7 @@ impl EditorView {
                     .mt(tokens::SPACE_1)
                     .flex()
                     .flex_wrap()
-                    .gap(tokens::SPACE_1)
+                    .gap(tokens::SPACE_2)
                     .children(apply)
                     .children(reply)
                     .child(dismiss),

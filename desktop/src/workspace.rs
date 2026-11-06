@@ -930,7 +930,11 @@ impl Workspace {
                 div()
                     .id(label)
                     .toggle(tokens, label, active)
-                    .px(tokens::SPACE_2)
+                    .h(tokens::MODE_HEIGHT)
+                    .px(tokens::MODE_PADDING)
+                    .flex()
+                    .items_center()
+                    .text_size(tokens::MODE_TEXT)
                     .rounded(tokens::RADIUS)
                     .cursor_pointer()
                     .text_color(if active { tokens.text } else { tokens.text_quiet })
@@ -974,9 +978,9 @@ impl Workspace {
 
 /// How wide the mode switch at the title bar's centre is, as [`Workspace::mode_switch`] lays it out.
 pub fn mode_switch_width(window: &Window) -> Pixels {
-    let buttons = Mode::ALL
-        .iter()
-        .map(|(_, key)| crate::shell::ui::small_text_width(crate::t!(*key), window) + tokens::SPACE_2 * 2.);
+    let buttons = Mode::ALL.iter().map(|(_, key)| {
+        crate::shell::ui::text_width(crate::t!(*key), tokens::MODE_TEXT, window) + tokens::MODE_PADDING * 2.
+    });
     buttons.fold(Pixels::ZERO, |sum, width| sum + width) + tokens::HAIR_GAP * (Mode::ALL.len() - 1) as f32
 }
 

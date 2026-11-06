@@ -80,7 +80,8 @@ impl Render for PathBar {
             .text_color(color);
         for (at, (segment, width)) in segments.into_iter().zip(widths).enumerate() {
             let level = segment.level;
-            let on = overview || open == Some(level);
+            // The overview's own word stands as plain quiet text, like a segment at rest.
+            let on = !overview && open == Some(level);
             bar = bar.child(
                 div()
                     .id(ElementId::from(("path-segment", at)))

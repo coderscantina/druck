@@ -121,6 +121,17 @@ impl GalleyStyle {
         px(self.book.measure * self.scale())
     }
 
+    /// The chapter numbered `number` as the theme writes it, when the theme numbers chapters.
+    pub fn chapter_number(&self, number: u32) -> Option<String> {
+        self.book.chapter_number.as_ref().map(|chapter| chapter.of(number))
+    }
+
+    /// The height of a line of the chapter title, a level 1 heading, at this zoom.
+    pub fn title_line_height(&self) -> Pixels {
+        let title = &self.book.headings[0];
+        px(title.size * title.line_height * self.scale())
+    }
+
     /// The room between two columns, as the theme sets it, at this zoom.
     pub fn column_gap(&self) -> Pixels {
         px(self.book.column_gap * self.scale())
@@ -172,16 +183,23 @@ impl GalleyStyle {
     }
 
     /// The room between two blocks: the larger of what the upper leaves below it and the lower wants above it. Paragraphs
-    /// that neither space nor indent would run together, so they keep a little.
+    /// that neither space nor indent would run together, so they keep a little. A heading leaves at most one body line
+    /// below it, so a chapter title's sink on the page does not open a hole under it in Write.
     pub fn gap_between(&self, upper: Option<BlockKind>, lower: Option<BlockKind>) -> Pixels {
-        let after = upper.map_or(0., |kind| self.face(kind).space_after);
-        let before = lower.map_or(0., |kind| self.face(kind).space_before);
+        let after = upper.map_or(px(0.), |kind| {
+            let after = px(self.face(kind).space_after * self.scale());
+            match kind {
+                BlockKind::Heading { .. } => after.min(self.body_size * self.leading),
+                _ => after,
+            }
+        });
+        let before = lower.map_or(px(0.), |kind| px(self.face(kind).space_before * self.scale()));
         let gap = after.max(before);
-        let runs_together = gap == 0. && self.indent_of(lower) == px(0.);
+        let runs_together = gap == px(0.) && self.indent_of(lower) == px(0.);
         if runs_together {
             self.body_size * tokens::PARAGRAPH_GAP
         } else {
-            px(gap * self.scale())
+            gap
         }
     }
 

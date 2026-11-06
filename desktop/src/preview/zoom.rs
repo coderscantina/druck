@@ -121,7 +121,7 @@ impl Place {
         let pages = (layout.laid.pages().iter()).map(|page| (page.width.0 as f32, page.height.0 as f32));
         let arrangement = self.arrangement(zoom);
         let gap = match arrangement {
-            Arrangement::Spreads { .. } => tokens::SPACE_4,
+            Arrangement::Spreads { .. } => tokens::PAGES_MARGIN,
             Arrangement::Contact { .. } => tokens::CONTACT_GAP,
         };
         Some(Sheets::new(pages, zoom, f32::from(gap), arrangement))
@@ -135,7 +135,7 @@ impl Place {
         let pages = layout.laid.pages();
         let widest = pages.iter().map(|page| page.width.0 as f32).fold(1.0, f32::max);
         let tallest = pages.iter().map(|page| page.height.0 as f32).fold(1.0, f32::max);
-        let margins = 2.0 * f32::from(tokens::SPACE_4);
+        let margins = 2.0 * f32::from(tokens::PAGES_MARGIN);
         let gutter = f32::from(tokens::SPREAD_GUTTER);
         ((width - margins - gutter) / (2.0 * widest))
             .min((height - margins) / tallest)

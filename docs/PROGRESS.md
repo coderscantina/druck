@@ -95,6 +95,10 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Polish round note
+
+On 2026-11-06 a visual polish round fixed what two reviewers found against the owner's mockup, on `writing-first-direction`, not pushed. Write: a heading leaves at most one body line below it, a numbered chapter shows the theme's number above its title, the ticks stand level with the title, the outline's titles start clear of the grown tick with the part line in the book face, the agent's margin note scales with the zoom, and the pane's foot fades a cut line. The mode switch has its own type tokens, labels are in sentence case everywhere, the palette, overview, and Binder fade at their foot, the launch card is on the canvas, the overview's word in the title bar is plain text, the commit card starts at the text's top margin, and spreads have 24 px around them. The rules are in [the design](DESIGN.md#write). The grey lines under English words in the German book are the accent spelling line, unchanged. Captures of all 14 states are in the session scratchpad's `round1`, from a release build with `--features measure`.
+
 ### Writing UX note
 
 On 2026-11-06 the owner rated HTML variants of the writing surface in three rounds and the winners were built: heading ticks that unfold into the outline, a path bar with columns, an overview for the book's order, an optional bookshelf, directives drawn as their effect with margin brackets, placeholders as values with completion, styles shown only as their effect, and supporting material in a Write rail with a trail, margin pins, and a library. The rules are in [the design](DESIGN.md), what lost in its ratings section, the boards in [mockups](mockups/04-writing-ux/), and the choices in [decisions](DECISIONS.md#2026-11-06-heading-ticks) through the integration section. It was built by six agents in parallel and merged into `writing-first-direction` on 2026-11-06, not pushed.

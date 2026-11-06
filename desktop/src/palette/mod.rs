@@ -389,20 +389,30 @@ impl Render for Palette {
             )
             .child(
                 div()
-                    .id("palette-rows")
-                    .max_h(tokens::MENU_ROW_HEIGHT * tokens::PALETTE_MAX_ROWS as f32)
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
+                    .relative()
                     .flex()
                     .flex_col()
-                    .children(rows)
-                    .when(empty, |list| {
-                        list.child(
-                            div()
-                                .p(tokens::SPACE_3)
-                                .text_color(tokens.text_faint)
-                                .child(crate::t!(Key::NoMatches)),
-                        )
+                    .min_h_0()
+                    .child(
+                        div()
+                            .id("palette-rows")
+                            .max_h(tokens::MENU_ROW_HEIGHT * tokens::PALETTE_MAX_ROWS as f32)
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .flex()
+                            .flex_col()
+                            .children(rows)
+                            .when(empty, |list| {
+                                list.child(
+                                    div()
+                                        .p(tokens::SPACE_3)
+                                        .text_color(tokens.text_faint)
+                                        .child(crate::t!(Key::NoMatches)),
+                                )
+                            }),
+                    )
+                    .when(crate::shell::ui::more_below(&self.scroll), |list| {
+                        list.child(crate::shell::ui::foot_fade(&tokens))
                     }),
             )
             .into_any_element()

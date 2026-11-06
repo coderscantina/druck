@@ -372,13 +372,16 @@ impl Navigator {
                     .track_scroll(&scroll)
                     .px(margin)
                     .pt(tokens::NAV_DESK_TOP)
-                    .pb(tokens::SPACE_4)
+                    .pb(tokens::NAV_DESK_END)
                     .flex()
                     .flex_col()
                     .gap(tokens::SPACE_3)
                     .child(header)
                     .children(elements),
             )
+            .when(crate::shell::ui::more_below(&scroll), |overview| {
+                overview.child(crate::shell::ui::foot_fade_on(tokens.canvas).bottom(tokens::FOOTER_HEIGHT))
+            })
             .child(
                 div()
                     .absolute()

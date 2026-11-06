@@ -742,6 +742,11 @@ impl EditorView {
         self.style.body.clone()
     }
 
+    /// How far down the pane the middle of the chapter title's first line stands as the chapter opens.
+    pub fn title_middle(&self) -> Pixels {
+        tokens::TEXT_MARGIN_Y + self.style.title_line_height() / 2.
+    }
+
     /// Selects `range` of the active chapter and brings it into view, for the find bar.
     pub fn select(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.session.active_buffer().text();

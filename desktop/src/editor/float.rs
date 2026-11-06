@@ -860,8 +860,61 @@ impl EditorView {
             return None;
         }
         let (_, top) = self.visible.iter().find(|(index, _)| *index == last)?;
-        let y = *top - tokens::NOTE_LINE_HEIGHT - tokens::SPACE_2;
+        let label = self.chapter_label().map_or(px(0.), |_| self.chapter_label_room());
+        let y = *top - label - tokens::NOTE_LINE_HEIGHT - tokens::SPACE_2;
         Some((margin.into_any_element(), point(self.column.text_left, y)))
+    }
+
+    /// The chapter's number as the theme writes it, for a numbered chapter whose text opens with its level 1 heading,
+    /// with the title's top. None in the source view and while the opening notes are unfolded above the title.
+    fn chapter_label(&self) -> Option<(String, Pixels)> {
+        if self.source || self.note_room > px(0.) {
+            return None;
+        }
+        let number = self.session.number_of(self.session.active())?;
+        let label = self.style.chapter_number(number)?;
+        let list = self.blocks.as_slice();
+        let title = (list.iter()).position(|block| {
+            !matches!(
+                block.kind,
+                BlockKind::Blank | BlockKind::Comment | BlockKind::FrontMatter
+            )
+        })?;
+        if list[title].kind != (BlockKind::Heading { level: 1 }) {
+            return None;
+        }
+        let (_, top) = self.visible.iter().find(|(index, _)| *index == title)?;
+        Some((label, *top))
+    }
+
+    fn chapter_label_size(&self) -> Pixels {
+        self.style.body_size * tokens::CHAPTER_LABEL_SCALE
+    }
+
+    /// The room the chapter's label takes above its title, with the gap between them.
+    fn chapter_label_room(&self) -> Pixels {
+        self.chapter_label_size() * tokens::CHAPTER_LABEL_LEADING + tokens::SPACE_1
+    }
+
+    /// The chapter's label above its title: quiet capitals in the book face, spaced apart, as the mockup has it.
+    pub(super) fn chapter_label_element(&self, cx: &App) -> Option<(AnyElement, Point<Pixels>)> {
+        let (label, top) = self.chapter_label()?;
+        let tokens = Tokens::get(cx);
+        let size = self.chapter_label_size();
+        // gpui sets no letter spacing, so hair spaces stand between the letters.
+        let spaced = (label.to_uppercase().chars())
+            .map(|letter| letter.to_string())
+            .collect::<Vec<_>>()
+            .join("\u{200a}");
+        let element = div()
+            .font(self.style.body.clone())
+            .text_size(size)
+            .line_height(size * tokens::CHAPTER_LABEL_LEADING)
+            .text_color(tokens.text_quiet)
+            .whitespace_nowrap()
+            .child(spaced)
+            .into_any_element();
+        Some((element, point(self.column.text_left, top - self.chapter_label_room())))
     }
 
     // The frame's floats

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use gpui::prelude::*;
 use gpui::{
     Context, ElementId, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton, ObjectFit, Role,
-    SharedString, Window, div, img, svg,
+    ScrollHandle, SharedString, Window, div, img, svg,
 };
 
 use self::strings::Key;
@@ -124,6 +124,7 @@ pub struct SidebarView {
     marks: HashMap<ChapterId, Mark>,
     notice: Option<SharedString>,
     folded: HashSet<Fold>,
+    scroll: ScrollHandle,
 }
 
 /// A chapter being dragged.
@@ -188,6 +189,7 @@ impl SidebarView {
             marks: HashMap::new(),
             notice: None,
             folded: HashSet::new(),
+            scroll: ScrollHandle::new(),
         }
     }
 
@@ -541,9 +543,9 @@ impl Render for SidebarView {
         });
         let list = div()
             .id("contents")
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .flex()
             .flex_col()
             .when(!manifest.is_empty(), |list| {
@@ -617,7 +619,16 @@ impl Render for SidebarView {
             .border_r_1()
             .border_color(tokens.divider)
             .child(identity)
-            .child(list)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(list)
+                    .when(crate::shell::ui::more_below(&self.scroll), |list| {
+                        list.child(crate::shell::ui::foot_fade(&tokens))
+                    }),
+            )
             .children(notice)
             .child(bottom)
     }

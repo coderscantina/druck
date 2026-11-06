@@ -70,17 +70,28 @@ pub const TEXT_MARGIN_Y: Pixels = px(52.);
 pub const TEXT_START: Pixels = px(-52.);
 /// The least room kept right of the text.
 pub const TEXT_MARGIN_RIGHT: Pixels = px(24.);
+/// How far up from the text pane's foot a line fades out, so the foot never slices through glyphs.
+pub const TEXT_FADE_HEIGHT: Pixels = px(24.);
 /// The least width the text keeps, about 40 characters, before the Binder gives way.
 pub const TEXT_MIN_WIDTH: Pixels = px(320.);
 /// A margin note, and the gap between it and the text.
 /// How long a passing note stays at the window's foot.
 pub const NOTE_TIME: std::time::Duration = std::time::Duration::from_secs(6);
-pub const NOTE_WIDTH: Pixels = px(220.);
+pub const NOTE_WIDTH: Pixels = px(260.);
 pub const NOTE_GAP: Pixels = px(28.);
 pub const NOTE_LINE_HEIGHT: Pixels = px(18.);
 pub const NOTE_TEXT: Pixels = px(12.);
 pub const NOTE_ICON: Pixels = px(12.);
 pub const NOTE_RULE: Pixels = px(1.);
+/// The chapter's number above its title in Write, against the body size, and its line height.
+pub const CHAPTER_LABEL_SCALE: f32 = 0.85;
+pub const CHAPTER_LABEL_LEADING: f32 = 1.3;
+/// An agent's margin note against the body size, so it scales with Write's zoom: its title, its quiet line, its
+/// suggestion in the theme's font, and their line height.
+pub const ADVICE_TITLE: f32 = 0.9;
+pub const ADVICE_TEXT: f32 = 0.8;
+pub const ADVICE_SUGGESTION: f32 = 0.95;
+pub const ADVICE_LEADING: f32 = 1.4;
 /// The buttons of the agent's cards and of a passage under review.
 pub const SMALL_BUTTON_HEIGHT: Pixels = px(22.);
 /// The room under a passage that holds its buttons, and how far below the text they stand.
@@ -125,8 +136,11 @@ pub const TICK_GROWTH: f32 = 2.2;
 /// The outline a resting pointer unfolds from the ticks: its row, its width, how far a level moves a heading in, and
 /// how much of the text shows through the veil laid over it.
 pub const OUTLINE_ROW_HEIGHT: Pixels = px(20.);
-pub const OUTLINE_WIDTH: Pixels = px(260.);
+pub const OUTLINE_WIDTH: Pixels = px(280.);
 pub const OUTLINE_INDENT: Pixels = px(12.);
+/// Where the outline's titles start: past the longest tick grown under the pointer, `TICK_LEFT` plus
+/// `TICK_WIDTHS[0]` times `TICK_GROWTH`, and a gap.
+pub const OUTLINE_TEXT_LEFT: Pixels = px(56.);
 pub const OUTLINE_TEXT_OPACITY: f32 = 0.62;
 /// Motion. One spring for what follows the pointer, the ticks, the outline's lit row, and the rail, so they move alike:
 /// quick, settled in about 250 ms, with no visible overshoot.
@@ -201,6 +215,8 @@ pub const TRAFFIC_LIGHTS: (f32, f32) = (9., 7.);
 pub const PAGE_EDGE: Pixels = px(1.);
 /// The gap at a spread's gutter, and around sheets on a contact sheet.
 pub const SPREAD_GUTTER: Pixels = px(2.);
+/// The room around a spread in Publish, to the title bar, the status line, and the sides, and between spreads.
+pub const PAGES_MARGIN: Pixels = px(24.);
 pub const CONTACT_GAP: Pixels = px(10.);
 /// A dot on a page of a contact sheet that has a problem, in from the page's corner.
 pub const CONTACT_DOT_INSET: Pixels = px(5.);
@@ -257,6 +273,10 @@ pub const CHIP_CLOSE_ICON: Pixels = px(10.);
 /// A dot's place on a rail tab, and on the mode switch.
 pub const RAIL_DOT_INSET: Pixels = px(10.);
 pub const SWITCH_DOT_INSET: Pixels = px(1.);
+/// The mode switch at the title bar's centre: its labels, a segment's height, and the room either side of a label.
+pub const MODE_TEXT: Pixels = px(13.);
+pub const MODE_HEIGHT: Pixels = px(24.);
+pub const MODE_PADDING: Pixels = px(12.);
 /// The bar beside a row that has the keys, and a dragged block's drop line.
 pub const KEY_BAR: Pixels = px(2.);
 /// Export's progress segments.
@@ -408,6 +428,8 @@ pub const NAV_PATH_TINT: f32 = 0.55;
 pub const NAV_DESK_WIDE: Pixels = px(960.);
 pub const NAV_DESK_MARGIN: Pixels = px(48.);
 pub const NAV_DESK_TOP: Pixels = px(36.);
+/// The room after the overview's last line, so its cards scroll clear of the fade above the line of keys.
+pub const NAV_DESK_END: Pixels = px(48.);
 pub const NAV_DESK_LABEL: Pixels = px(140.);
 pub const NAV_DESK_COLUMNS: usize = 4;
 pub const NAV_DESK_CARD_MIN: Pixels = px(176.);
@@ -557,6 +579,7 @@ pub fn stand_in_type() -> BookType {
         },
         measure: 330.,
         column_gap: 16.,
+        chapter_number: None,
         files: Vec::new(),
         body,
     }

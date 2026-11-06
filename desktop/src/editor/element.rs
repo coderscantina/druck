@@ -7,7 +7,8 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseMoveEvent, MouseUpEvent, Pixels,
-    SharedString, Style, TextAlign, TextRun, Window, div, fill, point, px, relative, size,
+    SharedString, Style, TextAlign, TextRun, Window, div, fill, linear_color_stop, linear_gradient, point, px,
+    relative, size,
 };
 
 use super::directives::{Marks, paint_marks};
@@ -178,6 +179,7 @@ impl Element for Galley {
             let floats = view.floats(&selection, caret, window, cx);
             let margin = view.margin_element();
             let mut rows = view.review_rows(cx);
+            rows.extend(view.chapter_label_element(cx));
             rows.extend(view.pin_markers(cx));
             let mut advice = view.advice_elements(cx);
             advice.extend(view.comment_notes(window, cx));
@@ -267,6 +269,12 @@ impl Element for Galley {
         let mark_color = Hsla::from(colors.added).opacity(tokens::REVIEW_TINT);
         let misspelled_color = Hsla::from(accent).opacity(tokens::MISSPELLED_TINT);
         let note_line_color = colors.text_faint;
+        let canvas = Hsla::from(colors.canvas);
+        let foot_fade = linear_gradient(
+            tokens::FADE_DOWN,
+            linear_color_stop(canvas.opacity(tokens::CLEAR), 0.),
+            linear_color_stop(canvas, 1.),
+        );
         let focused = focus.is_focused(window);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for block in &frame.blocks {
@@ -307,6 +315,12 @@ impl Element for Galley {
             for element in &mut frame.review {
                 element.paint(window, cx);
             }
+            // A line the pane's foot cuts through fades out instead of showing sliced glyphs.
+            let foot = Bounds::new(
+                point(bounds.left(), bounds.bottom() - tokens::TEXT_FADE_HEIGHT),
+                size(bounds.size.width, tokens::TEXT_FADE_HEIGHT),
+            );
+            window.paint_quad(fill(foot, foot_fade));
             paint_gutter(frame, window, cx);
             if let Some(bar) = frame.scrollbar {
                 window.paint_quad(fill(bar.thumb, thumb_color).corner_radii(tokens::BOX_RADIUS));

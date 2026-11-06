@@ -381,7 +381,7 @@ impl Render for CommitCard {
             .id("commit-card")
             .occlude()
             .absolute()
-            .top(tokens::TITLEBAR_HEIGHT + tokens::SPACE_4)
+            .top(tokens::TITLEBAR_HEIGHT + tokens::TEXT_MARGIN_Y)
             .left(TextColumn::centred(cx, tokens::COMMIT_CARD_WIDTH))
             .w(tokens::COMMIT_CARD_WIDTH)
             .flex()

@@ -154,7 +154,7 @@ impl Render for LaunchView {
                     .w(tokens::LAUNCH_WIDTH)
                     .flex()
                     .flex_col()
-                    .bg(tokens.panel)
+                    .bg(tokens.canvas)
                     .border_1()
                     .border_color(tokens.divider)
                     .rounded(tokens::RADIUS)

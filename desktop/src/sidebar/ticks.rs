@@ -78,6 +78,8 @@ pub struct TicksView {
     leaving: Task<()>,
     /// The room the strip had at the last render: the view's height between title bar and foot.
     room: Pixels,
+    /// How far down the view the middle of the chapter title's first line stands as the chapter opens.
+    title_middle: Pixels,
     focus: FocusHandle,
     scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -134,6 +136,7 @@ impl TicksView {
             fading: None,
             leaving: Task::ready(()),
             room: px(0.),
+            title_middle: px(0.),
             focus,
             scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -233,11 +236,13 @@ impl TicksView {
         });
     }
 
-    /// The step between two ticks and the strip's top, in a view of `room`.
+    /// The step between two ticks and the strip's top, in a view of `room`: the first tick level with the chapter
+    /// title's first line, as long as the strip fits below it.
     fn strip(&self, room: Pixels) -> (Pixels, Pixels) {
         let count = self.headings().len().max(1);
         let step = tokens::TICK_STEP.min((room - tokens::SPACE_4 * 2.) / count as f32);
-        let top = ((room - step * count as f32) / 2.).max(tokens::SPACE_4);
+        let lowest = room - step * count as f32 - tokens::SPACE_4;
+        let top = (self.title_middle - step / 2.).min(lowest).max(tokens::SPACE_4);
         (step, top)
     }
 
@@ -516,7 +521,11 @@ impl TicksView {
                             .with_animation(
                                 ("tick-title", index),
                                 Animation::new(tokens::FADE).with_easing(ease_out_quint()),
-                                |title, shown| title.opacity(shown).left(px(40. + 6. * shown)),
+                                |title, shown| {
+                                    title
+                                        .opacity(shown)
+                                        .left(tokens::OUTLINE_TEXT_LEFT - tokens::OUTLINE_SLIDE * (1. - shown))
+                                },
                             ),
                     )
                 })
@@ -546,7 +555,7 @@ impl TicksView {
                     .flex_none()
                     .h(tokens::OUTLINE_ROW_HEIGHT)
                     .w_full()
-                    .pl(tokens::TICK_ZONE_WIDTH)
+                    .pl(tokens::OUTLINE_TEXT_LEFT)
                     .pr(tokens::SPACE_3)
                     .flex()
                     .items_center()
@@ -560,7 +569,6 @@ impl TicksView {
                 });
                 match entry {
                     Entry::Part(name) => row
-                        .font_family(tokens::FONT_UI)
                         .text_size(tokens::TEXT_SMALL)
                         .text_color(tokens.text_faint)
                         .child(name.clone()),
@@ -591,7 +599,7 @@ impl TicksView {
                         row.role(Role::ListItem)
                             .aria_label(title.clone())
                             .aria_selected(*current)
-                            .pl(tokens::TICK_ZONE_WIDTH + indent)
+                            .pl(tokens::OUTLINE_TEXT_LEFT + indent)
                             .text_color(if is_lit || first {
                                 tokens.text
                             } else {
@@ -664,6 +672,7 @@ impl Render for TicksView {
         let tokens = Tokens::get(cx).clone();
         let room = window.viewport_size().height - tokens::TITLEBAR_HEIGHT - tokens::FOOTER_HEIGHT;
         self.room = room;
+        self.title_middle = self.editor.read(cx).title_middle();
         let count = self.headings().len();
         let veil = Hsla::from(tokens.canvas).opacity(1. - tokens::OUTLINE_TEXT_OPACITY);
         let root = div().id("heading-ticks").absolute().top_0().left_0();

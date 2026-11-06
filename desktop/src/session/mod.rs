@@ -636,6 +636,13 @@ impl Session {
         }
     }
 
+    /// A chapter's number in the book, for a numbered chapter, as the Binder shows it.
+    pub fn number_of(&self, id: ChapterId) -> Option<u32> {
+        let at = self.book.iter().position(|book| *book == id)?;
+        let numbered = |id: &ChapterId| self.known(*id).outline.kind == RowKind::Numbered;
+        numbered(&id).then(|| self.book[..=at].iter().filter(|id| numbered(id)).count() as u32)
+    }
+
     /// The sidebar's lists.
     pub fn contents(&self) -> Contents {
         let mut number = 0;
