@@ -680,7 +680,7 @@ The `scene-break` style's spacing goes around the mark. The default centers it a
 
 ## Typesetting
 
-`typesetting` tunes the rules that page and line breaking follow. The built-in rules need no setting: a page avoids starting or ending with a one-line paragraph, and in a `duplex` document a right-hand page ends at the height of the left-hand page it faces. Each rule is a cost weighed against the others, so one may still be broken where keeping it would cost more, such as a page that would run several lines short. `druck check` lists the rules broken, see [typesetting warnings](AUTHORING.md#typesetting-warnings).
+`typesetting` tunes the rules that page and line breaking follow. The built-in rules need no setting: a page avoids starting or ending with a one-line paragraph or a list's first or last item of one line, a list breaks like one paragraph, and in a `duplex` document a right-hand page ends at the height of the left-hand page it faces. Each rule is a cost weighed against the others, so one may still be broken where keeping it would cost more, such as a page that would run several lines short. `druck check` lists the rules broken, see [typesetting warnings](AUTHORING.md#typesetting-warnings).
 
 | Field | Values |
 | --- | --- |

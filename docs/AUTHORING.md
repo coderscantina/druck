@@ -354,7 +354,8 @@ Content that must stay on one page but is taller than the text area is an error 
 
 Beyond these rules, page and line breaking weigh a few more, which a theme tunes in [`typesetting`](THEMES.md#typesetting):
 
-- A one-line paragraph avoids standing alone at the top or bottom of a page.
+- A one-line paragraph avoids standing alone at the top or bottom of a page. One that introduces a list or code block may start a page with it.
+- A list breaks like one paragraph, and its first or last item of one line avoids standing alone at a page edge.
 - A heading at the foot of a page wants three lines below it.
 - The last page of a chapter wants five lines.
 - In a `duplex` document, a right-hand page ends at the height of the left-hand page it faces.
