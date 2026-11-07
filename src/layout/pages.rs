@@ -52,7 +52,7 @@ const SHORT: f64 = 1000.0;
 /// Cost of a page whose spaces stretch fully. Grows with the cube of the share used.
 const STRETCHED: f64 = 100.0;
 /// Cost of a break between two lines of a block.
-const INSIDE: f64 = 50.0;
+pub(super) const INSIDE: f64 = 50.0;
 /// Cost of a column break or a footnote break that leaves a block's first line alone at the bottom.
 /// Pages never end there.
 const ORPHAN: f64 = 5000.0;
@@ -93,6 +93,10 @@ pub(super) enum Rule {
     OneLinerAtBottom,
     /// The line is this many lines below a heading.
     HeadingLines(usize),
+    /// The line ends the first item of a list, of one line, which would end the page alone.
+    ListItemAtBottom,
+    /// The next line is the last item of a list, of one line, which would start the next page alone.
+    ListItemAtTop,
 }
 
 /// The rules the planned page at physical index `page` breaks: its own, the break after it, and those of
@@ -115,7 +119,7 @@ fn page_issues(plan: &Plan, body: &[FlowLine], page: usize) -> Vec<Issue> {
     let broken = end > start && end < body.len() && matches!(body[end - 1].after, Break::Allowed(_));
     if let Some(rule) = body[start..end].last().and_then(|line| line.rule).filter(|_| broken) {
         match rule {
-            Rule::OneLinerAtTop => issue(page + 1, Some(body[end].at), IssueKind::Break(rule)),
+            Rule::OneLinerAtTop | Rule::ListItemAtTop => issue(page + 1, Some(body[end].at), IssueKind::Break(rule)),
             _ => issue(page, Some(body[end - 1].at), IssueKind::Break(rule)),
         }
     }

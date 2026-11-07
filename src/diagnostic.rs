@@ -51,6 +51,10 @@ pub enum Code {
     OneLinerAtTop { page: PageName },
     /// A one-line paragraph stands alone at the bottom of a page.
     OneLinerAtBottom { page: PageName },
+    /// The first item of a list, of one line, stands alone at the bottom of a page.
+    ListItemAtBottom { page: PageName },
+    /// The last item of a list, of one line, stands alone at the top of a page.
+    ListItemAtTop { page: PageName },
     /// A heading at the foot of a page has fewer lines below it than wanted.
     HeadingAtFoot {
         page: PageName,

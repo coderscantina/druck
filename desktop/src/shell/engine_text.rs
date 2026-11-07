@@ -31,6 +31,14 @@ crate::strings! {
             "this one-line paragraph stands alone at the bottom of {page}",
             "dieser einzeilige Absatz steht allein unten auf {page}"
         ),
+        ListItemAtBottom => (
+            "the first item of this list stands alone at the bottom of {page}",
+            "der erste Punkt dieser Liste steht allein unten auf {page}"
+        ),
+        ListItemAtTop => (
+            "the last item of this list stands alone at the top of {page}",
+            "der letzte Punkt dieser Liste steht allein oben auf {page}"
+        ),
         HeadingAtFoot => (
             "a heading at the foot of {page} has {lines} of this text below it, fewer than the {wanted} wanted",
             "eine Überschrift am Fuß von {page} hat {lines} Text unter sich, gewünscht sind {wanted}"
@@ -182,6 +190,8 @@ fn coded(code: &Code, place: Option<usize>, base: Option<&Path>) -> Option<Strin
         }
         Code::OneLinerAtTop { page } => crate::t!(Key::OneLinerAtTop, page = page_of(page, place)),
         Code::OneLinerAtBottom { page } => crate::t!(Key::OneLinerAtBottom, page = page_of(page, place)),
+        Code::ListItemAtBottom { page } => crate::t!(Key::ListItemAtBottom, page = page_of(page, place)),
+        Code::ListItemAtTop { page } => crate::t!(Key::ListItemAtTop, page = page_of(page, place)),
         Code::HeadingAtFoot { page, lines, wanted } => {
             crate::t!(
                 Key::HeadingAtFoot,

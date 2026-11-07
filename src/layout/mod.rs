@@ -317,6 +317,14 @@ fn warning(issue: &pages::Issue, numbering: &Numbering, config: &Config, source:
             format!("this one-line paragraph stands alone at the bottom of {page}"),
             Code::OneLinerAtBottom { page: name },
         ),
+        IssueKind::Break(pages::Rule::ListItemAtBottom) => (
+            format!("the first item of this list stands alone at the bottom of {page}"),
+            Code::ListItemAtBottom { page: name },
+        ),
+        IssueKind::Break(pages::Rule::ListItemAtTop) => (
+            format!("the last item of this list stands alone at the top of {page}"),
+            Code::ListItemAtTop { page: name },
+        ),
         IssueKind::Break(pages::Rule::HeadingLines(count)) => (
             format!(
                 "a heading at the foot of {page} has {} of this text below it, fewer than the {} wanted",
@@ -917,6 +925,7 @@ impl<'a> Flow<'a> {
                 && let Some(line) = self.lines.last_mut()
             {
                 line.after = line.after.costlier(pages::INTRODUCTION);
+                self.release_introduction();
             }
             previous = Some(block);
             // A placed block leaves the flow, which continues as if it were not there.
@@ -1554,6 +1563,22 @@ impl<'a> Flow<'a> {
         }
     }
 
+    /// Lets a page start with the one-line paragraph just set, since it introduces the list or code block
+    /// after it and does not stand alone.
+    fn release_introduction(&mut self) {
+        let Some(last) = self.lines.len().checked_sub(1) else {
+            return;
+        };
+        if last > 0
+            && self.lines[last].rule == Some(pages::Rule::OneLinerAtBottom)
+            && self.lines[last - 1].rule == Some(pages::Rule::OneLinerAtTop)
+        {
+            let line = &mut self.lines[last - 1];
+            line.after = line.after.costlier(-pages::ONE_LINER);
+            line.rule = None;
+        }
+    }
+
     /// Makes page breaks before and after the one-line paragraph at line `index` costly, so it does not
     /// stand alone at the top or bottom of a page.
     fn guard_one_liner(&mut self, index: usize) {
@@ -1663,6 +1688,8 @@ impl<'a> Flow<'a> {
         };
         let (style, bullets, marker_style) = self.list_style(class);
         let start_line = self.lines.len();
+        // The first line of each item, then the end of the list.
+        let mut ends = Vec::with_capacity(items.len() + 1);
         let inner = Frame {
             left: frame.left + indent.0,
             style,
@@ -1702,6 +1729,7 @@ impl<'a> Flow<'a> {
             // The marker ends half an em before the item text.
             let x = inner.left - 0.5 * style.size.0 - run.width.0;
             let first = self.lines.len();
+            ends.push(first);
             self.after_paragraph = false;
             let list_item = self.open(Kind::ListItem, false);
             let label = self.tags.add(Kind::Label, self.parent);
@@ -1723,11 +1751,42 @@ impl<'a> Flow<'a> {
                 .extend([Item::Begin(Mark::Element(label)), marker, Item::End]);
         }
         self.close(list);
+        ends.push(self.lines.len());
+        self.hold_list(start_line, &ends);
         if style.keep_with_next && self.lines.len() > start_line {
             self.keep_last();
         }
         if outermost {
             self.space(style.space_after.0);
+        }
+    }
+
+    /// Keeps the list set from line `start` together like one block: a page break between its blocks costs
+    /// as much as one inside a paragraph, and one that leaves a first or last item of one line alone at
+    /// the bottom or top of a page as much as a lone one-line paragraph. `items` holds the first line of
+    /// each item, then the end of the list.
+    fn hold_list(&mut self, start: usize, items: &[usize]) {
+        let end = items[items.len() - 1];
+        for line in &mut self.lines[start..end.saturating_sub(1)] {
+            if line.after == Break::Allowed(0.0) {
+                line.after = Break::Allowed(pages::INSIDE);
+            }
+        }
+        let count = items.len() - 1;
+        if count < 2 {
+            return;
+        }
+        let one_line = |item: usize| items[item + 1] - items[item] == 1;
+        let edges = [
+            (one_line(0), items[1] - 1, pages::Rule::ListItemAtBottom),
+            (one_line(count - 1), items[count - 1] - 1, pages::Rule::ListItemAtTop),
+        ];
+        for (alone, line, rule) in edges {
+            let line = &mut self.lines[line];
+            if alone && line.after.ends_page() && line.after != Break::Forced {
+                line.after = line.after.costlier(pages::ONE_LINER);
+                line.rule = Some(rule);
+            }
         }
     }
 

@@ -1532,12 +1532,36 @@ fn a_heading_keeps_two_lines_of_its_paragraph_wants_a_third_and_pages_strand_no_
 
 #[test]
 fn a_page_break_next_to_a_one_line_paragraph_costs_much() {
-    let lines = flow(&format!("{PROSE}\n\nShort.\n\n{PROSE}\n\n- item\n\n- item\n"));
+    let lines = flow(&format!("{PROSE}\n\nShort.\n\n{PROSE}\n"));
 
     assert_eq!(breaks_of(&lines, 1).last(), Some(&Break::Allowed(pages::ONE_LINER)));
     assert_eq!(breaks_of(&lines, 3), [Break::Allowed(pages::ONE_LINER)]);
     assert_eq!(breaks_of(&lines, 5).last(), Some(&Break::Allowed(0.0)));
-    assert!(breaks_of(&lines, 7).iter().all(|after| *after == Break::Allowed(0.0)));
+}
+
+#[test]
+fn a_one_line_introduction_may_start_a_page_with_its_list() {
+    let lines = flow(&format!("{PROSE}\n\nThe steps are:\n\n- one\n- two\n"));
+
+    assert_eq!(breaks_of(&lines, 1).last(), Some(&Break::Allowed(0.0)));
+    assert_eq!(
+        breaks_of(&lines, 3),
+        [Break::Allowed(pages::ONE_LINER + pages::INTRODUCTION)]
+    );
+}
+
+#[test]
+fn a_list_breaks_like_one_block_and_keeps_its_first_and_last_item_off_page_edges() {
+    let lines = flow(&format!("- one\n- two\n- three\n- four\n\n{PROSE}\n"));
+    let after: Vec<_> = lines.iter().map(|line| line.after).collect();
+    let edge = Break::Allowed(pages::INSIDE + pages::ONE_LINER);
+
+    // Items of one line each: the first and the last stay with their neighbors, the rest break like
+    // the lines of a paragraph, and the list ends like any block.
+    assert_eq!(
+        after[..4],
+        [edge, Break::Allowed(pages::INSIDE), edge, Break::Allowed(0.0)]
+    );
 }
 
 #[test]
