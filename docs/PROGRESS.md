@@ -51,7 +51,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 24: Gallery of finished looks. Built and checked on `agentic-beta`. What was not driven by hand is in the [note](#milestone-24-note).
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
-- [ ] 27: Typesetter.
+- [x] 27: Typesetter. Built and checked with real turns on both CLIs on `agentic-beta`, on a copy of the owner's book with the list cut to 20 of its 243 warnings, see the [note](#milestone-27-note).
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 27.
 - [ ] 23: Desktop 1.0, replacing 17.
 
@@ -98,6 +98,32 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Milestone 27 note
+
+Built on `agentic-beta`, not pushed. Choices, with the measured times and costs, are in [the decision](DECISIONS.md#2026-11-10-milestone-27-typesetter), rules in [the design](DESIGN.md#fixes).
+
+Done: all five deliverables. `desktop/src/typesetter/` tries a fix on a copy of the book in memory and compares the warnings, with no agent and no gpui in it. Both CLIs get it over MCP as `try_fixes`, beside `leave_note` and `record_style`. A fix is a page break, a keep, a figure's placement, or one of three theme values. "Fix the proof" is a button in the Proof tab and a palette row: one read-only turn gets the whole list, and each fix the tool kept is tried again by the app on a thread of its own before it enters the queue. The queue shows each fix with its page before and after, Accept, Reject, Accept all, and Reject all. Nothing is written before Accept. With the agent off, the Proof tab and the palette are as they were.
+
+Checks, on 2026-11-10: `cargo test -p druck-desktop` (877 passed), `cargo clippy -p druck-desktop --all-targets -- -D warnings`, and `cargo fmt --all --check`, all clean. The root crate was not changed.
+
+Evidence with real turns, debug build with `--features measure`, `DRUCK_GATE=2`, actions through `DRUCK_AGENT_SCRIPT`, keys by PID, sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`, `claude` 2.1.319 with `haiku` and `codex` 0.166.0 with `gpt-5.6-luna`, and once with `gpt-6-astra`, which the config names. The book is a temp copy of `buch-1-ttp404` made a project by hand, 203 pages and 243 warnings, with `DRUCK_FIX_LIMIT=20`. The demo is a temp book of four English chapters with 14 warnings.
+
+- **A run that reduces the count, both CLIs, on the book:** each kept four page breaks, three before a heading at the foot of a page and one ahead of a short chapter ending. Accepted one at a time, the app's own fresh layout said 243, 238, 236, 233, 230 after each, with both CLIs, and `druck check` on the copy said 230.
+- **Tokens and time on the book:** Claude 106 s and $0.012, then 106 s and $0.009. Codex 121 s with 165,000 tokens in (147,000 cached) and 2,000 out, then 156 s with 168,000 in (150,000 cached) and 1,800 out.
+- **Reject all leaves the bytes:** after a Claude run on the book, `diff -r` against the copy showed only `.druck/`, with the queue waiting and again after Reject all. `.druck/notes.json` holds the three margin notes the run left, which are not fixes. The same with Codex, where the words typed during the run were the one other difference.
+- **Typing during a run:** words typed into a chapter while a run tried fixes stayed, three times, on the demo and on the book with each CLI.
+- **The keep rule in runs:** the first demo runs kept page breaks that only took a short page's warning away, which is why the two rules against hiding a warning were added. After that the same demo kept one page break, a break after which no text moved was answered as not kept, and on the book a warning a break excused was listed apart from the ones it cleared.
+- **A theme value:** on the demo `styles.body.hyphenate = true` was one entry clearing 10 warnings. Accepted on a project theme, it was written there. On a shared theme the question came first, Return copied the theme into the project, the value went into the copy, the shared file stayed byte-identical, and the count went from 14 to 4.
+- **Undo:** an accepted page break was taken back with Undo, and the chapter was byte-identical again.
+- **Stop:** pressed 7 s into a run, the run ended with its line, no child process was left, and a second run started and finished.
+- **Keys:** Tab reached Fix the proof, Return started the run, Tab reached Accept all and then an entry's Accept, and Return accepted it.
+- **Agent off:** no offer in the Proof tab, no palette row, the script's `fix` started nothing, and the app had no child process.
+- **Inspected,** dark and light, English and German: the command in the Proof tab, the palette row in dark English and light German, the run's line, the queue with its pages, on the demo and on the book, and the shared theme question. Captures are in `.captures/milestone-27`, untracked.
+
+Not verified: a run on all 243 warnings, held to 20 by instruction. A real mouse on the buttons and the pages, and a click on a page going to it in Publish, which ran no script action. A figure's placement as a fix in a run: it has a unit test only, since neither book has a figure the rule flags. A single Markdown file in the running app: the trial's tests run on one, the app ran on projects. Escape on the shared theme question after Accept, which should drop the value and leave the theme. A release build's times. Models other than the cheapest. Linux and Windows.
+
+Follow-ups: no theme value passes the keep rule on the book, though `hyphen-fragments: [2, 2]` clears 111 warnings and causes 21, so the owner has to decide whether theme values get a rule that weighs the two. The tool reads the book from disk and the app tries on the session's text, so unsaved text or typing during a run can make the agent's answers differ from what the app keeps. An entry's pages are not painted again after another entry was accepted or rejected. "Clears 1 warning" leaves out the warnings a page break excuses, so the count after Accept can drop by more. The Proof panel comes late in the window's tab order, 21 presses from the title bar. In Publish with the Proof tab open, the run shows twice, in the panel and at the foot, each with Stop. A table's placement is not a fix. Authoring has no section on this yet. `haiku` read chapter files in some runs though the prompt says it need not. Claude loads the tools through its tool search, which costs one turn.
 
 ### Milestone 26 note
 
