@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Region boards</title>
+<link rel="stylesheet" href="../04-writing-ux/druck.css">
+<style>
+.wl { font-size: 11px; color: var(--faint); margin: 6px 0 -4px 2px; }
+.frames { display: flex; flex-direction: column; gap: 10px; }
+.win { width: 1000px; }
+.win .col { width: 560px; padding-top: 26px; }
+.col > :first-child { margin-top: 0; }
+.ab { position: absolute; z-index: 5; }
+svg.i { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; vertical-align: -2px; flex: none; }
+
+/* Regions: the bracket 50 px left of the text, the gutter's type icon 30 px left, names end left of the bracket. */
+.blk { position: relative; }
+.blk > .brk { position: absolute; left: -50px; top: 6px; bottom: 14px; width: 3px; border: 1px solid color-mix(in srgb, var(--faint) 70%, transparent); border-right: 0; }
+.blk .blk > .brk { left: -46px; top: 2px; bottom: 16px; }
+.blk > .bn { position: absolute; right: calc(100% + 56px); top: 2px; font: 11px/16px var(--ui); color: var(--faint); white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.blk > .bn.on, .blk > .bn.on svg { color: var(--text); }
+.blk > .brk.on { border-color: var(--quiet); }
+.cols2 { columns: 2; column-gap: 28px; }
+.cols2 { margin-bottom: 12px; }
+.cols2 p { margin: 0; }
+.blk.g > .bn { right: calc(100% + 74px); }
+.gi { position: absolute; left: -30px; width: 16px; text-align: center; color: var(--faint); font: 12px var(--ui); }
+.gi.on { color: var(--text); }
+
+/* Selection washes. */
+.wash { position: absolute; left: -8px; right: -8px; top: -2px; bottom: 6px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+.hwash { position: absolute; left: -8px; right: -8px; top: -2px; bottom: 6px; border-radius: 4px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.psel { position: relative; }
+.psel::before { content: ""; position: absolute; inset: -2px -8px -2px -8px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* Variant A: a grip at the bracket's top, as a block handle one level out. */
+.grip { position: absolute; left: -70px; top: 0; width: 18px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--quiet); }
+.grip.hov { background: var(--raised); color: var(--text); }
+/* Variant B: the name as a button. */
+.bn.pill { padding: 2px 4px 2px 6px; margin-top: -2px; border-radius: 4px; background: var(--raised); color: var(--text) !important; }
+
+/* Menus and toolbar. */
+.menu { width: 248px; padding: 4px 0; }
+.menu .hd { padding: 6px 10px 4px; font-size: 11px; color: var(--faint); }
+.menu .row .end svg.i { width: 12px; height: 12px; }
+.sub { width: 200px; padding: 4px 0; }
+.tbar { display: flex; align-items: center; height: 30px; padding: 0 3px; gap: 1px; }
+.tbar .t { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 4px; font-size: 12px; color: var(--quiet); white-space: nowrap; }
+.tbar .t.on { background: var(--raised); color: var(--text); }
+.tbar .sep { width: 1px; height: 16px; background: var(--divider); margin: 0 3px; }
+.tbar .t .k { color: var(--faint); font-size: 11px; }
+
+/* Pointer, drag ghost, drop lines. */
+.ptr { position: absolute; z-index: 9; width: 14px; height: 20px; }
+.ptr path { fill: #fff; stroke: #000; stroke-width: 1; }
+.drag { position: absolute; z-index: 8; width: 330px; padding: 6px 10px; border-radius: 4px; background: var(--panel); box-shadow: var(--card-shadow); opacity: .82; font: 15px/1.4 var(--book); color: var(--text); }
+.drop { position: absolute; height: 2px; background: var(--accent); border-radius: 1px; z-index: 7; }
+.vdrop { position: absolute; width: 2px; background: var(--accent); border-radius: 1px; z-index: 7; }
+.brk.grow { border-color: var(--accent) !important; }
+
+.note { position: absolute; font: 11px var(--ui); color: var(--faint); display: flex; gap: 6px; align-items: center; }
+.note b { color: var(--quiet); font-weight: 500; }
+.step { font: 11px var(--ui); color: var(--quiet); margin: 0 0 -4px 2px; }
+.step b { color: var(--text); font-weight: 600; }
+.empty { height: 27px; margin: 0 0 12px; }
+.ph { color: var(--faint); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-cols" viewBox="0 0 16 16"><rect x="2.5" y="3" width="4.5" height="10" rx="1"/><rect x="9" y="3" width="4.5" height="10" rx="1"/></symbol>
+  <symbol id="i-full" viewBox="0 0 16 16"><rect x="2" y="5.5" width="12" height="5" rx="1"/><path d="M2.5 2.5h4M9.5 2.5h4M2.5 13.5h4M9.5 13.5h4"/></symbol>
+  <symbol id="i-keep" viewBox="0 0 16 16"><path d="M5.5 2.5H3v11h2.5M10.5 2.5H13v11h-2.5M6 6h4M6 8h4M6 10h2.5"/></symbol>
+  <symbol id="i-bottom" viewBox="0 0 16 16"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M5.5 11h5"/></symbol>
+  <symbol id="i-unwrap" viewBox="0 0 16 16"><path d="M4.5 3H2.5v10h2M11.5 3h2v10h-2M6 8h4M7.5 6.5 6 8l1.5 1.5M8.5 6.5 10 8l-1.5 1.5"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 16 16"><circle cx="6" cy="4" r=".9"/><circle cx="10" cy="4" r=".9"/><circle cx="6" cy="8" r=".9"/><circle cx="10" cy="8" r=".9"/><circle cx="6" cy="12" r=".9"/><circle cx="10" cy="12" r=".9"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M5 6.5l3 3 3-3"/></symbol>
+  <symbol id="i-right" viewBox="0 0 16 16"><path d="M6.5 4.5l3 3.5-3 3.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+  <symbol id="i-down" viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1"/><path d="M3 10.5V3.5a1 1 0 0 1 1-1h6.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9"/></symbol>
+  <symbol id="i-text" viewBox="0 0 16 16"><path d="M3.5 4h9M8 4v9"/></symbol>
+  <symbol id="i-h" viewBox="0 0 16 16"><path d="M3.5 3.5v9M10.5 3.5v9M3.5 8h7"/></symbol>
+  <symbol id="i-quote" viewBox="0 0 16 16"><path d="M3.5 3.5v9M6.5 5h6M6.5 8h6M6.5 11h4"/></symbol>
+  <symbol id="ptr" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 6 2.5-1-3-6h5.5z"/></symbol>
+</svg>
+
+<!-- 1. Hover -->
+<section class="board" id="hover-a">
+  <div class="cap"><b>A. Grip at the bracket.</b> The pointer anywhere in a region shows a ⋮⋮ grip at the bracket's top, the same handle every block has, one level out. Click selects the region and opens its menu, drag moves the whole region. The paragraph's own type icon stays its own handle.</div>
+  <div class="win" style="height:330px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <div class="blk g"><span class="brk on"></span><span class="bn on">Two columns</span>
+        <span class="grip hov"><svg class="i"><use href="#i-grip"/></svg></span>
+        <span class="gi" style="top:2px">T</span>
+        <div class="cols2"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge.</p><p class="indent">A pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3, and a herd of cattle a Kreuzer for every five head.</p></div>
+      </div>
+      <p>Carriers who came back empty paid nothing, which is why the daybook shows so many return loads.</p>
+      <svg class="ptr" style="left:-58px; top:72px"><use href="#ptr"/></svg>
+    </div></div>
+  </div>
+</section>
+
+<section class="board" id="hover-b">
+  <div class="cap"><b>B. The name is the button.</b> No extra handle. The pointer in the margin beside a region turns its name into a button with a chevron and washes the region faintly, so you see what it holds. Click selects the region and opens its toolbar. The bracket's ends drag to take blocks in or out.</div>
+  <div class="win" style="height:330px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <div class="blk"><span class="hwash"></span><span class="brk on"></span><span class="bn pill"><svg class="i"><use href="#i-cols"/></svg>Two columns<svg class="i"><use href="#i-chev"/></svg></span>
+        <div class="cols2"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge.</p><p class="indent">A pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3, and a herd of cattle a Kreuzer for every five head.</p></div>
+      </div>
+      <p>Carriers who came back empty paid nothing, which is why the daybook shows so many return loads.</p>
+      <svg class="ptr" style="left:-120px; top:66px"><use href="#ptr"/></svg>
+    </div></div>
+  </div>
+</section>
+
+<!-- 2. Act on a region -->
+<section class="board" id="act-a">
+  <div class="cap"><b>A. Block menu.</b> Clicking the grip selects the region, washed as Notion washes a selected block, and opens the same menu every block's handle opens: Turn into, then what this kind offers, then Duplicate, Move, Delete. Esc closes the menu and leaves the region selected.</div>
+  <div class="win" style="height:470px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <div class="blk g"><span class="wash"></span><span class="brk on"></span><span class="bn on">Two columns</span>
+        <span class="grip hov"><svg class="i"><use href="#i-grip"/></svg></span>
+        <div class="cols2"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge.</p><p class="indent">A pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3, and a herd of cattle a Kreuzer for every five head.</p></div>
+      </div>
+      <p>Carriers who came back empty paid nothing, which is why the daybook shows so many return loads.</p>
+      <div class="float ab menu" style="left:-70px; top:80px">
+        <div class="hd">Two columns</div>
+        <div class="row on"><svg class="i ic"><use href="#i-cols"/></svg>Turn into<span class="end"><svg class="i"><use href="#i-right"/></svg></span></div>
+        <div class="row"><svg class="i ic"><use href="#i-full"/></svg>Full width from here<span class="end">⇧⌘↵</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-unwrap"/></svg>Unwrap<span class="end">⌘⌫</span></div>
+        <div class="divider" style="margin:4px 0"></div>
+        <div class="row"><svg class="i ic"><use href="#i-copy"/></svg>Duplicate<span class="end">⌘D</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-up"/></svg>Move up<span class="end">⌥↑</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-down"/></svg>Move down<span class="end">⌥↓</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-trash"/></svg>Delete with its text<span class="end">⌫</span></div>
+      </div>
+      <div class="float ab sub" style="left:182px; top:108px">
+        <div class="row on"><svg class="i ic"><use href="#i-cols"/></svg>Two columns<span class="end">✓</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-keep"/></svg>Keep together</div>
+        <div class="row"><svg class="i ic"><use href="#i-bottom"/></svg>Bottom of page</div>
+      </div>
+    </div></div>
+  </div>
+</section>
+
+<section class="board" id="act-b">
+  <div class="cap"><b>B. Toolbar over the region.</b> Clicking the name selects the region and puts a toolbar over its top edge, as a text selection gets one: the kind as a menu, the kind's actions, Unwrap, and More for Duplicate and Delete.</div>
+  <div class="win" style="height:470px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2 style="margin-bottom:50px">A tariff for every load</h2>
+      <div class="blk"><span class="wash"></span><span class="brk on"></span><span class="bn pill"><svg class="i"><use href="#i-cols"/></svg>Two columns<svg class="i"><use href="#i-chev"/></svg></span>
+        <div class="cols2"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge.</p><p class="indent">A pack horse with two Zentner paid 2. A cart of iron paid 4, a cask of wine 3, and a herd of cattle a Kreuzer for every five head.</p></div>
+      </div>
+      <p>Carriers who came back empty paid nothing, which is why the daybook shows so many return loads.</p>
+      <div class="float ab tbar" style="left:0; top:62px">
+        <span class="t on"><svg class="i"><use href="#i-cols"/></svg>Two columns<svg class="i"><use href="#i-chev"/></svg></span>
+        <span class="sep"></span>
+        <span class="t"><svg class="i"><use href="#i-full"/></svg>Full width from here</span>
+        <span class="t"><svg class="i"><use href="#i-unwrap"/></svg>Unwrap</span>
+        <span class="sep"></span>
+        <span class="t">···</span>
+      </div>
+    </div></div>
+  </div>
+</section>
+
+<!-- 3. Create from a selection -->
+<section class="board" id="wrap-menu">
+  <div class="cap"><b>Wrap the selected blocks.</b> Select three paragraphs, as blocks or by dragging over their text, and open any of their handles or press /. Turn into lists the block kinds, then Wrap in lists the regions the engine allows there. The new region holds exactly what was selected.</div>
+  <div class="win" style="height:470px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <p class="psel">The Golling tariff of 1561 names forty-one kinds of load, and the clerk painted each on the board.</p>
+      <p class="psel">A Fuder of salt, the wagon measure of about eight Zentner, paid 6 Kreuzer at the bridge.</p>
+      <p class="psel">A pack horse with two Zentner paid 2, a cart of iron 4, a cask of wine 3.</p>
+      <p>Carriers who came back empty paid nothing.</p>
+      <span class="grip hov" style="left:-34px; top:96px"><svg class="i"><use href="#i-grip"/></svg></span>
+      <div class="float ab menu" style="left:-34px; top:122px">
+        <div class="hd">3 blocks</div>
+        <div class="row"><svg class="i ic"><use href="#i-text"/></svg>Turn into<span class="end"><svg class="i"><use href="#i-right"/></svg></span></div>
+        <div class="row on"><svg class="i ic"><use href="#i-cols"/></svg>Wrap in<span class="end"><svg class="i"><use href="#i-right"/></svg></span></div>
+        <div class="divider" style="margin:4px 0"></div>
+        <div class="row"><svg class="i ic"><use href="#i-copy"/></svg>Duplicate<span class="end">⌘D</span></div>
+        <div class="row"><svg class="i ic"><use href="#i-trash"/></svg>Delete<span class="end">⌫</span></div>
+      </div>
+      <div class="float ab sub" style="left:218px; top:180px">
+        <div class="row on"><svg class="i ic"><use href="#i-cols"/></svg>Two columns</div>
+        <div class="row"><svg class="i ic"><use href="#i-keep"/></svg>Keep together</div>
+        <div class="row"><svg class="i ic"><use href="#i-bottom"/></svg>Bottom of page</div>
+      </div>
+    </div></div>
+  </div>
+</section>
+
+<section class="board" id="wrap-beside">
+  <div class="cap"><b>Drag beside to make columns.</b> Notion's own way: drag a block to the right half of another and a vertical drop line appears. Dropping makes the two a Two columns region, the first block left, the dragged one right. Dropping beside a block already in columns adds it there.</div>
+  <div class="win" style="height:360px">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+    <div class="body"><div class="col">
+      <h2>A tariff for every load</h2>
+      <p style="width:270px">The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt paid 6 Kreuzer at the bridge.</p>
+      <p style="opacity:.35">A pack horse with two Zentner paid 2, a cart of iron 4, a cask of wine 3.</p>
+      <p>Carriers who came back empty paid nothing.</p>
+      <span class="vdrop" style="left:290px; top:58px; height:80px"></span>
+      <div class="drag" style="left:310px; top:72px">A pack horse with two Zentner paid 2, a cart of iron 4, a cask of wine 3.</div>
+      <svg class="ptr" style="left:318px; top:84px"><use href="#ptr"/></svg>
+    </div></div>
+  </div>
+</section>
+
+<!-- 4. Drag a block across the edge -->
+<section class="board" id="drag-edge">
+  <div class="cap"><b>Drag across the edge.</b> A dragged block drops inside a region when the drop line starts at the text and the bracket stretches to reach it in the accent, and outside when the line starts under the bracket and the bracket stays put. The keys follow one rule: ⌥↓ on the block above a region first moves it in, the next press moves it past.</div>
+  <div class="frames">
+    <div class="step"><b>Drop inside</b>, the bracket grows to take it</div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="brk grow" style="bottom:-30px"></span><span class="bn on">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:0; right:0; top:126px"></span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:40px; top:138px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:46px; top:150px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+    <div class="step"><b>Drop outside</b>, the line starts under the bracket</div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:-50px; right:0; top:120px"></span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:-20px; top:134px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:-40px; top:146px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Edges while typing -->
+<section class="board" id="exit-return">
+  <div class="cap"><b>Return out of a region.</b> Return on an empty last paragraph inside a region moves it out, below the bracket, as Notion does for toggles and callouts. The fence lines never show.</div>
+  <div class="frames">
+    <div class="step"><b>Before</b>, an empty last paragraph in Kept together</div>
+    <div class="win" style="height:260px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <div class="blk"><span class="brk on"></span><span class="bn on">Kept together</span>
+          <h3>Exemptions</h3>
+          <p>Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+          <p class="empty"><span class="caret"></span></p>
+        </div>
+      </div></div>
+    </div>
+    <div class="step"><b>After Return</b>, the paragraph and caret stand outside</div>
+    <div class="win" style="height:260px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <h3>Exemptions</h3>
+          <p>Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <p class="empty"><span class="caret"></span></p>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="exit-backspace">
+  <div class="cap"><b>Backspace at the start unwraps.</b> Backspace at the very start of a region's first block takes the wrapper off and keeps the text, as Backspace at the start of a quote or toggle does in Notion. A second Backspace joins the paragraph with the one above. ⌘Z puts the region back.</div>
+  <div class="frames">
+    <div class="step"><b>Before</b>, the caret at the start of the first block</div>
+    <div class="win" style="height:230px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <p>The clerk kept his rates on a single board.</p>
+        <div class="blk"><span class="brk on"></span><span class="bn on">Kept together</span>
+          <p><span class="caret"></span>Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+      </div></div>
+    </div>
+    <div class="step"><b>After Backspace</b>, the text stays, the region is gone</div>
+    <div class="win" style="height:230px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <p>The clerk kept his rates on a single board.</p>
+        <p><span class="caret"></span>Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Keys -->
+<section class="board" id="keys-esc">
+  <div class="cap"><b>Esc climbs out.</b> While typing, Esc selects the paragraph, as in Notion. Esc again selects the region around it, a third time its outer region. A selected region takes ⌥↑↓, ⌘D, ⌫, ⌘C and ⌘X as a whole, and Return puts the caret back in the text.</div>
+  <div class="frames">
+    <div class="step"><b>Typing</b></div>
+    <div class="win" style="height:250px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <h3>Exemptions</h3>
+          <p>Monasteries paid half, and the archbishop's own kitchens paid nothing<span class="caret"></span> at all.</p>
+        </div>
+      </div></div>
+    </div>
+    <div class="step"><b>Esc</b>, the paragraph is selected</div>
+    <div class="win" style="height:250px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <h3>Exemptions</h3>
+          <p class="psel">Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+      </div></div>
+    </div>
+    <div class="step"><b>Esc again</b>, the region is selected</div>
+    <div class="win" style="height:250px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <div class="blk"><span class="wash"></span><span class="brk on"></span><span class="bn on">Kept together</span>
+          <h3>Exemptions</h3>
+          <p>Monasteries paid half, and the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="keys-enter">
+  <div class="cap"><b>No fence stop.</b> ↓ from the line above a region goes straight to its first line. The bracket and name light while the caret is inside, and nothing moves. Today the caret stops on a hidden <code>::: columns</code> line that opens as source and pushes the region down by a line.</div>
+  <div class="frames">
+    <div class="step"><b>Today</b>, after ↓</div>
+    <div class="win" style="height:270px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <p>The clerk kept his rates on a single board.</p>
+        <div class="blk"><span class="brk on" style="top:30px"></span><span class="bn on" style="top:6px">Two columns</span>
+          <p style="font:16px/1.5 var(--mono); color:var(--faint); margin:0 0 6px">::: columns<span class="caret"></span></p>
+          <div class="cols2"><p>The Golling tariff of 1561 names forty-one kinds of load. A Fuder of salt paid 6 Kreuzer at the bridge, and a pack horse with two Zentner paid 2.</p></div>
+        </div>
+      </div></div>
+    </div>
+    <div class="step"><b>Proposed</b>, after ↓</div>
+    <div class="win" style="height:270px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <p>The clerk kept his rates on a single board.</p>
+        <div class="blk"><span class="brk on"></span><span class="bn on">Two columns</span>
+          <div class="cols2"><p>The Golling<span class="caret"></span> tariff of 1561 names forty-one kinds of load. A Fuder of salt paid 6 Kreuzer at the bridge, and a pack horse with two Zentner paid 2.</p></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section class="board" id="drag-label">
+  <div class="cap"><b>A. The line says where.</b> A short accent label above the right end of the drop line names the outcome, "Into Kept together" or "After Kept together", so inside and outside never rest on 50 px of line.</div>
+  <div class="frames">
+    <div class="step"><b>Drop inside</b></div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="brk grow" style="bottom:-30px"></span><span class="bn on">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:0; right:0; top:126px"></span><span class="note" style="right:0; top:106px; color:var(--accent)">Into Kept together</span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:40px; top:156px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:46px; top:168px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+    <div class="step"><b>Drop outside</b></div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:-50px; right:0; top:120px"></span><span class="note" style="right:0; top:100px; color:var(--accent)">After Kept together</span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:-20px; top:156px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:-40px; top:168px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+  </div>
+</section>
+<section class="board" id="drag-wash">
+  <div class="cap"><b>B. The region lights up.</b> While a drop would land inside, the whole region takes a faint accent wash and its bracket stretches to the line, as Notion lights a toggle you drag into. Outside, nothing in the region changes.</div>
+  <div class="frames">
+    <div class="step"><b>Drop inside</b></div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="hwash" style="bottom:-16px; background:color-mix(in srgb, var(--accent) 7%, transparent)"></span><span class="brk grow" style="bottom:-30px"></span><span class="bn on">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:0; right:0; top:126px"></span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:40px; top:156px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:46px; top:168px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+    <div class="step"><b>Drop outside</b></div>
+    <div class="win" style="height:310px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="modes"><span class="on">Write</span><span>Publish</span></div></div>
+      <div class="body"><div class="col">
+        <h3>Exemptions</h3>
+        <div class="blk"><span class="brk"></span><span class="bn">Kept together</span>
+          <p>Monasteries paid half. Salt bound for the archbishop's own kitchens paid nothing at all.</p>
+        </div>
+        <span class="drop" style="left:-50px; right:0; top:120px"></span>
+        <p style="margin-top:14px; opacity:.35">The carriers stretched the privilege as far as any clerk would let them.</p>
+        <div class="drag" style="left:-20px; top:156px">The carriers stretched the privilege as far as any clerk…</div>
+        <svg class="ptr" style="left:-40px; top:168px"><use href="#ptr"/></svg>
+      </div></div>
+    </div>
+  </div>
+</section>
+</body>
+</html>
