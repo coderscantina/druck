@@ -1,5 +1,6 @@
 //! The window with no document: open one, or start one from a starter. The starters are a gallery: each shows a page of
-//! its sample, laid out by the engine and painted as Publish paints pages.
+//! its sample, laid out by the engine and painted as Publish paints pages. Until it has an answer, the card also asks
+//! once whether to turn the writing partner on.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,6 +47,7 @@ pub struct LaunchView {
     /// Pages of another language, to free at the next frame.
     stale: Vec<Arc<RenderImage>>,
     _painting: Task<()>,
+    _settings: gpui::Subscription,
 }
 
 /// A sheet's box is this many times as high as wide, the tallest starter page, so the cards never move as pages come.
@@ -66,7 +68,14 @@ impl LaunchView {
             painted: language(),
             stale: Vec::new(),
             _painting: Task::ready(()),
+            // The offer goes once it is answered, here or by the switch in Settings.
+            _settings: cx.observe_global::<crate::settings::Store>(|_, cx| cx.notify()),
         };
+        // `DRUCK_OFFER=yes` or `no` answers the offer as its buttons do, for scripted runs.
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        if let Some(answer) = crate::gate::var("DRUCK_OFFER") {
+            crate::settings::change(cx, |settings| settings.answer_agent_offer(answer == "yes"));
+        }
         view.take_error(error, asked.as_deref());
         view.paint_pages(cx);
         view
@@ -144,6 +153,36 @@ impl LaunchView {
                         .text_color(tokens.text_quiet)
                         .child(crate::t!(starter.description)),
                 ),
+            )
+    }
+
+    /// The first launch's question about the writing partner: what it does, what it needs, and the two answers.
+    fn agent_offer(tokens: &Tokens) -> impl IntoElement + use<> {
+        let answer = |id: &'static str, label: Key, yes: bool| {
+            crate::editor::review::small_button(id, crate::t!(label).to_owned(), tokens)
+                .on_click(move |_, _, cx| crate::settings::change(cx, |settings| settings.answer_agent_offer(yes)))
+        };
+        let quiet = |text: Key| {
+            div()
+                .text_size(tokens::TEXT_SMALL)
+                .text_color(tokens.text_quiet)
+                .child(crate::t!(text))
+        };
+        div()
+            .px(tokens::SPACE_3)
+            .py(tokens::SPACE_3)
+            .flex()
+            .flex_col()
+            .gap(tokens::SPACE_2)
+            .child(quiet(Key::AgentOffer).font_weight(FontWeight::SEMIBOLD))
+            .child(div().child(crate::t!(Key::AgentOfferWhat)))
+            .child(quiet(Key::AgentOfferNeeds))
+            .child(
+                div()
+                    .flex()
+                    .gap(tokens::SPACE_2)
+                    .child(answer("agent-offer-yes", Key::AgentOfferYes, true).text_color(tokens.accent))
+                    .child(answer("agent-offer-no", Key::AgentOfferNo, false)),
             )
     }
 
@@ -227,6 +266,7 @@ impl Render for LaunchView {
         // The card keeps a gutter to the window's edge, so five starters fit the smallest window.
         let width = (window.viewport_size().width - tokens::SPACE_4 * 2.).min(tokens::LAUNCH_WIDTH);
         let starter_width = ((width - tokens::SPACE_2 * 2. - px(2.)) / STARTERS.len() as f32).floor();
+        let offering = crate::settings::get(cx).offers_agent();
         let starters: Vec<_> = STARTERS
             .iter()
             .map(|starter| self.starter_card(&tokens, starter, starter_width, cx))
@@ -266,53 +306,58 @@ impl Render for LaunchView {
                             .text_color(tokens.text_quiet)
                             .child("Druck"),
                     )
-                    .when_some(self.offer.clone(), |card, (dir, offer)| {
-                        card.child(
-                            div()
-                                .px(tokens::SPACE_3)
-                                .pt(tokens::SPACE_2)
-                                .text_size(tokens::TEXT_SMALL)
-                                .text_color(tokens.text_quiet)
-                                .child(adopt::reason(&dir)),
+                    // The question comes before anything else, alone, so it cannot crowd the starters out of a small
+                    // window.
+                    .when(offering, |card| card.child(Self::agent_offer(&tokens)))
+                    .when(!offering, |card| {
+                        card.when_some(self.offer.clone(), |card, (dir, offer)| {
+                            card.child(
+                                div()
+                                    .px(tokens::SPACE_3)
+                                    .pt(tokens::SPACE_2)
+                                    .text_size(tokens::TEXT_SMALL)
+                                    .text_color(tokens.text_quiet)
+                                    .child(adopt::reason(&dir)),
+                            )
+                            .child(
+                                Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
+                                    .track_focus(&self.offer_focus)
+                                    .ring_while_focused(&tokens)
+                                    .border_b_1()
+                                    .border_color(tokens.divider)
+                                    .text_color(tokens.accent)
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
+                                    })),
+                            )
+                        })
+                        .when_some(self.error.clone(), |card, error| {
+                            card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
+                        })
+                        .child(
+                            Self::row(
+                                &tokens,
+                                "open",
+                                "icons/file.svg",
+                                crate::t!(Key::Open),
+                                crate::t!(Key::OpenHint),
+                            )
+                            .border_b_1()
+                            .border_color(tokens.divider)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
                         )
                         .child(
-                            Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
-                                .track_focus(&self.offer_focus)
-                                .ring_while_focused(&tokens)
-                                .border_b_1()
-                                .border_color(tokens.divider)
-                                .text_color(tokens.accent)
-                                .on_click(cx.listener(move |_, _, _, cx| {
-                                    cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
-                                })),
+                            div()
+                                .px(tokens::SPACE_3)
+                                .pt(tokens::SPACE_3)
+                                .pb(tokens::SPACE_1)
+                                .text_size(tokens::TEXT_SMALL)
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(tokens.text_quiet)
+                                .child(crate::t!(Key::NewProject)),
                         )
-                    })
-                    .when_some(self.error.clone(), |card, error| {
-                        card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
-                    })
-                    .child(
-                        Self::row(
-                            &tokens,
-                            "open",
-                            "icons/file.svg",
-                            crate::t!(Key::Open),
-                            crate::t!(Key::OpenHint),
-                        )
-                        .border_b_1()
-                        .border_color(tokens.divider)
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
-                    )
-                    .child(
-                        div()
-                            .px(tokens::SPACE_3)
-                            .pt(tokens::SPACE_3)
-                            .pb(tokens::SPACE_1)
-                            .text_size(tokens::TEXT_SMALL)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(tokens.text_quiet)
-                            .child(crate::t!(Key::NewProject)),
-                    )
-                    .child(div().px(tokens::SPACE_2).pb(tokens::SPACE_2).flex().children(starters)),
+                        .child(div().px(tokens::SPACE_2).pb(tokens::SPACE_2).flex().children(starters))
+                    }),
             )
     }
 }
