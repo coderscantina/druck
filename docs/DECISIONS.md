@@ -1931,3 +1931,24 @@ The owner found the region interaction sub-par and rated Notion-like boards ([th
 - **Not built:** making columns by dragging a block beside another, which lost to Wrap in.
 
 Verified: `cargo test -p druck-desktop` (816 passed, 1 ignored, with new tests of moving a range, wrapping, deleting, duplicating, Return out, Backspace unwrap, and a refused split wrap), `cargo clippy -p druck-desktop --all-targets -- -D warnings`, and `cargo fmt --all --check`. In a debug build on a demo chapter, by keys sent to the process and `DRUCK_POINTER` scripts, which gained `press`, `drag`, and `release`, checking the file after each: Escape twice selects the region with its wash and no marker; Tab opens the menu and Right its kinds; `Opt+Down` moves the region past the next paragraph and keeps it selected; `Cmd+D` duplicates it and selects the copy, and Backspace deletes that copy; Return twice at the end of a region's text leaves it; Backspace at the start of its heading unwraps it; `/` over two paragraphs opens Wrap in and Return wraps them in Kept together; `Opt+Shift+Down` steps a paragraph into a region and down through it; the pointer resting in a region shows the grip, a click on it opens the menu, and a dragged paragraph shows "Into Kept together" with the wash at the text and "After Kept together" under the bracket, landing after the region on release. Not verified: light appearance and German captures, a drag of a whole region by its grip, and nested regions on screen.
+
+## 2026-11-10: Agentic beta direction
+
+Settled with the owner in an interview on what would make Druck lead for books, articles, and reports. The contract is [the desktop briefing](DESKTOP_BRIEFING.md), amended the same day, and the work is milestones [24](milestones/24-gallery.md) to [27](milestones/27-typesetter.md).
+
+- **Audience:** book authors still win ties. Scholarly writers are the second audience, chosen over business report writers and designers. It starts with paper and thesis starters; math, then CSL styles, come after the release.
+- **Where the lead is:** UX, agentic processes, and Notion-level simplicity. Engine work beyond TeX (font expansion, a baseline grid, river detection) was offered and not chosen, so the 2026-10-17 exclusions stand.
+- **Before the release, not after:** four milestones run before the gate of milestone 22, in this order: gallery, no syntax to learn, editing passes with Codex, typesetter. Each is mergeable alone, so a release can follow any of them. Shipping the beta first was recommended and declined.
+- **Simplicity means two things:** an author never has to learn Markdown or directive syntax, and a new book starts from a rendered look. Cutting surfaces and sharing by link were offered and not chosen.
+- **The agent is offered once at first launch,** then shows only where a process applies. This replaces "off until enabled in Settings, and leaves no trace on screen until then" for authors who say yes. Declining keeps no trace.
+- **Three agentic processes:** editing passes, a typesetter, and a designer. A production check against print targets was not chosen.
+- **Editing passes are Markdown files** that run only when asked. Copyedit, consistency, references, and line edit ship built in. Offering them at chapter states or running them on a pause lost: no agent turn starts without the author.
+- **The agent drives the typesetter.** An engine search with the agent only for rewording was recommended and declined. Authors without an agent get no fixes. The engine's trial tool exists either way, so an offline search can be added without rework.
+- **A typesetter fix is an existing directive or a book-wide theme value.** A per-paragraph tighten or loosen directive was declined again, so "no per-block overrides" holds. It runs through the whole proof list on a scratch copy and hands back a queue with before and after pages.
+- **Claude and Codex from the beta,** chosen over Claude only, so the headline does not rest on one vendor's terms. One user-level setting picks the CLI. This doubles the testing of approvals, streaming, and tools.
+- **Other people take part by annotated PDF:** a proof marked up in any PDF reader, read back as margin notes. Live co-editing, a hosted web proof, and a Word round trip lost. It comes after the release.
+- **After the release:** the designer first, then the PDF review, then math and CSL.
+- **Milestone 23 is rescoped:** with the designer, the remaining theme sections stay JSON in the panel, and a section gets a hand-built panel only when beta users ask. This reverses "All 30 theme panels stay, for 1.0".
+- **New milestones take 24 to 27 and run before 22,** since renumbering would break links.
+
+Unresolved: the vendors' answers on subscription logins, for both CLIs. What a whole-book run costs in tokens, to be measured in milestones 26 and 27. Nothing has been tried with Codex yet.

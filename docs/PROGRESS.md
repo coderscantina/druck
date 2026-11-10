@@ -48,7 +48,11 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 19: Publish view. Built and checked, merged here. What only the owner can check is in the [note](#milestone-19-note).
 - [ ] 20: Writing partner. Built and checked with real turns, merged here. Stays unchecked until a person has clicked its buttons, see the [note](#milestone-20-note).
 - [ ] 21: Versions. Built and checked, merged here. Stays unchecked until the owner has tried a real mouse and signing, and decided whether the 20-minute soak stands in for the hour. See the note in the resume note.
-- [ ] 22: Writer beta, the new gate for a first public release.
+- [ ] 24: Gallery of finished looks.
+- [ ] 25: No syntax to learn.
+- [ ] 26: Editing passes, with Codex.
+- [ ] 27: Typesetter.
+- [ ] 22: Writer beta, the gate for a first public release, after 24 to 27.
 - [ ] 23: Desktop 1.0, replacing 17.
 
 ### Milestone 16 criteria
@@ -94,6 +98,10 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Agentic beta note
+
+On 2026-11-10 the owner settled [the agentic beta direction](DECISIONS.md#2026-11-10-agentic-beta-direction): milestones 24 to 27 run in order before the gate of 22, on branch `agentic-beta`, not pushed. Next: milestone [24](milestones/24-gallery.md).
 
 ### Regions note
 

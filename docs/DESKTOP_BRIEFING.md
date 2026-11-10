@@ -1,6 +1,6 @@
 # Briefing: Druck desktop
 
-Settled with the owner on 2026-11-03 and redirected on 2026-11-05. The dated decisions are in [the first decision](DECISIONS.md#2026-11-03-desktop-app) and [the redirection](DECISIONS.md#2026-11-05-writing-first-direction). The mockups the owner chose from are in [mockups](mockups/).
+Settled with the owner on 2026-11-03, redirected on 2026-11-05, and amended on 2026-11-10. The dated decisions are in [the first decision](DECISIONS.md#2026-11-03-desktop-app), [the redirection](DECISIONS.md#2026-11-05-writing-first-direction), and [the agentic beta direction](DECISIONS.md#2026-11-10-agentic-beta-direction). The mockups the owner chose from are in [mockups](mockups/).
 
 ## Goal
 
@@ -10,7 +10,7 @@ Writing comes first. Publishing is a separate step the author moves to, not a pr
 
 The toolkit is `gpui`, Apache-2.0. Zed's `editor` crate is GPL-3.0, so no code may be copied from it. Druck stays MIT.
 
-Long-form authors come first: a decision favours someone writing 80,000 words. The starters are book, paper, and article. There is no document kind in the engine, and the engine and CLI keep every capability they have, including reports and offers.
+Long-form authors come first: a decision favours someone writing 80,000 words. Scholarly writers are the second audience. The starters are novel, non-fiction book, article, paper, and thesis, picked from a gallery of rendered pages. An author never has to learn Markdown or directive syntax: every construct has a menu path, and source view is the way out. There is no document kind in the engine, and the engine and CLI keep every capability they have, including reports and offers.
 
 ## Sequence
 
@@ -18,8 +18,9 @@ The app as it stood on 2026-11-04 is the base. Nothing has been published, so th
 
 1. [Writing surface](milestones/18-writing-surface.md): the two modes, the bare page, theme type on the app surface, the design tokens, settings, zoom, and focus. Comes first, since the others build on it.
 2. These may run in parallel: [Publish view](milestones/19-publish-view.md), [Writing partner](milestones/20-writing-partner.md), and [Versions](milestones/21-versions.md).
-3. [Writer beta](milestones/22-writer-beta.md): the gate for the first public release.
-4. [Desktop 1.0](milestones/23-desktop-1-0.md): every theme section hand-designed, and the other platforms.
+3. In this order: [Gallery](milestones/24-gallery.md), [No syntax to learn](milestones/25-no-syntax.md), [Editing passes, with Codex](milestones/26-editing-passes.md), and [Typesetter](milestones/27-typesetter.md).
+4. [Writer beta](milestones/22-writer-beta.md): the gate for the first public release.
+5. [Desktop 1.0](milestones/23-desktop-1-0.md): the designer, the other platforms, then the PDF review round trip, math, and CSL styles.
 
 ## Project model
 
@@ -30,6 +31,7 @@ druck.yaml        metadata, theme, ordered chapter list, named exports
 manuscript/       chapter files, without front matter
 notes/  research/ open in the same editor, never built
 themes/<name>/    customized themes with their assets
+passes/           customized and own editing passes
 assets/           images
 references.bib
 build/            output
@@ -78,7 +80,7 @@ The manuscript's pages, painted natively from the engine's page output, never th
 
 Themes remain strict versioned JSON without inheritance. Common themes in the user config folder get full create, read, update, delete. Customizing one inside a project copies the JSON and its fonts and images to `themes/<name>/`; a project theme wins over a common one of the same name. Only changed fields are written, and partial themes stay partial.
 
-The Style tab is a searchable index of sections, then one section at a time with a back link. All 30 top-level sections of the schema get a hand-designed panel before 1.0. The beta ships the sections authors reach for most, and the rest open as JSON in the same panel. The bundled specimen covers every element for a theme with no document open.
+The Style tab is a searchable index of sections, then one section at a time with a back link. The beta ships hand-designed panels for the sections authors reach for most, and the rest open as JSON in the same panel. After the release the designer writes themes from a description or a reference, and a further section gets a panel only when authors ask. The bundled specimen covers every element for a theme with no document open.
 
 ## Versions
 
@@ -95,12 +97,14 @@ Two tiers, so the small changes stay out of Git.
 
 ## Agent
 
-Spawn the user's installed `claude` CLI as a child process over `stream-json`, behind one module with a version check. Project `CLAUDE.md`, skills, and MCP then work as in a terminal. It stays off until enabled in Settings, and leaves no trace on screen until then.
+Spawn the user's installed `claude` or `codex` CLI as a child process, behind one module with a version check. One user-level setting picks the CLI. Project `CLAUDE.md`, skills, and MCP then work as in a terminal. First launch offers the agent once. After a yes it shows only where a process applies, and after a no it stays off and leaves no trace on screen until enabled in Settings.
 
 - **Way of working:** like a modern IDE. It can write a whole chapter, refine chapters or passages, and change a selection.
 - **`Cmd+J`:** with a selection, a prompt opens at the selection and works on it. Without one, a small chat card opens for book-wide work.
 - **Edits land in the files**, written by the CLI's normal tools, and show in the text as tinted changes with Accept and Reject per passage, and Accept all. A local history label before each turn undoes the turn. Export and commit warn about unreviewed changes but do not block.
 - **Advice changes nothing:** margin notes beside a passage, kept in `.druck/` and anchored by quoted text, with Apply, Reply, and Dismiss.
+- **Editing passes:** named Markdown files that run only when asked, on the book, a chapter, or a selection. Copyedit, consistency, references, and line edit ship built in. A copy in the project's `passes/` wins over a built-in of the same name. Copyedit and consistency return changes; references and line edit return margin notes.
+- **Typesetter:** "Fix the proof" in Publish. The agent tries fixes through the engine on a scratch copy and keeps those that clear a warning and cause none. The author reviews a queue of before and after pages. A fix is an existing directive or a book-wide theme value.
 - **Credentials:** the app holds none and never handles tokens. Anthropic's docs bar third parties from offering claude.ai login or routing requests through Free, Pro, or Max credentials. Before a public release documents a subscription login, confirm in writing with Anthropic that spawning the user's own CLI with one is allowed. Until then API key setup is the documented path, and this does not block the release, since the agent is off by default.
 - **Sessions:** one resumable session per project. The chapter, selection, and diagnostics pass as context.
 - Rendering stays fully offline. Only this optional agent and `git push` need a network.

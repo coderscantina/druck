@@ -2,12 +2,11 @@
 
 ## Goal and prerequisites
 
-The gate for the first public release, on macOS. Requires milestones 18 to 21. Publishing needs a separate request.
+The gate for the first public release, on macOS. Requires milestones 18 to 21 and 24 to 27, though a release may follow any of 24 to 27 if the owner says so. Publishing needs a separate request.
 
 ## Deliverables
 
-- Starters reduced to book, paper, and article. The launch screen and new section templates follow.
-- The agent's setup documented with an API key. A subscription login is documented only with Anthropic's written answer in hand.
+- The agent's setup documented with an API key for Claude and for Codex. A subscription login is documented only with the vendor's written answer in hand.
 - Signed and notarized packaging, and the app's icon.
 - Accessibility and keyboard pass over every new surface with AccessKit.
 - Updated measurements, and the open items of [the owner's checklist](../PROGRESS.md#owners-checklist) that still apply.

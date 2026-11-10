@@ -2,14 +2,16 @@
 
 ## Goal and prerequisites
 
-The complete theme editor and the other platforms. Requires milestone 22 and feedback from the beta.
+The designer and the other platforms. Requires milestone 22 and feedback from the beta. Rescoped by [the agentic beta decision](../DECISIONS.md#2026-11-10-agentic-beta-direction).
 
 ## Deliverables
 
-- A hand-designed section in the Style index for each remaining top-level theme section. Lists, tables, callouts, footnotes, margin notes, placement, captions, bibliography, index, matter, scene breaks, typesetting, title block, title page with its anchored slot groups, page variants and bands, watermark, highlighting, labels, and the rest of the schema's 30 sections. Each schema change means UI work.
+- **The designer:** describe the look, or drop a reference PDF or a photo of a book, and the agent writes the theme JSON while the pages reflow. The panels that exist stay for fine tuning.
+- The remaining theme sections stay JSON in the panel. A section gets a hand-designed panel only when beta users ask for it.
+- After it, in this order: the annotated PDF review round trip, math in LaTeX syntax, and CSL citation styles. Each gets its own brief when it starts.
 - Linux and Windows builds with their spell checker backends, packaging, and IME checks.
 - Decisions from the beta recorded in [decisions](../DECISIONS.md).
 
 ## Completion criteria
 
-Every schema property is reachable from a designed section, checked by a test against the schema, and inspected on screen in dark and light, with the pages showing each change.
+A theme made by the designer from a description and from a reference PDF, each inspected as pages and valid against the schema. Every schema property is reachable from a designed section or as JSON in the panel. Linux and Windows builds launch and pass their IME checks.
