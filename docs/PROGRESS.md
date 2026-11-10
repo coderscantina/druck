@@ -99,6 +99,39 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Agentic beta follow-ups
+
+Milestones 24 to 27 were merged into `main` on 2026-11-11. Open across them, most important first. Each milestone's own note below has the detail.
+
+Waiting on the owner:
+
+- Theme values never pass the typesetter's keep rule on the real book: `typesetting.hyphen-fragments: [2, 2]` cleared 111 warnings and caused 21. Decide whether a theme value may be kept when it clears more than it causes, with both counts on the entry.
+- Change passes run with edits approved in advance. Decide whether they should ask as chat turns do.
+- Milestone 25's box: change a single file's title through Details by hand.
+- Milestone 26's box: a pass over the whole 45,000-word book.
+- Milestone 27 is checked on 20 of the book's 243 warnings. A full run has not been made.
+- By hand: a real mouse on the gallery, table cells and their handle, the offer's buttons, and the queue; an input method in a table cell; a new project through the system save panel.
+
+Defects and gaps:
+
+- The typesetter's tool reads the book from disk while the app tries fixes on the open text, so unsaved typing during a run can make the two disagree. A pass does not wait for unsaved text either.
+- An entry's pages in the queue are not repainted after another entry is accepted or rejected, and "Clears 1 warning" leaves out warnings a page break excuses.
+- Consistency sees one chapter at a time, so a variant across chapters is caught only if an earlier chapter recorded the rule. A first read-only turn over the whole book would help.
+- Shift-selecting across a hidden code fence and deleting can break the fence. Down on a code block's last line at the end of a file does nothing.
+- Table column widths in Write follow content length, not `widths`. Index marks in table cells and captions show as written.
+- A single file opens on its raw front matter part instead of the first text.
+- The block menu and the new lists do not filter by typing. Arrow keys do not move between starters.
+- Section template text is English in a German book.
+- The launch card does not scroll if it outgrows a small window.
+- `passes/` files are not in the Binder and open in the system editor.
+- Codex: a deny reason does not reach it, a change to a file that is not open is missing from the turn summary, and its approval card shows a long line whole. Only 0.166.0 with a ChatGPT login was tried, through `codex app-server`, which the CLI marks experimental.
+- In Publish a run shows twice, in the panel and at the foot. The Proof panel is 21 Tab presses from the title bar. The selection toolbar stays over the palette.
+- A table's placement is not a typesetter fix kind, and a figure's placement was not seen in a real run.
+- `docs/AUTHORING.md` has no section on the typesetter.
+- Two tests fail now and then in a parallel run and pass alone: `source::tests::an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame` and `spell::macos::tests::the_documents_language_decides_not_the_texts`.
+
+Not run: release builds of the new surfaces, the typing gate on the book, Linux, and Windows. The `claude` and `codex` CLIs keep their own session records of the test runs outside the repo, with excerpts of the book.
+
 ### Milestone 27 note
 
 Built on `agentic-beta`, not pushed. Choices, with the measured times and costs, are in [the decision](DECISIONS.md#2026-11-10-milestone-27-typesetter), rules in [the design](DESIGN.md#fixes).
