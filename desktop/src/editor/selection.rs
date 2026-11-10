@@ -24,7 +24,7 @@ impl EditorView {
         self.autoscroll = true;
         self.follow_slash();
         self.follow_completion();
-        self.follow_fence();
+        self.release_region();
         self.restart_blink(window, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
@@ -194,7 +194,7 @@ impl EditorView {
         self.commit_rich_float(window, cx);
         self.close_float(cx);
         if self.scrollbar_mouse_down(event.position, cx)
-            || self.click_name(event.position, window, cx)
+            || self.region_mouse_down(event.position, cx)
             || self.gutter_mouse_down(event.position, cx)
         {
             return;
@@ -240,6 +240,10 @@ impl EditorView {
         let hovered = if inside { self.block_at(event.position) } else { None };
         if hovered != self.hovered {
             self.hovered = hovered;
+            cx.notify();
+        }
+        let free = self.drag.is_none() && self.grab.is_none();
+        if free && self.follow_region_hover(event.position, inside && uncovered) {
             cx.notify();
         }
         let in_margin = inside && uncovered && event.position.x < self.column.text_left;

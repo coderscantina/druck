@@ -5,6 +5,7 @@ use gpui::{Bounds, Context, CursorStyle, Hsla, Pixels, Point, TransformationMatr
 
 use super::commands::convert::{self, BlockType};
 use super::commands::{moves, notes, slash};
+use super::directives::Edge;
 use super::element::{Frame, FrameBlock};
 use super::{EditorView, Tokens};
 use crate::source::inline::SpanKind;
@@ -14,15 +15,21 @@ use crate::tokens;
 /// How far the pointer must move before a press on an icon is a drag, not a click.
 const DRAG_START: f32 = 4.;
 
-/// A press on a block's icon, which a release turns into its menu and a move into a drag.
+/// A press on a block's icon, or a region's grip or name, which a release turns into its menu and a move into a drag.
 #[derive(Clone)]
 pub(super) struct BlockGrab {
     block: usize,
+    /// The last block that moves with it: a region's closing line, or the block itself.
+    last: usize,
+    /// A region held by its grip or name.
+    region: bool,
     origin: Point<Pixels>,
     anchor: Bounds<Pixels>,
-    dragging: bool,
+    pub(super) dragging: bool,
     /// The block the dragged one would go above, or the number of blocks for the end.
     pub(super) before: Option<usize>,
+    /// The region edge the drop crosses, if any.
+    pub(super) edge: Option<Edge>,
 }
 
 /// A comment marker in the gutter.
@@ -170,9 +177,34 @@ impl EditorView {
             ),
             dragging: false,
             before: None,
+            last: block,
+            region: false,
+            edge: None,
         });
         cx.notify();
         true
+    }
+
+    /// Holds a region by its grip or name, from block `open` to block `close`.
+    pub(super) fn grab_region(
+        &mut self,
+        open: usize,
+        close: usize,
+        origin: Point<Pixels>,
+        anchor: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.grab = Some(BlockGrab {
+            block: open,
+            last: close,
+            region: true,
+            origin,
+            anchor,
+            dragging: false,
+            before: None,
+            edge: None,
+        });
+        cx.notify();
     }
 
     /// Follows the pointer while a block's icon is held.
@@ -183,14 +215,19 @@ impl EditorView {
         let distance = f32::from((position.x - grab.origin.x).abs()) + f32::from((position.y - grab.origin.y).abs());
         let block = grab.block;
         let was_dragging = grab.dragging;
+        let region = grab.region;
         let text = self.session.active_buffer().text();
         let block_data = &self.blocks.as_slice()[block];
         let dragging = was_dragging
-            || (distance > DRAG_START && moves::can_move(block_data.kind, &text[block_data.range.clone()]));
-        let before = dragging.then(|| self.drop_target(position.y));
+            || (distance > DRAG_START && (region || moves::can_move(block_data.kind, &text[block_data.range.clone()])));
+        let (before, edge) = match dragging.then(|| self.drop_place(position)) {
+            Some((before, edge)) => (Some(before), edge),
+            None => (None, None),
+        };
         if let Some(grab) = &mut self.grab {
             grab.dragging = dragging;
             grab.before = before;
+            grab.edge = edge;
         }
         cx.notify();
     }
@@ -227,26 +264,51 @@ impl EditorView {
         };
         cx.notify();
         if !grab.dragging {
-            self.open_convert(grab.block, grab.anchor, cx);
+            if grab.region {
+                if let Some(region) = self.directives.structure.fence(grab.block) {
+                    self.select_region(region, true, None, window, cx);
+                }
+            } else {
+                self.open_convert(grab.block, grab.anchor, cx);
+            }
             return;
         }
         let Some(before) = grab.before else {
             return;
         };
         let text = self.session.active_buffer().text();
-        let selection = if self.selection.is_empty() {
-            self.selection
+        let command = if grab.region {
+            let open = self.blocks.as_slice()[grab.block].range.start;
+            moves::move_range(
+                text,
+                &self.blocks,
+                grab.block..grab.last + 1,
+                before,
+                Selection::caret(open),
+            )
         } else {
-            Selection::caret(self.selection.head)
+            let selection = if self.selection.is_empty() {
+                self.selection
+            } else {
+                Selection::caret(self.selection.head)
+            };
+            moves::move_block(text, &self.blocks, grab.block, before, selection)
         };
-        if let Some(command) = moves::move_block(text, &self.blocks, grab.block, before, selection) {
-            self.run_command(command, window, cx);
+        let Some(command) = command.filter(|command| self.keeps_directives(command)) else {
+            return;
+        };
+        let opening = grab.region.then_some(command.selection.head);
+        self.run_command(command, window, cx);
+        if let Some(region) = opening.and_then(|at| self.directives.structure.fence(self.blocks.index_at(at))) {
+            self.select_region(region, false, None, window, cx);
         }
     }
 
-    /// The accent line where a dragged block would land, in the same 2 px as a dragged sidebar row.
+    /// The accent line where a dragged block would land, in the same 2 px as a dragged sidebar row. Out of a region it
+    /// starts under the region's bracket.
     pub(super) fn drop_line(&self) -> Option<Bounds<Pixels>> {
-        let before = self.grab.as_ref().filter(|grab| grab.dragging)?.before?;
+        let grab = self.grab.as_ref().filter(|grab| grab.dragging)?;
+        let before = grab.before?;
         let y = self
             .visible
             .iter()
@@ -257,9 +319,11 @@ impl EditorView {
                 Some(top + self.own_height(last))
             })?;
         let line = before.min(self.blocks.as_slice().len() - 1);
+        let (left, right) = (self.block_left(line), self.block_left(line) + self.block_width(line));
+        let left = grab.edge.map_or(left, |edge| edge.x);
         Some(Bounds::new(
-            point(self.block_left(line), y - tokens::HAIRLINE),
-            size(self.block_width(line), tokens::KEY_BAR),
+            point(left, y - tokens::HAIRLINE),
+            size(right - left, tokens::KEY_BAR),
         ))
     }
 }

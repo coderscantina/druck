@@ -90,14 +90,8 @@ impl EditorView {
             let other = target(self.session.active_buffer().text(), head);
             // A key deletes a chip whole.
             let other = self.past_chip(other, other > head);
-            // A comment hidden there is not deleted by a key that cannot show it: the caret goes past it. A fence line
-            // at rest is not either: the caret goes onto it, which shows it.
+            // A comment or fence line hidden there is not deleted by a key that cannot show it: the caret goes past it.
             let visible = self.skip_hidden(other, other > head);
-            let fence = self.blocks.index_at(other);
-            if visible == other && fence != self.blocks.index_at(head) && self.fence_at_rest(fence) {
-                self.set_selection(Selection::caret(other), false, window, cx);
-                return;
-            }
             if visible != other {
                 if visible != head {
                     self.set_selection(Selection::caret(visible), false, window, cx);
@@ -114,7 +108,18 @@ impl EditorView {
         }
     }
 
+    /// Backspace at the very start of a region's first block unwraps the region, and the next one joins lines.
     pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.source && self.selection.is_empty() {
+            let text = self.session.active_buffer().text();
+            let structure = &self.directives.structure;
+            if let Some(command) =
+                directives::edits::unwrap_at_start(text, &self.blocks, structure, self.selection.head)
+            {
+                self.run_command(command, window, cx);
+                return;
+            }
+        }
         self.delete_towards(motion::left, window, cx);
     }
 
@@ -139,6 +144,15 @@ impl EditorView {
         if self.source {
             self.replace_selection("\n", EditKind::Discrete, window, cx);
             return;
+        }
+        // Return on an empty line that ends a region's text takes the line out of the region.
+        if self.selection.is_empty() {
+            let text = self.session.active_buffer().text();
+            let structure = &self.directives.structure;
+            if let Some(command) = directives::edits::leave_region(text, &self.blocks, structure, self.selection.head) {
+                self.run_command(command, window, cx);
+                return;
+            }
         }
         let edit = if self.selection.is_empty() {
             typing::line_break(self.session.active_buffer().text(), &self.blocks, self.selection.head)
@@ -292,6 +306,13 @@ impl EntityInputHandler for EditorView {
         self.options_release_keys();
         let range = self.input_range(range_utf16);
         let typed_slash = new_text == "/" && kind == EditKind::Typing && !self.menu_is_open();
+        // A slash over several selected blocks opens what they can be wrapped in, and writes nothing.
+        if typed_slash
+            && let Some(blocks) = self.selected_blocks()
+            && self.open_block_menu(blocks.start, Some(blocks), None, cx)
+        {
+            return;
+        }
         let at = range.start;
         let after = Selection::caret(range.start + new_text.len());
         self.edit(kind, vec![Edit::new(range, new_text)], after, None, window, cx);

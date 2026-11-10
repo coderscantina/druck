@@ -1084,6 +1084,9 @@ impl EditorView {
     }
 
     pub(super) fn next_pin(&mut self, _: &NextPin, window: &mut Window, cx: &mut Context<Self>) {
+        if self.region_takes_option_down(window, cx) {
+            return;
+        }
         self.step_pin(true, window, cx);
     }
 

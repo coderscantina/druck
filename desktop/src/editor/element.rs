@@ -290,7 +290,8 @@ impl Element for Galley {
     ) {
         let (focus, caret_on) = {
             let view = self.view.read(cx);
-            (view.focus.clone(), view.caret_on)
+            // A selected region shows no caret: the keys act on the region.
+            (view.focus.clone(), view.caret_on && view.directives.selected.is_none())
         };
         self.view.update(cx, |view, _| view.trace.paint_started());
         window.handle_input(&focus, ElementInputHandler::new(bounds, self.view.clone()), cx);
@@ -687,7 +688,9 @@ impl EditorView {
             .into_iter()
             .flat_map(|word| self.range_rectangles(word, &blocks, false))
             .collect();
-        let caret = if self.selection.is_empty() {
+        // A selected region takes the keys: no caret, and no style name beside it.
+        let region_selected = self.directives.selected.is_some();
+        let caret = if self.selection.is_empty() && !region_selected {
             self.caret_bounds(window)
         } else {
             None
@@ -699,7 +702,7 @@ impl EditorView {
         // After the brackets, whose names on the same row the style's name ends before.
         // Only while the text has the keys, so it never stands beside a card that covers its block.
         let style_name = (self.style_name_at_caret(&blocks))
-            .filter(|_| self.focus.is_focused(window))
+            .filter(|_| self.focus.is_focused(window) && !region_selected)
             .map(|(top, height, name, icon_x)| {
                 let icons = gutter_icon.min(icon_x);
                 StyleName {

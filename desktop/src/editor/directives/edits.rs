@@ -5,7 +5,7 @@
 use std::ops::Range;
 
 use super::structure::{self, Kind, Structure};
-use crate::editor::commands::{Bias, Command, applied, line_ending, moved, normalized, selection_after};
+use crate::editor::commands::{Bias, Command, applied, line_ending, moved, needs_gap, normalized, selection_after};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
 /// The kinds the options offer a body directive, in their order.
@@ -167,17 +167,198 @@ pub fn full_width_at(
     })
 }
 
-/// Where the first full-width part of a columns region starts its text.
-pub fn full_width_part(blocks: &Blocks, structure: &Structure, region: usize) -> Option<usize> {
-    let part = structure
-        .children(region)
-        .find(|&child| structure.regions[child].kind == Kind::FullWidth)?;
-    let found = &structure.regions[part];
+/// Where `region`'s lines are, from the start of its opening line to the end of its closing line.
+pub fn region_range(blocks: &Blocks, structure: &Structure, region: usize) -> Range<usize> {
+    let found = &structure.regions[region];
     let list = blocks.as_slice();
-    let first = (found.open + 1..found.close)
+    list[found.open].range.start..list[found.close].range.end
+}
+
+/// Puts blocks `first` to `last` in a new directive of `kind`, leaving out blank lines at either end. The selection stays
+/// on its text.
+pub fn wrap(
+    text: &str,
+    blocks: &Blocks,
+    structure: &Structure,
+    blocks_range: Range<usize>,
+    kind: Kind,
+    selection: Selection,
+) -> Option<Command> {
+    if !kind.has_body() || kind == Kind::Table {
+        return None;
+    }
+    let list = blocks.as_slice();
+    let shown = |at: &usize| list[*at].kind != BlockKind::Blank;
+    let first = blocks_range.clone().find(shown)?;
+    let last = blocks_range.rev().find(shown)?;
+    // A directive with only one of its lines inside would close another's instead.
+    let held = |at: usize| (first..=last).contains(&at);
+    if (structure.regions.iter()).any(|region| held(region.open) != held(region.close)) {
+        return None;
+    }
+    let eol = line_ending(text);
+    let start = list[first].range.start;
+    let end = list[last].range.end;
+    let close = if text[..end].ends_with('\n') {
+        format!(":::{eol}")
+    } else {
+        format!("{eol}:::")
+    };
+    let edits = vec![
+        Edit::new(start..start, format!("::: {}{eol}", kind.name())),
+        Edit::new(end..end, close),
+    ];
+    let after = applied(text, &edits);
+    (structure::read(&after, &Blocks::parse(&after)).regions.len() == structure.regions.len() + 1).then(|| Command {
+        selection: selection_after(selection, &edits),
+        edits,
+    })
+}
+
+/// The kinds blocks `blocks_range` can be wrapped in, in [`BODY_KINDS`]'s order.
+pub fn wraps_offered(text: &str, blocks: &Blocks, structure: &Structure, blocks_range: Range<usize>) -> Vec<Kind> {
+    BODY_KINDS
+        .into_iter()
+        .filter(|kind| {
+            wrap(
+                text,
+                blocks,
+                structure,
+                blocks_range.clone(),
+                *kind,
+                Selection::default(),
+            )
+            .is_some()
+        })
+        .collect()
+}
+
+/// Takes `region` away with all it holds, and the blank line that kept it from the next block. The caret goes where it
+/// stood.
+pub fn delete_region(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
+    let found = &structure.regions[region];
+    if !found.kind.has_body() {
+        return None;
+    }
+    let list = blocks.as_slice();
+    let (open, close) = (found.open, found.close);
+    let mut removed = region_range(blocks, structure, region);
+    let mut filler = "";
+    if list.get(close + 1).is_some_and(|next| next.kind == BlockKind::Blank) {
+        removed.end = list[close + 1].range.end;
+    } else if open > 0 && list[open - 1].kind == BlockKind::Blank && close + 1 == list.len() {
+        removed.start = list[open - 1].range.start;
+    } else if open > 0 && close + 1 < list.len() && needs_gap(blocks, open - 1) && needs_gap(blocks, close + 1) {
+        filler = line_ending(text);
+    }
+    let caret = removed.start;
+    let edits = vec![Edit::new(removed, filler)];
+    let after = applied(text, &edits);
+    let held = structure
+        .regions
+        .iter()
+        .filter(|other| (open..=close).contains(&other.open))
+        .count();
+    (structure::read(&after, &Blocks::parse(&after)).regions.len() + held == structure.regions.len()).then(|| Command {
+        edits: normalized(edits, text),
+        selection: Selection::caret(caret),
+    })
+}
+
+/// A copy of `region` after it. The caret goes to the copy's opening line.
+pub fn duplicate_region(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
+    let found = &structure.regions[region];
+    if !found.kind.has_body() {
+        return None;
+    }
+    let list = blocks.as_slice();
+    let range = region_range(blocks, structure, region);
+    let body = text[range.clone()].trim_end_matches(['\n', '\r']);
+    let eol = line_ending(text);
+    let end = range.end;
+    let (mut insert, start) = if text[..end].ends_with('\n') {
+        (format!("{eol}{body}{eol}"), end + eol.len())
+    } else {
+        (format!("{eol}{eol}{body}"), end + eol.len() * 2)
+    };
+    if list
+        .get(found.close + 1)
+        .is_some_and(|next| next.kind != BlockKind::Blank)
+    {
+        insert.push_str(eol);
+    }
+    let edits = vec![Edit::new(end..end, insert)];
+    let after = applied(text, &edits);
+    let held = (structure.regions.iter())
+        .filter(|other| (found.open..=found.close).contains(&other.open))
+        .count();
+    (structure::read(&after, &Blocks::parse(&after)).regions.len() == structure.regions.len() + held).then(|| Command {
+        edits,
+        selection: Selection::caret(start),
+    })
+}
+
+/// Return on an empty line that ends a directive's text: the line goes after the closing line, with the caret on it.
+pub fn leave_region(text: &str, blocks: &Blocks, structure: &Structure, caret: usize) -> Option<Command> {
+    let empty_line = (caret == 0 || text[..caret].ends_with('\n'))
+        && (caret == text.len() || text[caret..].starts_with('\n') || text[caret..].starts_with("\r\n"));
+    if !empty_line {
+        return None;
+    }
+    let list = blocks.as_slice();
+    let found = (structure.regions.iter())
+        .filter(|region| region.kind.has_body() && region.kind != Kind::Table)
+        .filter(|region| list[region.open].range.end <= caret && caret <= list[region.close].range.start)
+        .filter(|region| text[caret..list[region.close].range.start].trim().is_empty())
+        .max_by_key(|region| region.depth)?;
+    let content_end = (found.open + 1..found.close)
+        .rev()
         .find(|&at| list[at].kind != BlockKind::Blank)
-        .unwrap_or(found.open);
-    Some(list[first].range.start)
+        .map_or(list[found.open].range.end, |at| list[at].range.end);
+    let eol = line_ending(text);
+    let fence = list[found.close].range.clone();
+    let line = text[fence.clone()].trim_end_matches(['\n', '\r']);
+    let rest = &text[fence.end..];
+    let blank_lead = rest.len() - rest.trim_start_matches(['\n', '\r']).len();
+    let mut new = format!("{line}{eol}{eol}");
+    let at = content_end + new.len();
+    if blank_lead < rest.len() {
+        new.push_str(eol);
+        new.push_str(eol);
+    }
+    let edits = vec![Edit::new(content_end..fence.end + blank_lead, new)];
+    Some(Command {
+        edits: normalized(edits, text),
+        selection: Selection::caret(at),
+    })
+}
+
+/// Backspace at the very start of a directive's first block: the directive goes, and its text stays.
+pub fn unwrap_at_start(text: &str, blocks: &Blocks, structure: &Structure, caret: usize) -> Option<Command> {
+    let list = blocks.as_slice();
+    let starts_text = |at: usize| {
+        let range = &list[at].range;
+        let line = &text[range.clone()];
+        let hashes = if matches!(list[at].kind, BlockKind::Heading { .. }) {
+            let count = line.bytes().take_while(|byte| *byte == b'#').count();
+            count + line[count..].bytes().take_while(|byte| *byte == b' ').count()
+        } else {
+            0
+        };
+        (range.start..=range.start + hashes).contains(&caret)
+    };
+    let region = (structure.regions.iter().enumerate())
+        .filter(|(_, region)| region.kind.has_body() && region.kind != Kind::Table)
+        .filter(|(_, region)| {
+            (region.open + 1..region.close)
+                .find(|&at| list[at].kind != BlockKind::Blank)
+                .is_some_and(starts_text)
+        })
+        .max_by_key(|(_, region)| region.depth)?
+        .0;
+    let mut command = unwrap(text, blocks, structure, region)?;
+    command.selection = Selection::caret(moved(caret, &command.edits, Bias::After));
+    Some(command)
 }
 
 /// A column's alignment as `align` writes it.
@@ -315,6 +496,82 @@ mod tests {
         let text = "a\n\nb\n";
         let blocks = Blocks::parse(text);
         assert!(full_width_at(text, &blocks, &structure::read(text, &blocks), 0, Selection::caret(0)).is_none());
+    }
+
+    #[test]
+    fn wrapping_takes_the_blocks_between_their_blank_lines() {
+        let text = "a\n\nb\n\nc\n";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let command = wrap(text, &blocks, &structure, 0..4, Kind::Keep, Selection::caret(0)).expect("a wrap");
+        assert_eq!(applied(text, &command.edits), "::: keep\na\n\nb\n:::\n\nc\n");
+        let offered = wraps_offered(text, &blocks, &structure, 0..4);
+        assert_eq!(offered, [Kind::Columns, Kind::Keep, Kind::Bottom]);
+        let text = "::: columns\na\n\nb\n:::\n";
+        let (blocks, structure, _) = region_of(text, Kind::Columns);
+        let b = blocks.index_at(text.find('b').unwrap());
+        assert_eq!(
+            wraps_offered(text, &blocks, &structure, b..b + 1),
+            [Kind::FullWidth, Kind::Keep]
+        );
+        // A selection from inside the columns to after them holds only their closing line.
+        let text = "::: columns\na\n\nb\n:::\n\nc\n";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let b = blocks.index_at(text.find('b').unwrap());
+        let c = blocks.index_at(text.find('c').unwrap());
+        assert!(wraps_offered(text, &blocks, &structure, b..c + 1).is_empty());
+    }
+
+    #[test]
+    fn a_region_is_deleted_and_duplicated_whole() {
+        let text = "a\n\n::: keep\nb\n:::\n\nc\n";
+        let (blocks, structure, keep) = region_of(text, Kind::Keep);
+        let command = delete_region(text, &blocks, &structure, keep).expect("a delete");
+        assert_eq!(applied(text, &command.edits), "a\n\nc\n");
+        let command = duplicate_region(text, &blocks, &structure, keep).expect("a copy");
+        let result = applied(text, &command.edits);
+        assert_eq!(result, "a\n\n::: keep\nb\n:::\n\n::: keep\nb\n:::\n\nc\n");
+        assert!(result[command.selection.head..].starts_with("::: keep\nb\n:::\n\nc"));
+        let text = "a\n::: keep\nb\n:::\nc\n";
+        let (blocks, structure, keep) = region_of(text, Kind::Keep);
+        let command = delete_region(text, &blocks, &structure, keep).expect("a delete");
+        assert_eq!(applied(text, &command.edits), "a\n\nc\n");
+    }
+
+    #[test]
+    fn return_on_an_empty_last_line_leaves_the_region() {
+        let text = "::: keep\nA\n\n\n:::\n\nNext\n";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let caret = "::: keep\nA\n\n".len();
+        let command = leave_region(text, &blocks, &structure, caret).expect("out");
+        let result = applied(text, &command.edits);
+        assert_eq!(result, "::: keep\nA\n:::\n\n\n\nNext\n");
+        assert_eq!(command.selection.head, "::: keep\nA\n:::\n\n".len());
+        // Text after the caret keeps it in.
+        let text = "::: keep\nA\n\n\nB\n:::\n";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        assert!(leave_region(text, &blocks, &structure, "::: keep\nA\n\n".len()).is_none());
+        let text = "::: keep\nA\n\n\n:::";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let command = leave_region(text, &blocks, &structure, "::: keep\nA\n\n".len()).expect("out");
+        assert_eq!(applied(text, &command.edits), "::: keep\nA\n:::\n\n");
+    }
+
+    #[test]
+    fn backspace_at_the_start_of_the_first_block_unwraps() {
+        let text = "Before\n\n::: keep\n### Head\n\nText\n:::\n";
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let caret = text.find("Head").unwrap();
+        let command = unwrap_at_start(text, &blocks, &structure, caret).expect("an unwrap");
+        let result = applied(text, &command.edits);
+        assert_eq!(result, "Before\n\n### Head\n\nText\n");
+        assert_eq!(command.selection.head, result.find("Head").unwrap());
+        assert!(unwrap_at_start(text, &blocks, &structure, text.find("Text").unwrap()).is_none());
     }
 
     #[test]

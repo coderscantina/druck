@@ -271,6 +271,7 @@ impl EditorView {
     /// Whether the caret passes over a block.
     pub(in crate::editor) fn takes_no_caret(&self, index: usize) -> bool {
         self.is_hidden_block(index)
+            || self.fence_at_rest(index)
             || self
                 .rich_atom(index)
                 .is_some_and(|atom| !self.source && self.atom_is_whole(atom))

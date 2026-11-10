@@ -464,6 +464,11 @@ pub const BRACKET_TICK: Pixels = px(3.);
 /// The deepest step a bracket takes; deeper ones share it.
 pub const BRACKET_DEPTHS: usize = 3;
 pub const BRACKET_NAME_GAP: Pixels = px(6.);
+/// A region's grip, left of its bracket while the pointer is in the region or the region is selected.
+pub const REGION_GRIP: Pixels = px(16.);
+/// How strongly the accent washes a selected region, and a region a dragged block would drop into.
+pub const REGION_SELECTED_TINT: f32 = 0.12;
+pub const REGION_DROP_TINT: f32 = 0.07;
 /// How far a bracket's ends stay inside its text's first and last lines.
 pub const BRACKET_END_INSET: Pixels = px(3.);
 /// Each of two columns holds at least this many characters of body text, or the text shows one column.
@@ -471,8 +476,10 @@ pub const COLUMN_MIN_CHARACTERS: u32 = 24;
 /// A new page's gap between two sheet edges, in body lines, and the tint between the edges.
 pub const PAGE_GAP_LINES: f32 = 2.5;
 pub const SHEET_GAP_TINT: f32 = 0.04;
-/// A directive's options under its name, and their small segmented choice.
+/// A region's menu under its grip, and the ghost table's options.
 pub const OPTIONS_WIDTH: Pixels = px(262.);
+/// The kinds Turn into lists beside a region's menu.
+pub const REGION_KINDS_WIDTH: Pixels = px(200.);
 pub const SEGMENT_HEIGHT: Pixels = px(18.);
 pub const SEGMENT_RADIUS: Pixels = px(3.);
 /// A directive the slash menu would insert, drawn into the text before it is.

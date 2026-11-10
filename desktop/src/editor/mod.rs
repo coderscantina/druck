@@ -651,7 +651,7 @@ impl EditorView {
         });
         self.source = self.source_chapters.contains(&self.session.active());
         self.selection = opening_selection(text, &self.blocks, view, self.source);
-        self.directives.options = None;
+        self.release_region();
         self.read_directives();
         self.reveal_at = self.selection.head;
         self.upstream = false;
@@ -1016,12 +1016,13 @@ impl EditorView {
         });
     }
 
-    fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+    fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.grab.take().is_some() {
             self.drag_scroll = None;
         } else if self.dismiss_completion() {
         } else if !matches!(self.float, Float::None) {
             self.float = Float::None;
+        } else if self.escape_selects(window, cx) {
         } else {
             self.toolbar_dismissed = true;
         }
@@ -1163,7 +1164,8 @@ impl EditorView {
     /// Where markers reveal: at a caret, and at the start of a drag so nothing moves under the pointer. A selection shows
     /// its text clean, so nothing moves under it either.
     fn reveal_offset(&self) -> Option<usize> {
-        (!self.source && (self.selection.is_empty() || self.drag.is_some())).then_some(self.reveal_at)
+        let caret = self.selection.is_empty() && self.directives.selected.is_none();
+        (!self.source && (caret || self.drag.is_some())).then_some(self.reveal_at)
     }
 
     /// Whether a comment block takes no room here: it is closed, not opened by its marker, has no caret in it, and is not
@@ -1854,8 +1856,8 @@ impl Render for EditorView {
         }
         if self.options_have_keys() {
             context.add(directives::OPTIONS_CONTEXT);
-        } else if self.directives.options.is_some() && self.fence_under_caret().is_some() {
-            context.add(directives::FENCE_CONTEXT);
+        } else if self.selected_region().is_some() {
+            context.add(directives::REGION_CONTEXT);
         }
         // Only why the chapter cannot be read. The text is nearly all there is.
         let header = (!self.status.is_empty()).then(|| {
@@ -1937,7 +1939,6 @@ impl Render for EditorView {
             .on_action(cx.listener(|this, _: &InsertImage, window, cx| this.choose_image(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertTable, window, cx| this.insert_table(window, cx)))
             .on_action(cx.listener(|this, _: &EditRich, window, cx| this.edit_rich_at_caret(window, cx)))
-            .on_action(cx.listener(Self::options_focus))
             .on_action(cx.listener(Self::options_up))
             .on_action(cx.listener(Self::options_down))
             .on_action(cx.listener(Self::options_left))
@@ -1948,6 +1949,17 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::options_unwrap))
             .on_action(cx.listener(Self::full_width_from_caret))
             .on_action(cx.listener(Self::ghost_options))
+            .on_action(cx.listener(Self::move_block_up))
+            .on_action(cx.listener(Self::move_block_down))
+            .on_action(cx.listener(Self::region_out))
+            .on_action(cx.listener(Self::region_enter))
+            .on_action(cx.listener(Self::region_menu))
+            .on_action(cx.listener(Self::region_up))
+            .on_action(cx.listener(Self::region_down))
+            .on_action(cx.listener(Self::region_duplicate))
+            .on_action(cx.listener(Self::region_delete))
+            .on_action(cx.listener(Self::region_copy))
+            .on_action(cx.listener(Self::region_cut))
             .on_drop(cx.listener(Self::drop_paths))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll));

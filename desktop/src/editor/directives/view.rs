@@ -6,14 +6,15 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, BoxShadow, Context, Hsla, MouseButton, Pixels, Point, ShapedLine, SharedString, TextAlign,
-    TextRun, Window, div, fill, font, point, px, size, svg,
+    TextRun, TransformationMatrix, Window, div, fill, font, point, px, size, svg,
 };
 
 use super::edits::{self, Align};
+use super::region::Row;
 use super::strings::Key;
 use super::{
-    FullWidthFromCaret, GhostOptions, GhostTable, Kind, OptionsAccept, OptionsBack, OptionsDown, OptionsFocus,
-    OptionsLeft, OptionsRight, OptionsToggle, OptionsUnwrap, OptionsUp,
+    FullWidthFromCaret, GhostOptions, GhostTable, Kind, OptionsAccept, OptionsBack, OptionsDown, OptionsLeft,
+    OptionsRight, OptionsToggle, OptionsUnwrap, OptionsUp, Span,
 };
 use crate::editor::commands::slash::{Action, Standalone};
 use crate::editor::element::{Frame, FrameBlock};
@@ -21,7 +22,7 @@ use crate::editor::float::Spot;
 use crate::editor::rich::view::shapes::Whole;
 use crate::editor::rich::{Atom, AtomKind};
 use crate::editor::{EditorView, Float};
-use crate::source::{BlockKind, Blocks, Selection};
+use crate::source::{BlockKind, Blocks};
 use crate::tokens::{self, Tokens};
 
 /// A bracket beside a directive's text, or a short line beside one standing alone.
@@ -33,6 +34,8 @@ pub(in crate::editor) struct Bracket {
     tick: bool,
     name: Option<(ShapedLine, Point<Pixels>)>,
     lit: bool,
+    /// A dragged block would drop into it.
+    accent: bool,
     ghost: bool,
 }
 
@@ -45,6 +48,10 @@ pub(in crate::editor) struct Marks {
     /// The slash menu's ghost text, and a table it would insert.
     ghost_text: Option<(ShapedLine, Point<Pixels>, Pixels)>,
     ghost_whole: Option<(Rc<Whole>, Point<Pixels>)>,
+    /// The grips that show, the accent washes with their tint, and the label of a drop across a region's edge.
+    grips: Vec<Bounds<Pixels>>,
+    washes: Vec<(Bounds<Pixels>, f32)>,
+    drop_label: Option<(ShapedLine, Point<Pixels>)>,
 }
 
 /// The slash menu's chosen directive, drawn into the text before Return inserts it.
@@ -55,15 +62,6 @@ pub(in crate::editor) struct Ghost {
     pub block: usize,
     /// It wraps the slash's block, rather than writing a new block after it.
     pub around: bool,
-}
-
-/// A row of a directive's options.
-#[derive(Debug, Clone, PartialEq)]
-enum Row {
-    Kind(Vec<Kind>),
-    FullWidth,
-    GoTo(String),
-    Unwrap,
 }
 
 /// The slash menu's directive entries and what each would insert.
@@ -155,57 +153,9 @@ impl EditorView {
         Some(whole)
     }
 
-    /// The options of a region, in their order.
-    fn option_rows(&self, region: usize) -> Vec<Row> {
-        let text = self.session.active_buffer().text();
-        let structure = &self.directives.structure;
-        let found = &structure.regions[region];
-        if !found.kind.has_body() {
-            return Vec::new();
-        }
-        let mut rows = Vec::new();
-        let kinds = edits::kinds_offered(text, &self.blocks, structure, region);
-        if kinds.len() > 1 {
-            rows.push(Row::Kind(kinds));
-        }
-        let in_columns = found.kind == Kind::Columns
-            || found
-                .parent
-                .is_some_and(|parent| structure.regions[parent].kind == Kind::Columns);
-        if in_columns && found.kind != Kind::FullWidth && self.full_width_target(region).is_some() {
-            rows.push(Row::FullWidth);
-        }
-        if found.kind == Kind::Columns
-            && let Some(at) = edits::full_width_part(&self.blocks, structure, region)
-        {
-            let words: String = text[at..].lines().next().unwrap_or("").chars().take(18).collect();
-            rows.push(Row::GoTo(words));
-        }
-        rows.push(Row::Unwrap);
-        rows
-    }
-
-    /// What "Full width from the caret" writes for the options of `region`: the part after a columns region's opening
-    /// line or before its closing line, or a nested group whole.
-    fn full_width_target(&self, region: usize) -> Option<crate::editor::commands::Command> {
-        let text = self.session.active_buffer().text();
-        let structure = &self.directives.structure;
-        let found = &structure.regions[region];
-        let list = self.blocks.as_slice();
-        let caret_block = self.blocks.index_at(self.selection.head);
-        let block = if found.kind != Kind::Columns {
-            found.open
-        } else if caret_block == found.close {
-            (found.open + 1..found.close)
-                .rev()
-                .find(|&at| list[at].kind != BlockKind::Blank)?
-        } else {
-            (found.open + 1..found.close).find(|&at| list[at].kind != BlockKind::Blank)?
-        };
-        edits::full_width_at(text, &self.blocks, structure, block, self.selection)
-    }
-
-    /// The brackets, sheet gaps, and ghost of this frame's blocks. Also keeps where the lit name stands, for the options.
+    /// The brackets, sheet gaps, and ghost of this frame's blocks, with the grip and wash of the region under the
+    /// pointer, the selected one, and the one a dragged block would drop into. Also keeps where names and grips stand,
+    /// for the pointer and the menu.
     pub(in crate::editor) fn directive_marks(
         &mut self,
         blocks: &[FrameBlock],
@@ -216,18 +166,28 @@ impl EditorView {
         let mut marks = Marks::default();
         self.directives.anchor = None;
         self.directives.names.clear();
+        self.directives.grips.clear();
+        self.directives.spans.clear();
         if self.source || indices.is_empty() {
             return marks;
         }
         let colors = Tokens::get(cx);
-        let gutter = self.column.text_left - tokens::GUTTER_WIDTH + tokens::BRACKET_INSET;
-        let slot = |depth: usize| gutter + tokens::BRACKET_STEP * depth.min(tokens::BRACKET_DEPTHS - 1) as f32;
+        let base = self.bracket_x(0);
+        let slot = |depth: usize| base + tokens::BRACKET_STEP * depth.min(tokens::BRACKET_DEPTHS - 1) as f32;
         let name_right = slot(0) - tokens::BRACKET_NAME_GAP;
         let room_left = self.column.viewport.left() + tokens::SPACE_1;
         let (first, last) = (indices[0], indices[indices.len() - 1]);
-        let lit = self.fence_under_caret();
+        let selected = self.selected_region();
+        let menu_open = self.directives.menu.is_some();
+        let hover = self.directives.hover;
+        let drop = (self.grab.as_ref())
+            .filter(|grab| grab.dragging)
+            .and_then(|grab| Some((grab.edge?, grab.before?)));
+        let drop_y = self.drop_line().map(|line| line.top());
         let shown = |index: usize| indices.iter().position(|at| *at == index).map(|at| &blocks[at]);
         let gap_middle = self.column.text_left + self.directives.column_width + self.directives.column_gap * 0.5;
+        let wash_left = self.column.text_left - tokens::SPACE_2;
+        let wash_width = self.column.text_width + tokens::SPACE_2 * 2.;
         let regions = self.directives.structure.regions.clone();
         for (number, region) in regions.iter().enumerate() {
             if region.close < first || region.open > last {
@@ -243,32 +203,65 @@ impl EditorView {
             let Some((top, bottom)) = span else {
                 continue;
             };
+            let body = region.kind.has_body() && region.kind != Kind::Table;
+            if body {
+                self.directives.spans.push(Span {
+                    region: number,
+                    top,
+                    bottom,
+                    depth: region.depth,
+                });
+            }
             // A group inside a second column has its bracket in the gap between the columns, where no name fits.
             let in_second = region.kind != Kind::Columns
                 && (region.open..=region.close).any(|at| self.directives.shifted.contains_key(&at));
-            let is_lit = lit == Some(number);
+            let is_selected = selected == Some(number);
+            let into = drop.is_some_and(|(edge, _)| edge.into && edge.region == number);
+            let is_lit = body && (hover == Some(number) || is_selected || into);
             let x = if in_second { gap_middle } else { slot(region.depth) };
+            // A drop into the region stretches its bracket to the drop line.
+            let (top, bottom) = match drop_y.filter(|_| into) {
+                Some(y) => (top.min(y), bottom.max(y + tokens::KEY_BAR)),
+                None => (top, bottom),
+            };
+            let grip = (body && !in_second && (hover == Some(number) || is_selected)).then(|| {
+                Bounds::new(
+                    point(name_right - tokens::REGION_GRIP, top),
+                    size(tokens::REGION_GRIP, tokens::TEXT_SMALL * 1.5),
+                )
+            });
+            let name_end = grip.map_or(name_right, |grip| grip.left() - tokens::SPACE_1);
             let name = (!in_second)
                 .then(|| {
                     let color = if is_lit { colors.text } else { colors.text_faint };
                     let line = ui_line(region.kind.label(), color.into(), window);
-                    let left = name_right - line.width;
+                    let left = name_end - line.width;
                     (left >= room_left).then(|| (line, point(left, top)))
                 })
                 .flatten();
-            if is_lit {
-                let anchor = name
-                    .as_ref()
-                    .map_or(Bounds::new(point(x, top), size(px(1.), px(16.))), |(line, at)| {
-                        Bounds::new(*at, size(line.width, tokens::TEXT_SMALL * 1.5))
-                    });
-                self.directives.anchor = Some(anchor);
-            }
-            if let Some((line, at)) = &name {
-                let range = &self.blocks.as_slice()[region.open].range;
-                let end = range.start + self.session.active_buffer().text()[range.clone()].trim_end().len();
+            if let Some((line, at)) = &name
+                && body
+            {
                 let bounds = Bounds::new(*at, size(line.width, tokens::TEXT_SMALL * 1.5));
-                self.directives.names.push((bounds, end));
+                self.directives.names.push((bounds, number));
+            }
+            if let Some(grip) = grip {
+                self.directives.grips.push((grip, number));
+                marks.grips.push(grip);
+            }
+            if is_selected && menu_open {
+                let at = grip.or_else(|| {
+                    name.as_ref()
+                        .map(|(line, at)| Bounds::new(*at, size(line.width, tokens::TEXT_SMALL * 1.5)))
+                });
+                self.directives.anchor = Some(at.unwrap_or(Bounds::new(point(x, top), size(px(1.), px(16.)))));
+            }
+            if is_selected {
+                let wash = Bounds::new(point(wash_left, top), size(wash_width, bottom - top));
+                marks.washes.push((wash, tokens::REGION_SELECTED_TINT));
+            } else if into {
+                let wash = Bounds::new(point(wash_left, top), size(wash_width, bottom - top));
+                marks.washes.push((wash, tokens::REGION_DROP_TINT));
             }
             let standalone = !region.kind.has_body();
             if standalone
@@ -291,8 +284,25 @@ impl EditorView {
                 tick: standalone,
                 name,
                 lit: is_lit,
+                accent: into,
                 ghost: false,
             });
+        }
+        // The drop's label names where the block lands, above the line's right end.
+        if let (Some((edge, before)), Some(y)) = (drop, drop_y)
+            && let Some(region) = regions.get(edge.region)
+        {
+            let word = crate::t!(if edge.into {
+                Key::DropInto
+            } else if before <= region.open {
+                Key::DropBefore
+            } else {
+                Key::DropAfter
+            });
+            let line = ui_line(&format!("{word} {}", region.kind.label()), colors.accent.into(), window);
+            let right = self.column.text_left + self.column.text_width;
+            let at = point(right - line.width, y - tokens::TEXT_SMALL * 1.5 - tokens::SPACE_1);
+            marks.drop_label = Some((line, at));
         }
         self.ghost_marks(&mut marks, blocks, indices, slot(0), name_right, room_left, window, cx);
         marks
@@ -386,29 +396,18 @@ impl EditorView {
             tick: !ghost.kind.has_body(),
             name,
             lit: false,
+            accent: false,
             ghost: true,
         });
     }
 
     // Keys
 
-    pub(in crate::editor) fn options_focus(&mut self, _: &OptionsFocus, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(region) = self.fence_under_caret() else {
-            return;
-        };
-        let rows = self.option_rows(region);
-        let own = self.directives.structure.regions[region].kind;
-        if let Some(options) = &mut self.directives.options
-            && !rows.is_empty()
-        {
-            options.keys = true;
-            options.row = 0;
-            options.kind = match rows.first() {
-                Some(Row::Kind(kinds)) => kinds.iter().position(|kind| *kind == own).unwrap_or(0),
-                _ => 0,
-            };
-            cx.notify();
-        }
+    /// The selected region with its menu's rows, while its menu is open.
+    fn open_menu(&self) -> Option<(usize, Vec<Row>, super::Menu)> {
+        let menu = self.directives.menu?;
+        let region = self.selected_region()?;
+        Some((region, self.region_rows(region), menu))
     }
 
     fn options_move(&mut self, down: bool, cx: &mut Context<Self>) {
@@ -417,20 +416,22 @@ impl EditorView {
             cx.notify();
             return;
         }
-        let Some(region) = self.fence_under_caret() else {
+        let Some((_, rows, mut menu)) = self.open_menu() else {
             return;
         };
-        let count = self.option_rows(region).len();
-        if let Some(options) = self.directives.options.as_mut().filter(|options| options.keys)
-            && count > 0
-        {
-            options.row = if down {
-                (options.row + 1) % count
+        let step = |at: usize, count: usize| {
+            if down {
+                (at + 1) % count
             } else {
-                (options.row + count - 1) % count
-            };
-            cx.notify();
+                (at + count - 1) % count
+            }
+        };
+        match (menu.sub, rows.get(menu.row)) {
+            (Some(sub), Some(Row::TurnInto(kinds))) => menu.sub = Some(step(sub, kinds.len())),
+            _ => menu.row = step(menu.row, rows.len()),
         }
+        self.directives.menu = Some(menu);
+        cx.notify();
     }
 
     pub(in crate::editor) fn options_up(&mut self, _: &OptionsUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -452,21 +453,20 @@ impl EditorView {
             cx.notify();
             return;
         }
-        let Some(region) = self.fence_under_caret() else {
+        let Some((region, rows, mut menu)) = self.open_menu() else {
             return;
         };
-        let rows = self.option_rows(region);
-        if let Some(options) = self.directives.options.as_mut().filter(|options| options.keys)
-            && let Some(Row::Kind(kinds)) = rows.get(options.row)
-        {
-            let count = kinds.len();
-            options.kind = if right {
-                (options.kind + 1) % count
-            } else {
-                (options.kind + count - 1) % count
-            };
+        if let Some(Row::TurnInto(kinds)) = rows.get(menu.row) {
+            menu.sub = right.then(|| self.own_kind_at(region, kinds));
+            self.directives.menu = Some(menu);
             cx.notify();
         }
+    }
+
+    /// Where `region`'s own kind stands among `kinds`, so Turn into opens on it.
+    fn own_kind_at(&self, region: usize, kinds: &[Kind]) -> usize {
+        let own = self.directives.structure.regions[region].kind;
+        kinds.iter().position(|kind| *kind == own).unwrap_or(0)
     }
 
     pub(in crate::editor) fn options_left(&mut self, _: &OptionsLeft, _: &mut Window, cx: &mut Context<Self>) {
@@ -498,64 +498,48 @@ impl EditorView {
             cx.notify();
             return;
         }
-        let Some(options) = self.directives.options.filter(|options| options.keys) else {
+        let Some((region, rows, menu)) = self.open_menu() else {
             return;
         };
-        self.act(options.row, Some(options.kind), window, cx);
+        match (rows.get(menu.row), menu.sub) {
+            (Some(Row::TurnInto(kinds)), None) => {
+                let sub = self.own_kind_at(region, kinds);
+                self.directives.menu = Some(super::Menu { sub: Some(sub), ..menu });
+                cx.notify();
+            }
+            (Some(row @ Row::TurnInto(kinds)), Some(sub)) => {
+                let kind = kinds.get(sub).copied();
+                self.choose_row(&row.clone(), kind, window, cx);
+            }
+            (Some(row), _) => self.choose_row(&row.clone(), None, window, cx),
+            (None, _) => {}
+        }
     }
 
-    /// Carries out row `row` of the options, with `kind` chosen in the kind row.
-    fn act(&mut self, row: usize, kind: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(region) = self.fence_under_caret() else {
-            return;
-        };
-        let text = self.session.active_buffer().text();
-        let structure = &self.directives.structure;
-        let command = match self.option_rows(region).get(row) {
-            Some(Row::Kind(kinds)) => kinds
-                .get(kind.unwrap_or(0))
-                .and_then(|kind| edits::change_kind(text, &self.blocks, structure, region, *kind, self.selection)),
-            Some(Row::FullWidth) => self.full_width_target(region),
-            Some(Row::GoTo(_)) => {
-                if let Some(at) = edits::full_width_part(&self.blocks, structure, region) {
-                    self.directives.options = None;
-                    self.set_selection(Selection::caret(at), false, window, cx);
-                }
-                return;
-            }
-            Some(Row::Unwrap) => edits::unwrap(text, &self.blocks, structure, region),
-            None => None,
-        };
-        let Some(command) = command else {
-            return;
-        };
-        let keys = self.directives.options.is_some_and(|options| options.keys);
-        self.run_command(command, window, cx);
-        // The keys stay with the options while the caret stays on the line.
-        if let Some(options) = &mut self.directives.options {
-            options.keys = keys;
-            options.row = row;
-        }
-        cx.notify();
+    /// Closes the menu and carries out `row`.
+    fn choose_row(&mut self, row: &Row, kind: Option<Kind>, window: &mut Window, cx: &mut Context<Self>) {
+        self.directives.menu = None;
+        self.act_on_region(row, kind, window, cx);
     }
 
     pub(in crate::editor) fn options_back(&mut self, _: &OptionsBack, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(ghost) = &mut self.directives.ghost_table {
             ghost.keys = false;
         }
-        if let Some(options) = &mut self.directives.options {
-            options.keys = false;
+        // Escape closes Turn into first, then the menu, and the region stays selected.
+        if let Some(menu) = &mut self.directives.menu {
+            if menu.sub.is_some() {
+                menu.sub = None;
+            } else {
+                self.directives.menu = None;
+            }
         }
         cx.notify();
     }
 
     pub(in crate::editor) fn options_unwrap(&mut self, _: &OptionsUnwrap, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(region) = self.fence_under_caret() else {
-            return;
-        };
-        let rows = self.option_rows(region);
-        if let Some(row) = rows.iter().position(|row| *row == Row::Unwrap) {
-            self.act(row, None, window, cx);
+        if self.open_menu().is_some() {
+            self.choose_row(&Row::Unwrap, None, window, cx);
         }
     }
 
@@ -565,15 +549,11 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let command = match self.fence_under_caret() {
-            Some(region) => self.full_width_target(region),
-            None => {
-                let text = self.session.active_buffer().text();
-                let block = self.blocks.index_at(self.selection.head);
-                edits::full_width_at(text, &self.blocks, &self.directives.structure, block, self.selection)
-            }
-        };
-        if let Some(command) = command {
+        let text = self.session.active_buffer().text();
+        let block = self.blocks.index_at(self.selection.head);
+        if let Some(command) =
+            edits::full_width_at(text, &self.blocks, &self.directives.structure, block, self.selection)
+        {
             self.run_command(command, window, cx);
         }
     }
@@ -586,11 +566,8 @@ impl EditorView {
         }
     }
 
-    /// Typing goes to the text: the options give the keys back to the line, and the ghost's to the menu.
+    /// Typing goes to the text: the ghost's options give the keys back to the menu.
     pub(in crate::editor) fn options_release_keys(&mut self) {
-        if let Some(options) = &mut self.directives.options {
-            options.keys = false;
-        }
         if let Some(ghost) = &mut self.directives.ghost_table {
             ghost.keys = false;
         }
@@ -598,7 +575,7 @@ impl EditorView {
 
     // The float
 
-    /// The options under the lit name, or the ghost table's, for this frame.
+    /// The selected region's menu under its grip, or the ghost table's options, for this frame.
     pub(in crate::editor) fn options_float(&mut self, cx: &mut Context<Self>) -> Option<(AnyElement, Spot)> {
         let anchor = self.directives.anchor?;
         let at = point(
@@ -613,32 +590,25 @@ impl EditorView {
         if !matches!(self.float, Float::None) {
             return None;
         }
-        let region = self.fence_under_caret()?;
-        let rows = self.option_rows(region);
-        let options = self.directives.options?;
-        if rows.is_empty() {
-            return None;
-        }
+        let (region, rows, menu) = self.open_menu()?;
         let own = self.directives.structure.regions[region].kind;
         Some((
-            self.options_element(&rows, options, own, cx).into_any_element(),
+            self.region_menu_element(&rows, menu, own, cx).into_any_element(),
             Spot::At(at),
         ))
     }
 
-    fn options_element(
+    fn region_menu_element(
         &self,
         rows: &[Row],
-        options: super::Options,
+        menu: super::Menu,
         own: Kind,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx).clone();
-        let ring = ring(&tokens);
-        let row_base = |index: usize, label: SharedString, icon: &'static str| {
-            let chosen = options.keys && options.row == index;
+        let row_base = |id: (&'static str, usize), chosen: bool, label: SharedString, icon: &'static str| {
             div()
-                .id(("directive-option", index))
+                .id(id)
                 .role(gpui::Role::MenuItem)
                 .aria_label(label.clone())
                 .aria_selected(chosen)
@@ -650,9 +620,12 @@ impl EditorView {
                 .items_center()
                 .gap(tokens::SPACE_2)
                 .rounded(tokens::RADIUS)
+                .cursor_pointer()
                 .text_size(tokens::TEXT_BODY)
                 .text_color(if chosen { tokens.text } else { tokens.text_quiet })
                 .when(chosen, |row| row.bg(tokens.raised))
+                .hover(|row| row.bg(tokens.raised))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     svg()
                         .flex_none()
@@ -660,96 +633,119 @@ impl EditorView {
                         .size(tokens::ICON_SIZE)
                         .text_color(if chosen { tokens.text } else { tokens.text_faint }),
                 )
-                .child(div().flex_none().child(label))
+                .child(div().flex_1().min_w_0().truncate().child(label))
         };
-        let end = |text: SharedString| {
+        let end = |text: &'static str| {
             div()
-                .ml_auto()
-                .min_w_0()
-                .truncate()
+                .flex_none()
                 .text_size(tokens::TEXT_SMALL)
                 .text_color(tokens.text_faint)
                 .child(text)
         };
-        let elements: Vec<AnyElement> = rows
-            .iter()
-            .enumerate()
-            .map(|(index, row)| match row {
-                Row::Kind(kinds) => {
-                    let segments = kinds.iter().enumerate().map(|(at, kind)| {
-                        let on = *kind == own;
-                        let focused = options.keys && options.row == index && options.kind == at;
-                        div()
-                            .id(("directive-kind", at))
-                            .role(gpui::Role::RadioButton)
-                            .aria_label(kind.choice())
-                            .h(tokens::SEGMENT_HEIGHT)
-                            .px(tokens::SPACE_2)
-                            .flex()
-                            .items_center()
-                            .rounded(tokens::SEGMENT_RADIUS)
-                            .text_size(tokens::TEXT_SMALL)
-                            .cursor_pointer()
-                            .text_color(if on { tokens.text } else { tokens.text_quiet })
-                            .when(on, |segment| segment.bg(tokens.raised))
-                            .when(focused, |segment| segment.shadow(vec![ring.clone()]))
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, window, cx| this.act(index, Some(at), window, cx)))
-                            .child(kind.choice())
-                    });
-                    row_base(index, crate::t!(Key::Kind).into(), "icons/directive-columns.svg")
-                        .child(
-                            div()
-                                .ml_auto()
-                                .flex()
-                                .gap(px(2.))
-                                .p(px(2.))
-                                .rounded(tokens::SEGMENT_RADIUS + px(1.))
-                                .bg(tokens.field)
-                                .children(segments),
-                        )
-                        .into_any_element()
+        let mut sub_row = 0;
+        let mut elements: Vec<AnyElement> = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let chosen = menu.row == index;
+            if *row == Row::Duplicate {
+                elements.push(
+                    div()
+                        .my(tokens::SPACE_1)
+                        .h(tokens::HAIRLINE)
+                        .bg(tokens.divider)
+                        .into_any_element(),
+                );
+            }
+            let (label, icon, keys): (&'static str, &'static str, Option<&'static str>) = match row {
+                Row::TurnInto(_) => {
+                    sub_row = index;
+                    (crate::t!(Key::TurnInto), own.icon(), None)
                 }
-                Row::FullWidth => row_base(
-                    index,
-                    crate::t!(Key::FullWidthFromCaret).into(),
+                Row::FullWidth => (
+                    crate::t!(Key::FullWidthFromHere),
                     "icons/directive-full-width.svg",
-                )
-                .cursor_pointer()
-                .hover(|row| row.bg(tokens.raised))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |this, _, window, cx| this.act(index, None, window, cx)))
-                .child(end("\u{21e7}\u{2318}\u{21a9}".into()))
-                .into_any_element(),
-                Row::GoTo(words) => row_base(index, crate::t!(Key::GoToFullWidth).into(), "icons/directive-jump.svg")
-                    .cursor_pointer()
-                    .hover(|row| row.bg(tokens.raised))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| this.act(index, None, window, cx)))
-                    .child(end(words.clone().into()))
-                    .into_any_element(),
-                Row::Unwrap => row_base(index, crate::t!(Key::Unwrap).into(), "icons/directive-unwrap.svg")
-                    .cursor_pointer()
-                    .hover(|row| row.bg(tokens.raised))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| this.act(index, None, window, cx)))
-                    .child(end("\u{2318}\u{232b}".into()))
-                    .into_any_element(),
-            })
-            .collect();
-        card(&tokens)
-            .id("directive-options")
+                    Some("\u{21e7}\u{2318}\u{21a9}"),
+                ),
+                Row::Unwrap => (
+                    crate::t!(Key::Unwrap),
+                    "icons/directive-unwrap.svg",
+                    Some("\u{2318}\u{232b}"),
+                ),
+                Row::Duplicate => (crate::t!(Key::Duplicate), "icons/duplicate.svg", Some("\u{2318}D")),
+                Row::MoveUp => (crate::t!(Key::MoveUp), "icons/move-up.svg", Some("\u{2325}\u{2191}")),
+                Row::MoveDown => (
+                    crate::t!(Key::MoveDown),
+                    "icons/move-down.svg",
+                    Some("\u{2325}\u{2193}"),
+                ),
+                Row::Delete => (crate::t!(Key::DeleteWithText), "icons/trash.svg", Some("\u{232b}")),
+            };
+            let picked = row.clone();
+            let element = row_base(("region-row", index), chosen, label.into(), icon).on_click(cx.listener(
+                move |this, _, window, cx| match &picked {
+                    Row::TurnInto(kinds) => {
+                        let sub = this.own_kind_at(this.selected_region().unwrap_or(0), kinds);
+                        if let Some(menu) = &mut this.directives.menu {
+                            menu.row = index;
+                            menu.sub = if menu.sub.is_some() { None } else { Some(sub) };
+                        }
+                        cx.notify();
+                    }
+                    row => this.choose_row(row, None, window, cx),
+                },
+            ));
+            let element = match keys {
+                Some(keys) => element.child(end(keys)),
+                None => element.child(
+                    svg()
+                        .flex_none()
+                        .path("icons/chevron-right.svg")
+                        .size(tokens::ICON_SIZE)
+                        .text_color(tokens.text_faint),
+                ),
+            };
+            elements.push(element.into_any_element());
+        }
+        let main = card(&tokens)
+            .id("region-menu")
             .role(gpui::Role::Menu)
-            .children(elements)
-            .child(div().my(tokens::SPACE_1).h(tokens::HAIRLINE).bg(tokens.divider))
             .child(
                 div()
                     .px(tokens::SPACE_3)
+                    .pt(tokens::SPACE_1)
                     .pb(tokens::SPACE_1)
                     .text_size(tokens::TEXT_SMALL)
-                    .text_color(tokens.text_quiet)
-                    .child(crate::t!(Key::OptionsFoot)),
+                    .text_color(tokens.text_faint)
+                    .child(own.label()),
             )
+            .children(elements);
+        let kinds = match (menu.sub, rows.get(menu.row)) {
+            (Some(sub), Some(Row::TurnInto(kinds))) => Some((sub, kinds.clone())),
+            _ => None,
+        };
+        let sub = kinds.map(|(sub, kinds)| {
+            let rows = kinds.into_iter().enumerate().map(|(at, kind)| {
+                let label: SharedString = kind.label().into();
+                row_base(("region-kind", at), at == sub, label, kind.icon())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.choose_row(&Row::TurnInto(Vec::new()), Some(kind), window, cx)
+                    }))
+                    .when(kind == own, |row| row.child(end("\u{2713}")))
+            });
+            // Level with Turn into, past the menu's quiet name.
+            let down = tokens::TEXT_SMALL * 1.5 + tokens::SPACE_2 + tokens::MENU_ROW_HEIGHT * sub_row as f32;
+            card(&tokens)
+                .id("region-kinds")
+                .role(gpui::Role::Menu)
+                .w(tokens::REGION_KINDS_WIDTH)
+                .mt(down)
+                .children(rows)
+        });
+        div()
+            .flex()
+            .items_start()
+            .gap(tokens::SPACE_1)
+            .child(main)
+            .children(sub)
     }
 
     fn ghost_table_element(&self, table: &GhostTable, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -882,6 +878,10 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
     let faint: Hsla = colors.text_faint.into();
     let line_color = faint.opacity(0.7);
     let lit_color: Hsla = colors.text_quiet.into();
+    let accent: Hsla = colors.accent.into();
+    for (bounds, tint) in &marks.washes {
+        window.paint_quad(fill(*bounds, accent.opacity(*tint)).corner_radii(tokens::RADIUS));
+    }
     for (bounds, ghost) in &marks.sheets {
         let opacity = if *ghost { tokens::GHOST_OPACITY } else { 1. };
         let height = bounds.size.height;
@@ -904,7 +904,13 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
         whole.paint(*at, frame, window, cx);
     }
     for bracket in &marks.brackets {
-        let color = if bracket.lit { lit_color } else { line_color };
+        let color = if bracket.accent {
+            accent
+        } else if bracket.lit {
+            lit_color
+        } else {
+            line_color
+        };
         let color = if bracket.ghost {
             color.opacity(tokens::GHOST_OPACITY)
         } else {
@@ -936,5 +942,30 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
             name.paint(*at, tokens::TEXT_SMALL * 1.5, TextAlign::Left, None, window, cx)
                 .ok();
         }
+    }
+    let ink: Hsla = colors.text.into();
+    for grip in &marks.grips {
+        let icon = Bounds::new(
+            point(
+                grip.left() + (grip.size.width - tokens::GUTTER_ICON) * 0.5,
+                grip.top() + (grip.size.height - tokens::GUTTER_ICON) * 0.5,
+            ),
+            size(tokens::GUTTER_ICON, tokens::GUTTER_ICON),
+        );
+        window
+            .paint_svg(
+                icon,
+                "icons/grip.svg".into(),
+                None,
+                TransformationMatrix::unit(),
+                ink,
+                cx,
+            )
+            .ok();
+    }
+    if let Some((label, at)) = &marks.drop_label {
+        label
+            .paint(*at, tokens::TEXT_SMALL * 1.5, TextAlign::Left, None, window, cx)
+            .ok();
     }
 }

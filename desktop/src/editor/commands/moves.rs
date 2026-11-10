@@ -1,5 +1,7 @@
 //! Moving a block's text to another place between blocks: one delete and one insert, in one undo step.
 
+use std::ops::Range;
+
 use super::{Bias, Command, line_ending, moved, needs_gap, normalized, selection_after};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
@@ -21,16 +23,36 @@ pub fn can_move(kind: BlockKind, text: &str) -> bool {
 
 /// Moves block `from` to just above block `before`, or to the end when `before` is the number of blocks.
 pub fn move_block(text: &str, blocks: &Blocks, from: usize, before: usize, selection: Selection) -> Option<Command> {
-    let list = blocks.as_slice();
-    let moving = list.get(from)?;
-    let moved_text = &text[moving.range.clone()];
-    if !can_move(moving.kind, moved_text) || before > list.len() {
+    let moving = blocks.as_slice().get(from)?;
+    if !can_move(moving.kind, &text[moving.range.clone()]) {
         return None;
     }
-    // Above the block itself or the blank after it is where it already is.
-    let after_blank = list.get(from + 1).is_some_and(|next| next.kind == BlockKind::Blank);
-    let next_place = from + 1 + usize::from(after_blank);
-    if before == from || before == from + 1 || before == next_place {
+    move_range(text, blocks, from..from + 1, before, selection)
+}
+
+/// Moves blocks `from` together to just above block `before`, or to the end when `before` is the number of blocks. The
+/// caller says they may move together, such as a directive with everything it holds.
+pub fn move_range(
+    text: &str,
+    blocks: &Blocks,
+    from: Range<usize>,
+    before: usize,
+    selection: Selection,
+) -> Option<Command> {
+    let list = blocks.as_slice();
+    let (first, last) = (from.start, from.end.checked_sub(1)?);
+    if from.is_empty() || last >= list.len() || before > list.len() {
+        return None;
+    }
+    if list[first].kind == BlockKind::FrontMatter {
+        return None;
+    }
+    let range = list[first].range.start..list[last].range.end;
+    let moved_text = &text[range.clone()];
+    // Above the blocks themselves or the blank after them is where they already are.
+    let after_blank = list.get(last + 1).is_some_and(|next| next.kind == BlockKind::Blank);
+    let next_place = last + 1 + usize::from(after_blank);
+    if (first..=next_place).contains(&before) {
         return None;
     }
     if list.first().is_some_and(|first| first.kind == BlockKind::FrontMatter) && before == 0 {
@@ -39,16 +61,16 @@ pub fn move_block(text: &str, blocks: &Blocks, from: usize, before: usize, selec
     let eol = line_ending(text);
     let body = moved_text.trim_end_matches(['\n', '\r']);
 
-    // What goes away: the block and the blank line that kept it from the next one. At the end of the text that is the
-    // blank before it.
-    let mut removed = moving.range.clone();
+    // What goes away: the blocks and the blank line that kept them from the next one. At the end of the text that is
+    // the blank before them.
+    let mut removed = range.clone();
     let mut filler = "";
     if after_blank {
-        removed.end = list[from + 1].range.end;
-    } else if from > 0 && list[from - 1].kind == BlockKind::Blank && from + 1 == list.len() {
-        removed.start = list[from - 1].range.start;
-    } else if from > 0 && from + 1 < list.len() && needs_gap(blocks, from - 1) && needs_gap(blocks, from + 1) {
-        // Two blocks that only this one kept apart.
+        removed.end = list[last + 1].range.end;
+    } else if first > 0 && list[first - 1].kind == BlockKind::Blank && last + 1 == list.len() {
+        removed.start = list[first - 1].range.start;
+    } else if first > 0 && last + 1 < list.len() && needs_gap(blocks, first - 1) && needs_gap(blocks, last + 1) {
+        // Two blocks that only these kept apart.
         filler = eol;
     }
 
@@ -66,7 +88,7 @@ pub fn move_block(text: &str, blocks: &Blocks, from: usize, before: usize, selec
         (vec![removal, insert], lead.len())
     } else {
         let at = list[before].range.start;
-        let lead = if before > 0 && needs_gap(blocks, before - 1) && before - 1 != from {
+        let lead = if before > 0 && needs_gap(blocks, before - 1) && before - 1 != last {
             eol
         } else {
             ""
@@ -76,12 +98,12 @@ pub fn move_block(text: &str, blocks: &Blocks, from: usize, before: usize, selec
         (vec![insert, removal], lead.len())
     };
     edits.sort_by_key(|edit| edit.range.start);
-    // The caret goes with the block if it was in it, and otherwise stays on its text.
+    // The caret goes with the blocks if it was in them, and otherwise stays on its text.
     let head = selection.head;
-    let selection = if moving.range.contains(&head) || head == moving.range.end {
+    let selection = if range.contains(&head) || head == range.end {
         let insert = edits.iter().find(|edit| edit.range.is_empty() && !edit.text.is_empty());
         let at = insert.map_or(0, |insert| moved(insert.range.start, &edits, Bias::Before));
-        Selection::caret(at + lead + (head - moving.range.start).min(body.len()))
+        Selection::caret(at + lead + (head - range.start).min(body.len()))
     } else {
         let edits = normalized(edits.clone(), text);
         selection_after(selection, &edits)
@@ -144,6 +166,18 @@ mod tests {
         assert_eq!(moving("::: keep\nb\n:::\n\nc\n", 0, 4), "no command");
         assert_eq!(moving("c\n\n::: page-break\n", 2, 0), "::: page-break\n\nc\n");
         assert_eq!(moving("---\na: b\n---\n\nc\n\nd\n", 4, 0), "no command");
+    }
+
+    #[test]
+    fn a_directive_moves_with_what_it_holds() {
+        let text = "a\n\n::: keep\nb\n:::\n\nc\n";
+        let blocks = Blocks::parse(text);
+        let command = move_range(text, &blocks, 2..5, 7, Selection::caret(2)).expect("a move");
+        assert_eq!(applied(text, &command.edits), "a\n\nc\n\n::: keep\nb\n:::\n");
+        let command = move_range(text, &blocks, 2..5, 0, Selection::caret(3)).expect("a move");
+        assert_eq!(applied(text, &command.edits), "::: keep\nb\n:::\n\na\n\nc\n");
+        assert_eq!(command.selection, Selection::caret(0));
+        assert!(move_range(text, &blocks, 2..5, 4, Selection::caret(0)).is_none());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use super::commands::convert::{self, BlockType, TARGETS};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::notes;
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
+use super::directives::{self, Kind};
 use super::place::{self, Rect};
 use super::placeholders::card::Completion;
 use super::rich::view::RichFloat;
@@ -53,10 +54,14 @@ enum MenuKind {
         all: Vec<Item>,
         items: Vec<Item>,
     },
+    /// What a block can become, and the regions its blocks can be wrapped in. Several selected blocks only wrap. With
+    /// no anchor it stands at the selection.
     Convert {
         block: usize,
         targets: Vec<BlockType>,
-        anchor: Bounds<Pixels>,
+        wraps: Vec<Kind>,
+        blocks: Range<usize>,
+        anchor: Option<Bounds<Pixels>>,
     },
     /// The suggestions for a misspelled word, then a row that adds it to the project's words.
     Spelling {
@@ -69,7 +74,7 @@ impl Menu {
     fn len(&self) -> usize {
         match &self.kind {
             MenuKind::Slash { items, .. } => items.len(),
-            MenuKind::Convert { targets, .. } => targets.len(),
+            MenuKind::Convert { targets, wraps, .. } => targets.len() + wraps.len(),
             MenuKind::Spelling { suggestions, .. } => suggestions.len() + 1,
         }
     }
@@ -632,14 +637,25 @@ impl EditorView {
                 self.apply_slash(start, &item.action, window, cx);
             }
             Float::Menu(Menu {
-                kind: MenuKind::Convert { block, targets, .. },
+                kind:
+                    MenuKind::Convert {
+                        block,
+                        targets,
+                        wraps,
+                        blocks,
+                        ..
+                    },
                 ..
             }) => {
-                let Some(target) = targets.get(index) else {
-                    return;
-                };
                 let text = self.session.active_buffer().text();
-                if let Some(command) = convert::convert(text, &self.blocks, block, *target, self.selection) {
+                let command = match targets.get(index) {
+                    Some(target) => convert::convert(text, &self.blocks, block, *target, self.selection),
+                    None => wraps.get(index - targets.len()).and_then(|kind| {
+                        let structure = &self.directives.structure;
+                        directives::edits::wrap(text, &self.blocks, structure, blocks, *kind, self.selection)
+                    }),
+                };
+                if let Some(command) = command {
                     self.run_command(command, window, cx);
                 }
             }
@@ -726,22 +742,59 @@ impl EditorView {
 
     // Convert menu
 
-    /// Opens the menu of what a block can become, under its gutter icon.
+    /// Opens the menu of what a block can become, under its gutter icon. When the selection holds it and other blocks,
+    /// the menu wraps them all.
     pub(super) fn open_convert(&mut self, block: usize, anchor: Bounds<Pixels>, cx: &mut Context<Self>) {
+        let blocks = self.selected_blocks().filter(|blocks| blocks.contains(&block));
+        self.open_block_menu(block, blocks, Some(anchor), cx);
+    }
+
+    /// The blocks a selection runs across, when it holds more than one.
+    pub(super) fn selected_blocks(&self) -> Option<Range<usize>> {
+        if self.selection.is_empty() || self.source {
+            return None;
+        }
+        let range = self.selection.range();
+        let first = self.blocks.index_at(range.start);
+        let last = self.blocks.index_at(range.end - 1);
+        (last > first).then_some(first..last + 1)
+    }
+
+    /// Opens the block menu: what `block` can become, or with several `blocks` only what they can be wrapped in.
+    /// Returns whether it had anything to offer.
+    pub(super) fn open_block_menu(
+        &mut self,
+        block: usize,
+        blocks: Option<Range<usize>>,
+        anchor: Option<Bounds<Pixels>>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let text = self.session.active_buffer().text();
-        let targets: Vec<BlockType> = TARGETS
-            .into_iter()
-            .filter(|target| convert::convert(text, &self.blocks, block, *target, self.selection).is_some())
-            .collect();
-        if targets.is_empty() {
-            return;
+        let targets: Vec<BlockType> = match blocks {
+            Some(_) => Vec::new(),
+            None => TARGETS
+                .into_iter()
+                .filter(|target| convert::convert(text, &self.blocks, block, *target, self.selection).is_some())
+                .collect(),
+        };
+        let blocks = blocks.unwrap_or(block..block + 1);
+        let wraps = directives::edits::wraps_offered(text, &self.blocks, &self.directives.structure, blocks.clone());
+        if targets.is_empty() && wraps.is_empty() {
+            return false;
         }
         self.float = Float::Menu(Menu {
-            kind: MenuKind::Convert { block, targets, anchor },
+            kind: MenuKind::Convert {
+                block,
+                targets,
+                wraps,
+                blocks,
+                anchor,
+            },
             selected: 0,
             scroll: ScrollHandle::new(),
         });
         cx.notify();
+        true
     }
 
     fn menu_rows(&self, menu: &Menu) -> Vec<(SharedString, Option<SharedString>, &'static str)> {
@@ -750,16 +803,20 @@ impl EditorView {
                 .iter()
                 .map(|item| (item.label.into(), item.group.map(SharedString::from), item.icon))
                 .collect(),
-            MenuKind::Convert { targets, .. } => targets
-                .iter()
-                .map(|target| {
+            MenuKind::Convert { targets, wraps, .. } => {
+                let wrap_in: SharedString = directives::wrap_in_label().into();
+                let turned = targets.iter().map(|target| {
                     (
                         type_label(*target, crate::shell::strings::language()).into(),
                         None,
                         type_icon(*target),
                     )
-                })
-                .collect(),
+                });
+                let wrapped = wraps
+                    .iter()
+                    .map(|kind| (kind.label().into(), Some(wrap_in.clone()), kind.icon()));
+                turned.chain(wrapped).collect()
+            }
             MenuKind::Spelling { suggestions, .. } => {
                 let suggested = suggestions
                     .iter()
@@ -1058,7 +1115,7 @@ impl EditorView {
             Float::Menu(menu) => {
                 let target = match &menu.kind {
                     MenuKind::Slash { .. } => caret,
-                    MenuKind::Convert { anchor, .. } => Some(*anchor),
+                    MenuKind::Convert { anchor, .. } => anchor.or_else(|| Self::selection_box(selection)),
                     MenuKind::Spelling { .. } => Self::selection_box(selection),
                 };
                 let Some(target) = target else {

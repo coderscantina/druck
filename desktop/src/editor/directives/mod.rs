@@ -2,14 +2,15 @@
 //!
 //! `columns` sets its text in two balanced columns inside the text column, `full-width` across both, and `page-break`
 //! and the parts of a book as a gap between two sheet edges. `keep`, `bottom`, and the rest show their text as it is.
-//! Fence lines take no room at rest. The caret on one opens it as source, lights its bracket's name, and shows the
-//! directive's options under the name, which Tab gives the keys and Escape takes them back from.
+//! Fence lines take no room and the caret never stands on them. A region is changed as a block is: [`region`] selects
+//! it by its grip or name, opens its menu, and moves, copies, and deletes it whole.
 //!
 //! [`structure`] reads which directives the engine accepts, [`balance`] parts a run between two columns, [`edits`] is
-//! what the options write, and [`view`] draws the brackets, the options, and the slash menu's ghost.
+//! what a region's menu and keys write, and [`view`] draws the brackets, the grip, the menu, and the slash menu's ghost.
 
 mod balance;
 pub(super) mod edits;
+mod region;
 mod strings;
 pub(super) mod structure;
 mod view;
@@ -32,8 +33,6 @@ use crate::tokens;
 actions!(
     directives,
     [
-        /// Gives the keys to the options of the directive whose fence line holds the caret.
-        OptionsFocus,
         OptionsUp,
         OptionsDown,
         OptionsLeft,
@@ -41,26 +40,60 @@ actions!(
         OptionsAccept,
         /// Steps the chosen value of the ghost's table options, or acts as [`OptionsAccept`] elsewhere.
         OptionsToggle,
-        /// Gives the keys back to the line, or to the slash menu.
+        /// Closes the region's menu, or gives the ghost's keys back to the slash menu.
         OptionsBack,
         OptionsUnwrap,
         /// Sets the part of two columns at the caret across both.
         FullWidthFromCaret,
         /// Gives the keys to the options of the slash menu's ghost.
         GhostOptions,
+        /// Moves the block at the caret, or a table or figure whole, a step up or down: across a region's edge counts
+        /// as a step.
+        MoveBlockUp,
+        MoveBlockDown,
+        /// With a region selected: selects the region around it, or gives the keys back to the text.
+        RegionOut,
+        /// Puts the caret at the start of the selected region's text.
+        RegionEnter,
+        /// Opens the selected region's menu.
+        RegionMenu,
+        RegionUp,
+        RegionDown,
+        RegionDuplicate,
+        RegionDelete,
+        RegionCopy,
+        RegionCut,
     ]
 );
 
-/// Set while the caret stands on a fence line with options.
-pub(super) const FENCE_CONTEXT: &str = "DirectiveFence";
-/// Set while a directive's options have the keys. Bound after the menu's keys, so these win.
+/// Set while a region is selected and its menu is closed.
+pub(super) const REGION_CONTEXT: &str = "DirectiveRegion";
+/// Set while a region's menu or the ghost's options have the keys. Bound after the menu's keys, so these win.
 pub(super) const OPTIONS_CONTEXT: &str = "DirectiveOptions";
 
 pub fn bind_keys(cx: &mut App) {
+    let text = Some(super::keys::CONTEXT);
     cx.bind_keys([
-        KeyBinding::new("tab", OptionsFocus, Some(FENCE_CONTEXT)),
-        KeyBinding::new("cmd-shift-enter", FullWidthFromCaret, Some(super::keys::CONTEXT)),
+        KeyBinding::new("cmd-shift-enter", FullWidthFromCaret, text),
+        KeyBinding::new("alt-shift-up", MoveBlockUp, text),
+        KeyBinding::new("alt-shift-down", MoveBlockDown, text),
         KeyBinding::new("tab", GhostOptions, Some(super::keys::MENU_CONTEXT)),
+    ]);
+    // After the text's, so a selected region takes these keys.
+    let region = Some(REGION_CONTEXT);
+    cx.bind_keys([
+        KeyBinding::new("escape", RegionOut, region),
+        KeyBinding::new("enter", RegionEnter, region),
+        KeyBinding::new("tab", RegionMenu, region),
+        KeyBinding::new("alt-up", RegionUp, region),
+        KeyBinding::new("alt-down", RegionDown, region),
+        KeyBinding::new("alt-shift-up", RegionUp, region),
+        KeyBinding::new("alt-shift-down", RegionDown, region),
+        KeyBinding::new("cmd-d", RegionDuplicate, region),
+        KeyBinding::new("backspace", RegionDelete, region),
+        KeyBinding::new("delete", RegionDelete, region),
+        KeyBinding::new("cmd-c", RegionCopy, region),
+        KeyBinding::new("cmd-x", RegionCut, region),
     ]);
     let context = Some(OPTIONS_CONTEXT);
     cx.bind_keys([
@@ -78,6 +111,16 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 impl Kind {
+    /// Its icon in a menu.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::FullWidth => "icons/directive-full-width.svg",
+            Self::Keep => "icons/directive-keep.svg",
+            Self::Bottom => "icons/directive-bottom.svg",
+            _ => "icons/directive-columns.svg",
+        }
+    }
+
     /// The bracket's name.
     pub fn label(self) -> &'static str {
         crate::t!(match self {
@@ -95,28 +138,37 @@ impl Kind {
             Self::BackMatter => Key::BackMatter,
         })
     }
-
-    /// The kind's word in the options' segmented choice.
-    fn choice(self) -> &'static str {
-        crate::t!(match self {
-            Self::Columns => Key::KindColumns,
-            Self::FullWidth => Key::KindFullWidth,
-            Self::Bottom => Key::KindBottom,
-            _ => Key::KindKeep,
-        })
-    }
 }
 
-/// The options under a fence line's name, while the caret is on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Options {
-    /// The fence line's block. The options are its region's.
-    pub block: usize,
-    /// They have the keys, with this row chosen.
-    pub keys: bool,
+/// The group name of the block menu's rows that wrap blocks in a region.
+pub(super) fn wrap_in_label() -> &'static str {
+    crate::t!(Key::WrapIn)
+}
+
+/// A selected region's menu, which has the keys while it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct Menu {
     pub row: usize,
-    /// The kind chosen in the kind row, as an index into what it offers.
-    pub kind: usize,
+    /// The kinds of Turn into, open beside its row, with this one chosen.
+    pub sub: Option<usize>,
+}
+
+/// Where a region stood in the last frame, for the pointer.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Span {
+    pub region: usize,
+    pub top: Pixels,
+    pub bottom: Pixels,
+    pub depth: usize,
+}
+
+/// Where a dragged block would land when it crosses a region's edge: into `region`, or out of it, with the drop line
+/// starting at `x`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Edge {
+    pub region: usize,
+    pub into: bool,
+    pub x: Pixels,
 }
 
 /// The table options of the slash menu's ghost, while a list table is chosen.
@@ -158,12 +210,20 @@ pub(super) struct Directives {
     column_gap: Pixels,
     /// How far right of the text's left edge each block on screen in a second column starts.
     shifted: HashMap<usize, Pixels>,
-    pub options: Option<Options>,
+    /// The selected region, by where its opening line starts, so it survives the directives being read again.
+    pub selected: Option<usize>,
+    /// Where the caret stood when its region was selected by the keys, for Full width from here.
+    origin: Option<usize>,
+    pub menu: Option<Menu>,
+    /// The region under the pointer, which shows its grip.
+    pub hover: Option<usize>,
     pub ghost_table: Option<GhostTable>,
-    /// Where the lit name stood in the last frame, which the options stand under.
+    /// Where the menu's region's grip stood in the last frame, which the menu stands under.
     anchor: Option<Bounds<Pixels>>,
-    /// Each name on screen in the last frame, with the end of its opening line, where a click puts the caret.
+    /// Each name and grip on screen in the last frame, with its region, where a click selects it.
     names: Vec<(Bounds<Pixels>, usize)>,
+    grips: Vec<(Bounds<Pixels>, usize)>,
+    spans: Vec<Span>,
     /// The ghost's table as last shaped, for the options and width it was shaped with.
     ghost_grid: Option<(TableOptions, Pixels, Rc<Whole>)>,
 }
@@ -202,10 +262,10 @@ impl EditorView {
         self.directives.runs = structure.column_runs(&self.blocks);
         self.directives.structure = structure;
         self.directives.shifted.clear();
-        if let Some(options) = self.directives.options
-            && self.directives.structure.fence(options.block).is_none()
-        {
-            self.directives.options = None;
+        self.directives.hover = None;
+        if self.selected_region().is_none() {
+            self.directives.selected = None;
+            self.directives.menu = None;
         }
     }
 
@@ -259,10 +319,9 @@ impl EditorView {
         self.reveal_offset().is_some_and(|at| self.blocks.index_at(at) == index)
     }
 
-    /// Whether block `index` is a fence line of a directive with text, which takes no room while the caret is away.
+    /// Whether block `index` is a fence line of a directive with text, which takes no room and no caret in Write.
     pub(super) fn fence_at_rest(&self, index: usize) -> bool {
-        self.drawn_fence(index)
-            .is_some_and(|region| region.kind.has_body() && !self.caret_on(index))
+        self.drawn_fence(index).is_some_and(|region| region.kind.has_body())
     }
 
     /// Whether block `index` is a line where two columns start or end, while they show.
@@ -412,56 +471,8 @@ impl EditorView {
             .map(|(index, _)| *index)
     }
 
-    /// The region whose fence line holds the caret, when it has options to show.
-    pub(super) fn fence_under_caret(&self) -> Option<usize> {
-        if self.source || !self.selection.is_empty() {
-            return None;
-        }
-        let block = self.blocks.index_at(self.selection.head);
-        let region = self.directives.structure.fence(block)?;
-        (self.directives.structure.regions[region].kind != Kind::Table).then_some(region)
-    }
-
-    /// Follows the caret: the options stay while it is on the same fence line, and go when it leaves.
-    pub(super) fn follow_fence(&mut self) {
-        let block = self.blocks.index_at(self.selection.head);
-        let on_fence = self.fence_under_caret().is_some();
-        match self.directives.options {
-            Some(options) if on_fence && options.block == block => {}
-            _ if on_fence && self.selection.is_empty() => {
-                self.directives.options = Some(Options {
-                    block,
-                    keys: false,
-                    row: 0,
-                    kind: 0,
-                });
-            }
-            _ => self.directives.options = None,
-        }
-    }
-
-    /// Puts the caret on the opening line of the directive whose name is at `position`. Returns whether there was one.
-    pub(super) fn click_name(
-        &mut self,
-        position: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(&(_, at)) = self
-            .directives
-            .names
-            .iter()
-            .find(|(bounds, _)| bounds.contains(&position))
-        else {
-            return false;
-        };
-        self.set_selection(crate::source::Selection::caret(at), false, window, cx);
-        true
-    }
-
-    /// Whether the options have the keys, so the text's own keys stand aside.
+    /// Whether a region's menu or the ghost's options have the keys, so the text's own keys stand aside.
     pub(super) fn options_have_keys(&self) -> bool {
-        self.directives.options.is_some_and(|options| options.keys)
-            || self.directives.ghost_table.as_ref().is_some_and(|ghost| ghost.keys)
+        self.directives.menu.is_some() || self.directives.ghost_table.as_ref().is_some_and(|ghost| ghost.keys)
     }
 }
