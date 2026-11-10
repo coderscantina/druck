@@ -427,7 +427,7 @@ fn paint_block_background(block: &FrameBlock, frame: &Frame, window: &mut Window
         for (chip, look) in &line.chips {
             let bounds = Bounds::new(point(block.left + chip.origin.x, block.top + chip.origin.y), chip.size);
             let color = match look {
-                ChipLook::Mark | ChipLook::NoteLabel | ChipLook::Ghost => continue,
+                ChipLook::Mark | ChipLook::NoteLabel | ChipLook::Ghost | ChipLook::Index => continue,
                 ChipLook::Value | ChipLook::Note if dotted => {
                     paint_dots(bounds, frame.faint, window);
                     continue;

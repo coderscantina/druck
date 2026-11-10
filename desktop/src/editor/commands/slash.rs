@@ -36,6 +36,8 @@ pub enum Action {
     OpenImage,
     /// A new section from the template with this slug. The session carries this one out.
     Section(&'static str),
+    /// A `{todo: ...}` note to the author at the caret.
+    Todo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +49,40 @@ pub enum Standalone {
     Bibliography,
     /// A `::: table` of rows from a list.
     ListTable,
+    /// A part of a book by its directive's name, such as `front-matter`.
+    Part(&'static str),
+    /// A comment, which the pages leave out.
+    Comment,
+}
+
+/// The parts of a book, in the order the engine wants them.
+pub const PARTS: [&str; 3] = ["front-matter", "main-matter", "back-matter"];
+
+/// The parts a text starts, each with where its line begins.
+pub fn parts_in(text: &str) -> Vec<(&'static str, usize)> {
+    let mut found = Vec::new();
+    let mut start = 0;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with(":::") {
+            let name = line.trim_start_matches(':').trim();
+            found.extend(PARTS.iter().find(|part| **part == name).map(|part| (*part, start)));
+        }
+        start += line.len();
+    }
+    found
+}
+
+/// The parts that may start at the caret. `placed` is every part the book has, with whether it stands before the
+/// caret: each part appears once, and they keep their order.
+pub fn parts_offered(placed: &[(&str, bool)]) -> Vec<&'static str> {
+    let order = |name: &str| PARTS.iter().position(|part| *part == name);
+    (PARTS.iter().enumerate())
+        .filter(|(at, _)| {
+            (placed.iter())
+                .all(|(other, before)| order(other).is_none_or(|other| other != *at && (other < *at) == *before))
+        })
+        .map(|(_, name)| *name)
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +113,8 @@ pub struct Context {
     pub block: Option<BlockKind>,
     /// The theme the book's manifest names, which decides the new sections offered.
     pub theme: Option<String>,
+    /// The parts of a book that may start here, see [`parts_offered`].
+    pub parts: Vec<&'static str>,
 }
 
 /// Where a slash opens the menu: in running text, at the start of a word.
@@ -248,6 +286,24 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             Action::OpenReference,
         ));
     }
+    if open.is_empty() {
+        for part in &context.parts {
+            let key = match *part {
+                "front-matter" => Key::PartFront,
+                "main-matter" => Key::PartMain,
+                _ => Key::PartBack,
+            };
+            items.push(label(key, "icons/book.svg", Action::Insert(Standalone::Part(part))));
+        }
+    }
+    if !in_heading {
+        items.push(label(Key::Todo, "icons/pencil.svg", Action::Todo));
+    }
+    items.push(label(
+        Key::Comment,
+        "icons/block-comment.svg",
+        Action::Insert(Standalone::Comment),
+    ));
     for template in templates_for(context.theme.as_deref()) {
         items.push(Item {
             label: template.name.text(language),
@@ -387,6 +443,14 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
             let end = text.len();
             (text, end..end)
         }
+        Action::Insert(Standalone::Part(name)) => {
+            let text = format!("::: {name}");
+            let end = text.len();
+            (text, end..end)
+        }
+        Action::Insert(Standalone::Comment) => {
+            with_placeholder("<!-- ".to_owned(), Key::PlaceholderComment.text(language), " -->")
+        }
         Action::Insert(Standalone::ListTable) => list_table("::: table", eol, language),
         Action::Insert(Standalone::Table) => {
             let (column, cell) = (
@@ -403,7 +467,8 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
         | Action::OpenCitation
         | Action::OpenReference
         | Action::OpenImage
-        | Action::Section(_) => return None,
+        | Action::Section(_)
+        | Action::Todo => return None,
     })
 }
 
@@ -429,6 +494,20 @@ pub fn apply(text: &str, blocks: &Blocks, slash: Range<usize>, action: &Action, 
     let body = body.start..body.end.max(slash.end);
     if let Action::Section(_) = action {
         return finish(text, vec![Edit::new(slash.clone(), "")], Selection::caret(slash.start));
+    }
+    if let Action::Todo = action {
+        // It stands in the sentence, in place of the typed slash, with its words selected to type over.
+        let words = Key::PlaceholderTodo.text(language);
+        let start = slash.start + "{todo: ".len();
+        let selection = Selection {
+            anchor: start,
+            head: start + words.len(),
+        };
+        return finish(
+            text,
+            vec![Edit::new(slash.clone(), format!("{{todo: {words}}}"))],
+            selection,
+        );
     }
     let line = line_of(text, &body, slash.start);
     let others_on_line = wraps_block(text, blocks, slash.clone());
@@ -605,6 +684,8 @@ mod tests {
             (Action::Wrap("keep"), "::: keep\nText\n:::\n", "Text"),
             (Action::Insert(Standalone::SceneBreak), "***\n", ""),
             (Action::Insert(Standalone::PageBreak), "::: page-break\n", ""),
+            (Action::Insert(Standalone::Part("back-matter")), "::: back-matter\n", ""),
+            (Action::Insert(Standalone::Comment), "<!-- Comment -->\n", "Comment"),
             (Action::Insert(Standalone::Toc), "::: toc\n", ""),
             (
                 Action::Insert(Standalone::Table),
@@ -697,6 +778,30 @@ mod tests {
             ..Context::default()
         };
         assert!(!labels(&note).contains(&"Footnote"));
+    }
+
+    #[test]
+    fn a_part_is_offered_once_and_in_its_order() {
+        assert_eq!(parts_offered(&[]), PARTS);
+        assert_eq!(parts_offered(&[("front-matter", true)]), ["main-matter", "back-matter"]);
+        assert_eq!(parts_offered(&[("main-matter", true)]), ["back-matter"]);
+        assert_eq!(parts_offered(&[("main-matter", false)]), ["front-matter"]);
+        assert!(parts_offered(&[("front-matter", true), ("back-matter", true)]).is_empty());
+        let context = Context {
+            parts: vec!["back-matter"],
+            ..Context::default()
+        };
+        let labels: Vec<_> = (items(&context, Language::English).into_iter())
+            .map(|item| item.label)
+            .collect();
+        assert!(labels.contains(&"Back matter") && !labels.contains(&"Front matter"));
+    }
+
+    #[test]
+    fn a_todo_stands_in_the_sentence_with_its_words_selected() {
+        let (result, chosen) = choose("Text /to| more\n", &Action::Todo);
+        assert_eq!(result, "Text {todo: to do} more\n");
+        assert_eq!(chosen, "to do");
     }
 
     #[test]

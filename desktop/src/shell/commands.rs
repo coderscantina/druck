@@ -7,10 +7,10 @@ use super::menus::*;
 use super::text::Key;
 use crate::app::{NewBook, Open, Quit};
 use crate::editor::{
-    Copy, Cut, EditRich, FullWidthFromCaret, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable,
-    OpenLink, Paste, Redo, Save, SelectAll, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers,
-    ToggleQuote, ToggleSmallCaps, ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
-    Undo,
+    CodeLanguage, Copy, Cut, EditRich, FullWidthFromCaret, InsertCitation, InsertFootnote, InsertImage,
+    InsertReference, InsertTable, LeaveCode, MarkIndex, OpenLink, Paste, Redo, Save, SelectAll, SetStyle,
+    ShowBlockMenu, ShowSpelling, ToggleBold, ToggleBullets, ToggleItalic, ToggleNumbers, ToggleQuote, ToggleSmallCaps,
+    ToggleSource, ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline, Undo,
 };
 use crate::material::{JumpToMaterial, ShowLibrary, ToggleMaterial};
 use crate::persist::ShowKeptCopies;
@@ -99,6 +99,11 @@ pub fn all() -> Vec<Command> {
         command(Key::InsertReference, Write, InsertReference),
         command(Key::InsertImage, Write, InsertImage),
         command(Key::InsertTable, Write, InsertTable),
+        command(Key::IndexMark, Write, MarkIndex),
+        command(Key::BlockMenu, Write, ShowBlockMenu),
+        command(Key::BlockStyle, Write, SetStyle),
+        command(Key::CodeLanguage, Write, CodeLanguage),
+        command(Key::LeaveCode, Write, LeaveCode),
         command(Key::FullWidthFromCaret, Write, FullWidthFromCaret),
         command(Key::EditAtCaret, Write, EditRich),
         command(Key::NextMisspelled, Write, ShowSpelling),

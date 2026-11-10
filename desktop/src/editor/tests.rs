@@ -34,6 +34,22 @@ fn a_chapter_opens_where_the_session_put_its_caret() {
 }
 
 #[test]
+fn a_chapter_opens_after_its_front_matter_unless_that_is_all_it_holds() {
+    let view = ChapterView {
+        selection: Selection::caret(0),
+        scroll: None,
+    };
+    let text = "---\ntitle: A\n---\n\nWords.\n";
+    let blocks = Blocks::parse(text);
+    let words = text.find("Words").unwrap();
+    assert_eq!(opening_selection(text, &blocks, view, false), Selection::caret(words));
+    assert_eq!(opening_selection(text, &blocks, view, true), Selection::caret(0));
+    let alone = "---\ntitle: A\n---\n";
+    let blocks = Blocks::parse(alone);
+    assert_eq!(opening_selection(alone, &blocks, view, false), Selection::caret(0));
+}
+
+#[test]
 fn a_chapter_opens_with_the_caret_in_its_title_text() {
     let view = ChapterView {
         selection: Selection::caret(0),

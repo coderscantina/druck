@@ -10,7 +10,7 @@ use gpui::{
 
 use super::display::{Chip, ChipLook, DisplayLine, RunStyle};
 use super::rich::view::shapes::Whole;
-use crate::preview::job::{BookType, Face};
+use crate::preview::job::{BookType, CustomFace, Face};
 use crate::source::BlockKind;
 use crate::tokens::{self, Tokens};
 
@@ -212,8 +212,19 @@ impl GalleyStyle {
         }
     }
 
+    /// The theme's custom styles, sorted by name.
+    pub fn custom_styles(&self) -> &[CustomFace] {
+        &self.book.custom
+    }
+
     pub(super) fn line_style(&self, kind: BlockKind) -> LineStyle {
-        let face = self.face(kind);
+        self.line_style_of(kind, None)
+    }
+
+    /// The style of a block's lines: its custom style's when it names one the theme has, else its kind's.
+    pub(super) fn line_style_of(&self, kind: BlockKind, custom: Option<&str>) -> LineStyle {
+        let named = custom.and_then(|name| self.book.custom.iter().find(|custom| custom.name == name));
+        let face = named.map_or_else(|| self.face(kind), |custom| &custom.face);
         let themed = LineStyle {
             font: font_of(face),
             size: px(face.size * self.scale()),
@@ -258,7 +269,7 @@ impl GalleyStyle {
                 ChipLook::Error => self.error,
                 ChipLook::Open => self.accent,
                 ChipLook::Note => self.quiet,
-                ChipLook::Ghost => self.faint,
+                ChipLook::Ghost | ChipLook::Index => self.faint,
                 ChipLook::Removed | ChipLook::Value | ChipLook::NoteLabel => base.color,
             }
         } else if style.quiet || style.note {
@@ -428,6 +439,8 @@ pub struct BlockLayout {
     pub collapsed: bool,
     /// The chips it was shaped with.
     pub chips: Vec<Chip>,
+    /// The custom style it was shaped in.
+    pub custom: Option<String>,
     /// A table or figure drawn in place of its lines.
     pub whole: Option<Box<Whole>>,
     /// Shaped in the faded colour of a paragraph out of focus.
@@ -467,6 +480,8 @@ pub struct ShapeRequest<'a> {
     pub width: Pixels,
     pub style: &'a GalleyStyle,
     pub chips: Vec<Chip>,
+    /// The custom style the block names, shown as its effect.
+    pub custom: Option<String>,
     pub whole: Option<Box<Whole>>,
     pub dim: bool,
     /// How tall a separator is.
@@ -491,6 +506,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         width,
         style,
         chips,
+        custom,
         whole,
         dim,
         gap,
@@ -501,7 +517,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
     let base = if source {
         style.source_line_style(kind)
     } else {
-        style.line_style(kind)
+        style.line_style_of(kind, custom.as_deref())
     };
     let line_height = base.size * base.leading;
     let hang = style.body_size * 1.25;
@@ -586,6 +602,7 @@ pub fn shape_block(request: ShapeRequest<'_>, window: &Window) -> BlockLayout {
         width,
         collapsed,
         chips,
+        custom,
         whole,
         dim,
         gap,

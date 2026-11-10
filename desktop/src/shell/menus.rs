@@ -8,8 +8,8 @@ use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 use super::text::Key;
 use crate::app::{NewBook, Open, Quit};
 use crate::editor::{
-    Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, Paste, Redo, Save, SelectAll,
-    ShowSpelling, ToggleSource, Undo,
+    Copy, Cut, InsertCitation, InsertFootnote, InsertImage, InsertReference, InsertTable, MarkIndex, Paste, Redo, Save,
+    SelectAll, ShowSpelling, ToggleSource, Undo,
 };
 use crate::material::{JumpToMaterial, ShowLibrary, ToggleMaterial};
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
@@ -248,6 +248,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::InsertReference, InsertReference),
             item(Key::InsertImage, InsertImage),
             item(Key::InsertTable, InsertTable),
+            item(Key::IndexMark, MarkIndex),
         ]),
         Menu::new(crate::t!(Key::MenuWindow))
             .items([item(Key::Minimize, MinimizeWindow), item(Key::WindowZoom, ZoomWindow)]),

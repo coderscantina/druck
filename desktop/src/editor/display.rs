@@ -48,6 +48,8 @@ pub enum ChipLook {
     NoteLabel,
     /// What completing a placeholder would add after the caret, which stands for no source.
     Ghost,
+    /// The quiet sign of an index mark.
+    Index,
 }
 
 /// A run of a block's source that shows as other text. `range` is relative to the block, on one line.
@@ -250,7 +252,7 @@ fn span_style(kind: SpanKind, style: &mut RunStyle) {
         SpanKind::Superscript => style.superscript = true,
         SpanKind::Subscript => style.subscript = true,
         SpanKind::SmallCaps => style.small_caps = true,
-        SpanKind::Placeholder => {}
+        SpanKind::Placeholder | SpanKind::Index => {}
         SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::CrossReference | SpanKind::Comment => {
             style.quiet = true;
         }

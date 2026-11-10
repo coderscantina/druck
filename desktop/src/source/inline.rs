@@ -4,13 +4,16 @@
 //! alone. Footnote references and citations are recognised here: the first need a definition the block does not have,
 //! and the second come from the engine's own citation scanner. The marks the engine pairs from the source, such as
 //! `^x^` and `[x]{.underline}`, use the same functions as the engine, [`druck::markdown::marks`].
+//!
+//! A reference link, `[text][label]` or `[text][]`, is a link here whatever the rest of the file defines: its
+//! definition is another block, which this layer does not see. A lone `[label]` stays text.
 
 use std::ops::Range;
 
 use druck::editor::comments;
 use druck::editor::marks;
 use druck::editor::syntax::{self, Segment};
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 use super::blocks::BlockKind;
 
@@ -40,6 +43,9 @@ pub enum SpanKind {
     Todo,
     /// `{name}`, read by the engine's rule for placeholder names. Whether the name is known is the view's question.
     Placeholder,
+    /// An index mark. `{^term}` is one span with no markers, and `[text]{^term}` is two: this one for the braces, and
+    /// one whose markers are the brackets around the text, which stays in the sentence.
+    Index,
 }
 
 /// One inline construct: `range` holds all of it, `open` and `close` its markers at either end. A span whose markers
@@ -152,7 +158,12 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
     let mut open: Vec<(SpanKind, Range<usize>, usize)> = Vec::new();
     let mut last_inner_end = 0;
     let mut in_image = 0;
-    for (event, range) in Parser::new_ext(text, OPTIONS).into_offset_iter() {
+    // The definition of a reference link stands in another block, so the parser is told that one exists.
+    let defined = |link: BrokenLink<'_>| {
+        matches!(link.link_type, LinkType::Reference | LinkType::Collapsed)
+            .then(|| (CowStr::Borrowed(""), CowStr::Borrowed("")))
+    };
+    for (event, range) in Parser::new_with_broken_link_callback(text, OPTIONS, Some(defined)).into_offset_iter() {
         match event {
             Event::Start(Tag::Image { .. }) => in_image += 1,
             Event::End(TagEnd::Image) => in_image -= 1,
@@ -161,8 +172,12 @@ fn parser_spans(text: &str) -> Vec<InlineSpan> {
             Event::Start(Tag::Strong) => open.push((SpanKind::Strong, range, 2)),
             Event::Start(Tag::Strikethrough) => open.push((SpanKind::Strike, range, 2)),
             Event::Start(Tag::Subscript) => open.push((SpanKind::Subscript, range, 1)),
-            Event::Start(Tag::Link { .. }) => {
-                open.push((SpanKind::Link, range, 1));
+            Event::Start(Tag::Link { link_type, .. }) => {
+                // The parser ends a collapsed reference, `[text][]`, before its empty brackets.
+                let collapsed = matches!(link_type, LinkType::Collapsed | LinkType::CollapsedUnknown)
+                    && text[range.end..].starts_with("[]");
+                let end = range.end + if collapsed { "[]".len() } else { 0 };
+                open.push((SpanKind::Link, range.start..end, 1));
                 last_inner_end = 0;
             }
             Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Subscript) => {
@@ -339,6 +354,17 @@ fn source_marks(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &
                     // Marks inside the brackets are still found.
                     at + 1
                 }),
+            b'{' if text[at + 1..].starts_with('^') && !marks::escaped(text, at) => {
+                index_close(text, at, gap.end).inspect(|&end| {
+                    // The text in brackets before it is the term's, when no other mark took those brackets.
+                    let bracketed = index_text(text, gap.start, at)
+                        .filter(|open| !spans.iter().any(|span| span.range.start == *open));
+                    if let Some(open) = bracketed {
+                        push_span(spans, SpanKind::Index, open, open + 1, at - 1, at);
+                    }
+                    push_span(spans, SpanKind::Index, at, at, end, end);
+                })
+            }
             b'{' if text[at + 1..].starts_with("todo:") && !marks::escaped(text, at) => marks::todo_close(text, at)
                 .filter(|close| *close < gap.end)
                 .map(|close| {
@@ -356,6 +382,21 @@ fn source_marks(text: &str, gap: Range<usize>, paired: &[Range<usize>], spans: &
         };
         at = step.unwrap_or(at + 1);
     }
+}
+
+/// Where the index mark whose `{` is at `at` ends, by the engine's rule: at the next `}`, with no blank line before it.
+fn index_close(text: &str, at: usize, limit: usize) -> Option<usize> {
+    let spec = at + "{^".len();
+    let close = text[spec..limit].find('}')?;
+    (!text[spec..spec + close].contains("\n\n")).then_some(spec + close + 1)
+}
+
+/// The `[` of the text an index mark at `brace` takes its term from: `[text]` directly before it, with no bracket
+/// inside.
+fn index_text(text: &str, from: usize, brace: usize) -> Option<usize> {
+    let inner = text[from..brace].strip_suffix(']')?;
+    let open = from + inner.rfind('[')?;
+    (!text[open + 1..brace - 1].contains(']') && !marks::escaped(text, open)).then_some(open)
 }
 
 /// Adds a span from `start` to `end`, whose markers are `start..open_end` and `close_start..end`.
@@ -558,9 +599,35 @@ mod tests {
     }
 
     #[test]
-    fn index_marks_footnotes_and_other_attributes_are_not_marks() {
-        assert_eq!(spans("{^a} and {^b} [x]{.other} [^n] ^open ~~ x ~~").len(), 1);
+    fn footnotes_and_other_attributes_are_not_marks() {
+        assert_eq!(spans("[x]{.other} [^n] ^open ~~ x ~~").len(), 1);
         assert!(matches!(spans("a [^n] b")[0].0, SpanKind::FootnoteReference));
+    }
+
+    #[test]
+    fn finds_index_marks_and_the_text_a_mark_takes_its_term_from() {
+        use SpanKind::*;
+        assert_eq!(
+            spans("a{^b!c} and [Knuth]{^Knuth, Donald} \\{^no} `{^code}`"),
+            [
+                (Index, "{^b!c}", "", ""),
+                (Index, "[Knuth]", "[", "]"),
+                (Index, "{^Knuth, Donald}", "", ""),
+                (Code, "`{^code}`", "`", "`"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_reference_link_is_a_link_and_a_lone_label_is_text() {
+        assert_eq!(
+            spans("see [the *docs*][d] and [d][] but [d]")[..2],
+            [
+                (SpanKind::Link, "[the *docs*][d]", "[", "][d]"),
+                (SpanKind::Emphasis, "*docs*", "*", "*"),
+            ]
+        );
+        assert_eq!(spans("[d][] but [d]"), [(SpanKind::Link, "[d][]", "[", "][]")]);
     }
 
     #[test]

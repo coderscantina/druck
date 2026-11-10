@@ -327,6 +327,8 @@ pub const COMMENT_MARKER_INSET: Pixels = px(20.);
 pub const GUTTER_ICON_INSET: Pixels = px(14.);
 /// The cards over the text: a figure's, a citation's, and a footnote's, and the citation card's rows.
 pub const FIGURE_CARD_WIDTH: Pixels = px(360.);
+/// The card of an index mark, two short fields.
+pub const INDEX_CARD_WIDTH: Pixels = px(280.);
 pub const PICKER_CARD_WIDTH: Pixels = px(400.);
 pub const PICKER_ROW_HEIGHT: Pixels = px(40.);
 pub const NOTE_CARD_WIDTH: Pixels = px(400.);
@@ -335,9 +337,6 @@ pub const IMAGE_THUMB: Pixels = px(44.);
 pub const CELL_X: Pixels = px(6.);
 pub const CELL_Y: Pixels = px(4.);
 pub const CAPTION_GAP: Pixels = px(6.);
-pub const GRID_FIELD_MIN: Pixels = px(160.);
-pub const GRID_LABEL_WIDTH: Pixels = px(120.);
-pub const GRID_ROW_Y: Pixels = px(6.);
 
 /// The keyboard's focus ring.
 pub const FOCUS_RING: Pixels = px(2.);
@@ -370,8 +369,6 @@ pub const SCROLLBAR_INSET: Pixels = px(2.);
 pub const TABLE_RULE: Pixels = px(0.5);
 pub const CELL_MIN_WIDTH: Pixels = px(16.);
 pub const FIGURE_MISSING_HEIGHT: Pixels = px(48.);
-/// What the editing grid keeps free above the window's foot.
-pub const GRID_MIN_ROOM: Pixels = px(120.);
 /// How strongly the accent tints a selection, and a prompt's.
 pub const SELECTION_TINT: f32 = 0.25;
 /// How strongly the accent tints a find or search match that is not the selection.
@@ -602,6 +599,7 @@ pub fn stand_in_type() -> BookType {
         measure: 330.,
         column_gap: 16.,
         chapter_number: None,
+        custom: Vec::new(),
         files: Vec::new(),
         body,
     }

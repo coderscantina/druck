@@ -59,6 +59,50 @@ pub struct FigureShape {
     height: Pixels,
 }
 
+/// A place in a table that takes the caret: a cell by its row and its place in the row, or the caption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Cell(usize, usize),
+    Caption,
+}
+
+impl GridShape {
+    /// Where a place stands, from the table's top left. A table without a caption has no place for one.
+    pub fn bounds_of(&self, place: Place) -> Option<Bounds<Pixels>> {
+        match place {
+            Place::Caption => {
+                let caption = self.caption.as_ref()?;
+                Some(Bounds::new(point(px(0.), self.space), size(self.width, caption.height)))
+            }
+            Place::Cell(row, cell) => {
+                let found = self.rows.get(row)?;
+                let left = found.cells.get(cell)?.x;
+                let right = found.cells.get(cell + 1).map_or(self.width, |next| next.x);
+                Some(Bounds::new(point(left, found.y), size(right - left, found.height)))
+            }
+        }
+    }
+
+    /// The place under a point, from the table's top left.
+    pub fn place_at(&self, at: Point<Pixels>) -> Option<Place> {
+        if self
+            .bounds_of(Place::Caption)
+            .is_some_and(|caption| at.y < caption.bottom())
+        {
+            return Some(Place::Caption);
+        }
+        let row = (self.rows.iter().rposition(|row| row.y <= at.y)).unwrap_or(0);
+        let cell = self
+            .rows
+            .get(row)?
+            .cells
+            .iter()
+            .rposition(|cell| cell.x <= at.x)
+            .unwrap_or(0);
+        Some(Place::Cell(row, cell))
+    }
+}
+
 /// A table or a figure, drawn in place of its source lines.
 #[allow(clippy::large_enum_variant, reason = "a block's layout holds it boxed")]
 pub enum Whole {
@@ -215,6 +259,7 @@ impl EditorView {
                 width,
                 style: &self.style,
                 chips,
+                custom: None,
                 whole: None,
                 dim,
                 gap: px(0.),

@@ -13,13 +13,16 @@ use gpui::{
 
 use super::commands::Command;
 use super::commands::convert::{self, BlockType, TARGETS};
+use super::commands::links::{self, Reference};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::notes;
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
 use super::directives::{self, Kind};
+use super::picks::{Extra, Pick, Row};
 use super::place::{self, Rect};
 use super::placeholders::card::Completion;
 use super::rich::view::RichFloat;
+use super::rich::view::shapes::Place;
 use super::strings::Key;
 use super::{EditorView, MenuAccept, MenuComplete, MenuDown, MenuUp};
 use crate::a11y::Control as _;
@@ -41,6 +44,23 @@ pub(super) enum Float {
     Complete(Completion),
 }
 
+impl Float {
+    /// The cell a table's menu was opened from, while that menu is what floats.
+    pub(super) fn table_place(&self) -> Option<(usize, Place)> {
+        let Self::Menu(Menu {
+            kind: MenuKind::Pick { rows, .. },
+            ..
+        }) = self
+        else {
+            return None;
+        };
+        match rows.first()?.pick {
+            Pick::Table { start, row, cell, .. } => Some((start, Place::Cell(row, cell))),
+            _ => None,
+        }
+    }
+}
+
 pub(super) struct Menu {
     kind: MenuKind,
     selected: usize,
@@ -60,7 +80,14 @@ enum MenuKind {
         block: usize,
         targets: Vec<BlockType>,
         wraps: Vec<Kind>,
+        /// The rows that open a list: the blocks' style and a code block's language.
+        extras: Vec<Extra>,
         blocks: Range<usize>,
+        anchor: Option<Bounds<Pixels>>,
+    },
+    /// A list that sets one thing about a block. See [`super::picks`].
+    Pick {
+        rows: Vec<Row>,
         anchor: Option<Bounds<Pixels>>,
     },
     /// The suggestions for a misspelled word, then a row that adds it to the project's words.
@@ -74,7 +101,10 @@ impl Menu {
     fn len(&self) -> usize {
         match &self.kind {
             MenuKind::Slash { items, .. } => items.len(),
-            MenuKind::Convert { targets, wraps, .. } => targets.len() + wraps.len(),
+            MenuKind::Convert {
+                targets, wraps, extras, ..
+            } => targets.len() + wraps.len() + extras.len(),
+            MenuKind::Pick { rows, .. } => rows.len(),
             MenuKind::Spelling { suggestions, .. } => suggestions.len() + 1,
         }
     }
@@ -84,6 +114,8 @@ pub(super) struct Link {
     selection: Selection,
     input: Entity<TextInput>,
     has_link: bool,
+    /// The reference link the selection stands in, whose address is in its definition.
+    reference: Option<Reference>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,6 +127,9 @@ pub(super) struct ToolbarState {
     marks: MarkStates,
     block: Option<BlockType>,
     has_text: bool,
+    /// The theme has a custom style for the selection's blocks, and an index mark may stand at its end.
+    styles: bool,
+    index: bool,
 }
 
 /// One button of the toolbar. The mockup's `Tt` is dropped: no case command exists in the language.
@@ -103,9 +138,11 @@ enum Button {
     Mark(Mark),
     Block(BlockType),
     Link,
+    Style,
+    Index,
 }
 
-const MARK_BUTTONS: [(Mark, &str, &str); 7] = [
+pub(super) const MARK_BUTTONS: [(Mark, &str, &str); 7] = [
     (Mark::Bold, "icons/mark-bold.svg", "\u{2318}B"),
     (Mark::Italic, "icons/mark-italic.svg", "\u{2318}I"),
     (Mark::Underline, "icons/mark-underline.svg", "\u{2318}U"),
@@ -121,10 +158,12 @@ const BLOCK_BUTTONS: [(BlockType, &str, &str); 3] = [
     (BlockType::Numbers, "icons/block-numbers.svg", "\u{21e7}\u{2318}7"),
 ];
 
-fn toolbar_size() -> Size<Pixels> {
-    let buttons = MARK_BUTTONS.len() + BLOCK_BUTTONS.len() + 1;
+/// The toolbar's size with `extra` buttons after the link: the style list and the index mark, where they apply.
+fn toolbar_size(extra: usize) -> Size<Pixels> {
+    let buttons = MARK_BUTTONS.len() + BLOCK_BUTTONS.len() + 1 + extra;
+    let separators = if extra > 0 { 2. } else { 1. };
     size(
-        tokens::TOOLBAR_BUTTON * buttons as f32 + tokens::TOOLBAR_SEPARATOR + tokens::SPACE_1 * 2.,
+        tokens::TOOLBAR_BUTTON * buttons as f32 + tokens::TOOLBAR_SEPARATOR * separators + tokens::SPACE_1 * 2.,
         tokens::TOOLBAR_HEIGHT,
     )
 }
@@ -239,6 +278,8 @@ impl EditorView {
             marks: marks::states(text, &self.blocks, self.selection),
             block: convert::type_of(block.kind, &text[block.range.clone()]),
             has_text: marks::has_markable_text(text, &self.blocks, self.selection),
+            styles: self.styles_offered(),
+            index: self.index_offered(),
         };
         self.toolbar_seen = Some(seen);
         seen
@@ -288,6 +329,8 @@ impl EditorView {
                 Button::Mark(mark) => this.toggle_mark(mark, window, cx),
                 Button::Block(target) => this.toggle_block(target, window, cx),
                 Button::Link => this.open_link(window, cx),
+                Button::Style => this.show_extra(Extra::Style, None, cx),
+                Button::Index => this.open_index(window, cx),
             }))
             .child(svg().path(icon).size(tokens::ICON_SIZE).text_color(if on {
                 tokens.panel
@@ -300,7 +343,11 @@ impl EditorView {
 
     fn toolbar(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let ToolbarState {
-            marks: states, block, ..
+            marks: states,
+            block,
+            styles,
+            index,
+            ..
         } = self.toolbar_state();
         let mut row = div()
             .occlude()
@@ -325,14 +372,15 @@ impl EditorView {
             row = row.child(self.toolbar_button(Button::Mark(mark), icon, tip, states.of(mark), id, cx));
             id += 1;
         }
-        row = row.child(
+        let separator = || {
             div()
                 .flex_none()
                 .w(tokens::TOOLBAR_SEPARATOR)
                 .flex()
                 .justify_center()
-                .child(div().w(tokens::HAIRLINE).h(tokens::SPACE_4).bg(tokens_now.divider)),
-        );
+                .child(div().w(tokens::HAIRLINE).h(tokens::SPACE_4).bg(tokens_now.divider))
+        };
+        row = row.child(separator());
         for (target, icon, keys) in BLOCK_BUTTONS {
             let state = if block == Some(target) {
                 MarkState::On
@@ -344,7 +392,20 @@ impl EditorView {
             id += 1;
         }
         let tip = hint(crate::t!(Key::Link), "\u{2318}K");
-        row.child(self.toolbar_button(Button::Link, "icons/mark-link.svg", tip, states.link, id, cx))
+        row = row.child(self.toolbar_button(Button::Link, "icons/mark-link.svg", tip, states.link, id, cx));
+        if styles || index {
+            row = row.child(separator());
+        }
+        if styles {
+            let tip = hint(crate::t!(Key::Style), "\u{2325}\u{2318}S");
+            row = row.child(self.toolbar_button(Button::Style, "icons/styles.svg", tip, MarkState::Off, id + 1, cx));
+        }
+        if index {
+            let tip = hint(crate::t!(Key::IndexMark), "\u{2325}\u{2318}I");
+            row =
+                row.child(self.toolbar_button(Button::Index, "icons/mark-index.svg", tip, MarkState::Off, id + 2, cx));
+        }
+        row
     }
 
     /// Whether the toolbar shows: a settled selection holding text it can mark.
@@ -377,7 +438,15 @@ impl EditorView {
 
     pub(super) fn open_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.session.active_buffer().text();
-        let address = marks::link_at(text, &self.blocks, self.selection);
+        let reference = links::reference_at(text, &self.blocks, self.selection);
+        let address = match &reference {
+            Some(reference) => Some(
+                (reference.address.clone())
+                    .map(|range| links::shown_address(&text[range]).to_owned())
+                    .unwrap_or_default(),
+            ),
+            None => marks::link_at(text, &self.blocks, self.selection),
+        };
         if !marks::has_markable_text(text, &self.blocks, self.command_range()) {
             return;
         }
@@ -406,6 +475,7 @@ impl EditorView {
             selection,
             input,
             has_link,
+            reference,
             _subscriptions: subscriptions,
         });
         cx.notify();
@@ -436,13 +506,15 @@ impl EditorView {
             return;
         };
         let selection = link.selection;
+        let reference = link.reference.clone();
         self.float = Float::None;
         window.focus(&self.focus, cx);
         let text = self.session.active_buffer().text();
-        let command = if address.trim().is_empty() {
-            marks::remove_link(text, &self.blocks, selection)
-        } else {
-            marks::set_link(text, &self.blocks, selection, address)
+        let command = match reference {
+            _ if address.trim().is_empty() => marks::remove_link(text, &self.blocks, selection),
+            // A reference link keeps its form: the address changes in its definition, where that stands.
+            Some(reference) => links::set_address(text, &reference, address, selection),
+            None => marks::set_link(text, &self.blocks, selection, address),
         };
         if let Some(command) = command {
             self.run_command(command, window, cx);
@@ -541,7 +613,29 @@ impl EditorView {
             has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
             theme: session.theme_setting(),
+            parts: slash::parts_offered(&self.parts_placed(at)),
         }
+    }
+
+    /// Every part the book starts, with whether it stands before `at` in the active chapter.
+    fn parts_placed(&self, at: usize) -> Vec<(&'static str, bool)> {
+        let session = &self.session;
+        let active = session.active();
+        let mut reached = false;
+        let mut placed = Vec::new();
+        for id in session.book() {
+            let here = *id == active;
+            let Some(chapter) = session.chapter(*id) else {
+                continue;
+            };
+            placed.extend(
+                slash::parts_in(chapter.text())
+                    .into_iter()
+                    .map(|(part, start)| (part, if here { start < at } else { !reached })),
+            );
+            reached |= here;
+        }
+        placed
     }
 
     /// Follows the text and caret while the slash menu is open: the query filters it, and a caret that leaves the query,
@@ -643,11 +737,19 @@ impl EditorView {
                         block,
                         targets,
                         wraps,
+                        extras,
                         blocks,
-                        ..
+                        anchor,
                     },
                 ..
             }) => {
+                // A row that leads to a list opens it where the menu stood. These rows come first.
+                if let Some(extra) = extras.get(index) {
+                    let rows = self.extra_rows(*extra, &blocks);
+                    self.open_pick(rows, anchor, cx);
+                    return;
+                }
+                let index = index - extras.len();
                 let text = self.session.active_buffer().text();
                 let command = match targets.get(index) {
                     Some(target) => convert::convert(text, &self.blocks, block, *target, self.selection),
@@ -658,6 +760,14 @@ impl EditorView {
                 };
                 if let Some(command) = command {
                     self.run_command(command, window, cx);
+                }
+            }
+            Float::Menu(Menu {
+                kind: MenuKind::Pick { mut rows, .. },
+                ..
+            }) => {
+                if index < rows.len() {
+                    self.run_pick(rows.swap_remove(index).pick, window, cx);
                 }
             }
             Float::Menu(Menu {
@@ -780,7 +890,8 @@ impl EditorView {
         };
         let blocks = blocks.unwrap_or(block..block + 1);
         let wraps = directives::edits::wraps_offered(text, &self.blocks, &self.directives.structure, blocks.clone());
-        if targets.is_empty() && wraps.is_empty() {
+        let extras = self.extras_for(&blocks);
+        if targets.is_empty() && wraps.is_empty() && extras.is_empty() {
             return false;
         }
         self.float = Float::Menu(Menu {
@@ -788,6 +899,7 @@ impl EditorView {
                 block,
                 targets,
                 wraps,
+                extras,
                 blocks,
                 anchor,
             },
@@ -798,13 +910,40 @@ impl EditorView {
         true
     }
 
+    /// Opens a list that sets one thing, at `anchor` or the selection, on the choice the block has now.
+    pub(super) fn open_pick(&mut self, rows: Vec<Row>, anchor: Option<Bounds<Pixels>>, cx: &mut Context<Self>) {
+        // A list of choices opens on the one in force. A table's menu holds actions too, and opens at its top.
+        let actions = matches!(rows.first().map(|row| &row.pick), Some(Pick::Table { .. }));
+        let selected = rows.iter().position(|row| row.on && !actions).unwrap_or(0);
+        let scroll = ScrollHandle::new();
+        // The list shows ten rows, so a choice further down is brought into view by the rows' fixed height.
+        let above = selected.saturating_sub(tokens::MENU_MAX_ROWS / 2);
+        scroll.set_offset(point(px(0.), -tokens::MENU_ROW_HEIGHT * above as f32));
+        self.float = Float::Menu(Menu {
+            kind: MenuKind::Pick { rows, anchor },
+            selected,
+            scroll,
+        });
+        cx.notify();
+    }
+
     fn menu_rows(&self, menu: &Menu) -> Vec<(SharedString, Option<SharedString>, &'static str)> {
         match &menu.kind {
             MenuKind::Slash { items, .. } => items
                 .iter()
                 .map(|item| (item.label.into(), item.group.map(SharedString::from), item.icon))
                 .collect(),
-            MenuKind::Convert { targets, wraps, .. } => {
+            MenuKind::Pick { rows, .. } => rows
+                .iter()
+                .map(|row| (row.label.clone(), row.on.then(|| "\u{2713}".into()), row.icon))
+                .collect(),
+            MenuKind::Convert {
+                targets,
+                wraps,
+                extras,
+                blocks,
+                ..
+            } => {
                 let wrap_in: SharedString = directives::wrap_in_label().into();
                 let turned = targets.iter().map(|target| {
                     (
@@ -816,7 +955,8 @@ impl EditorView {
                 let wrapped = wraps
                     .iter()
                     .map(|kind| (kind.label().into(), Some(wrap_in.clone()), kind.icon()));
-                turned.chain(wrapped).collect()
+                let leading = extras.iter().map(|extra| self.extra_row(*extra, blocks));
+                leading.chain(turned).chain(wrapped).collect()
             }
             MenuKind::Spelling { suggestions, .. } => {
                 let suggested = suggestions
@@ -1093,7 +1233,8 @@ impl EditorView {
                         right: f32::from(self.column.text_left + self.column.text_width),
                         ..area
                     };
-                    let size = toolbar_size();
+                    let state = self.toolbar_state();
+                    let size = toolbar_size(usize::from(state.styles) + usize::from(state.index));
                     let gap = f32::from(tokens::FLOAT_GAP);
                     let (x, y) = place::above(rect(target), f32::from(size.width), f32::from(size.height), column, gap);
                     // Above the selection where there is room, its edges between lines rather than through glyphs.
@@ -1116,7 +1257,7 @@ impl EditorView {
             Float::Menu(menu) => {
                 let target = match &menu.kind {
                     MenuKind::Slash { .. } => caret,
-                    MenuKind::Convert { anchor, .. } => anchor.or_else(|| Self::selection_box(selection)),
+                    MenuKind::Convert { anchor, .. } | MenuKind::Pick { anchor, .. } => anchor.or(target),
                     MenuKind::Spelling { .. } => Self::selection_box(selection),
                 };
                 let Some(target) = target else {

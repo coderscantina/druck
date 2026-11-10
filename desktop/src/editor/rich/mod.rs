@@ -1,4 +1,4 @@
-//! The rich blocks: footnotes, citations and cross-references, tables, and images. Each edits the Markdown through the
+//! The rich blocks: footnotes, citations and cross-references, index marks, tables, and images. Each edits the Markdown through the
 //! buffer as one undo step, and writes nothing from a model. The logic is here without gpui, one module per kind of
 //! block, and the views are in [`view`].
 //!
@@ -11,6 +11,7 @@ pub mod citations;
 pub mod facts;
 pub mod footnotes;
 pub mod images;
+pub mod index;
 mod strings;
 pub mod styles;
 pub mod table;

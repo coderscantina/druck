@@ -125,7 +125,12 @@ fn content(span: &InlineSpan) -> Range<usize> {
 fn is_opaque(kind: SpanKind) -> bool {
     matches!(
         kind,
-        SpanKind::Code | SpanKind::Comment | SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::Todo
+        SpanKind::Code
+            | SpanKind::Comment
+            | SpanKind::FootnoteReference
+            | SpanKind::Citation
+            | SpanKind::Todo
+            | SpanKind::Index
     )
 }
 
@@ -537,7 +542,7 @@ pub fn link_at(text: &str, blocks: &Blocks, selection: Selection) -> Option<Stri
 }
 
 /// How an address is written in a link: in angle brackets when it holds spaces or parentheses.
-fn link_destination(url: &str) -> Option<String> {
+pub(super) fn link_destination(url: &str) -> Option<String> {
     let url = url.trim();
     if url.is_empty() || url.contains(['<', '>', '\n']) {
         return None;

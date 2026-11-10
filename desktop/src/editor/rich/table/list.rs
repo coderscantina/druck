@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use super::{Align, Cell, Grid, Refused, Source};
-use crate::editor::commands::line_ending;
+use crate::editor::commands::{line_ending, smallest_edit};
 use crate::editor::rich::Key;
 use crate::source::Edit;
 
@@ -565,6 +565,57 @@ impl List {
         };
         *words.get_mut(column).ok_or(Key::TableNoColumnThere)? = word.to_owned();
         Ok(vec![attribute_edit(text, &self.directive, "align", &words.join(" "))])
+    }
+
+    /// Where the directive line places the table: `top`, `bottom`, or empty for where it stands.
+    pub fn placement<'a>(&self, text: &'a str) -> &'a str {
+        attribute_value(&text[self.directive.clone()], "placement").unwrap_or("")
+    }
+
+    /// Sets the placement on the directive line. Empty takes the attribute off, and the braces with it when it was
+    /// their last.
+    pub fn set_placement(&self, text: &str, placement: &str) -> Option<Edit> {
+        if self.placement(text) == placement {
+            return None;
+        }
+        if !placement.is_empty() {
+            return Some(attribute_edit(text, &self.directive, "placement", placement));
+        }
+        let line = text[self.directive.clone()].trim_end_matches(['\n', '\r']);
+        let at = line.find("placement=")?;
+        let rest = &line[at + "placement=".len()..];
+        let length = match rest.strip_prefix('"') {
+            Some(quoted) => quoted.find('"').map_or(rest.len(), |end| end + 2),
+            None => rest.find([' ', '}']).unwrap_or(rest.len()),
+        };
+        let end = at + "placement=".len() + length;
+        let before = line[..at].trim_end_matches(' ');
+        let after = line[end..].trim_start_matches(' ');
+        let kept = match (before.ends_with('{'), after.starts_with('}')) {
+            (true, true) => format!("{}{}", before[..before.len() - 1].trim_end_matches(' '), &after[1..]),
+            (true, false) => format!("{before}{after}"),
+            (false, true) => format!("{before}{after}"),
+            (false, false) => format!("{before} {after}"),
+        };
+        Some(smallest_edit(self.directive.start, line, &kept))
+    }
+
+    /// Whether a column takes the width the others leave, `*` in `widths`.
+    pub fn fills(&self, text: &str, column: usize) -> bool {
+        attribute_value(&text[self.directive.clone()], "widths")
+            .and_then(|value| value.split_whitespace().nth(column))
+            .is_some_and(|word| word == "*")
+    }
+
+    /// Sets whether a column fills the width, `*`, or fits its content, `auto`.
+    pub fn set_fill(&self, text: &str, column: usize, fill: bool) -> Result<Vec<Edit>, Refused> {
+        let line = &text[self.directive.clone()];
+        let mut words: Vec<String> = match attribute_value(line, "widths") {
+            Some(value) => value.split_whitespace().map(str::to_owned).collect(),
+            None => vec!["auto".to_owned(); self.columns],
+        };
+        *words.get_mut(column).ok_or(Key::TableNoColumnThere)? = if fill { "*" } else { "auto" }.to_owned();
+        Ok(vec![attribute_edit(text, &self.directive, "widths", &words.join(" "))])
     }
 
     pub fn merge_right(&self, text: &str, row: usize, cell: usize) -> Result<Vec<Edit>, Refused> {

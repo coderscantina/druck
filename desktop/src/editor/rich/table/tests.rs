@@ -210,6 +210,59 @@ fn list_columns_keep_the_directive_lists_in_step() {
 }
 
 #[test]
+fn a_list_column_fills_the_width_or_fits_its_content() {
+    let text = "::: table {align=\"left right\"}\n- - a\n  - b\n- - 1\n  - 2\n:::\n";
+    let table = grid(text);
+    assert_eq!(table.fills(text, 0), Some(false));
+    let filled = run(text, table.set_fill(text, 0, true));
+    assert_eq!(
+        filled,
+        "::: table {align=\"left right\" widths=\"* auto\"}\n- - a\n  - b\n- - 1\n  - 2\n:::\n"
+    );
+    let table = grid(&filled);
+    assert_eq!(table.fills(&filled, 0), Some(true));
+    assert_eq!(
+        run(&filled, table.set_fill(&filled, 0, false)),
+        "::: table {align=\"left right\" widths=\"auto auto\"}\n- - a\n  - b\n- - 1\n  - 2\n:::\n"
+    );
+    let pipe = "| a |\n|---|\n| 1 |\n";
+    assert_eq!(grid(pipe).fills(pipe, 0), None);
+}
+
+#[test]
+fn a_list_table_keeps_its_placement_on_its_directive_line() {
+    let text = "::: table {align=\"left right\"}\n- - a\n  - b\n:::\n";
+    let table = grid(text);
+    assert_eq!(table.directive_placement(text), Some(""));
+    let placed = run(
+        text,
+        Ok(table.set_directive_placement(text, "top").into_iter().collect()),
+    );
+    assert_eq!(
+        placed,
+        "::: table {align=\"left right\" placement=\"top\"}\n- - a\n  - b\n:::\n"
+    );
+    let table = grid(&placed);
+    assert_eq!(table.directive_placement(&placed), Some("top"));
+    assert_eq!(
+        run(
+            &placed,
+            Ok(table.set_directive_placement(&placed, "").into_iter().collect())
+        ),
+        text
+    );
+    // The braces go with their last attribute.
+    let only = "::: table {placement=bottom}\n- - a\n:::\n";
+    assert_eq!(
+        run(
+            only,
+            Ok(grid(only).set_directive_placement(only, "").into_iter().collect())
+        ),
+        "::: table\n- - a\n:::\n"
+    );
+}
+
+#[test]
 fn spans_merge_an_empty_neighbour_and_give_it_back() {
     let text = "::: table\n- - a\n  - b\n- - 1\n  - \n:::\n";
     let table = grid(text);

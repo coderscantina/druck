@@ -6,8 +6,12 @@
 //! - [`slash`]: the slash menu's list and what each entry inserts.
 //! - [`moves`]: moving a block's text.
 //! - [`notes`]: comments, and the notes that open a chapter.
+//! - [`code`]: a code block's language, its fence lines, and the way out of it.
+//! - [`links`]: the address of a reference link, in its definition.
 
+pub mod code;
 pub mod convert;
+pub mod links;
 pub mod marks;
 pub mod moves;
 pub mod notes;

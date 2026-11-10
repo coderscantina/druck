@@ -119,6 +119,19 @@ impl EditorView {
                 self.run_command(command, window, cx);
                 return;
             }
+            // At the start of a code block's first line it turns the block back into text.
+            let index = self.blocks.index_at(self.selection.head);
+            let block = &self.blocks.as_slice()[index];
+            let first_line = commands::code::fences(&text[block.range.clone()])
+                .filter(|_| block.kind == BlockKind::Code)
+                .map(|fences| block.range.start + fences.open.end + 1);
+            if first_line == Some(self.selection.head)
+                && let Some(command) =
+                    commands::convert::convert(text, &self.blocks, index, BlockType::Paragraph, self.selection)
+            {
+                self.run_command(command, window, cx);
+                return;
+            }
         }
         self.delete_towards(motion::left, window, cx);
     }

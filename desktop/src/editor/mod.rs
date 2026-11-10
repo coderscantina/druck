@@ -7,6 +7,8 @@
 //! text, [`selection`] where the caret goes, and [`review`] what shows of an agent's work.
 
 mod accessible;
+#[cfg(test)]
+mod audit;
 mod commands;
 mod directives;
 mod display;
@@ -17,6 +19,7 @@ mod input;
 mod keys;
 mod layout;
 mod margin;
+mod picks;
 mod place;
 pub(crate) mod placeholders;
 pub mod review;
@@ -329,9 +332,17 @@ fn opening_selection(text: &str, blocks: &Blocks, view: ChapterView, source: boo
     if source || !selection.is_empty() {
         return selection;
     }
+    // Front matter above text stays out of sight, so the caret starts in the text after it.
+    let list = blocks.as_slice();
+    let in_front_matter = list[blocks.index_at(selection.head)].kind == BlockKind::FrontMatter;
+    let after_front_matter = (list.iter())
+        .find(|block| !matches!(block.kind, BlockKind::FrontMatter | BlockKind::Blank))
+        .filter(|_| in_front_matter)
+        .map(|block| block.range.start);
+    let head = after_front_matter.unwrap_or(selection.head);
     let head = match notes::leading_region(text, blocks) {
-        Some(region) if region.contains(&selection.head) => region.end,
-        _ => selection.head,
+        Some(region) if region.contains(&head) => region.end,
+        _ => head,
     };
     Selection::caret(selection::past_heading_marker(text, blocks, head))
 }
@@ -1020,6 +1031,9 @@ impl EditorView {
         if self.grab.take().is_some() {
             self.drag_scroll = None;
         } else if self.dismiss_completion() {
+        } else if let Some((start, place)) = self.float.table_place() {
+            // Escape on a table's menu gives the caret back to its cell.
+            self.open_table_place(start, place, window, cx);
         } else if !matches!(self.float, Float::None) {
             self.float = Float::None;
         } else if self.escape_selects(window, cx) {
@@ -1180,6 +1194,24 @@ impl EditorView {
             && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
     }
 
+    /// Whether a block that prints nothing stays out of the galley: a file's front matter above its text, which the book
+    /// details edit, and the definitions of reference links, which the link field edits. A selection inside one, as a
+    /// find leaves it, shows it.
+    fn settings_are_hidden(&self, index: usize) -> bool {
+        let block = &self.blocks.as_slice()[index];
+        let prints_nothing = match block.kind {
+            // A single file's part before its first heading may be front matter alone. It shows there, so that
+            // part is never an empty page.
+            BlockKind::FrontMatter => (self.blocks.as_slice().iter())
+                .any(|other| !matches!(other.kind, BlockKind::FrontMatter | BlockKind::Blank)),
+            BlockKind::Raw => {
+                commands::links::is_definitions(&self.session.active_buffer().text()[block.range.clone()])
+            }
+            _ => false,
+        };
+        prints_nothing && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
+    }
+
     /// Whether a block takes no room in the galley: a hidden comment, a note's text that its reference shows, the later
     /// blocks of a table shown whole, and the blank line after any of them.
     fn is_hidden_block(&self, index: usize) -> bool {
@@ -1195,12 +1227,14 @@ impl EditorView {
         match self.blocks.as_slice()[index].kind {
             BlockKind::Comment => self.comment_is_hidden(index),
             BlockKind::FootnoteDefinition => self.definition_is_hidden(index),
+            BlockKind::FrontMatter | BlockKind::Raw => self.settings_are_hidden(index),
             BlockKind::Blank => {
                 index > 0 && {
                     let before = &self.blocks.as_slice()[index - 1];
                     match before.kind {
                         BlockKind::Comment => self.comment_is_hidden(index - 1),
                         BlockKind::FootnoteDefinition => self.definition_is_hidden(index - 1),
+                        BlockKind::FrontMatter | BlockKind::Raw => self.settings_are_hidden(index - 1),
                         BlockKind::Directive => self.opens_at_rest(index - 1),
                         _ => self.closes_before_a_blank(index + 1),
                     }
@@ -1218,6 +1252,13 @@ impl EditorView {
     /// `target`, moved past the hidden blocks it falls in, on the side the caret is heading.
     fn skip_hidden(&self, target: usize, forward: bool) -> usize {
         let index = self.blocks.index_at(target);
+        if !self.source {
+            let text = self.session.active_buffer().text();
+            let past = commands::code::past_fence(text, &self.blocks.as_slice()[index], target, forward);
+            if past != target {
+                return self.skip_hidden(past, forward);
+            }
+        }
         if !self.takes_no_caret(index) || target == self.session.active_buffer().len() && self.ends_in_atom() {
             return target;
         }
@@ -1323,6 +1364,20 @@ impl EditorView {
                 trailing_line,
                 self.slots[index].expanded,
             );
+            // A code block shows its code alone: the fence lines take no room, and the caret never stands on them.
+            if block.kind == BlockKind::Code
+                && let Some(fences) = commands::code::fences(block_text)
+            {
+                // A selection brought onto a fence line, as a find leaves it, shows that line.
+                let shown = |line: &Range<usize>| caret.is_some_and(|caret| line.start <= caret && caret <= line.end);
+                hidden.extend(
+                    [Some(fences.open), fences.close]
+                        .into_iter()
+                        .flatten()
+                        .filter(|line| !shown(line)),
+                );
+                hidden.sort_by_key(|range| range.start);
+            }
             // A heading's `#` goes with the caret while the keys are elsewhere.
             if matches!(block.kind, BlockKind::Heading { .. }) && !self.focus.is_focused(window) {
                 hidden.extend(syntax.markers.iter().map(|marker| marker.range.clone()));
@@ -1344,6 +1399,7 @@ impl EditorView {
                 .filter(|at| self.blocks.index_at(*at) == index)
                 .map(|at| at - block.range.start);
             let mut chips = self.rich.chips(block_text, &syntax.spans, caret);
+            chips.extend(rich::index::chips(block_text, &syntax.spans, caret));
             chips.extend(placeholders::chips(
                 block.kind,
                 block_text,
@@ -1403,8 +1459,13 @@ impl EditorView {
         } else {
             px(0.)
         };
+        // A block in a custom style shows that style's type. Only a theme that has custom styles is asked.
+        let custom = (!self.source && !self.style.custom_styles().is_empty())
+            .then(|| rich::styles::style_of(text, &self.blocks, index))
+            .flatten();
         if let Some(layout) = &self.slots[index].layout
             && layout.width == width
+            && layout.custom == custom
             && layout.dim == dim
             && layout.gap == gap
             && layout.indent == indent
@@ -1442,6 +1503,7 @@ impl EditorView {
                 width,
                 style: &self.style,
                 chips,
+                custom,
                 whole,
                 dim,
                 gap,
@@ -1938,7 +2000,20 @@ impl Render for EditorView {
             )
             .on_action(cx.listener(|this, _: &InsertImage, window, cx| this.choose_image(None, window, cx)))
             .on_action(cx.listener(|this, _: &InsertTable, window, cx| this.insert_table(window, cx)))
-            .on_action(cx.listener(|this, _: &EditRich, window, cx| this.edit_rich_at_caret(window, cx)))
+            .on_action(cx.listener(|this, _: &EditRich, window, cx| {
+                // In a code block the key leaves it, since nothing there has an editor to open.
+                let block = this.blocks.index_at(this.selection.head);
+                if !this.source && this.blocks.as_slice()[block].kind == BlockKind::Code {
+                    this.leave_code(&LeaveCode, window, cx);
+                } else {
+                    this.edit_rich_at_caret(window, cx);
+                }
+            }))
+            .on_action(cx.listener(Self::show_block_menu))
+            .on_action(cx.listener(Self::set_style))
+            .on_action(cx.listener(Self::code_language))
+            .on_action(cx.listener(Self::mark_index))
+            .on_action(cx.listener(Self::leave_code))
             .on_action(cx.listener(Self::options_up))
             .on_action(cx.listener(Self::options_down))
             .on_action(cx.listener(Self::options_left))

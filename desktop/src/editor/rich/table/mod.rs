@@ -274,6 +274,39 @@ impl Grid {
         }
     }
 
+    /// The placement a list table's directive line names, which needs no caption. `None` for a pipe table, whose
+    /// placement is its caption's.
+    pub fn directive_placement<'a>(&self, text: &'a str) -> Option<&'a str> {
+        match &self.source {
+            Source::Pipe(_) => None,
+            Source::List(list) => Some(list.placement(text)),
+        }
+    }
+
+    /// Sets a list table's placement on its directive line.
+    pub fn set_directive_placement(&self, text: &str, placement: &str) -> Option<Edit> {
+        match &self.source {
+            Source::Pipe(_) => None,
+            Source::List(list) => list.set_placement(text, placement),
+        }
+    }
+
+    /// Whether a column of a list table fills the width the others leave. A pipe table has no such option.
+    pub fn fills(&self, text: &str, column: usize) -> Option<bool> {
+        match &self.source {
+            Source::Pipe(_) => None,
+            Source::List(list) => Some(list.fills(text, column)),
+        }
+    }
+
+    /// Sets whether a column of a list table fills the width or fits its content.
+    pub fn set_fill(&self, text: &str, column: usize, fill: bool) -> Result<Vec<Edit>, Refused> {
+        match &self.source {
+            Source::Pipe(_) => Err(Key::TableNoColumnThere),
+            Source::List(list) => list.set_fill(text, column, fill),
+        }
+    }
+
     /// Makes a cell of a list table take in the empty cell to its right.
     pub fn merge_right(&self, text: &str, row: usize, cell: usize) -> Result<Vec<Edit>, Refused> {
         match &self.source {

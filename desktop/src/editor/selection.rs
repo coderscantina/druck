@@ -74,6 +74,16 @@ impl EditorView {
         };
         let target = self.skip_hidden(target, target > head);
         let target = self.past_chip(target, target > head);
+        // An arrow key that would pass a table puts the caret into it.
+        let steps = matches!(motion_kind, Motion::Left | Motion::Right | Motion::Up | Motion::Down);
+        if steps
+            && !extend
+            && let Some((table, place)) = self.table_on_the_way(head, target)
+        {
+            self.open_table_place(table, place, window, cx);
+            self.trace.handled(started);
+            return;
+        }
         let selection = Selection {
             anchor: if extend { self.selection.anchor } else { target },
             head: target,

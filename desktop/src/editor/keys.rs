@@ -67,6 +67,16 @@ actions!(
         InsertImage,
         InsertTable,
         EditRich,
+        /// Opens the block menu at the caret, as a click on the gutter's icon does.
+        ShowBlockMenu,
+        /// Opens the list of the theme's custom styles for the blocks the selection touches.
+        SetStyle,
+        /// Opens the list of languages for the code block at the caret.
+        CodeLanguage,
+        /// Opens the card of the index mark at the caret, or of a new one on the selection.
+        MarkIndex,
+        /// Moves the caret out of a code block, to an empty line after it.
+        LeaveCode,
         MenuUp,
         MenuDown,
         MenuAccept,
@@ -151,6 +161,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", gpui::NoAction, context),
         KeyBinding::new("shift-tab", gpui::NoAction, context),
         KeyBinding::new("cmd-enter", EditRich, context),
+        KeyBinding::new("ctrl-enter", ShowBlockMenu, context),
+        KeyBinding::new("cmd-alt-s", SetStyle, context),
+        KeyBinding::new("cmd-alt-l", CodeLanguage, context),
+        KeyBinding::new("cmd-alt-i", MarkIndex, context),
     ]);
     rich::view::bind_keys(cx);
     let context = Some(MENU_CONTEXT);

@@ -4,6 +4,7 @@
 mod figure;
 mod grid;
 mod images_panel;
+mod index;
 mod note;
 mod picker;
 pub mod shapes;
@@ -21,6 +22,8 @@ use gpui::{
 
 use self::figure::FigureFloat;
 use self::grid::GridFloat;
+pub(in crate::editor) use self::grid::TableAct;
+use self::index::IndexFloat;
 use self::note::NoteFloat;
 use self::picker::PickerFloat;
 use crate::a11y::Control as _;
@@ -31,11 +34,25 @@ use crate::editor::rich::{Atom, AtomKind, Key, check, facts, footnotes, images};
 use crate::editor::{EditorView, ToggleBold, ToggleItalic, ToggleStrike, ToggleUnderline};
 use crate::session::ChapterId;
 use crate::source::inline::SpanKind;
-use crate::source::{Edit, EditKind, Selection};
+use crate::source::{BlockKind, Edit, EditKind, Selection};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{Parts, Workspace};
 
-actions!(rich_float, [NextField, PreviousField]);
+actions!(
+    rich_float,
+    [
+        NextField,
+        PreviousField,
+        /// In a table: steps the alignment of the caret's column.
+        StepColumnAlign,
+        /// In a table: has the caret's column of a list table fill the width, or fit its content.
+        ToggleColumnWidth,
+        /// In a table: steps where the table is placed, here, at the top, or at the bottom of a page.
+        StepPlacement,
+        /// In a table: opens its menu of rows, columns, and options at the caret's cell.
+        TableMenu,
+    ]
+);
 
 /// How long typing must pause before the book is read again.
 const PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
@@ -48,6 +65,10 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", NextField, context),
         KeyBinding::new("shift-tab", PreviousField, context),
+        KeyBinding::new("cmd-alt-a", StepColumnAlign, context),
+        KeyBinding::new("cmd-alt-w", ToggleColumnWidth, context),
+        KeyBinding::new("cmd-alt-p", StepPlacement, context),
+        KeyBinding::new("ctrl-enter", TableMenu, context),
         KeyBinding::new("cmd-b", ToggleBold, context),
         KeyBinding::new("cmd-i", ToggleItalic, context),
         KeyBinding::new("cmd-u", ToggleUnderline, context),
@@ -90,6 +111,7 @@ pub enum RichFloat {
     Picker(PickerFloat),
     Grid(GridFloat),
     Figure(FigureFloat),
+    Index(IndexFloat),
     Notice(NoticeFloat),
     Offer(OfferFloat),
 }
@@ -366,7 +388,7 @@ impl EditorView {
             RichFloat::Note(note) => self.commit_note(note, window, cx),
             RichFloat::Grid(grid) => self.commit_grid(grid, window, cx),
             RichFloat::Figure(figure) => self.commit_figure(figure, window, cx),
-            RichFloat::Picker(_) | RichFloat::Notice(_) | RichFloat::Offer(_) => {}
+            RichFloat::Picker(_) | RichFloat::Index(_) | RichFloat::Notice(_) | RichFloat::Offer(_) => {}
         }
         if !matches!(self.float, Float::Rich(_)) {
             window.focus(&self.focus, cx);
@@ -409,7 +431,13 @@ impl EditorView {
                 let height = layout.whole.as_ref().map_or(px(0.), |whole| whole.height());
                 if position.y < top + height {
                     // After the press, whose focus would otherwise land on the galley again.
-                    cx.defer_in(window, move |this, window, cx| this.open_atom(&atom, window, cx));
+                    cx.defer_in(window, move |this, window, cx| match &atom.kind {
+                        AtomKind::Table(Ok(_)) => {
+                            let start = this.blocks.as_slice()[atom.first].range.start;
+                            this.open_table_under(start, Some(position), window, cx);
+                        }
+                        _ => this.open_atom(&atom, window, cx),
+                    });
                     return true;
                 }
             }
@@ -463,7 +491,10 @@ impl EditorView {
     /// Opens the editor of the chip at `range` of the active chapter.
     fn open_chip(&mut self, range: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
         let written = self.session.active_buffer().text()[range.clone()].to_owned();
-        if let Some(label) = facts::reference_label(&written) {
+        if written.starts_with("{^") {
+            self.set_selection(Selection::caret(range.end), false, window, cx);
+            self.open_index(window, cx);
+        } else if let Some(label) = facts::reference_label(&written) {
             let label = label.to_owned();
             self.open_note(&label, range, window, cx);
         } else if crate::editor::rich::citations::read_reference(&written)
@@ -494,15 +525,34 @@ impl EditorView {
                 }
             }
         }
+        // The caret never stands in a table or figure shown whole. At the end of the text before one, or at the start
+        // of the text after one, the key opens it.
+        let list = self.blocks.as_slice();
+        let shown = |at: &usize| list[*at].kind != BlockKind::Blank;
+        let body_end = block.range.start + text[block.range.clone()].trim_end_matches(['\n', '\r']).len();
+        let after = (index + 1..list.len()).find(shown).filter(|_| head == body_end);
+        let before = (0..index)
+            .rev()
+            .find(shown)
+            .filter(|_| head == crate::editor::selection::past_heading_marker(text, &self.blocks, block.range.start));
+        let neighbour = [after, before]
+            .into_iter()
+            .flatten()
+            .find_map(|at| self.rich_atom(at).filter(|atom| self.atom_is_whole(atom)).cloned());
+        if let Some(atom) = neighbour {
+            self.open_atom(&atom, window, cx);
+            return;
+        }
         let relative = head - block.range.start;
         let span = crate::source::inline::inline_spans(block.kind, &text[block.range.clone()])
             .into_iter()
             .find(|span| {
-                matches!(
-                    span.kind,
-                    SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::CrossReference
-                ) && span.range.start <= relative
-                    && relative <= span.range.end
+                let chip = match span.kind {
+                    SpanKind::FootnoteReference | SpanKind::Citation | SpanKind::CrossReference => true,
+                    SpanKind::Index => span.open.is_empty(),
+                    _ => false,
+                };
+                chip && span.range.start <= relative && relative <= span.range.end
             });
         if let Some(span) = span {
             self.open_chip(
@@ -637,11 +687,12 @@ impl EditorView {
         let target = match &self.float {
             Float::Rich(RichFloat::Note(note)) => note.anchor(),
             Float::Rich(RichFloat::Picker(picker)) => picker.anchor(),
+            Float::Rich(RichFloat::Index(index)) => index.anchor(),
             Float::Rich(RichFloat::Offer(_)) => self.selection.head,
             Float::Rich(RichFloat::Notice(notice)) => notice.at,
             Float::Rich(RichFloat::Grid(grid)) => {
                 return self
-                    .grid_element(grid.first_byte(), cx)
+                    .grid_element(grid.first_byte(), window, cx)
                     .map(|(element, origin)| (element, Spot::At(origin)));
             }
             Float::Rich(RichFloat::Figure(figure)) => {
@@ -656,6 +707,7 @@ impl EditorView {
         let built = match &float {
             Float::Rich(RichFloat::Note(note)) => self.note_element(note, cx),
             Float::Rich(RichFloat::Picker(picker)) => self.picker_element(picker, cx),
+            Float::Rich(RichFloat::Index(index)) => self.index_element(index, cx),
             Float::Rich(RichFloat::Offer(offer)) => self.offer_element(offer, cx),
             Float::Rich(RichFloat::Notice(notice)) => self.notice_element(notice, cx),
             _ => unreachable!("taken above"),

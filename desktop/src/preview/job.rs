@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
-use druck::editor::resolved_config::{self, Config, FontStyle, NumberFormat, Style, Weight};
+use druck::editor::resolved_config::{self, Config, FontStyle, NumberFormat, Style, StyleKind, Weight};
 use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Missing, Renderer};
@@ -16,6 +16,7 @@ use druck::{Failure, LayoutOptions, Missing, Renderer};
 use super::fonts::{FontUse, fonts_in_use};
 use super::raster::{Painter, family_name, fingerprint};
 use super::strings::Key;
+use crate::editor::rich::styles::Class;
 use crate::session::{Joined, Kind, LiveResolver};
 
 /// What one layout typesets: a text, in a theme, which is the specimen or the document.
@@ -128,8 +129,18 @@ pub struct BookType {
     pub column_gap: f32,
     /// How the theme numbers a chapter, when it does.
     pub chapter_number: Option<ChapterNumber>,
+    /// The theme's custom styles, sorted by name, with the kind of block each is for.
+    pub custom: Vec<CustomFace>,
     /// The font files of every face above, for the toolkit.
     pub files: Vec<Bytes>,
+}
+
+/// A custom style of the theme as Write shows it.
+#[derive(Clone, PartialEq)]
+pub struct CustomFace {
+    pub name: String,
+    pub class: Class,
+    pub face: Face,
 }
 
 /// How the theme writes a chapter's number above or before its title: the format, and the label before it if any.
@@ -198,7 +209,19 @@ impl BookType {
             }
         };
         let styles = &config.styles;
+        let custom = (config.custom_styles.iter())
+            .map(|(name, style)| CustomFace {
+                name: name.clone(),
+                class: match style.kind() {
+                    StyleKind::Heading => Class::Heading,
+                    StyleKind::List => Class::List,
+                    StyleKind::Paragraph => Class::Paragraph,
+                },
+                face: face(style.style()),
+            })
+            .collect();
         Self {
+            custom,
             body: face(&styles.body),
             headings: [
                 face(&styles.heading_1),
