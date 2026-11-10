@@ -43,7 +43,8 @@ pub const COVER_PREVIEW_WIDTH: Pixels = px(64.);
 pub const FOOTER_HEIGHT: Pixels = px(30.);
 pub const DIALOG_WIDTH: Pixels = px(380.);
 pub const DIALOG_LIST_HEIGHT: Pixels = px(440.);
-pub const LAUNCH_WIDTH: Pixels = px(440.);
+/// The launch card's widest. A narrower window narrows it.
+pub const LAUNCH_WIDTH: Pixels = px(920.);
 pub const TEXT_TITLE: Pixels = px(20.);
 /// The one height of a field, and of a bordered button or control beside it, in floats, panels, and settings.
 pub const FIELD_HEIGHT: Pixels = px(28.);

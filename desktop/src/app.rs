@@ -38,13 +38,13 @@ use crate::editor::Save;
 use crate::launch::{LaunchEvent, LaunchView};
 use crate::persist::Closing;
 use crate::session::adopt::Offer;
-use crate::session::{STARTERS, Session, Starter};
+use crate::session::{Session, Starter};
 use crate::shell::text::Key;
 use crate::shell::{self, menus};
 use crate::tokens::{self, Scheme, Tokens};
 use crate::workspace::{Parts, ShowPublish, ShowWrite, Slots, Workspace, titlebar};
 
-actions!(druck_desktop, [Quit, Open, NewBook, NewPaper, NewArticle]);
+actions!(druck_desktop, [Quit, Open, NewBook]);
 
 /// The window the app opens to, smaller on a smaller display.
 const WINDOW_SIZE: (f32, f32) = (1680., 1000.);
@@ -91,6 +91,7 @@ pub fn open(
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-n", NewBook, None),
         KeyBinding::new("cmd-o", Open, None),
         KeyBinding::new("cmd-s", Save, None),
         KeyBinding::new("cmd-1", ShowWrite, None),
@@ -188,6 +189,8 @@ type After = Box<dyn FnOnce(&mut Shell, &mut Window, &mut Context<Shell>)>;
 struct Shell {
     launch: Entity<LaunchView>,
     workspace: Option<Entity<Workspace>>,
+    /// What had the keys in the book when New Book put the launch card over it. Escape gives them back.
+    choosing: Option<gpui::FocusHandle>,
     _subscriptions: Vec<Subscription>,
     _documents: Task<()>,
 }
@@ -216,6 +219,7 @@ impl Shell {
                 LaunchEvent::Open => shell.ask_to_open(window, cx),
                 LaunchEvent::New(starter) => shell.ask_for_new_project(starter, window, cx),
                 LaunchEvent::MakeProject(dir, offer) => shell.make_project(dir, offer, window, cx),
+                LaunchEvent::Dismiss => shell.stop_choosing(window, cx),
             }),
         ];
         // A document opened from the Finder or dropped on the Dock icon. One window holds one document, so the first
@@ -238,6 +242,7 @@ impl Shell {
         let mut shell = Self {
             launch,
             workspace: None,
+            choosing: None,
             _subscriptions: subscriptions,
             _documents: opened,
         };
@@ -254,7 +259,7 @@ impl Shell {
             }
             (None, _, true) => {}
         }
-        // `DRUCK_NEW_PROJECT=book:/path` makes a project there as the save panel would, for screenshots.
+        // `DRUCK_NEW_PROJECT=novel:/path` makes a project there as the save panel would, for screenshots.
         #[cfg(any(debug_assertions, feature = "measure"))]
         if let Some((slug, path)) = crate::gate::var("DRUCK_NEW_PROJECT")
             .as_deref()
@@ -270,6 +275,7 @@ impl Shell {
         window.set_window_title(&session.window_title());
         shell::document_opened(session.location(), cx);
         self.workspace = Some(cx.new(|cx| Workspace::new(session, theme, window, cx)));
+        self.choosing = None;
         cx.notify();
     }
 
@@ -363,6 +369,7 @@ impl Shell {
             cx,
             Box::new(|shell, window, cx| {
                 shell.workspace = None;
+                shell.choosing = None;
                 shell::document_closed(cx);
                 window.set_window_title("Druck");
                 LaunchView::take_focus(&shell.launch, window, cx);
@@ -477,13 +484,25 @@ impl Shell {
         }
     }
 
+    #[cfg(any(debug_assertions, feature = "measure"))]
     fn starter(slug: &str) -> Option<&'static Starter> {
-        STARTERS.iter().find(|starter| starter.slug == slug)
+        crate::session::STARTERS.iter().find(|starter| starter.slug == slug)
     }
 
-    fn new_project(&mut self, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(starter) = Self::starter(slug) {
-            self.ask_for_new_project(starter, window, cx);
+    /// New Book: shows the starters, over the book if one is open. The book stays as it is until one is chosen.
+    fn choose_starter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workspace.is_some() && self.choosing.is_none() {
+            self.choosing = window.focused(cx);
+        }
+        LaunchView::take_focus(&self.launch, window, cx);
+        cx.notify();
+    }
+
+    /// Back to the book the starters were shown over, with the keys where they were.
+    fn stop_choosing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(before) = self.choosing.take() {
+            window.focus(&before, cx);
+            cx.notify();
         }
     }
 }
@@ -502,9 +521,7 @@ impl Render for Shell {
             .text_color(tokens.text)
             .bg(tokens.canvas)
             .on_action(cx.listener(|shell, _: &Open, window, cx| shell.ask_to_open(window, cx)))
-            .on_action(cx.listener(|shell, _: &NewBook, window, cx| shell.new_project("book", window, cx)))
-            .on_action(cx.listener(|shell, _: &NewPaper, window, cx| shell.new_project("paper", window, cx)))
-            .on_action(cx.listener(|shell, _: &NewArticle, window, cx| shell.new_project("article", window, cx)))
+            .on_action(cx.listener(|shell, _: &NewBook, window, cx| shell.choose_starter(window, cx)))
             .on_action(cx.listener(|shell, _: &menus::CloseDocument, window, cx| shell.close_document(window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent0, window, cx| shell.open_recent(0, window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent1, window, cx| shell.open_recent(1, window, cx)))
@@ -516,11 +533,13 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &menus::Recent7, window, cx| shell.open_recent(7, window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent8, window, cx| shell.open_recent(8, window, cx)))
             .on_action(cx.listener(|shell, _: &menus::Recent9, window, cx| shell.open_recent(9, window, cx)))
-            .map(|root| match self.workspace.clone() {
-                Some(workspace) => root.child(workspace),
-                None => root
-                    .child(titlebar(&tokens, div(), div(), div()))
-                    .child(self.launch.clone()),
-            })
+            .map(
+                |root| match self.workspace.clone().filter(|_| self.choosing.is_none()) {
+                    Some(workspace) => root.child(workspace),
+                    None => root
+                        .child(titlebar(&tokens, div(), div(), div()))
+                        .child(self.launch.clone()),
+                },
+            )
     }
 }

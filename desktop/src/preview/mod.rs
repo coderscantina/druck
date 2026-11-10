@@ -12,6 +12,7 @@ mod bench;
 mod cache;
 pub mod directives;
 pub mod fonts;
+pub mod gallery;
 pub(crate) mod job;
 pub mod proof;
 mod raster;
@@ -921,7 +922,7 @@ fn in_words(problem: &Diagnostic, base: &Path) -> String {
 }
 
 /// Turns a finished page into what the GPU atlas takes: BGRA, with its size in bytes.
-fn render_image(pixmap: Pixmap) -> (Arc<RenderImage>, usize) {
+pub(crate) fn render_image(pixmap: Pixmap) -> (Arc<RenderImage>, usize) {
     let (width, height) = (pixmap.width(), pixmap.height());
     let mut pixels = pixmap.take();
     for pixel in pixels.as_chunks_mut::<4>().0 {
