@@ -50,7 +50,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 21: Versions. Built and checked, merged here. Stays unchecked until the owner has tried a real mouse and signing, and decided whether the 20-minute soak stands in for the hour. See the note in the resume note.
 - [x] 24: Gallery of finished looks. Built and checked on `agentic-beta`. What was not driven by hand is in the [note](#milestone-24-note).
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
-- [ ] 26: Editing passes, with Codex.
+- [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
 - [ ] 27: Typesetter.
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 27.
 - [ ] 23: Desktop 1.0, replacing 17.
@@ -98,6 +98,32 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Milestone 26 note
+
+Built on `agentic-beta` in two commits, not pushed. Choices, with the measured times and costs, are in [the decision](DECISIONS.md#2026-11-10-milestone-26-editing-passes-and-codex), rules in [the design](DESIGN.md#agent), and the author's side in [authoring](AUTHORING.md#editing-passes-in-the-desktop-app).
+
+Done: all five deliverables. The launch card asks once about the agent and keeps the answer. A pass is a Markdown file, four are built in, and `passes/<name>.md` in the project replaces or adds one. Copyedit and consistency return tinted changes, references and line edit return margin notes, and the app holds each to that. The palette runs a pass on the selection, the chapter, or the book, with a history label before, a quiet line at the foot during, and the existing review after. A book runs chapter by chapter in separate CLI processes. `agent_cli` chooses `claude` or `codex`, both behind `agent::backend::Backend`, and both get `leave_note` and the new `record_style` over MCP.
+
+Checks, on 2026-11-10: `cargo test -p druck-desktop` (860 passed), `cargo clippy -p druck-desktop --all-targets -- -D warnings`, and `cargo fmt --all --check`, all clean. The root crate was not changed.
+
+Evidence with real turns, debug build, `DRUCK_GATE=2`, actions through `DRUCK_AGENT_SCRIPT`, sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`, `claude` 2.1.319 with `haiku` and `codex` 0.166.0 with `gpt-5.6-luna` logged in through ChatGPT. The chapter is `12-zwischenspiel-i.md` in a temp copy of `buch-1-ttp404` made a project by hand, with four typing mistakes put in. The book is a temp demo of four German chapters.
+
+- **Each pass on the chapter, both CLIs:** copyedit fixed the four mistakes and nothing else. Line edit left 4 notes with Claude and 3 with Codex, and references 1 and 2, with the file's bytes unchanged. Consistency changed the text and wrote `passes/style-sheet.md` through `record_style`.
+- **Whole-book consistency, both CLIs:** 4 of 4 chapters. Chapter 1's turn wrote "numbers up to twelve in words" and chapters 2 to 4 followed it. With a contrary line added to the sheet by hand, the next run followed that line in every chapter it did.
+- **One failure does not lose the rest:** the CLI process of chapter 2 was ended from outside. The run said "3 of 4 chapters. Not done: Im Verlag." and the other three had their changes.
+- **A customized pass wins:** "Customize pass" wrote a byte-identical copy of the built-in. Changed to replace one word and renamed, it ran under its own name in place of Copyedit.
+- **An author's own pass:** `passes/titel.md`, returning notes, left its note.
+- **A selection:** with Codex, a pass on one selected sentence fixed the mistake in it and left the one two lines above.
+- **Reject all restores the bytes:** `diff -r` and `cmp` against the copy, after a chapter pass with each CLI and after the book run, where only the words typed during the run differed.
+- **Typing during a run:** words typed into a chapter while a pass ran stayed, three times, once in a paragraph the pass also changed.
+- **Declining the offer:** `settings.json` holds only `agent_offered`, the launch card is as before, the palette has no pass rows, `Cmd+J` and a pass asked through the script start nothing, and the app has no child process.
+- **Approvals, both CLIs:** a chat edit asked first, in the copy with Claude's `defaultMode: default` and with Codex in an untrusted folder. Deny left the file and the turn went on, and Allow made the change, which came under review. A pass also showed an approval when `haiku` asked to read outside the project.
+- **Inspected,** dark and light, English and German: the offer, the palette rows, and the progress line, with the line after Stop. Also the Codex approval card and a book run's foot beside changes to review. Captures are in `.captures/milestone-26`, untracked.
+
+Not verified: a whole-book run on the owner's 45,000-word book, held back for cost by instruction, so the box stays open. A real mouse on the offer's buttons and the palette rows: the offer was answered through `DRUCK_OFFER`, which calls what the buttons call, and passes through the script. Tab and Return on the offer's buttons. The palette's "selection" row on screen: the hook that selects text runs after the palette opens, so the row was not captured, and the selection run itself went through the script. Codex with an API key login, since this machine has a ChatGPT login and nothing was logged in or out. A Codex version other than 0.166.0, and resuming a Codex thread after a restart, which has a unit test only. Models other than the two cheapest. Linux and Windows.
+
+Follow-ups: the vendors' written answers on subscription logins, for both CLIs. A deny reason does not reach Codex, so the reason field could hide there. A Codex change to a file that is not open is missing from the turn summary. The Codex approval card shows a paragraph-long line whole, where Claude's is cut around the change. The selection toolbar stays over the palette when text is selected. Consistency cannot see a variant across chapters unless a turn recorded it, so a first read-only turn that collects variants over the whole book would help. `passes/` files are not in the Binder, so they open in the system's editor. A pass does not wait for unsaved text to be written, as chat turns do not. `haiku` records weak style sheet entries now and then, such as a single corrected typo.
 
 ### Milestone 25 note
 

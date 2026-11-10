@@ -260,7 +260,11 @@ The panel's section label is Export. It lists each named export as a collapsed c
 - Replies show as plain text. The author's prompts sit on the raised color. A tool call is one quiet line with its name and target, collapsed until clicked, with a word at its end only when it waits, was denied, or failed.
 - Diffs in approvals use Menlo at the small size, one row per line with the line number, a sign, and the text. Added and removed rows are tinted at 14 percent in the `added` and `removed` colors.
 - Buttons are 22 px high with a thin divider border and quiet text. The choice that lets the work go on has accent text. Nothing is filled and nothing is a pill. Chips are 22 px with a 4 px radius on the raised color, and end in a close icon.
-- The setup text names an API key as the way to set Claude Code up and says what the login line reports. It never offers a login of its own.
+- The setup text names an API key as the way to set the chosen CLI up, Claude Code or Codex, and says what the login line reports. It never offers a login of its own. Every line names the CLI the setting names, and its vendor.
+- **The first-launch offer** stands alone on the launch card, before Open and the starters, until it is answered: a quiet label, one sentence in full ink saying what the agent does and that nothing runs unasked, one quiet sentence saying what it needs, then two 22 px buttons, Turn on with accent text and Not now. Either answer brings the card's usual content. It is asked once.
+- **Passes are palette rows,** only with the agent on: for each pass "Copyedit: selection" while text is selected, "Copyedit: this chapter", and in a project with more than one chapter "Copyedit: whole book", then "Customize pass: Copyedit" for each built-in one. A project's own pass goes by the name its file gives. No menu item, no key, no button in the text.
+- **A running pass is one quiet line at the left of the window's foot:** the pass, then for a book "chapter 2 of 4", then the chapter's title, joined by middle dots, then Stop. It shows whether or not the chat card is open, and no tokens or cost show. When the run ends the line says how, "Consistency is done: 3 of 4 chapters. Not done: Im Verlag.", for 8 seconds, before the count of changes to review. The same sentence stays as a row in the conversation.
+- In Settings, Agent has two rows: the switch, and "Agent program" as two segments, Claude Code and Codex.
 
 ## Versions
 

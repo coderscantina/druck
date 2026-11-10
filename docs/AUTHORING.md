@@ -1047,3 +1047,60 @@ These are errors, reported with their location:
 - A mark alone in its paragraph, with no text to stand beside.
 - A mark on a page without a number, such as a copyright page before a book's first part.
 - A second `::: index`, or one inside `keep` or `bottom`.
+
+## Editing passes in the desktop app
+
+A pass is a named set of instructions that the agent runs over your text when you ask. Open the command palette with `Cmd+Shift+P` and type the pass's name. Each pass offers "this chapter", "whole book" in a project with several chapters, and "selection" while text is selected. Nothing runs unless you choose a row.
+
+Four passes are built in:
+
+| Pass | Returns | What it does |
+| --- | --- | --- |
+| Copyedit | changes | Corrects spelling, grammar, punctuation, and typographic marks. It never rephrases. |
+| Consistency | changes | Makes the book agree with itself: spellings, names, numbers, dates, terms. Keeps the style sheet. |
+| References | notes | Looks for claims without a source, citation keys that do not exist, and cross-references that point at nothing. |
+| Line edit | notes | Suggests rewordings where a sentence gets in the reader's way. |
+
+A pass that returns changes edits the files, and each change shows tinted in the text with Accept and Reject. A pass that returns notes changes nothing: each point stands in the margin beside its passage. Local history is labelled before every run, so the timeline takes a whole run back.
+
+A whole-book run works through the chapters one after another. The line at the window's foot says which chapter it is on and has Stop. A chapter that fails is named at the end, and the others are still done.
+
+### Your own passes
+
+A pass is a Markdown file in the project's `passes/` folder:
+
+```markdown
+---
+name: Tighten
+returns: notes
+---
+
+Note every sentence that says the same thing twice.
+Suggest the shorter version, in the author's voice.
+```
+
+- `name` is what the palette shows. Without it the file's name is used.
+- `returns` is `changes` or `notes`, and the app holds the pass to it: a notes pass cannot write a file.
+- The rest is what the agent is told. Write it as you would brief an editor: what to look for, what to leave alone, and how much is too much.
+
+To change a built-in pass, choose "Customize pass: Copyedit" in the palette. It copies the pass to `passes/copyedit.md` and opens it. A file in `passes/` with a built-in's file name replaces it for this project: `copyedit.md`, `consistency.md`, `references.md`, or `line-edit.md`. Delete the file to get the built-in one back.
+
+### The style sheet
+
+The consistency pass records what it decides in `passes/style-sheet.md`, one line per decision:
+
+```markdown
+- **E-Mail**: with a hyphen, capitalised
+- **Numbers**: in words up to twelve
+```
+
+Every later pass reads this file and follows it. Change a line, add your own, or write the file before the first run to set the rules yourself. Other text in the file is left as you wrote it.
+
+### Setting up the agent
+
+Druck runs an agent program that is installed on your computer: Claude Code or Codex. Settings, Agent, "Agent program" chooses which. Druck holds no keys and handles no login.
+
+- **Claude Code:** install it as Anthropic's documentation describes, and set the `ANTHROPIC_API_KEY` environment variable to an API key from the Anthropic Console.
+- **Codex:** install it as OpenAI's documentation describes, and sign in with an API key: `printenv OPENAI_API_KEY | codex login --with-api-key`.
+
+A project's `CLAUDE.md` or `AGENTS.md`, and your own settings for the program, apply as they do in a terminal.
