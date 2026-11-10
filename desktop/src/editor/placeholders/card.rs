@@ -197,6 +197,10 @@ impl EditorView {
 
     /// Writes the chosen name, `{name}`, over what is typed, as one undo step.
     pub(in crate::editor) fn accept_completion(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // Another float, such as a menu, stays for its own Return.
+        if !matches!(self.float, Float::Complete(_)) {
+            return false;
+        }
         let Float::Complete(completion) = std::mem::take(&mut self.float) else {
             return false;
         };
