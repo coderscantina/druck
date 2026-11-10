@@ -49,7 +49,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 20: Writing partner. Built and checked with real turns, merged here. Stays unchecked until a person has clicked its buttons, see the [note](#milestone-20-note).
 - [ ] 21: Versions. Built and checked, merged here. Stays unchecked until the owner has tried a real mouse and signing, and decided whether the 20-minute soak stands in for the hour. See the note in the resume note.
 - [x] 24: Gallery of finished looks. Built and checked on `agentic-beta`. What was not driven by hand is in the [note](#milestone-24-note).
-- [ ] 25: No syntax to learn.
+- [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex.
 - [ ] 27: Typesetter.
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 27.
@@ -98,6 +98,20 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Milestone 25 note
+
+Built on `agentic-beta`, not pushed. Choices are in [the decision](DECISIONS.md#2026-11-10-milestone-25-no-syntax-to-learn), rules in [the design](DESIGN.md#rich-blocks).
+
+Done: all seven deliverables, and the owner's instruction of 2026-11-10 that tables are edited in place. A table's options (alignment, width, placement) are in the table's menu and on keys. The theme's custom styles are a list from the block menu, the toolbar, and `Opt+Cmd+S`, and a styled block shows the style's face. Index marks have a card and a quiet sign. Front matter above text and link definitions stay out of Write. Code blocks hide their fences, take a language from a list, and are left with `Cmd+Return`. Reference links edit through the link field, in their definition. The audit test names a path for every construct and found five gaps, now slash entries: the three parts of a book, a to-do note, and a comment. The table card is gone: a field stands in the cell.
+
+Checks, all on 2026-11-10: `cargo test -p druck-desktop` (842 passed, 1 ignored), `cargo clippy -p druck-desktop --all-targets -- -D warnings`, `cargo fmt --all --check`, and for the one re-export in the engine `cargo test -p druck` (452 unit tests and the integration suites passed) and `cargo clippy -p druck --all-targets -- -D warnings`. Typing gate, `DRUCK_GATE=1 DRUCK_GATE_THEME_EDITS=0 DRUCK_GATE_REFRESHES=10` on a copy of `samples/book.md`, debug build: 360 keys, median 8.6 ms, p95 12.6 ms, under the 16 ms wanted.
+
+Evidence in the running app, debug build, `DRUCK_GATE=2`, keys by PID, windows captured by id, sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`, on a demo chapter with the business theme, the file compared after each step: a style applied and taken off again (file identical after); an index mark made from a selection, its sub-entry changed, and removed (identical after); a reference link's address changed in its definition, the link removed with the definition left, and both undone; a code block inserted from the slash menu, its language set from the list and from the block menu, a line added, left with `Cmd+Return`, and turned back into text with Backspace; a table entered with Up, cells typed, a row added with Tab and from the menu, Escape on the menu back to the cell, and width, alignment, and placement set by keys, with only the table's lines changed. Captures of the index card, the style and language lists, the block menu, a cell being edited, and the table menu in dark and light, English and German, of which the index card, a cell, and the table menu were looked at in light and dark.
+
+Not verified: a single file's title changed through the book details by keys in the running app, since Tab did not reach the panel's fields in a window that is not key. `front_matter_details_change_only_the_front_matter` covers the write. So the milestone's box stays open. Also not verified: every pointer path (a click on a cell, on the ⋯ handle, on the index sign, the toolbar's two new buttons), since mouse events were not played here; an input method in a cell, which uses the same field as every other card; a list table's multi-line cell on screen; a figure opened with `Cmd+Return` from the text beside it; the typing gate on the 203-page book in a release build, for want of disk; and not every capture of the four appearance and language pairs was looked at.
+
+Follow-ups: a single file opens on its front matter part, raw YAML, where it could open on the first text. A reference link whose label has no definition shows as a link in Write. The block menu and the lists do not filter by typing. Shift-selecting across a code block's hidden fence and deleting can break the fence. Down on a code block's last line at the very end of a file does nothing, where it could leave the block. A table's label cannot be given a name of the author's choosing outside the source view. Table column widths in Write still follow content length, not `widths`. Index marks in table cells and captions show as written. The engine has no custom style on a span.
 
 ### Milestone 24 note
 
