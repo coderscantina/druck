@@ -228,7 +228,7 @@ fn apply_to_workspace(parts: &Parts, workspace: &Entity<Workspace>, window: &mut
 
 /// `DRUCK_POINTER=file` plays a pointer script through the window's own event path, so hover, rest, and clicks run as
 /// a hand would make them, without the window being key. A line is `move X Y`, `glide X0 Y0 X1 Y1 MS` (moves at 60 Hz
-/// for that long), `click X Y`, `key NAME` (a key after any of `cmd-`, `alt-`, and `shift-`, such as `right`, `shift-tab`,
+/// for that long), `click X Y`, `press X Y`, `drag X0 Y0 X1 Y1 MS` (a glide with the button held), `release X Y`, `key NAME` (a key after any of `cmd-`, `alt-`, and `shift-`, such as `right`, `shift-tab`,
 /// or `cmd-alt-2`), `wait MS`, or `say WORDS` (printed with the time, to line a recording up). Points are in the window,
 /// from its top left.
 fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
@@ -261,6 +261,39 @@ fn pointer_script(handle: AnyWindowHandle, cx: &mut App) {
                         cx.background_executor().timer(Duration::from_millis(16)).await;
                     }
                 }
+                (Some("press"), [x, y]) => send(
+                    gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                        button: gpui::MouseButton::Left,
+                        position: at(*x, *y),
+                        modifiers: gpui::Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                ),
+                (Some("drag"), [x0, y0, x1, y1, ms]) => {
+                    let steps = (ms / 16.).max(1.) as usize;
+                    for step in 0..=steps {
+                        let t = step as f32 / steps as f32;
+                        let position = at(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+                        let held = gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                            position,
+                            pressed_button: Some(gpui::MouseButton::Left),
+                            modifiers: gpui::Modifiers::default(),
+                        });
+                        send(held, cx);
+                        cx.background_executor().timer(Duration::from_millis(16)).await;
+                    }
+                }
+                (Some("release"), [x, y]) => send(
+                    gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                        button: gpui::MouseButton::Left,
+                        position: at(*x, *y),
+                        modifiers: gpui::Modifiers::default(),
+                        click_count: 1,
+                    }),
+                    cx,
+                ),
                 (Some("click"), [x, y]) => {
                     let position = at(*x, *y);
                     send(moved(position), cx);
