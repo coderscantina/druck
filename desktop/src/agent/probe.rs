@@ -4,7 +4,8 @@
 //!
 //! Actions: `ask`, `prompt <text>` (into the card or the selection prompt that is open), `send`, `select <text>`, `show <text>`,
 //! `type <text>`, `accept <n>`, `reject <n>`, `again <n>`, `accept-all`, `reject-all`, `next`, `note-apply <n>`,
-//! `note-reply <n>`, `note-dismiss <n>`, `allow`, `deny`, `chapter <n>`, `mode write|publish`, `state`.
+//! `note-reply <n>`, `note-dismiss <n>`, `allow`, `deny`, `chapter <n>`, `mode write|publish`, `state`,
+//! `pass <name> book|chapter|selection`, `customize <name>`, `stop`.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -17,6 +18,15 @@ use crate::editor::review::NoteAction;
 use crate::workspace::Workspace;
 
 const POLL: Duration = Duration::from_millis(100);
+
+/// `DRUCK_AGENT_MODEL` names the model, for runs that should cost little, and `DRUCK_AGENT_TRANSCRIPT` a file that
+/// takes every line the CLI writes, for captures and for counting what a run used.
+pub fn override_config(config: &mut super::SessionConfig) {
+    if let Some(model) = crate::gate::var("DRUCK_AGENT_MODEL") {
+        config.model = Some(model);
+    }
+    config.transcript = crate::gate::var("DRUCK_AGENT_TRANSCRIPT").map(PathBuf::from);
+}
 
 pub fn start(agent: &Entity<AgentView>, window: &mut Window, cx: &mut Context<Workspace>) {
     let Some(script) = crate::gate::var("DRUCK_AGENT_SCRIPT").map(PathBuf::from) else {
@@ -151,6 +161,17 @@ impl AgentView {
                     .update(cx, |workspace, cx| workspace.show(mode, window, cx))
                     .ok();
             }
+            "pass" => {
+                let (slug, scope) = rest.split_once(' ').unwrap_or((rest, "chapter"));
+                let scope = match scope {
+                    "book" => super::run::Scope::Book,
+                    "selection" => super::run::Scope::Selection,
+                    _ => super::run::Scope::Chapter,
+                };
+                self.run_pass(slug, scope, window, cx);
+            }
+            "customize" => super::run_pass_command(super::PassAction::Customize(rest.to_owned()), cx),
+            "stop" => self.stop(cx),
             "state" => return self.state(cx),
             _ => return "unknown".to_owned(),
         }
@@ -167,8 +188,10 @@ impl AgentView {
     fn state(&self, cx: &Context<Self>) -> String {
         let editor = self.editor.read(cx);
         format!(
-            "working={} waiting={} passages={} notes={} chat={} process={} chapter={}",
+            "working={} pass={} foot={:?} waiting={} passages={} notes={} chat={} process={} chapter={}",
             !self.conversation.is_idle(),
+            self.pass_run.is_some(),
+            self.pass_line().unwrap_or_default(),
             self.conversation.approvals().count(),
             editor.review().len(),
             self.notes.all().len(),

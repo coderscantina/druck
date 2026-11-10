@@ -1,48 +1,58 @@
-//! The writing partner: the user's own `claude` CLI, off until enabled in Settings, and on `Cmd+J` when it is on.
+//! The writing partner: the user's own agent CLI, `claude` or `codex`, offered once at first launch and off until the
+//! author says yes there or in Settings. Then it is on `Cmd+J`, and in the editing passes of the command palette.
 //!
 //! With a selection `Cmd+J` opens a prompt at the selection, and without one a small chat card over the text. In Publish
 //! the same conversation is a tab of the rail. The CLI writes files with its normal tools, and its changes show in the
-//! text for review. Advice comes as margin notes through a small tool the app serves itself, see `note_tool`.
+//! text for review. Advice comes as margin notes through a small tool the app serves itself, see `tools`.
 //!
-//! Druck spawns the installed program over `stream-json`. It holds no credentials, reads no tokens, and sets no
+//! Druck spawns the installed program and speaks JSON lines with it. What differs between the CLIs is behind
+//! `backend::Backend`, with one implementation each in `claude` and `codex`. It holds no credentials, reads no tokens, and sets no
 //! authentication variable: the login is the CLI's, and the app only reports which login the CLI says it has. Project
-//! `CLAUDE.md`, skills, and MCP work as in a terminal because the CLI runs with its defaults in the project folder. With
-//! the setting off, nothing is spawned and nothing shows.
+//! `CLAUDE.md` or `AGENTS.md`, skills, and MCP work as in a terminal because the CLI runs with its defaults in the
+//! project folder. With the setting off, nothing is spawned and nothing shows. No turn starts unless the author asks.
 //!
-//! **Before a public release documents a subscription login:** whether Anthropic allows spawning the user's own CLI with
-//! one in a third party app must be confirmed with Anthropic in writing. Until then the setup text names an API key as
+//! **Before a public release documents a subscription login:** whether the vendor allows spawning the user's own CLI
+//! with one in a third party app must be confirmed in writing, with Anthropic and with OpenAI. Until then the setup text names an API key as
 //! the way and leaves the login to the CLI. See `docs/DECISIONS.md`, "Desktop beta, agent panel".
 //!
 //! Logic without gpui, each with tests, many from the recorded stream in `tests/fixtures/agent-turns.jsonl`:
 //!
 //! - `session`, `cli`: the child process and the CLI lookup.
+//! - `backend`, `claude`, `codex`: what differs between the CLIs, and each one's command line and stream.
+//! - `passes`, `style_sheet`: editing passes as Markdown files, and the style sheet they keep.
 //! - `conversation`: events in, rows and approvals out.
 //! - `approval`, `diff`: what is shown before a tool is allowed.
 //! - `changes`: hunks of a turn from what Persistence saw on disk, found again in text that moved.
-//! - `notes`, `note_tool`: margin notes and the tool that leaves them.
+//! - `notes`, `tools`: margin notes, and the MCP server whose tools leave them and record style decisions.
 //! - `context`, `store`, `markdown`, `strings`: chips, the remembered session, replies, and the two languages.
 //!
 //! The gpui parts are `AgentView` here, `review` for what it does with changes and notes, `view` for drawing the
-//! conversation, `card` for the layers around it, `prompt` for the box a prompt is written in, and `probe` for scripted
-//! runs. The text draws review itself, in `editor/review.rs`.
+//! conversation, `card` for the layers around it, `prompt` for the box a prompt is written in, `run` for running a pass
+//! chapter by chapter, and `probe` for scripted runs. The text draws review itself, in `editor/review.rs`.
 
 mod approval;
+mod backend;
 mod card;
 mod changes;
+mod claude;
 mod cli;
+mod codex;
 mod context;
 mod conversation;
 mod diff;
 mod markdown;
-pub mod note_tool;
 mod notes;
+mod passes;
 #[cfg(any(debug_assertions, feature = "measure"))]
 mod probe;
 mod prompt;
 mod review;
+mod run;
 mod session;
 mod store;
 mod strings;
+mod style_sheet;
+pub mod tools;
 mod view;
 
 use std::cell::RefCell;
@@ -63,17 +73,19 @@ use crate::inspector::{InspectorView, Tab};
 use crate::persist::PersistView;
 use crate::preview::PreviewView;
 use crate::session::{ChapterId, Session as Document};
-use crate::settings;
+use crate::settings::{self, AgentCli};
 use crate::workspace::{Current, Mode, ModeChanged, Parts, Slots, Workspace};
+use backend::{Backend, Verdict};
 use cli::{CliState, Login};
 use context::{ChipKind, Context as PromptContext, Selected};
-use conversation::{Answer, Conversation, Effect, SentContext};
+use conversation::{Answer, Conversation, Effect, Outcome, SentContext};
 use notes::Notes;
 use session::{Event, Session as Child, SessionConfig};
 use store::{Remembered, Store};
 use strings::Key;
 
-pub use note_tool::FLAG as NOTE_TOOL_FLAG;
+pub use run::{PassAction, pass_commands, run_pass_command};
+pub use tools::FLAG as NOTE_TOOL_FLAG;
 
 /// How often the CLI's output is looked at while a turn runs, and while it waits for the author.
 const BUSY_POLL: Duration = Duration::from_millis(16);
@@ -82,9 +94,6 @@ const IDLE_POLL: Duration = Duration::from_millis(250);
 const SETTLE: Duration = Duration::from_millis(150);
 /// How long after a turn a change on disk still counts as the turn's: a save running at its end holds the last look back.
 const TURN_GRACE: Duration = Duration::from_millis(500);
-
-/// The models the selector offers, as the CLI's own `--model` aliases. The first is the CLI's own choice.
-const MODELS: [Option<&str>; 4] = [None, Some("haiku"), Some("sonnet"), Some("opus")];
 
 /// Mounts the conversation as a tab of the inspector rail, and what shows over the text.
 pub fn mount(
@@ -135,6 +144,16 @@ pub fn unreviewed_changes(cx: &App) -> Vec<Unreviewed> {
         .unwrap_or_default()
 }
 
+impl AgentCli {
+    /// What this CLI needs done its own way. The one place that tells the two apart.
+    pub fn backend(self) -> Box<dyn Backend> {
+        match self {
+            Self::Claude => Box::new(claude::Claude::default()),
+            Self::Codex => Box::new(codex::Codex::default()),
+        }
+    }
+}
+
 /// What looking for the CLI found.
 struct Cli {
     program: PathBuf,
@@ -176,6 +195,15 @@ pub struct AgentView {
     mode: Mode,
     /// The setting, as last heard. Off: nothing shows and nothing runs.
     enabled: bool,
+    /// Which CLI the settings name, as last heard.
+    cli_kind: AgentCli,
+    /// The editing pass under way.
+    pass_run: Option<run::PassRun>,
+    /// A pass asked for while the CLI was still being looked for.
+    pass_asked: Option<(String, run::Scope)>,
+    /// How the last pass ended, for the line at the window's foot, until it has been shown a while.
+    pass_result: Option<String>,
+    pass_result_end: Task<()>,
     /// The chat card over the text.
     chat_open: bool,
     /// The prompt at the selection.
@@ -252,6 +280,8 @@ impl AgentView {
             (session.location().to_owned(), session.base_dir())
         };
         let store = Store::open();
+        let cli_kind = settings::get(cx).agent_cli;
+        let backend = cli_kind.backend();
         let remembered = match store.as_ref().map(|store| store.get(&project)) {
             Some(Err(error)) => {
                 let kind = crate::persist::sync::Problem::AgentSessionUnread;
@@ -260,12 +290,16 @@ impl AgentView {
             }
             found => found.and_then(Result::ok).unwrap_or_default(),
         };
+        // A conversation is the CLI's that held it. The other one starts its own.
+        let remembered = Some(remembered)
+            .filter(|remembered| remembered.cli == backend.program())
+            .unwrap_or_default();
         let mut conversation = Conversation::new(base.clone());
         conversation.set_session_id(remembered.session.clone());
         let model = remembered
             .model
             .as_deref()
-            .and_then(|model| MODELS.iter().copied().flatten().find(|known| *known == model));
+            .and_then(|model| backend.models().iter().copied().find(|known| *known == model));
         let prompt = cx.new(|cx| prompt::PromptInput::new(crate::t!(Key::Placeholder), cx));
         let selection_prompt = cx.new(|cx| prompt::PromptInput::one_line(crate::t!(Key::SelectionPlaceholder), cx));
         let reason = cx.new(|cx| TextInput::new(window, cx));
@@ -347,6 +381,11 @@ impl AgentView {
             workspace: workspace.downgrade(),
             mode: Mode::Write,
             enabled: settings::get(cx).agent,
+            cli_kind,
+            pass_run: None,
+            pass_asked: None,
+            pass_result: None,
+            pass_result_end: Task::ready(()),
             chat_open: false,
             selection_prompt,
             can_send: false,
@@ -405,14 +444,16 @@ impl AgentView {
             return;
         }
         self.checking = true;
-        let lookup = cx.background_spawn(async {
+        let kind = self.cli_kind;
+        let lookup = cx.background_spawn(async move {
+            let backend = kind.backend();
             let path = cli::search_path();
-            let program = cli::locate(&path)?;
-            let state = cli::check(&program, &path);
+            let program = cli::locate(backend.as_ref(), &path)?;
+            let state = cli::check(backend.as_ref(), &program, &path);
             let login = if matches!(state, CliState::Missing) {
                 Login::Unknown
             } else {
-                cli::login(&program, &path)
+                cli::login(backend.as_ref(), &program, &path)
             };
             Some(Cli {
                 program,
@@ -423,19 +464,31 @@ impl AgentView {
         });
         cx.spawn_in(window, async move |view, cx| {
             let found = lookup.await;
-            view.update(cx, |view, cx| {
+            view.update_in(cx, |view, window, cx| {
                 view.checking = false;
+                // The setting changed while this looked: the look for the CLI it names now is still to come.
+                if view.cli_kind != kind {
+                    return view.ensure_checked(window, cx);
+                }
                 view.cli = Some(found.unwrap_or(Cli {
                     program: PathBuf::new(),
                     path: OsString::new(),
                     state: CliState::Missing,
                     login: Login::Unknown,
                 }));
+                if let Some((slug, scope)) = view.pass_asked.take() {
+                    view.run_pass(&slug, scope, window, cx);
+                }
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    /// The CLI the settings name, for its words and its wire.
+    fn backend(&self) -> Box<dyn Backend> {
+        self.cli_kind.backend()
     }
 
     fn cli_usable(&self) -> bool {
@@ -449,6 +502,7 @@ impl AgentView {
             let remembered = Remembered {
                 session: self.conversation.session_id().map(str::to_owned),
                 model: self.model.map(str::to_owned),
+                cli: self.backend().program().to_owned(),
             };
             let error = store
                 .set(&self.project, &remembered)
@@ -465,19 +519,27 @@ impl AgentView {
         if self.running.is_some() {
             return Ok(());
         }
+        let backend = self.backend();
+        let name = backend.name();
         let Some(cli) = &self.cli else {
-            return Err(strings::cannot_start(crate::t!(strings::Key::CliNotFound)));
+            return Err(strings::cannot_start(name, crate::t!(strings::Key::CliNotFound)));
         };
-        let config = SessionConfig {
+        #[allow(unused_mut)]
+        let mut config = SessionConfig {
             program: cli.program.clone(),
             path: Some(cli.path.clone()),
             cwd: self.base.clone(),
             model: self.model.map(str::to_owned),
             resume: self.conversation.session_id().map(str::to_owned),
-            extra_args: note_tool::cli_args(),
+            // Without this executable's own path there are no tools, and the rest works.
+            tool_server: std::env::current_exe().ok(),
+            access: self.pass_run.as_ref().map(run::PassRun::access).unwrap_or_default(),
             ..SessionConfig::default()
         };
-        let (session, events) = Child::spawn(&config).map_err(|error| strings::cannot_start(&error.to_string()))?;
+        #[cfg(any(debug_assertions, feature = "measure"))]
+        probe::override_config(&mut config);
+        let (session, events) =
+            Child::spawn(&config, backend).map_err(|error| strings::cannot_start(name, &error.to_string()))?;
         self.running = Some(Running {
             session,
             events,
@@ -560,15 +622,30 @@ impl AgentView {
 
     fn take(&mut self, effect: Effect, window: &mut Window, cx: &mut Context<Self>) {
         match effect {
+            // A pass's turns are not the conversation the chat card resumes.
+            Effect::SessionId(_) if self.pass_run.is_some() => {}
             Effect::SessionId(_) => self.remember(cx),
             Effect::Patched(path) => self.forget_patch_of_open_file(&path, cx),
             Effect::Created(_) => self.take_in_new_files(cx),
             Effect::NoteLeft(input) => self.note_left(&input, window, cx),
-            Effect::TurnEnded => self.end_turn(window, cx),
+            Effect::StyleRecorded(input) => {
+                if let Err(error) = style_sheet::write(&self.base, &input) {
+                    self.conversation
+                        .note(strings::style_sheet_unwritten(&error.to_string()));
+                }
+            }
+            Effect::TurnEnded(outcome) => {
+                self.end_turn(window, cx);
+                self.pass_turn_ended(outcome, window, cx);
+            }
             Effect::ProcessEnded => {
                 let never_started = self.running.as_ref().is_some_and(|running| !running.started);
                 self.running = None;
                 self.persist.update(cx, |persist, _| persist.set_agent_working(false));
+                if self.pass_run.is_some() {
+                    // The chapter whose process ended is lost, and the rest still get their turn.
+                    return self.pass_turn_ended(Outcome::Failed, window, cx);
+                }
                 // A resume the CLI did not understand would fail the same way again.
                 if never_started && self.conversation.session_id().is_some() {
                     self.conversation.set_session_id(None);
@@ -614,12 +691,23 @@ impl AgentView {
         self.selection_prompt.update(cx, |prompt, cx| {
             prompt.set_placeholder(crate::t!(Key::SelectionPlaceholder), cx)
         });
+        let cli_kind = settings::get(cx).agent_cli;
+        if cli_kind != self.cli_kind {
+            // Another program: its own lookup, and a conversation of its own.
+            self.cli_kind = cli_kind;
+            self.cli = None;
+            self.model = None;
+            self.pass_run = None;
+            self.new_conversation(cx);
+        }
         let enabled = settings::get(cx).agent;
         if enabled == self.enabled {
             return;
         }
         self.enabled = enabled;
         if !enabled {
+            self.pass_run = None;
+            self.pass_asked = None;
             self.running = None;
             self.chat_open = false;
             self.close_selection_prompt(window, cx);
@@ -767,7 +855,10 @@ impl AgentView {
             cx.notify();
             return false;
         }
-        self.label_local_history_before_turn(cx);
+        // A pass has its own label, from before its first chapter.
+        if self.pass_run.is_none() {
+            self.label_local_history_before_turn(cx);
+        }
         self.turn_start = Some(self.project_now(cx));
         // The conversation should know what was taken back, or it offers the same change again.
         let message = if self.rejections.is_empty() {
@@ -781,7 +872,8 @@ impl AgentView {
         let running = self.running.as_mut().expect("started above");
         if let Err(error) = running.session.send(&message) {
             self.running = None;
-            self.conversation.fail(strings::cannot_send(&error.to_string()));
+            let name = self.backend().name();
+            self.conversation.fail(strings::cannot_send(name, &error.to_string()));
             cx.notify();
             return false;
         }
@@ -819,9 +911,11 @@ impl AgentView {
             return;
         };
         for approval in self.conversation.stop() {
-            running.session.deny(&approval.request, strings::STOPPED_DENIAL).ok();
+            let stopped = Verdict::Deny(strings::STOPPED_DENIAL);
+            running.session.answer(&approval.request, stopped).ok();
         }
         running.session.cancel().ok();
+        self.stop_pass();
         self.update_attention(cx);
         cx.notify();
     }
@@ -831,12 +925,13 @@ impl AgentView {
             return;
         };
         if let Some(running) = &mut self.running {
-            let result = match (&approval.session_rule, for_session) {
-                (Some(rule), true) => running.session.allow_with(&approval.request, &rule.update),
-                _ => running.session.allow(&approval.request),
+            let verdict = match (&approval.session_rule, for_session) {
+                (Some(rule), true) => Verdict::AllowForSession(&rule.update),
+                _ => Verdict::Allow,
             };
-            if let Err(error) = result {
-                self.conversation.fail(strings::cannot_send(&error.to_string()));
+            if let Err(error) = running.session.answer(&approval.request, verdict) {
+                let name = self.cli_kind.backend().name();
+                self.conversation.fail(strings::cannot_send(name, &error.to_string()));
             }
         }
         self.update_attention(cx);
@@ -852,9 +947,10 @@ impl AgentView {
             reason => reason,
         };
         if let Some(running) = &mut self.running
-            && let Err(error) = running.session.deny(&approval.request, reason)
+            && let Err(error) = running.session.answer(&approval.request, Verdict::Deny(reason))
         {
-            self.conversation.fail(strings::cannot_send(&error.to_string()));
+            let name = self.cli_kind.backend().name();
+            self.conversation.fail(strings::cannot_send(name, &error.to_string()));
         }
         self.denying = None;
         self.reason

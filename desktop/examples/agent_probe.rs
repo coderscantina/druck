@@ -6,16 +6,27 @@
 //! and short prompts. It never touches anything outside the given folder.
 
 #[allow(dead_code)]
+#[path = "../src/agent/backend.rs"]
+mod backend;
+#[allow(dead_code)]
+#[path = "../src/agent/claude.rs"]
+mod claude;
+#[allow(dead_code)]
 #[path = "../src/agent/cli.rs"]
 mod cli;
 #[allow(dead_code)]
 #[path = "../src/agent/session.rs"]
 mod session;
+#[allow(dead_code)]
+#[path = "../src/agent/tools.rs"]
+mod tools;
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
+use backend::Verdict;
+use claude::Claude;
 use session::{Event, PermissionRequest, Session, SessionConfig};
 
 /// What the probe does with permission requests during one turn.
@@ -30,8 +41,9 @@ fn main() {
     let dir = PathBuf::from(args.next().expect("usage: agent_probe <scratch-dir> [transcript]"));
     let transcript = args.next().map(PathBuf::from);
     let path = cli::search_path();
-    let program = cli::locate(&path).expect("claude not found");
-    println!("cli: {:?} {:?}", program, cli::check(&program, &path));
+    let claude = Claude::default();
+    let program = cli::locate(&claude, &path).expect("claude not found");
+    println!("cli: {:?} {:?}", program, cli::check(&claude, &program, &path));
 
     let config = SessionConfig {
         program,
@@ -52,7 +64,7 @@ fn main() {
     let notes = dir.join("notes.md");
     let before = std::fs::read_to_string(&notes).expect("notes.md");
 
-    let (mut session, events) = Session::spawn(&config).expect("spawn");
+    let (mut session, events) = Session::spawn(&config, Box::new(Claude::default())).expect("spawn");
     let ask = "Use the Edit tool to change the word Hello to Howdy in notes.md. Do nothing else.";
     let session_id = turn(&mut session, &events, ask, Policy::Deny);
     let after_deny = std::fs::read_to_string(&notes).expect("notes.md");
@@ -68,7 +80,7 @@ fn main() {
         transcript,
         ..config
     };
-    let (mut session, events) = Session::spawn(&resumed).expect("spawn resumed");
+    let (mut session, events) = Session::spawn(&resumed, Box::new(Claude::default())).expect("spawn resumed");
     turn(
         &mut session,
         &events,
@@ -147,8 +159,8 @@ fn turn(session: &mut Session, events: &Receiver<Event>, text: &str, policy: Pol
 
 fn answer(session: &mut Session, request: &PermissionRequest, policy: Policy) {
     match policy {
-        Policy::Allow => session.allow(request),
-        Policy::Deny => session.deny(request, "The author declined this edit."),
+        Policy::Allow => session.answer(request, Verdict::Allow),
+        Policy::Deny => session.answer(request, Verdict::Deny("The author declined this edit.")),
     }
     .expect("answer");
 }

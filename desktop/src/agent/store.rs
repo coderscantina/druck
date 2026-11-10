@@ -14,11 +14,23 @@ use crate::persist::{atomic, recovery};
 
 const FILE: &str = "agent-sessions.json";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Remembered {
     pub session: Option<String>,
     pub model: Option<String>,
+    /// The program whose conversation this is. A file from before there were two holds none, and means `claude`.
+    pub cli: String,
+}
+
+impl Default for Remembered {
+    fn default() -> Self {
+        Self {
+            session: None,
+            model: None,
+            cli: "claude".to_owned(),
+        }
+    }
 }
 
 /// The file, as written.
@@ -51,7 +63,7 @@ impl Store {
     /// since writing over it would lose every other project's entry.
     pub fn set(&self, project: &Path, remembered: &Remembered) -> io::Result<()> {
         let mut all = self.read()?;
-        if remembered == &Remembered::default() {
+        if remembered.session.is_none() && remembered.model.is_none() {
             all.projects.remove(&key(project));
         } else {
             all.projects.insert(key(project), remembered.clone());
@@ -98,6 +110,7 @@ mod tests {
         let remembered = Remembered {
             session: Some("abc-123".into()),
             model: Some("haiku".into()),
+            ..Remembered::default()
         };
         Store::in_dir(&dir).set(&project, &remembered).expect("set");
         // A new Store reads the file again, as a restarted app does.
@@ -118,6 +131,7 @@ mod tests {
                 &Remembered {
                     session: Some("s1".into()),
                     model: None,
+                    ..Remembered::default()
                 },
             )
             .expect("set");
@@ -137,6 +151,7 @@ mod tests {
                 &Remembered {
                     session: Some("s".into()),
                     model: None,
+                    ..Remembered::default()
                 },
             )
             .expect("set");

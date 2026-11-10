@@ -14,9 +14,9 @@ use super::context::ChipKind;
 use super::conversation::{Entry, Status, ToolCall, ToolState};
 use super::diff::{DiffLine, Mark};
 use super::markdown::{self, Block, Inline};
-use super::note_tool::TOOL as NOTE_TOOL;
 use super::strings::{self, Key};
-use super::{AgentView, MODELS, Standing};
+use super::tools;
+use super::{AgentView, Standing};
 use crate::a11y::Control as _;
 use crate::editor::review::small_button;
 use crate::tokens::{self, Tokens};
@@ -92,9 +92,8 @@ impl AgentView {
     }
 
     fn model_menu(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let options: Vec<_> = MODELS
-            .iter()
-            .copied()
+        let options: Vec<_> = std::iter::once(None)
+            .chain(self.backend().models().iter().copied().map(Some))
             .map(|model| {
                 let label = model.map_or(crate::t!(Key::ModelDefault), |model| model);
                 div()
@@ -124,6 +123,7 @@ impl AgentView {
 
     fn body(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let mut rows: Vec<AnyElement> = Vec::new();
+        let backend = self.backend();
         if self.setup_folded() {
             rows.push(self.setup_row(tokens, cx));
         } else {
@@ -131,12 +131,12 @@ impl AgentView {
         }
         if self.cli_usable() {
             if self.conversation.entries().is_empty() {
-                rows.push(quiet(
+                rows.push(quiet_owned(
                     tokens,
                     if self.resumable {
-                        crate::t!(Key::Resumed)
+                        crate::t!(Key::Resumed, cli = backend.name())
                     } else {
-                        crate::t!(Key::Intro)
+                        crate::t!(Key::Intro, cli = backend.name(), memory = backend.memory_file())
                     },
                 ));
             }
@@ -173,10 +173,10 @@ impl AgentView {
     }
 
     fn setup_row(&self, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
-        let label = crate::t!(Key::SetupFolded);
+        let label = crate::t!(Key::SetupFolded, cli = self.backend().name());
         div()
             .id("agent-setup")
-            .button(tokens, label)
+            .button(tokens, label.clone())
             .cursor_pointer()
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_faint)
@@ -191,35 +191,29 @@ impl AgentView {
 
     /// What the panel says about the CLI: being looked for, missing, or what version and login it has.
     fn status_rows(&self, tokens: &Tokens) -> Vec<AnyElement> {
+        let backend = self.backend();
+        let (name, vendor) = (backend.name(), backend.vendor());
         let Some(cli) = &self.cli else {
-            return vec![faint(tokens, crate::t!(Key::Checking))];
+            return vec![faint_owned(tokens, crate::t!(Key::Checking, cli = name))];
         };
+        let title = crate::t!(Key::SetupTitle, cli = name);
+        let steps = crate::t!(Key::SetupSteps, cli = name, vendor = vendor);
         let mut rows = Vec::new();
         match &cli.state {
             CliState::Missing => {
-                rows.push(card(
-                    tokens,
-                    crate::t!(Key::SetupTitle),
-                    &[
-                        crate::t!(Key::SetupMissing),
-                        crate::t!(Key::SetupSteps),
-                        crate::t!(Key::SetupOwner),
-                    ],
-                ));
+                let missing = crate::t!(Key::SetupMissing, cli = name);
+                let owner = crate::t!(Key::SetupOwner, cli = name);
+                rows.push(card(tokens, title, [missing, steps, owner]));
             }
             CliState::Unreadable(_) => {
-                rows.push(card(
-                    tokens,
-                    crate::t!(Key::SetupTitle),
-                    &[crate::t!(Key::CliUnreadable), crate::t!(Key::SetupSteps)],
-                ));
+                rows.push(card(tokens, title, [crate::t!(Key::CliUnreadable, cli = name), steps]));
             }
             CliState::Untested(version) => {
-                rows.push(quiet_owned(tokens, strings::cli_untested(version)));
+                rows.push(quiet_owned(tokens, strings::cli_untested(name, version)));
                 rows.extend(self.login_rows(&cli.login, tokens));
             }
             CliState::Ready(version) => {
-                rows.push(faint_owned(tokens, strings::cli_version(version)));
+                rows.push(faint_owned(tokens, strings::cli_version(name, version)));
                 rows.extend(self.login_rows(&cli.login, tokens));
             }
         }
@@ -228,13 +222,21 @@ impl AgentView {
 
     /// Which login the CLI reports, in plain words, and what is not settled about a subscription.
     fn login_rows(&self, login: &Login, tokens: &Tokens) -> Vec<AnyElement> {
+        let backend = self.backend();
+        let name = backend.name();
         match login {
-            Login::LoggedOut => vec![quiet(tokens, crate::t!(Key::LoggedOut))],
-            Login::Unknown => vec![faint_owned(tokens, crate::t!(Key::LoginUnknown).to_owned())],
-            Login::LoggedIn { method, plan } => {
-                let mut rows = vec![faint_owned(tokens, strings::login_line(method, plan.as_deref()))];
-                if method == "claude.ai" {
-                    rows.push(faint(tokens, crate::t!(Key::SubscriptionNote)));
+            Login::LoggedOut => vec![quiet_owned(tokens, crate::t!(Key::LoggedOut, cli = name))],
+            Login::Unknown => vec![faint_owned(tokens, crate::t!(Key::LoginUnknown, cli = name))],
+            Login::LoggedIn {
+                method,
+                plan,
+                subscription,
+            } => {
+                let line = strings::login_line(name, backend.subscription(), method, plan.as_deref(), *subscription);
+                let mut rows = vec![faint_owned(tokens, line)];
+                if *subscription {
+                    let note = crate::t!(Key::SubscriptionNote, vendor = backend.vendor());
+                    rows.push(faint_owned(tokens, note));
                 }
                 rows
             }
@@ -300,7 +302,7 @@ impl AgentView {
         };
         let open = self.expanded.contains(&index);
         let has_output = !tool.output.is_empty();
-        let name = if tool.name == NOTE_TOOL {
+        let name = if tool.name == tools::full_name(tools::LEAVE_NOTE) {
             crate::t!(Key::ToolNote).to_owned()
         } else {
             tool.name.clone()
@@ -747,7 +749,7 @@ fn faint_owned(tokens: &Tokens, text: String) -> AnyElement {
 }
 
 /// A titled block of paragraphs, for the setup text.
-fn card(tokens: &Tokens, title: &'static str, paragraphs: &[&'static str]) -> AnyElement {
+fn card(tokens: &Tokens, title: String, paragraphs: impl IntoIterator<Item = String>) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -757,11 +759,11 @@ fn card(tokens: &Tokens, title: &'static str, paragraphs: &[&'static str]) -> An
         .border_1()
         .border_color(tokens.divider)
         .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-        .children(paragraphs.iter().map(|text| {
+        .children(paragraphs.into_iter().map(|text| {
             div()
                 .text_size(tokens::TEXT_SMALL)
                 .text_color(tokens.text_quiet)
-                .child(*text)
+                .child(text)
         }))
         .into_any_element()
 }

@@ -66,6 +66,14 @@ impl KeptFor {
     }
 }
 
+/// The agent CLI the writing partner runs. What differs between them is behind `agent::backend::Backend`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentCli {
+    #[default]
+    Claude,
+    Codex,
+}
+
 /// The shortest and longest line a person can ask for.
 const LINE_LENGTHS: std::ops::RangeInclusive<u64> = 20..=240;
 
@@ -86,8 +94,12 @@ pub struct Settings {
     /// Typesetting warnings stay marked on the pages with the Proof tab closed, for a proof pass.
     pub warning_marks: bool,
     pub spelling: bool,
-    /// The writing partner: Claude Code, spawned on request. Off leaves no trace on screen and spawns nothing.
+    /// The writing partner: the author's own agent CLI, spawned on request. Off leaves no trace on screen and spawns
+    /// nothing.
     pub agent: bool,
+    pub agent_cli: AgentCli,
+    /// The first launch's question about the writing partner has been answered, so it is not asked again.
+    pub agent_offered: bool,
     /// How a placeholder's value shows in Write.
     pub placeholders: PlaceholderDisplay,
     /// How long kept copies stay, see `persist::recovery::sweep_kept`.
@@ -109,6 +121,8 @@ impl Default for Settings {
             warning_marks: false,
             spelling: true,
             agent: false,
+            agent_cli: AgentCli::Claude,
+            agent_offered: false,
             placeholders: PlaceholderDisplay::Chip,
             kept_for: KeptFor::Month,
         }
@@ -212,6 +226,24 @@ const FIELDS: &[Field] = &[
     switch!("warning_marks", warning_marks),
     switch!("spelling", spelling),
     switch!("agent", agent),
+    switch!("agent_offered", agent_offered),
+    Field {
+        key: "agent_cli",
+        read: |settings, value| {
+            settings.agent_cli = match value.as_str() {
+                Some("claude") => AgentCli::Claude,
+                Some("codex") => AgentCli::Codex,
+                _ => return Err(wanted("agent_cli", crate::t!(Key::WantedAgentCli))),
+            };
+            Ok(())
+        },
+        write: |settings| {
+            json!(match settings.agent_cli {
+                AgentCli::Claude => "claude",
+                AgentCli::Codex => "codex",
+            })
+        },
+    },
     Field {
         key: "placeholders",
         read: |settings, value| {
@@ -345,6 +377,17 @@ pub fn settings_file() -> Option<PathBuf> {
 }
 
 impl Settings {
+    /// Whether the launch card still has to ask about the writing partner: once, and not of an author who has it on.
+    pub fn offers_agent(&self) -> bool {
+        !self.agent_offered && !self.agent
+    }
+
+    /// Takes the answer to that question. A no changes nothing else, so the agent stays off without a trace.
+    pub fn answer_agent_offer(&mut self, yes: bool) {
+        self.agent_offered = true;
+        self.agent |= yes;
+    }
+
     /// The accent to write for a choice in the window: the default leaves the file.
     pub fn set_accent(&mut self, color: u32) {
         self.accent = (!is_default_accent(color)).then_some(color);
@@ -476,5 +519,33 @@ mod tests {
         assert_eq!(settings.accent, Some(ACCENTS[3]));
         settings.set_accent(ACCENTS[0]);
         assert_eq!(settings.accent, None);
+    }
+
+    #[test]
+    fn the_agent_program_is_claude_unless_the_file_says_codex() {
+        assert_eq!(parse("{}").unwrap().agent_cli, AgentCli::Claude);
+        assert_eq!(parse(r#"{"agent_cli": "codex"}"#).unwrap().agent_cli, AgentCli::Codex);
+        assert!(parse(r#"{"agent_cli": "other"}"#).unwrap_err().contains("agent_cli"));
+    }
+
+    #[test]
+    fn the_agent_is_offered_once_whatever_the_answer() {
+        let folder = folder("offer");
+        let file = folder.join("settings.json");
+        for (yes, written) in [(true, r#""agent": true"#), (false, r#""agent_offered": true"#)] {
+            let before = Settings::default();
+            assert!(before.offers_agent());
+            let mut after = before.clone();
+            after.answer_agent_offer(yes);
+            assert_eq!((after.agent, after.offers_agent()), (yes, false));
+            fs::remove_dir_all(&folder).ok();
+            write_changes(&file, &before, &after).unwrap();
+            let text = fs::read_to_string(&file).unwrap();
+            assert!(text.contains(written), "{text}");
+            assert_eq!(load(&file).unwrap(), after, "the next launch reads the answer");
+        }
+        // An author who turned it on in Settings before the question existed is not asked.
+        assert!(!parse(r#"{"agent": true}"#).unwrap().offers_agent());
+        fs::remove_dir_all(folder).ok();
     }
 }

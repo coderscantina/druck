@@ -20,8 +20,8 @@ crate::strings! {
         ToolNote => ("Note", "Notiz"),
         TryAgainShown => ("Try again: {place}", "Neu versuchen: {place}"),
         TurnBusy => (
-            "Claude Code is still working. Try again when it has finished.",
-            "Claude Code arbeitet noch. Versuche es danach erneut."
+            "{cli} is still working. Try again when it has finished.",
+            "{cli} arbeitet noch. Versuche es danach erneut."
         ),
         NewConversation => ("New", "Neu"),
         Model => ("Model", "Modell"),
@@ -29,44 +29,44 @@ crate::strings! {
         Placeholder => ("Ask about the book\u{2026}", "Frag etwas zum Buch\u{2026}"),
         Send => ("Send", "Senden"),
         Stop => ("Stop", "Stopp"),
-        Checking => ("Looking for Claude Code\u{2026}", "Suche nach Claude Code\u{2026}"),
+        Checking => ("Looking for {cli}\u{2026}", "Suche nach {cli}\u{2026}"),
         Stopped => ("Stopped.", "Angehalten."),
         Working => ("Working\u{2026}", "Arbeitet\u{2026}"),
         Stopping => ("Stopping\u{2026}", "Halte an\u{2026}"),
         Resumed => (
-            "This project has an earlier conversation. Claude Code keeps it, so the next prompt continues it.",
-            "Dieses Projekt hat eine frühere Unterhaltung. Claude Code bewahrt sie auf, der nächste Prompt setzt sie fort."
+            "This project has an earlier conversation. {cli} keeps it, so the next prompt continues it.",
+            "Dieses Projekt hat eine frühere Unterhaltung. {cli} bewahrt sie auf, der nächste Prompt setzt sie fort."
         ),
-        SetupTitle => ("Set up Claude Code", "Claude Code einrichten"),
-        SetupFolded => ("Claude Code setup", "Einrichtung von Claude Code"),
+        SetupTitle => ("Set up {cli}", "{cli} einrichten"),
+        SetupFolded => ("{cli} setup", "Einrichtung von {cli}"),
         SetupMissing => (
-            "The agent runs the Claude Code program on this computer. It is not installed or not on the search path.",
-            "Der Agent startet das Programm Claude Code auf diesem Computer. Es ist nicht installiert oder nicht im Suchpfad."
+            "The agent runs the {cli} program on this computer. It is not installed or not on the search path.",
+            "Der Agent startet das Programm {cli} auf diesem Computer. Es ist nicht installiert oder nicht im Suchpfad."
         ),
         SetupSteps => (
-            "1. Install Claude Code.\n2. Set it up with an API key, as Anthropic's documentation describes.\n3. Reopen Druck.",
-            "1. Claude Code installieren.\n2. Mit einem API-Schlüssel einrichten, wie in Anthropics Dokumentation beschrieben.\n3. Druck erneut öffnen."
+            "1. Install {cli}.\n2. Set it up with an API key, as the documentation of {vendor} describes.\n3. Reopen Druck.",
+            "1. {cli} installieren.\n2. Mit einem API-Schlüssel einrichten, wie in der Dokumentation von {vendor} beschrieben.\n3. Druck erneut öffnen."
         ),
         SetupOwner => (
-            "Druck holds no keys and sends nothing itself. Claude Code does the login, and Druck only starts it. Everything else in Druck works without it.",
-            "Druck speichert keine Schlüssel und sendet nichts selbst. Claude Code übernimmt die Anmeldung, Druck startet es nur. Alles andere in Druck funktioniert auch ohne."
+            "Druck holds no keys and sends nothing itself. {cli} does the login, and Druck only starts it. Everything else in Druck works without it.",
+            "Druck speichert keine Schlüssel und sendet nichts selbst. {cli} übernimmt die Anmeldung, Druck startet es nur. Alles andere in Druck funktioniert auch ohne."
         ),
         SubscriptionNote => (
-            "Whether Anthropic allows a subscription login for an app like Druck is not confirmed. An API key is the documented way.",
-            "Ob Anthropic eine Abo-Anmeldung für eine App wie Druck erlaubt, ist nicht bestätigt. Ein API-Schlüssel ist der dokumentierte Weg."
+            "Whether {vendor} allows a subscription login for an app like Druck is not confirmed. An API key is the documented way.",
+            "Ob {vendor} eine Abo-Anmeldung für eine App wie Druck erlaubt, ist nicht bestätigt. Ein API-Schlüssel ist der dokumentierte Weg."
         ),
         LoggedOut => (
-            "Claude Code reports that nobody is logged in. Set it up with an API key before the first prompt.",
-            "Claude Code meldet, dass niemand angemeldet ist. Vor dem ersten Prompt mit einem API-Schlüssel einrichten."
+            "{cli} reports that nobody is logged in. Set it up with an API key before the first prompt.",
+            "{cli} meldet, dass niemand angemeldet ist. Vor dem ersten Prompt mit einem API-Schlüssel einrichten."
         ),
         Intro => (
-            "Ask Claude Code about the book. It works in the project folder and reads its CLAUDE.md, skills, and MCP servers as in a terminal. What it changes shows in the text for you to accept or reject.",
-            "Frag Claude Code zum Buch. Es arbeitet im Projektordner und liest CLAUDE.md, Skills und MCP-Server wie im Terminal. Was es ändert, steht im Text und du nimmst es an oder lehnst es ab."
+            "Ask {cli} about the book. It works in the project folder and reads its {memory}, skills, and MCP servers as in a terminal. What it changes shows in the text for you to accept or reject.",
+            "Frag {cli} zum Buch. Es arbeitet im Projektordner und liest {memory}, Skills und MCP-Server wie im Terminal. Was es ändert, steht im Text und du nimmst es an oder lehnst es ab."
         ),
         AllowOnce => ("Allow once", "Einmal erlauben"),
         Deny => ("Deny", "Ablehnen"),
         DenyWithReason => ("Deny with reason\u{2026}", "Mit Grund ablehnen\u{2026}"),
-        ReasonLabel => ("Reason, which Claude sees", "Grund, den Claude sieht"),
+        ReasonLabel => ("Reason, which the agent sees", "Grund, den der Agent sieht"),
         Back => ("Back", "Zurück"),
         SendDenial => ("Deny", "Ablehnen"),
         ScopeOnce => ("Allows this call only.", "Erlaubt nur diesen Aufruf."),
@@ -89,8 +89,8 @@ crate::strings! {
         HunkMoved => ("Text changed since", "Text seither geändert"),
         HunkNotOpen => ("Not open here", "Hier nicht geöffnet"),
         CliUnreadable => (
-            "Claude Code did not report a version Druck can read.",
-            "Claude Code meldet keine Version, die Druck lesen kann."
+            "{cli} did not report a version Druck can read.",
+            "{cli} meldet keine Version, die Druck lesen kann."
         ),
 
         ChipChapter => ("Chapter: {title}", "Kapitel: {title}"),
@@ -99,15 +99,15 @@ crate::strings! {
         ChipProblemOne => ("{count} problem", "{count} Problem"),
         ChipProblemMany => ("{count} problems", "{count} Probleme"),
         CliUntested => (
-            "Claude Code {version} is not a version Druck was tested with. It may still work.",
-            "Claude Code {version} gehört nicht zu den getesteten Versionen. Es kann trotzdem funktionieren."
+            "{cli} {version} is not a version Druck was tested with. It may still work.",
+            "{cli} {version} gehört nicht zu den getesteten Versionen. Es kann trotzdem funktionieren."
         ),
-        LoginSubscription => ("a Claude subscription login", "eine Claude-Abo-Anmeldung"),
+        LoginSubscription => ("a {product} subscription login", "eine {product}-Abo-Anmeldung"),
         LoginApiKey => ("an API key", "einen API-Schlüssel"),
-        LoginReports => ("Claude Code reports {what}{plan}.", "Claude Code meldet {what}{plan}."),
+        LoginReports => ("{cli} reports {what}{plan}.", "{cli} meldet {what}{plan}."),
         LoginUnknown => (
-            "Claude Code did not say which login it uses.",
-            "Claude Code sagt nicht, welche Anmeldung es nutzt."
+            "{cli} did not say which login it uses.",
+            "{cli} sagt nicht, welche Anmeldung es nutzt."
         ),
         AllowTool => ("{tool} {target}?", "{tool} {target} erlauben?"),
         MoreWaiting => ("{count} more waiting", "{count} weitere warten"),
@@ -132,10 +132,46 @@ crate::strings! {
             "This change could not be taken back without touching text you edited since, so it stays.",
             "Diese Änderung lässt sich nicht zurücknehmen, ohne deinen späteren Text zu berühren, deshalb bleibt sie."
         ),
-        CannotStart => ("Claude Code did not start: {error}", "Claude Code ließ sich nicht starten: {error}"),
+        CannotStart => ("{cli} did not start: {error}", "{cli} ließ sich nicht starten: {error}"),
         CliNotFound => ("it is not installed or not on the path", "es ist nicht installiert oder nicht im Pfad"),
-        CannotSend => ("The prompt did not reach Claude Code: {error}", "Der Prompt hat Claude Code nicht erreicht: {error}"),
-        Exited => ("Claude Code stopped unexpectedly.{detail}", "Claude Code wurde unerwartet beendet.{detail}"),
+        CannotSend => ("The prompt did not reach {cli}: {error}", "Der Prompt hat {cli} nicht erreicht: {error}"),
+        PassCopyedit => ("Copyedit", "Korrektorat"),
+        PassConsistency => ("Consistency", "Konsistenz"),
+        PassReferences => ("References", "Verweise"),
+        PassLineEdit => ("Line edit", "Stillektorat"),
+        PassOnSelection => ("{pass}: selection", "{pass}: Auswahl"),
+        PassOnChapter => ("{pass}: this chapter", "{pass}: dieses Kapitel"),
+        PassOnBook => ("{pass}: whole book", "{pass}: ganzes Buch"),
+        PassCustomize => ("Customize pass: {pass}", "Durchgang anpassen: {pass}"),
+        PassRow => ("{pass}: {chapter}", "{pass}: {chapter}"),
+        PassProgress => ("{pass} \u{b7} {chapter}", "{pass} \u{b7} {chapter}"),
+        PassProgressOf => (
+            "{pass} \u{b7} chapter {at} of {total} \u{b7} {chapter}",
+            "{pass} \u{b7} Kapitel {at} von {total} \u{b7} {chapter}"
+        ),
+        PassDone => ("{pass} is done.", "{pass} ist fertig."),
+        PassDoneOf => (
+            "{pass} is done: {done} of {total} chapters.",
+            "{pass} ist fertig: {done} von {total} Kapiteln."
+        ),
+        PassStopped => (
+            "{pass} was stopped after {done} of {total} chapters.",
+            "{pass} wurde nach {done} von {total} Kapiteln angehalten."
+        ),
+        PassFailed => ("Not done: {chapters}.", "Nicht erledigt: {chapters}."),
+        PassUnusable => ("{file} cannot run: {problem}.", "{file} lässt sich nicht starten: {problem}."),
+        PassNotCopied => ("The pass could not be copied: {error}", "Der Durchgang ließ sich nicht kopieren: {error}"),
+        BeforePass => ("Before {pass}", "Vor {pass}"),
+        StyleSheetTitle => ("Style sheet", "Stilblatt"),
+        StyleSheetIntro => (
+            "The decisions the Consistency pass has made. Change them as you like: the next pass follows this file.",
+            "Die Entscheidungen des Durchgangs Konsistenz. Ändere sie nach Belieben: Der nächste Durchgang folgt dieser Datei."
+        ),
+        StyleSheetUnwritten => (
+            "The style sheet could not be written: {error}",
+            "Das Stilblatt ließ sich nicht schreiben: {error}"
+        ),
+        Exited => ("The agent program stopped unexpectedly.{detail}", "Das Agent-Programm wurde unerwartet beendet.{detail}"),
     }
 }
 
@@ -219,23 +255,77 @@ pub fn chip_diagnostics(count: usize) -> String {
     )
 }
 
-pub fn cli_version(version: &str) -> String {
-    format!("Claude Code {version}")
+pub fn cli_version(cli: &str, version: &str) -> String {
+    format!("{cli} {version}")
 }
 
-pub fn cli_untested(version: &str) -> String {
-    crate::t!(Key::CliUntested, version = version)
+pub fn cli_untested(cli: &str, version: &str) -> String {
+    crate::t!(Key::CliUntested, cli = cli, version = version)
 }
 
-/// The login Claude Code reports, in plain words.
-pub fn login_line(method: &str, plan: Option<&str>) -> String {
+/// The login the CLI reports, in plain words. `product` is what the vendor's subscription is called.
+pub fn login_line(cli: &str, product: &str, method: &str, plan: Option<&str>, subscription: bool) -> String {
     let what = match method {
-        "claude.ai" => crate::t!(Key::LoginSubscription),
-        method if method.to_lowercase().contains("api") => crate::t!(Key::LoginApiKey),
-        method => method,
+        _ if subscription => crate::t!(Key::LoginSubscription, product = product),
+        method if method.to_lowercase().contains("api") => crate::t!(Key::LoginApiKey).to_owned(),
+        method => method.to_owned(),
     };
     let plan = plan.map(|plan| format!(" ({plan})")).unwrap_or_default();
-    crate::t!(Key::LoginReports, what = what, plan = plan)
+    crate::t!(Key::LoginReports, cli = cli, what = what, plan = plan)
+}
+
+pub fn turn_busy(cli: &str) -> String {
+    crate::t!(Key::TurnBusy, cli = cli)
+}
+
+/// A pass's row in the conversation.
+pub fn pass_row(pass: &str, chapter: &str) -> String {
+    crate::t!(Key::PassRow, pass = pass, chapter = chapter)
+}
+
+/// The line at the window's foot while a pass runs. No cost shows, as on the chat card.
+pub fn pass_progress(pass: &str, at: usize, total: usize, chapter: &str) -> String {
+    if total == 1 {
+        crate::t!(Key::PassProgress, pass = pass, chapter = chapter)
+    } else {
+        crate::t!(
+            Key::PassProgressOf,
+            pass = pass,
+            at = at,
+            total = total,
+            chapter = chapter
+        )
+    }
+}
+
+/// How a pass ended, with the chapters it could not do.
+pub fn pass_ended(pass: &str, done: usize, total: usize, failed: &[String], stopped: bool) -> String {
+    let summary = match (stopped, total) {
+        (true, _) => crate::t!(Key::PassStopped, pass = pass, done = done, total = total),
+        (false, 1) if failed.is_empty() => crate::t!(Key::PassDone, pass = pass),
+        (false, _) => crate::t!(Key::PassDoneOf, pass = pass, done = done, total = total),
+    };
+    if failed.is_empty() {
+        summary
+    } else {
+        format!("{summary} {}", crate::t!(Key::PassFailed, chapters = failed.join(", ")))
+    }
+}
+
+pub fn pass_unusable(file: &str, problem: &str) -> String {
+    crate::t!(Key::PassUnusable, file = file, problem = problem)
+}
+
+pub fn pass_not_copied(error: &str) -> String {
+    crate::t!(Key::PassNotCopied, error = error)
+}
+
+pub fn before_pass(pass: &str) -> String {
+    crate::t!(Key::BeforePass, pass = pass)
+}
+
+pub fn style_sheet_unwritten(error: &str) -> String {
+    crate::t!(Key::StyleSheetUnwritten, error = error)
 }
 
 pub fn allow_tool(tool: &str, target: &str) -> String {
@@ -279,12 +369,12 @@ pub fn merge_conflict(path: &str) -> String {
     crate::t!(Key::MergeConflict, path = path)
 }
 
-pub fn cannot_start(error: &str) -> String {
-    crate::t!(Key::CannotStart, error = error)
+pub fn cannot_start(cli: &str, error: &str) -> String {
+    crate::t!(Key::CannotStart, cli = cli, error = error)
 }
 
-pub fn cannot_send(error: &str) -> String {
-    crate::t!(Key::CannotSend, error = error)
+pub fn cannot_send(cli: &str, error: &str) -> String {
+    crate::t!(Key::CannotSend, cli = cli, error = error)
 }
 
 pub fn exited(stderr: &str) -> String {

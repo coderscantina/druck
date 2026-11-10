@@ -34,8 +34,8 @@ use gpui::{App, Context, Entity, Global, KeyBinding, Subscription, Task, WeakEnt
 
 use self::commit_card::{CardField, CommitCard};
 use self::git_cli::{Git, Refused};
-pub use self::history::Moment;
 use self::history::{History, Orphan};
+pub use self::history::{Label, Moment};
 use self::local::LocalHistory;
 pub use self::local::label_history;
 use self::merge::PendingMerge;

@@ -24,6 +24,7 @@ crate::strings! {
         OneObject => ("the file should hold one object", "die Datei sollte ein Objekt enthalten"),
         WantedSwitch => ("true or false", "true oder false"),
         WantedAppearance => ("\"system\", \"dark\", or \"light\"", "\"system\", \"dark\" oder \"light\""),
+        WantedAgentCli => ("\"claude\" or \"codex\"", "\"claude\" oder \"codex\""),
         WantedPlaceholders => ("\"chip\" or \"underline\"", "\"chip\" oder \"underline\""),
         WantedKeptFor => (
             "\"7-days\", \"30-days\", \"90-days\", or \"never\"",
@@ -105,8 +106,13 @@ crate::strings! {
         Spelling => ("Check spelling", "Rechtschreibung prüfen"),
         Agent => ("Writing partner", "Schreibpartner"),
         AgentHint => (
-            "Claude Code on Cmd+J, on this computer. Set it up with an API key. Druck holds no keys and starts nothing while this is off.",
-            "Claude Code auf Cmd+J, auf diesem Computer. Mit einem API-Schlüssel einrichten. Druck speichert keine Schlüssel und startet nichts, solange das aus ist."
+            "Your own agent program on Cmd+J and in editing passes, on this computer. Set it up with an API key. Druck holds no keys and starts nothing while this is off.",
+            "Dein eigenes Agent-Programm auf Cmd+J und in Durchgängen, auf diesem Computer. Mit einem API-Schlüssel einrichten. Druck speichert keine Schlüssel und startet nichts, solange das aus ist."
+        ),
+        AgentCli => ("Agent program", "Agent-Programm"),
+        AgentCliHint => (
+            "Which installed program does the work. Changing it starts a new conversation.",
+            "Welches installierte Programm die Arbeit macht. Ein Wechsel beginnt eine neue Unterhaltung."
         ),
         SpellingHint => ("Underlines misspelled words while you write.", "Unterstreicht falsche Wörter beim Schreiben."),
     }

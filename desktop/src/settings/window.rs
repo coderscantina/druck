@@ -7,7 +7,7 @@ use gpui::{
     Window, WindowBounds, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 
-use super::file::{Appearance, KeptFor, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
+use super::file::{AgentCli, Appearance, KeptFor, LineLength, PlaceholderDisplay, Settings, hex, parse_hex};
 use super::strings::Key;
 use super::{Store, change, file_path, get, open_file, problem};
 use crate::a11y::Control as _;
@@ -71,6 +71,7 @@ enum Control {
     Language,
     Placeholders,
     KeptFor,
+    AgentCli,
     Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
 }
 
@@ -165,6 +166,12 @@ const ROWS: &[Row] = &[
         label: Key::Agent,
         hint: Key::AgentHint,
         control: Control::Switch(|s| s.agent, |s, on| s.agent = on),
+    },
+    Row {
+        category: Category::Agent,
+        label: Key::AgentCli,
+        hint: Key::AgentCliHint,
+        control: Control::AgentCli,
     },
 ];
 
@@ -487,6 +494,18 @@ impl SettingsWindow {
                     ],
                     settings.placeholders,
                     |settings, value| settings.placeholders = value,
+                    tokens,
+                    cx,
+                )
+                .into_any_element(),
+            Control::AgentCli => self
+                .segments(
+                    "agent-cli",
+                    [AgentCli::Claude, AgentCli::Codex]
+                        .map(|cli| (cli, cli.backend().name().to_owned()))
+                        .into(),
+                    settings.agent_cli,
+                    |settings, value| settings.agent_cli = value,
                     tokens,
                     cx,
                 )

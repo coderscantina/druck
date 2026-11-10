@@ -71,9 +71,9 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
-    // The CLI starts this executable again as the tool that leaves margin notes. See `agent::note_tool`.
+    // The CLI starts this executable again as the server of its own tools. See `agent::tools`.
     if std::env::args().nth(1).as_deref() == Some(agent::NOTE_TOOL_FLAG) {
-        let served = std::env::current_dir().and_then(|folder| agent::note_tool::serve(&folder));
+        let served = std::env::current_dir().and_then(|folder| agent::tools::serve(&folder));
         return if served.is_ok() {
             ExitCode::SUCCESS
         } else {

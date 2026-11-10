@@ -78,11 +78,11 @@ impl Render for SelectionCard {
         let tokens = Tokens::get(cx);
         let agent = self.agent.read(cx);
         let hint = if agent.is_looking_for_cli() {
-            crate::t!(Key::Checking)
+            crate::t!(Key::Checking, cli = agent.backend().name())
         } else if agent.is_working() {
-            crate::t!(Key::Working)
+            crate::t!(Key::Working).to_owned()
         } else {
-            "\u{23ce}"
+            "\u{23ce}".to_owned()
         };
         div()
             .w(tokens::PROMPT_CARD_WIDTH)
@@ -112,7 +112,8 @@ impl Render for SelectionCard {
     }
 }
 
-/// How many changes wait for review, with Accept all and Reject all, and that a turn is running while the card is closed.
+/// How many changes wait for review, with Accept all and Reject all, that a turn is running while the card is closed,
+/// and which chapter a pass is on or how it ended.
 struct ReviewFoot {
     agent: Entity<AgentView>,
 }
@@ -128,9 +129,11 @@ impl Render for ReviewFoot {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let agent = self.agent.read(cx);
         let (here, elsewhere) = agent.review_counts(cx);
-        let working = agent.is_working() && !agent.chat_is_on_screen();
+        let pass = agent.pass_line();
+        let running = agent.is_working() && (pass.is_some() || !agent.chat_is_on_screen());
+        let working = running && pass.is_none();
         let has_next = agent.has_next_change(cx);
-        if !agent.is_enabled() || (here + elsewhere == 0 && !working) {
+        if !agent.is_enabled() || (here + elsewhere == 0 && !working && pass.is_none()) {
             return div().into_any_element();
         }
         let tokens = Tokens::get(cx).clone();
@@ -152,6 +155,15 @@ impl Render for ReviewFoot {
             .text_size(tokens::TEXT_SMALL)
             .text_color(tokens.text_quiet)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .when_some(pass, |foot, line| {
+                foot.child(div().min_w_0().truncate().child(line))
+                    .when(running, |foot| {
+                        foot.child(
+                            small_button("foot-stop-pass", crate::t!(Key::Stop).to_owned(), &tokens)
+                                .on_click(on(|agent, _, cx| agent.stop_turn(cx))),
+                        )
+                    })
+            })
             .when(working, |foot| {
                 foot.child(crate::t!(Key::Working)).child(
                     small_button("foot-stop", crate::t!(Key::Stop).to_owned(), &tokens)

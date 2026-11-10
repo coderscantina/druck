@@ -1,10 +1,10 @@
-//! The small local MCP server that gives the CLI a tool for leaving a margin note.
+//! The small local MCP server that gives the CLI Druck's tools: one leaves a margin note, one records a style decision.
 //!
-//! The app starts the CLI with `--mcp-config` naming its own executable with [`FLAG`], so the author's settings stay as
-//! they are. The server only checks a note and answers: the app takes the note from the tool call in the CLI's stream
-//! and stays the one writer of `.druck/notes.json`. Messages are one JSON object per line on stdin and stdout.
+//! The app starts the CLI with its own executable named as a server for one session, with [`FLAG`], so the author's
+//! settings stay as they are. The server only checks a call and answers: the app takes the call from the CLI's stream and
+//! stays the one writer of `.druck/notes.json` and the style sheet. Messages are one JSON object per line on stdin and
+//! stdout.
 
-use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path};
 
@@ -12,40 +12,25 @@ use serde_json::{Value, json};
 
 /// The argument that runs the app as this server.
 pub const FLAG: &str = "--agent-note-tool";
-/// The tool's full name as the CLI calls it: `mcp__<server>__<tool>`.
-pub const TOOL: &str = "mcp__druck__leave_note";
+/// The server's name, which is part of each tool's full name.
+pub const SERVER: &str = "druck";
+pub const LEAVE_NOTE: &str = "leave_note";
+pub const RECORD_STYLE: &str = "record_style";
+pub const NAMES: [&str; 2] = [LEAVE_NOTE, RECORD_STYLE];
 
-const SERVER: &str = "druck";
-const SHORT_NAME: &str = "leave_note";
+/// A tool's name as a CLI's stream has it: `mcp__<server>__<tool>`.
+pub fn full_name(tool: &str) -> String {
+    format!("mcp__{SERVER}__{tool}")
+}
 
-/// What the CLI is told to do with this tool and with the files. For the model, so never translated.
+/// What the CLI is told to do with these tools and with the files. For the model, so never translated.
 pub const SYSTEM_PROMPT: &str = "You work inside Druck, a writing app for long-form authors. The book's Markdown files \
 are the truth. To change text, edit the files with your normal tools: the author reviews each change in the text and \
 accepts or rejects it passage by passage, so change only what was asked and leave every other byte alone. A new chapter \
 is a new Markdown file in manuscript/, added to the chapters list in druck.yaml. When the author asks for advice, \
-feedback, or a review rather than a change, do not edit anything: call mcp__druck__leave_note once per point, quoting \
-the exact text it is about. In your replies, be brief and say what you did.";
-
-/// The value for `--mcp-config`: this executable as a server, for this session only.
-pub fn mcp_config(executable: &Path) -> String {
-    json!({"mcpServers": {SERVER: {"type": "stdio", "command": executable, "args": [FLAG]}}}).to_string()
-}
-
-/// The flags that give the CLI the tool for this session only, which the author's settings never see. Without this
-/// executable's own path there is no tool, and the rest works.
-pub fn cli_args() -> Vec<OsString> {
-    let Ok(executable) = std::env::current_exe() else {
-        return Vec::new();
-    };
-    vec![
-        "--mcp-config".into(),
-        mcp_config(&executable).into(),
-        "--allowedTools".into(),
-        TOOL.into(),
-        "--append-system-prompt".into(),
-        SYSTEM_PROMPT.into(),
-    ]
-}
+feedback, or a review rather than a change, do not edit anything: call the druck tool leave_note once per point, quoting \
+the exact text it is about. The druck tool record_style keeps the book's style sheet: call it only when an editing pass \
+tells you to, and never edit the style sheet file yourself. In your replies, be brief and say what you did.";
 
 /// Answers the CLI until it closes stdin. `base` is the project folder, the CLI's working directory.
 pub fn serve(base: &Path) -> io::Result<()> {
@@ -74,8 +59,14 @@ fn answer(message: &Value, base: &Path) -> Option<Value> {
             "serverInfo": {"name": SERVER, "version": env!("CARGO_PKG_VERSION")},
         }),
         "ping" => json!({}),
-        "tools/list" => json!({"tools": [tool()]}),
-        "tools/call" if params["name"] == SHORT_NAME => call(&params["arguments"], base),
+        "tools/list" => json!({"tools": [leave_note(), record_style()]}),
+        "tools/call" if params["name"] == LEAVE_NOTE => call(
+            check_note(&params["arguments"], base),
+            "The note stands beside the passage.",
+        ),
+        "tools/call" if params["name"] == RECORD_STYLE => {
+            call(check_style(&params["arguments"]), "The style sheet has it.")
+        }
         method => {
             let error = json!({"code": -32601, "message": format!("unknown method {method}")});
             return Some(json!({"jsonrpc": "2.0", "id": id, "error": error}));
@@ -84,9 +75,9 @@ fn answer(message: &Value, base: &Path) -> Option<Value> {
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
 
-fn tool() -> Value {
+fn leave_note() -> Value {
     json!({
-        "name": SHORT_NAME,
+        "name": LEAVE_NOTE,
         "description": "Leave a margin note beside a passage of the book, for advice that changes nothing. The author can \
             apply its suggestion, reply, or dismiss it.",
         "inputSchema": {
@@ -103,21 +94,47 @@ fn tool() -> Value {
     })
 }
 
-fn call(input: &Value, base: &Path) -> Value {
-    let (text, is_error) = match check(input, base) {
-        Ok(()) => ("The note stands beside the passage.".to_owned(), false),
+fn record_style() -> Value {
+    json!({
+        "name": RECORD_STYLE,
+        "description": "Record one decision in the book's style sheet, which later editing passes follow. Recording an \
+            entry again replaces its rule.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry": {"type": "string", "description": "What the decision is about, as it is written in the book: a word, a name, a kind of number."},
+                "rule": {"type": "string", "description": "The decision, in a few words, in the book's language."},
+            },
+            "required": ["entry", "rule"],
+        },
+    })
+}
+
+fn call(checked: Result<(), String>, done: &str) -> Value {
+    let (text, is_error) = match checked {
+        Ok(()) => (done.to_owned(), false),
         Err(problem) => (problem, true),
     };
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
-/// What makes a note unusable, told to the model so it can try again.
-fn check(input: &Value, base: &Path) -> Result<(), String> {
-    for field in ["chapter", "quote", "title", "text"] {
-        if input[field].as_str().is_none_or(|value| value.trim().is_empty()) {
-            return Err(format!("{field} is required."));
-        }
+fn required(input: &Value, fields: &[&str]) -> Result<(), String> {
+    match fields
+        .iter()
+        .find(|field| input[**field].as_str().is_none_or(|value| value.trim().is_empty()))
+    {
+        Some(field) => Err(format!("{field} is required.")),
+        None => Ok(()),
     }
+}
+
+fn check_style(input: &Value) -> Result<(), String> {
+    required(input, &["entry", "rule"])
+}
+
+/// What makes a note unusable, told to the model so it can try again.
+fn check_note(input: &Value, base: &Path) -> Result<(), String> {
+    required(input, &["chapter", "quote", "title", "text"])?;
     let chapter = Path::new(input["chapter"].as_str().unwrap_or_default());
     if chapter.is_absolute() || chapter.components().any(|part| part == Component::ParentDir) {
         return Err("chapter must be relative to the project folder.".to_owned());
@@ -146,7 +163,8 @@ mod tests {
         assert_eq!(reply["id"], 7);
         assert_eq!(answer(&json!({"method": "notifications/initialized"}), base), None);
         let list = answer(&request("tools/list", json!({})), base).unwrap();
-        assert_eq!(list["result"]["tools"][0]["name"], SHORT_NAME);
+        assert_eq!(list["result"]["tools"][0]["name"], LEAVE_NOTE);
+        assert_eq!(list["result"]["tools"][1]["name"], RECORD_STYLE);
         assert!(answer(&request("nonsense", json!({})), base).unwrap()["error"].is_object());
     }
 
@@ -157,7 +175,7 @@ mod tests {
         std::fs::write(folder.join("a.md"), "The lamps were lit.\n").unwrap();
         let call_with = |chapter: &str, quote: &str| {
             let arguments = json!({"chapter": chapter, "quote": quote, "title": "T", "text": "Advice."});
-            let params = json!({"name": SHORT_NAME, "arguments": arguments});
+            let params = json!({"name": LEAVE_NOTE, "arguments": arguments});
             answer(&request("tools/call", params), &folder).unwrap()["result"]["isError"].clone()
         };
         assert_eq!(call_with("a.md", "The lamps"), false);
@@ -168,19 +186,12 @@ mod tests {
     }
 
     #[test]
-    fn the_flags_leave_the_authors_settings_and_servers_alone() {
-        let args = cli_args();
-        assert!(args.contains(&OsString::from("--mcp-config")));
-        for flag in ["--strict-mcp-config", "--settings", "--setting-sources", "--tools"] {
-            assert!(!args.contains(&OsString::from(flag)), "{flag}");
-        }
-    }
-
-    #[test]
-    fn the_config_names_this_executable_for_the_session() {
-        let config: Value = serde_json::from_str(&mcp_config(Path::new("/Apps/Druck App/druck"))).unwrap();
-        assert_eq!(config["mcpServers"]["druck"]["command"], "/Apps/Druck App/druck");
-        assert_eq!(config["mcpServers"]["druck"]["args"][0], FLAG);
-        assert_eq!(TOOL, format!("mcp__{SERVER}__{SHORT_NAME}"));
+    fn a_style_decision_needs_its_entry_and_rule() {
+        let call_with = |arguments: Value| {
+            let params = json!({"name": RECORD_STYLE, "arguments": arguments});
+            answer(&request("tools/call", params), Path::new("."))?["result"]["isError"].as_bool()
+        };
+        assert_eq!(call_with(json!({"entry": "e-mail", "rule": "hyphenated"})), Some(false));
+        assert_eq!(call_with(json!({"entry": "e-mail", "rule": " "})), Some(true));
     }
 }

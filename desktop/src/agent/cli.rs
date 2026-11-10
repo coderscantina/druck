@@ -1,4 +1,5 @@
-//! Finding the user's `claude` CLI, checking that it is a version we tested, and asking which login it reports.
+//! Finding the user's agent CLI, checking that it is a version we tested, and asking which login it reports. What
+//! differs between the CLIs is the [`Backend`]'s.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -7,15 +8,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The CLI line this protocol code was captured and tested against.
-const TESTED_MAJOR: u32 = 2;
-const TESTED_MINOR: u32 = 1;
-const TESTED_MIN_PATCH: u32 = 317;
+use super::backend::Backend;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliState {
     Missing,
-    /// The version output did not look like `X.Y.Z (Claude Code)`.
+    /// The version output did not hold a version.
     Unreadable(String),
     /// A version we have not tested. It may still work.
     Untested(String),
@@ -84,22 +82,23 @@ fn parse_shell_path<'a>(output: &'a str, mark: &str) -> Option<&'a str> {
         .filter(|path| !path.is_empty())
 }
 
-/// Finds `claude`: the program `DRUCK_CLAUDE` names if that is set, else on `path`.
-pub fn locate(path: &OsStr) -> Option<PathBuf> {
-    if let Some(program) = env::var_os("DRUCK_CLAUDE").filter(|program| !program.is_empty()) {
+/// Finds the CLI: the program `DRUCK_CLAUDE` or `DRUCK_CODEX` names if that is set, else on `path`.
+pub fn locate(backend: &dyn Backend, path: &OsStr) -> Option<PathBuf> {
+    let named = format!("DRUCK_{}", backend.program().to_uppercase());
+    if let Some(program) = env::var_os(named).filter(|program| !program.is_empty()) {
         return Some(PathBuf::from(program));
     }
     env::split_paths(path)
-        .map(|dir| dir.join("claude"))
+        .map(|dir| dir.join(backend.program()))
         .find(|candidate| candidate.is_file())
 }
 
 /// Runs `<program> --version` and classifies the result.
-pub fn check(program: &Path, path: &OsStr) -> CliState {
+pub fn check(backend: &dyn Backend, program: &Path, path: &OsStr) -> CliState {
     let Ok(output) = Command::new(program).arg("--version").env("PATH", path).output() else {
         return CliState::Missing;
     };
-    classify(&String::from_utf8_lossy(&output.stdout))
+    backend.classify_version(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Which login the CLI says it has. Druck only reports this. It never reads a credential, and the report holds no
@@ -109,55 +108,29 @@ pub enum Login {
     /// The CLI says nobody is logged in.
     LoggedOut,
     /// A login with this method, such as `claude.ai`, and its plan if the CLI names one.
-    LoggedIn { method: String, plan: Option<String> },
+    LoggedIn {
+        method: String,
+        plan: Option<String>,
+        /// A subscription login, which the vendor may not allow in an app like this one.
+        subscription: bool,
+    },
     /// The CLI did not answer in a way we know.
     Unknown,
 }
 
-/// Runs `<program> auth status`, which prints the CLI's own report as JSON.
-pub fn login(program: &Path, path: &OsStr) -> Login {
+/// Runs the CLI's own login report. Some print it on stderr.
+pub fn login(backend: &dyn Backend, program: &Path, path: &OsStr) -> Login {
     match Command::new(program)
-        .args(["auth", "status"])
+        .args(backend.login_args())
         .env("PATH", path)
         .output()
     {
-        Ok(output) => classify_login(&String::from_utf8_lossy(&output.stdout)),
+        Ok(output) => {
+            let said = [output.stdout, output.stderr].concat();
+            backend.classify_login(&String::from_utf8_lossy(&said))
+        }
         Err(_) => Login::Unknown,
     }
-}
-
-fn classify_login(output: &str) -> Login {
-    let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
-        return Login::Unknown;
-    };
-    match (report["loggedIn"].as_bool(), report["authMethod"].as_str()) {
-        (Some(false), _) => Login::LoggedOut,
-        (Some(true), Some(method)) => Login::LoggedIn {
-            method: method.to_owned(),
-            plan: report["subscriptionType"].as_str().map(str::to_owned),
-        },
-        _ => Login::Unknown,
-    }
-}
-
-fn classify(output: &str) -> CliState {
-    let version = output.split_whitespace().next().unwrap_or_default();
-    match parse_version(version) {
-        None => CliState::Unreadable(output.trim().to_owned()),
-        Some((major, minor, patch)) => {
-            let tested = major == TESTED_MAJOR && minor == TESTED_MINOR && patch >= TESTED_MIN_PATCH;
-            if tested {
-                CliState::Ready(version.to_owned())
-            } else {
-                CliState::Untested(version.to_owned())
-            }
-        }
-    }
-}
-
-fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = version.split('.').map(|part| part.parse().ok());
-    Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
 #[cfg(test)]
@@ -173,44 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn classifies_versions() {
-        assert_eq!(classify("2.1.317 (Claude Code)\n"), CliState::Ready("2.1.317".into()));
-        assert_eq!(classify("2.1.400 (Claude Code)"), CliState::Ready("2.1.400".into()));
-        assert_eq!(classify("2.1.100 (Claude Code)"), CliState::Untested("2.1.100".into()));
-        assert_eq!(classify("3.0.0 (Claude Code)"), CliState::Untested("3.0.0".into()));
-        assert_eq!(classify("not a version"), CliState::Unreadable("not a version".into()));
-    }
-
-    #[test]
-    fn a_login_report_keeps_only_the_method_and_plan() {
-        let report = r#"{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty",
-            "email": "someone@example.com", "orgId": "o-1", "subscriptionType": "max"}"#;
-        let login = classify_login(report);
-        assert_eq!(
-            login,
-            Login::LoggedIn {
-                method: "claude.ai".into(),
-                plan: Some("max".into())
-            }
-        );
-        assert!(!format!("{login:?}").contains("example.com"));
-        assert_eq!(classify_login(r#"{"loggedIn": false}"#), Login::LoggedOut);
-        assert_eq!(classify_login("Not logged in"), Login::Unknown);
-    }
-
-    #[test]
     fn missing_program_is_reported() {
+        let claude = super::super::claude::Claude::default();
         assert_eq!(
-            check(Path::new("/nonexistent/claude"), OsStr::new("")),
+            check(&claude, Path::new("/nonexistent/claude"), OsStr::new("")),
             CliState::Missing
         );
-    }
-
-    #[test]
-    #[ignore = "needs the installed claude CLI"]
-    fn installed_cli_is_ready() {
-        let path = search_path();
-        let program = locate(&path).expect("claude is installed");
-        assert!(matches!(check(&program, &path), CliState::Ready(_)));
     }
 }

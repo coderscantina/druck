@@ -44,6 +44,40 @@ pub fn lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The lines of a unified diff, numbered from its hunk headers. Anything else in it, such as a file header, is left out.
+pub fn unified(patch: &str) -> Vec<DiffLine> {
+    let (mut old, mut new) = (0, 0);
+    let mut shown = Vec::new();
+    for line in lines(patch) {
+        if let Some(header) = line.strip_prefix("@@ -") {
+            let start = |side: &str| side.split(',').next().and_then(|start| start.parse::<usize>().ok());
+            let mut sides = header.split(" +");
+            old = sides.next().and_then(start).unwrap_or(1);
+            let next = (sides.next().and_then(|side| side.split(' ').next()).and_then(start)).unwrap_or(1);
+            if !shown.is_empty() {
+                shown.push(DiffLine::Gap(next.saturating_sub(new)));
+            }
+            new = next;
+            continue;
+        }
+        let (mark, number, text) = match line.split_at_checked(1) {
+            Some(("+", text)) if new > 0 => (Mark::Added, new, text),
+            Some(("-", text)) if old > 0 => (Mark::Removed, old, text),
+            Some((" ", text)) if new > 0 => (Mark::Context, new, text),
+            _ => continue,
+        };
+        old += usize::from(mark != Mark::Added);
+        new += usize::from(mark != Mark::Removed);
+        shown.push(DiffLine::Line {
+            mark,
+            number,
+            text: text.to_owned(),
+            emphasis: None,
+        });
+    }
+    shown
+}
+
 /// The difference between two texts line by line, with two lines of context around each change.
 pub fn diff(old: &str, new: &str) -> Vec<DiffLine> {
     let (old, new) = (lines(old), lines(new));
@@ -390,5 +424,24 @@ mod tests {
         let out = diff(&old, "");
         assert_eq!(out.len(), MAX_LINES + 1);
         assert_eq!(out.last(), Some(&DiffLine::Gap(400 - MAX_LINES)));
+    }
+
+    #[test]
+    fn a_unified_diff_keeps_its_line_numbers() {
+        let shown = unified("--- a/a.md\n+++ b/a.md\n@@ -3,2 +3,2 @@\n same\n-Hello world.\n+Howdy world.\n");
+        let brief: Vec<_> = (shown.iter())
+            .map(|line| match line {
+                DiffLine::Line { mark, number, text, .. } => (*mark, *number, text.as_str()),
+                DiffLine::Gap(_) => panic!("one hunk has no gap"),
+            })
+            .collect();
+        assert_eq!(
+            brief,
+            [
+                (Mark::Context, 3, "same"),
+                (Mark::Removed, 4, "Hello world."),
+                (Mark::Added, 4, "Howdy world."),
+            ]
+        );
     }
 }

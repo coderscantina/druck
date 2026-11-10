@@ -413,7 +413,7 @@ impl AgentView {
     /// Rejects a passage and asks the agent for another go at it.
     fn try_again(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         if !self.conversation.is_idle() {
-            self.conversation.note(crate::t!(Key::TurnBusy).to_owned());
+            self.conversation.note(strings::turn_busy(self.backend().name()));
             self.chat_open = true;
             cx.notify();
             return;

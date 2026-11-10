@@ -46,7 +46,7 @@ pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Con
     slots.overlays.push(palette.into());
 }
 
-/// `DRUCK_PALETTE=chapters` or `commands` opens it, for screenshots.
+/// `DRUCK_PALETTE=chapters` or `commands` opens it, for screenshots. `commands:words` also types the words.
 #[cfg(any(debug_assertions, feature = "measure"))]
 pub fn apply_gate(window: &mut Window, cx: &mut App) {
     let Some(name) = crate::gate::var("DRUCK_PALETTE") else {
@@ -55,12 +55,19 @@ pub fn apply_gate(window: &mut Window, cx: &mut App) {
     let Some(palette) = Current::<Palette>::view(cx) else {
         return;
     };
+    let (name, typed) = name.split_once(':').unwrap_or((&name, ""));
     let kind = if name == "commands" {
         Kind::Commands
     } else {
         Kind::Chapters
     };
-    palette.update(cx, |palette, cx| palette.open(kind, window, cx));
+    palette.update(cx, |palette, cx| {
+        palette.open(kind, window, cx);
+        if !typed.is_empty() {
+            (palette.input).update(cx, |input, cx| input.set_value(typed.to_owned(), true, cx));
+            palette.filter(cx);
+        }
+    });
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,6 +82,8 @@ enum Target {
     Command(Box<dyn Action>),
     /// Sets or clears the writing state of the chapter in the text.
     Status(ChapterId, Option<String>),
+    /// Runs an editing pass, or copies one into the project to change.
+    Pass(crate::agent::PassAction),
 }
 
 struct Row {
@@ -220,6 +229,13 @@ impl Palette {
                 target: Target::Command(menus::recent_action(index)),
             });
         }
+        // Nothing with the agent off.
+        rows.extend(crate::agent::pass_commands(cx).into_iter().map(|command| Row {
+            label: command.label,
+            keys: None,
+            chapter: None,
+            target: Target::Pass(command.action),
+        }));
         rows.extend(self.status_rows(cx));
         rows
     }
@@ -310,6 +326,7 @@ impl Palette {
                 }
             }
             Target::Command(action) => window.dispatch_action(action, cx),
+            Target::Pass(action) => crate::agent::run_pass_command(action, cx),
             Target::Status(id, status) => {
                 if let Some(workspace) = self.workspace.upgrade() {
                     workspace.update(cx, |workspace, cx| {

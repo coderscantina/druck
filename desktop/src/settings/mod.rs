@@ -16,7 +16,7 @@ use gpui::prelude::*;
 use gpui::{App, Context, Global, Window, div};
 use notify::Watcher as _;
 
-pub use self::file::{Appearance, LineLength, Settings};
+pub use self::file::{AgentCli, Appearance, LineLength, Settings};
 use self::strings::Key;
 use crate::tokens::{self, Tokens};
 

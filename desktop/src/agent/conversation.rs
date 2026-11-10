@@ -8,9 +8,9 @@ use serde_json::Value;
 
 use super::approval::{self, Approval};
 use super::changes::{Hunk, TurnChanges};
-use super::note_tool::TOOL as NOTE_TOOL;
 use super::session::Event;
 use super::strings;
+use super::tools;
 
 /// How much of a tool's output a row keeps.
 const OUTPUT_LIMIT: usize = 600;
@@ -79,13 +79,23 @@ pub enum Effect {
     /// A tool reported a patch for this file, now in the turn's changes.
     Patched(PathBuf),
     /// The turn is over: what it did to the files is on disk by now.
-    TurnEnded,
+    TurnEnded(Outcome),
     /// A tool created this file.
     Created(PathBuf),
     /// The process ended; a new prompt starts a new one.
     ProcessEnded,
     /// The note tool took a note, with what the agent passed it.
     NoteLeft(Value),
+    /// The style tool took a decision for the style sheet, with what the agent passed it.
+    StyleRecorded(Value),
+}
+
+/// How a turn ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Done,
+    Failed,
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,8 +114,8 @@ pub struct Conversation {
     turns: Vec<TurnChanges>,
     /// An event changed what the panel shows since the last [`Conversation::take_dirty`].
     dirty: bool,
-    /// What the agent passed the note tool in calls that have not finished.
-    note_calls: HashMap<String, Value>,
+    /// What the agent passed Druck's own tools in calls that have not finished, by call, with the tool's name.
+    own_calls: HashMap<String, (String, Value)>,
 }
 
 impl Conversation {
@@ -119,7 +129,7 @@ impl Conversation {
             session_id: None,
             turns: Vec::new(),
             dirty: false,
-            note_calls: HashMap::new(),
+            own_calls: HashMap::new(),
         }
     }
 
@@ -230,13 +240,14 @@ impl Conversation {
                 _ => self.entries.push(Entry::Assistant { text: delta }),
             },
             Event::ToolUse { id, name, input } => {
-                let target = if name == NOTE_TOOL {
-                    input["title"].as_str().unwrap_or_default().to_owned()
-                } else {
-                    approval::target(&name, &input, &self.base)
+                let own = tools::NAMES.into_iter().find(|tool| name == tools::full_name(tool));
+                let target = match own {
+                    Some(tools::LEAVE_NOTE) => input["title"].as_str().unwrap_or_default().to_owned(),
+                    Some(_) => input["entry"].as_str().unwrap_or_default().to_owned(),
+                    None => approval::target(&name, &input, &self.base),
                 };
-                if name == NOTE_TOOL {
-                    self.note_calls.insert(id.clone(), input);
+                if let Some(tool) = own {
+                    self.own_calls.insert(id.clone(), (tool.to_owned(), input));
                 }
                 self.entries.push(Entry::Tool(ToolCall {
                     id,
@@ -271,8 +282,12 @@ impl Conversation {
                 if !is_error && let Some(details) = details {
                     effects.extend(self.record_changes(&details));
                 }
-                if let Some(note) = self.note_calls.remove(&tool_use_id).filter(|_| !is_error) {
-                    effects.push(Effect::NoteLeft(note));
+                if let Some((tool, input)) = self.own_calls.remove(&tool_use_id).filter(|_| !is_error) {
+                    effects.push(if tool == tools::LEAVE_NOTE {
+                        Effect::NoteLeft(input)
+                    } else {
+                        Effect::StyleRecorded(input)
+                    });
                 }
             }
             Event::TurnFinished {
@@ -284,15 +299,19 @@ impl Conversation {
                 let stopping = self.status == Status::Stopping;
                 self.status = Status::Idle;
                 self.approvals.clear();
-                if stopped || (stopping && is_error) {
+                let outcome = if stopped || (stopping && is_error) {
                     self.entries.push(Entry::Stopped);
+                    Outcome::Stopped
                 } else if is_error {
                     self.entries.push(Entry::Error(result));
-                }
+                    Outcome::Failed
+                } else {
+                    Outcome::Done
+                };
                 self.entries.push(Entry::TurnEnd {
                     changes: self.turns.len().checked_sub(1),
                 });
-                effects.push(Effect::TurnEnded);
+                effects.push(Effect::TurnEnded(outcome));
                 if !session_id.is_empty() {
                     self.session_id = Some(session_id.clone());
                     effects.push(Effect::SessionId(session_id));
@@ -361,7 +380,7 @@ fn clip(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::session::parse_line;
+    use super::super::claude::parse_line;
     use super::*;
 
     const CAPTURE: &str = include_str!("../../tests/fixtures/agent-turns.jsonl");

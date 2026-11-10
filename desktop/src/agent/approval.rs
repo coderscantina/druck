@@ -69,6 +69,12 @@ impl Approval {
                 }
                 None => text_preview(input),
             },
+            // A patch as Codex sends it: each file's change as a unified diff.
+            ("Patch", _) => Preview::Diff(
+                (input["changes"].as_array().into_iter().flatten())
+                    .flat_map(|change| diff::unified(change["diff"].as_str().unwrap_or_default()))
+                    .collect(),
+            ),
             ("Bash", _) => Preview::Text(clip(input["command"].as_str().unwrap_or_default())),
             _ => text_preview(input),
         };
