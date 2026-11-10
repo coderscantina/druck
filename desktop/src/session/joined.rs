@@ -47,6 +47,38 @@ impl ChapterMap {
     }
 }
 
+impl Joined {
+    /// A copy of a project's text in which `change` gives some chapter files other text, for a trial that must leave
+    /// the session alone. `None` keeps a file as it is.
+    pub fn with_files(&self, change: impl Fn(&Path, &str) -> Option<String>) -> Self {
+        let mut text = String::with_capacity(self.text.len());
+        let mut map = ChapterMap::default();
+        let mut copied = 0;
+        for place in &self.map.places {
+            // What joins two chapters stays as it is.
+            text.push_str(&self.text[copied..place.range.start]);
+            let start = text.len();
+            match change(&place.path, &self.text[place.range.clone()]) {
+                Some(new) => text.push_str(&new),
+                None => text.push_str(&self.text[place.range.clone()]),
+            }
+            map.push(place.id, place.path.clone(), start..text.len());
+            copied = place.range.end;
+        }
+        text.push_str(&self.text[copied..]);
+        Self {
+            text,
+            map,
+            revision: self.revision,
+        }
+    }
+
+    /// The text of the chapter file at `path`, in a project.
+    pub fn file(&self, path: &Path) -> Option<&str> {
+        Some(&self.text[self.map.range_of(path)?])
+    }
+}
+
 /// An unchanging copy of the document for a layout on another thread. A single file's text is the file. A project's is
 /// its chapters with a blank line between them, the same rule as the engine's, with a chapter's byte order mark left
 /// in. Its pages' source positions name a chapter file.

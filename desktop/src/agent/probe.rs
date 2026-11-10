@@ -5,7 +5,8 @@
 //! Actions: `ask`, `prompt <text>` (into the card or the selection prompt that is open), `send`, `select <text>`, `show <text>`,
 //! `type <text>`, `accept <n>`, `reject <n>`, `again <n>`, `accept-all`, `reject-all`, `next`, `note-apply <n>`,
 //! `note-reply <n>`, `note-dismiss <n>`, `allow`, `deny`, `chapter <n>`, `mode write|publish`, `state`,
-//! `pass <name> book|chapter|selection`, `customize <name>`, `stop`.
+//! `pass <name> book|chapter|selection`, `customize <name>`, `stop`, `fix`, `fix-accept <n>`, `fix-reject <n>`,
+//! `fix-accept-all`, `fix-reject-all`, `undo`.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -172,6 +173,18 @@ impl AgentView {
             }
             "customize" => super::run_pass_command(super::PassAction::Customize(rest.to_owned()), cx),
             "stop" => self.stop(cx),
+            "fix" => self.fix_proof(window, cx),
+            "fix-accept" | "fix-reject" => {
+                let at = rest.parse::<usize>().unwrap_or(0);
+                match (self.fixes().get(at).map(|entry| entry.id), verb) {
+                    (Some(id), "fix-accept") => self.accept_fix(id, window, cx),
+                    (Some(id), _) => self.reject_fix(id, cx),
+                    (None, _) => {}
+                }
+            }
+            "fix-accept-all" => self.accept_all_fixes(window, cx),
+            "undo" => window.dispatch_action(Box::new(crate::editor::Undo), cx),
+            "fix-reject-all" => self.reject_all_fixes(cx),
             "state" => return self.state(cx),
             _ => return "unknown".to_owned(),
         }
@@ -188,9 +201,16 @@ impl AgentView {
     fn state(&self, cx: &Context<Self>) -> String {
         let editor = self.editor.read(cx);
         format!(
-            "working={} pass={} foot={:?} waiting={} passages={} notes={} chat={} process={} chapter={}",
+            "working={} pass={} fixing={} fixes=[{}] warnings={} foot={:?} waiting={} passages={} notes={} chat={} \
+             process={} chapter={}",
             !self.conversation.is_idle(),
             self.pass_run.is_some(),
+            self.fixing.is_running(),
+            (self.fixes().iter())
+                .map(|entry| format!("{} ({})", entry.title(), entry.cleared))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.warnings_to_fix(cx),
             self.pass_line().unwrap_or_default(),
             self.conversation.approvals().count(),
             editor.review().len(),

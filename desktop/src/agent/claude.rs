@@ -110,7 +110,7 @@ impl Backend for Claude {
             let allowed = tools::NAMES.map(tools::full_name).join(",");
             args.extend([
                 "--mcp-config".into(),
-                mcp_config(executable).into(),
+                mcp_config(executable, &config.document).into(),
                 "--allowedTools".into(),
                 allowed.into(),
                 "--append-system-prompt".into(),
@@ -163,8 +163,9 @@ impl Backend for Claude {
 }
 
 /// The value for `--mcp-config`: this executable as a server, for this session only.
-fn mcp_config(executable: &Path) -> String {
-    json!({"mcpServers": {tools::SERVER: {"type": "stdio", "command": executable, "args": [tools::FLAG]}}}).to_string()
+fn mcp_config(executable: &Path, document: &Path) -> String {
+    let server = json!({"type": "stdio", "command": executable, "args": [tools::FLAG, document]});
+    json!({"mcpServers": {tools::SERVER: server}}).to_string()
 }
 
 /// Turns one stdout line into events. Anything not recognised becomes [`Event::Raw`].
@@ -385,14 +386,21 @@ mod tests {
     fn the_tools_come_in_for_one_session_and_leave_the_authors_servers_alone() {
         let args = args_of(&SessionConfig {
             tool_server: Some("/Apps/Druck App/druck".into()),
+            document: "/books/My Book".into(),
             ..SessionConfig::default()
         });
         let at = args.iter().position(|arg| arg == "--mcp-config").expect("flag");
         let config: Value = serde_json::from_str(args[at + 1].to_str().unwrap()).unwrap();
         assert_eq!(config["mcpServers"]["druck"]["command"], "/Apps/Druck App/druck");
-        assert_eq!(config["mcpServers"]["druck"]["args"][0], tools::FLAG);
+        assert_eq!(
+            config["mcpServers"]["druck"]["args"],
+            json!([tools::FLAG, "/books/My Book"])
+        );
         let at = args.iter().position(|arg| arg == "--allowedTools").expect("flag");
-        assert_eq!(args[at + 1], "mcp__druck__leave_note,mcp__druck__record_style");
+        assert_eq!(
+            args[at + 1],
+            "mcp__druck__leave_note,mcp__druck__record_style,mcp__druck__try_fixes"
+        );
         assert!(!args.iter().any(|arg| arg == "--strict-mcp-config"));
     }
 

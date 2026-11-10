@@ -153,7 +153,7 @@ impl AgentView {
     }
 
     /// A line the app says about a pass, at the window's foot for a while and in the conversation for good.
-    fn say(&mut self, message: String, cx: &mut Context<Self>) {
+    pub(super) fn say(&mut self, message: String, cx: &mut Context<Self>) {
         self.conversation.note(message.clone());
         self.pass_result = Some(message);
         self.pass_result_end = cx.spawn(async move |view, cx| {
@@ -167,9 +167,11 @@ impl AgentView {
         cx.notify();
     }
 
-    /// What the window's foot says about a pass: where it is, or for a while how it ended.
+    /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended.
     pub(super) fn pass_line(&self) -> Option<String> {
-        (self.pass_run.as_ref().map(PassRun::progress)).or_else(|| self.pass_result.clone())
+        (self.pass_run.as_ref().map(PassRun::progress))
+            .or_else(|| self.fix_line())
+            .or_else(|| self.pass_result.clone())
     }
 
     /// Starts a pass, once the CLI has been looked for. Nothing else starts one.
@@ -187,7 +189,7 @@ impl AgentView {
             self.open_chat(window, cx);
             return;
         }
-        if !self.conversation.is_idle() || self.pass_run.is_some() {
+        if !self.conversation.is_idle() || self.pass_run.is_some() || self.fixing.is_running() {
             self.say(strings::turn_busy(self.backend().name()), cx);
             return;
         }

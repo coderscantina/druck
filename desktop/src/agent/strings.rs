@@ -162,6 +162,57 @@ crate::strings! {
         PassUnusable => ("{file} cannot run: {problem}.", "{file} lässt sich nicht starten: {problem}."),
         PassNotCopied => ("The pass could not be copied: {error}", "Der Durchgang ließ sich nicht kopieren: {error}"),
         BeforePass => ("Before {pass}", "Vor {pass}"),
+        FixProof => ("Fix the proof", "Satzwarnungen beheben"),
+        FixReading => ("Fix the proof \u{b7} reading the pages", "Satzwarnungen beheben \u{b7} Seiten werden gelesen"),
+        FixTrying => ("Fix the proof \u{b7} trying fixes", "Satzwarnungen beheben \u{b7} Korrekturen werden probiert"),
+        FixTryingKept => (
+            "Fix the proof \u{b7} trying fixes \u{b7} {kept} kept",
+            "Satzwarnungen beheben \u{b7} Korrekturen werden probiert \u{b7} {kept} behalten"
+        ),
+        FixDoneNone => ("Fix the proof is done: no fix helped.", "Satzwarnungen beheben ist fertig: Keine Satzkorrektur half."),
+        FixDoneOne => (
+            "Fix the proof is done: 1 fix to review in Proof.",
+            "Satzwarnungen beheben ist fertig: 1 Satzkorrektur im Reiter Korrektur zu prüfen."
+        ),
+        FixDoneMany => (
+            "Fix the proof is done: {count} fixes to review in Proof.",
+            "Satzwarnungen beheben ist fertig: {count} Satzkorrekturen im Reiter Korrektur zu prüfen."
+        ),
+        FixStopped => (
+            "Fix the proof was stopped. Fixes to review: {count}.",
+            "Satzwarnungen beheben wurde angehalten. Satzkorrekturen zu prüfen: {count}."
+        ),
+        FixFailed => (
+            "Fix the proof did not finish. Fixes to review: {count}.",
+            "Satzwarnungen beheben wurde nicht fertig. Satzkorrekturen zu prüfen: {count}."
+        ),
+        FixNothing => ("The pages break no typesetting rule.", "Die Seiten verletzen keine Satzregel."),
+        FixNoPages => ("Fix the proof needs pages: {problem}", "Satzwarnungen beheben braucht Seiten: {problem}"),
+        FixGone => (
+            "A fix was left out, since its text has changed.",
+            "Eine Satzkorrektur wurde ausgelassen, weil sich ihr Text geändert hat."
+        ),
+        BeforeFixes => ("Before proof fixes", "Vor den Satzkorrekturen"),
+        FixesOne => ("1 fix to review", "1 Satzkorrektur zu prüfen"),
+        FixesMany => ("{count} fixes to review", "{count} Satzkorrekturen zu prüfen"),
+        FixAccept => ("Accept", "Annehmen"),
+        FixReject => ("Reject", "Ablehnen"),
+        FixBefore => ("Before \u{b7} page {page}", "Vorher \u{b7} Seite {page}"),
+        FixAfter => ("After \u{b7} page {page}", "Nachher \u{b7} Seite {page}"),
+        FixPageBreak => ("Page break before", "Seitenumbruch davor"),
+        FixKeep => ("Keep together", "Zusammenhalten"),
+        FixPlacementTop => ("Figure at the top of its page", "Abbildung oben auf der Seite"),
+        FixPlacementBottom => ("Figure at the foot of its page", "Abbildung unten auf der Seite"),
+        FixPlacementHere => ("Figure where it is written", "Abbildung an ihrer Stelle im Text"),
+        FixTheme => ("Theme: {property} = {value}", "Theme: {property} = {value}"),
+        FixWholeBook => ("Holds for the whole book", "Gilt für das ganze Buch"),
+        FixClearsOne => ("Clears 1 warning", "Behebt 1 Warnung"),
+        FixClearsMany => ("Clears {count} warnings", "Behebt {count} Warnungen"),
+        FixShowPage => ("Show this page", "Diese Seite zeigen"),
+        FixOffer => (
+            "The agent tries fixes on a copy of the book and keeps those that clear a warning and cause none.",
+            "Der Agent probiert Korrekturen an einer Kopie des Buchs und behält, was eine Warnung behebt und keine verursacht."
+        ),
         StyleSheetTitle => ("Style sheet", "Stilblatt"),
         StyleSheetIntro => (
             "The decisions the Consistency pass has made. Change them as you like: the next pass follows this file.",
@@ -322,6 +373,44 @@ pub fn pass_not_copied(error: &str) -> String {
 
 pub fn before_pass(pass: &str) -> String {
     crate::t!(Key::BeforePass, pass = pass)
+}
+
+/// The line at the window's foot while the typesetter's turn runs.
+pub fn fix_progress(kept: usize) -> String {
+    match kept {
+        0 => crate::t!(Key::FixTrying).to_owned(),
+        kept => crate::t!(Key::FixTryingKept, kept = kept),
+    }
+}
+
+/// How a run of the typesetter ended, with how many fixes wait for review.
+pub fn fix_ended(kept: usize, outcome: super::conversation::Outcome) -> String {
+    use super::conversation::Outcome;
+    match (outcome, kept) {
+        (Outcome::Stopped, count) => crate::t!(Key::FixStopped, count = count),
+        (Outcome::Failed, count) => crate::t!(Key::FixFailed, count = count),
+        (Outcome::Done, 0) => crate::t!(Key::FixDoneNone).to_owned(),
+        (Outcome::Done, 1) => crate::t!(Key::FixDoneOne).to_owned(),
+        (Outcome::Done, count) => crate::t!(Key::FixDoneMany, count = count),
+    }
+}
+
+pub fn fix_no_pages(problem: &str) -> String {
+    crate::t!(Key::FixNoPages, problem = problem)
+}
+
+pub fn fixes_to_review(count: usize) -> String {
+    match count {
+        1 => crate::t!(Key::FixesOne).to_owned(),
+        count => crate::t!(Key::FixesMany, count = count),
+    }
+}
+
+pub fn fix_clears(count: usize) -> String {
+    match count {
+        1 => crate::t!(Key::FixClearsOne).to_owned(),
+        count => crate::t!(Key::FixClearsMany, count = count),
+    }
 }
 
 pub fn style_sheet_unwritten(error: &str) -> String {

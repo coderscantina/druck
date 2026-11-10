@@ -10,7 +10,7 @@ use druck::cancel::Cancel;
 use druck::diagnostic::Diagnostic;
 use druck::editor::resolved_config::{self, Config, FontStyle, NumberFormat, Style, StyleKind, Weight};
 use druck::input::{DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
-use druck::resource::{Bytes, FileResolver, Origin, clock_date, source_date};
+use druck::resource::{Bytes, FileResolver, InstalledFace, Origin, ResolveError, Resolver, clock_date, source_date};
 use druck::{Failure, LayoutOptions, Missing, Renderer};
 
 use super::fonts::{FontUse, fonts_in_use};
@@ -268,6 +268,8 @@ pub struct Typesetter {
     working_dir: PathBuf,
     renderer: Renderer,
     resolver: FileResolver,
+    /// A theme file's text to typeset with in place of what the disk holds, for a trial.
+    stand_in: Option<(PathBuf, Bytes)>,
     painter: Option<Arc<Painter>>,
     /// The theme's type, read from its fonts when the last layout failed after the theme and fonts were in order.
     failed_type: Option<BookType>,
@@ -287,6 +289,7 @@ impl Typesetter {
             working_dir,
             renderer: Renderer::new(),
             resolver: FileResolver::new(),
+            stand_in: None,
             painter: None,
             failed_type: None,
         }
@@ -300,6 +303,12 @@ impl Typesetter {
     /// Typesets the next runs in this theme, or in the document's when `None`.
     pub fn set_theme(&mut self, theme: Option<PathBuf>) {
         self.theme = theme;
+    }
+
+    /// Typesets the next runs with `text` as the theme file at `file`, which stays as it is on disk, or with the file
+    /// itself when `None`.
+    pub fn set_theme_text(&mut self, theme: Option<(PathBuf, String)>) {
+        self.stand_in = theme.map(|(file, text)| (druck::resource::normalize(&file), Bytes::from(text.into_bytes())));
     }
 
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
@@ -366,9 +375,13 @@ impl Typesetter {
         #[cfg(any(debug_assertions, feature = "measure"))]
         let start = Instant::now();
         let (input, unlisted) = self.input(joined)?;
+        let resolver = WithStandIn {
+            files: &self.resolver,
+            stand_in: self.stand_in.as_ref(),
+        };
         let configured = self
             .renderer
-            .job(&self.resolver, &input, cancel)
+            .job(&resolver, &input, cancel)
             .missing(Missing::StandIn)
             .configure()?;
         #[cfg(any(debug_assertions, feature = "measure"))]
@@ -450,6 +463,29 @@ impl Typesetter {
             today,
         };
         Ok((input, warnings))
+    }
+}
+
+/// Reads one file from memory and every other from disk.
+struct WithStandIn<'a> {
+    files: &'a FileResolver,
+    stand_in: Option<&'a (PathBuf, Bytes)>,
+}
+
+impl Resolver for WithStandIn<'_> {
+    fn read(&self, origin: &Origin, path: &str) -> Result<Bytes, ResolveError> {
+        match self.stand_in {
+            Some((file, text)) if origin.file(path).as_ref() == Some(file) => Ok(text.clone()),
+            _ => self.files.read(origin, path),
+        }
+    }
+
+    fn list(&self, origin: &Origin, dir: &str) -> Option<Vec<String>> {
+        self.files.list(origin, dir)
+    }
+
+    fn installed(&self, family: &str) -> Result<Vec<InstalledFace>, ResolveError> {
+        self.files.installed(family)
     }
 }
 

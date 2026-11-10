@@ -23,6 +23,9 @@ use super::tools;
 const TESTED: (u32, u32) = (0, 166);
 
 /// The ids of the two requests this side sends once. Prompts and interrupts count on from there.
+/// How long a call of Druck's tools may take. Codex gives a tool 60 seconds unless told, and a trial lays the whole
+/// book out once per fix.
+const TOOL_TIMEOUT_SECONDS: u32 = 1800;
 const INITIALIZE: u64 = 1;
 const THREAD: u64 = 2;
 
@@ -254,7 +257,10 @@ impl Backend for Codex {
                 "-c".into(),
                 format!("{server}.command={}", json!(executable)).into(),
                 "-c".into(),
-                format!("{server}.args={}", json!([tools::FLAG])).into(),
+                format!("{server}.args={}", json!([tools::FLAG, config.document])).into(),
+                // A trial lays the whole book out, once per fix of a call.
+                "-c".into(),
+                format!("{server}.tool_timeout_sec={TOOL_TIMEOUT_SECONDS}").into(),
             ]);
         }
         args.extend(config.extra_args.iter().cloned());
@@ -523,6 +529,7 @@ mod tests {
             cwd: "/book".into(),
             model: Some("gpt-5.6-luna".into()),
             tool_server: Some("/Apps/Druck App/druck".into()),
+            document: "/book".into(),
             access: Access::ReadOnly,
             ..SessionConfig::default()
         };
@@ -530,7 +537,8 @@ mod tests {
         let args = codex.args(&config);
         assert_eq!(args[0], "app-server");
         assert_eq!(args[2], r#"mcp_servers.druck.command="/Apps/Druck App/druck""#);
-        assert_eq!(args[4], r#"mcp_servers.druck.args=["--agent-note-tool"]"#);
+        assert_eq!(args[4], r#"mcp_servers.druck.args=["--agent-note-tool","/book"]"#);
+        assert_eq!(args[6], "mcp_servers.druck.tool_timeout_sec=1800");
         let opening = codex.open(&config);
         assert_eq!(opening[0]["method"], "initialize");
         assert_eq!(opening[1], json!({"method": "initialized"}));

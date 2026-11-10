@@ -79,6 +79,7 @@ crate::strings! {
         ShowDetails => ("Details", "Angaben"),
         ShowAgent => ("Agent", "Agent"),
         AskAgent => ("Ask the agent\u{2026}", "Agent fragen\u{2026}"),
+        FixProof => ("Fix the proof", "Satzwarnungen beheben"),
         CommitCard => ("Commit…", "Commit…"),
         Timeline => ("Timeline", "Zeitleiste"),
         KeptCopies => ("Show kept versions", "Aufbewahrte Fassungen zeigen"),

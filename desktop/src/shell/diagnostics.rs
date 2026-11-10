@@ -37,6 +37,8 @@ pub struct DiagnosticsPanel {
     /// The entry being looked at.
     current: Option<usize>,
     scroll: ScrollHandle,
+    /// What another part of the app shows above the list: the typesetter's fixes.
+    above: Option<gpui::AnyView>,
 }
 
 impl DiagnosticsPanel {
@@ -47,7 +49,12 @@ impl DiagnosticsPanel {
             notice: None,
             current: None,
             scroll: ScrollHandle::new(),
+            above: None,
         }
+    }
+
+    pub fn set_above(&mut self, view: gpui::AnyView) {
+        self.above = Some(view);
     }
 
     pub fn set(&mut self, report: &Report, notice: Option<String>, cx: &mut Context<Self>) {
@@ -216,6 +223,7 @@ impl Render for DiagnosticsPanel {
                         ),
                 )
             })
+            .children(self.above.clone())
             .child(if rows.is_empty() {
                 div()
                     .p(tokens::SPACE_3)

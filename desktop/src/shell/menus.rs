@@ -33,6 +33,7 @@ actions!(
         ShowDetails,
         ShowAgent,
         AskAgent,
+        FixProof,
         ChooseTheme,
         FocusEditor,
         CloseDocument,

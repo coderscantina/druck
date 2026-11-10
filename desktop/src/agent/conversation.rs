@@ -88,6 +88,8 @@ pub enum Effect {
     NoteLeft(Value),
     /// The style tool took a decision for the style sheet, with what the agent passed it.
     StyleRecorded(Value),
+    /// The trial tool tried typesetting fixes: what the agent passed it, and what it answered.
+    FixesTried(Value, String),
 }
 
 /// How a turn ended.
@@ -243,6 +245,7 @@ impl Conversation {
                 let own = tools::NAMES.into_iter().find(|tool| name == tools::full_name(tool));
                 let target = match own {
                     Some(tools::LEAVE_NOTE) => input["title"].as_str().unwrap_or_default().to_owned(),
+                    Some(tools::TRY_FIXES) => input["fixes"].as_array().map_or(0, Vec::len).to_string(),
                     Some(_) => input["entry"].as_str().unwrap_or_default().to_owned(),
                     None => approval::target(&name, &input, &self.base),
                 };
@@ -283,10 +286,10 @@ impl Conversation {
                     effects.extend(self.record_changes(&details));
                 }
                 if let Some((tool, input)) = self.own_calls.remove(&tool_use_id).filter(|_| !is_error) {
-                    effects.push(if tool == tools::LEAVE_NOTE {
-                        Effect::NoteLeft(input)
-                    } else {
-                        Effect::StyleRecorded(input)
+                    effects.push(match tool.as_str() {
+                        tools::LEAVE_NOTE => Effect::NoteLeft(input),
+                        tools::TRY_FIXES => Effect::FixesTried(input, content),
+                        _ => Effect::StyleRecorded(input),
                     });
                 }
             }

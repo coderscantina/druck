@@ -121,6 +121,7 @@ pub fn all() -> Vec<Command> {
         command(Key::ShowDetails, Anywhere, ShowDetails),
         command(Key::AskAgent, Agent, AskAgent),
         command(Key::ShowAgent, Agent, ShowAgent),
+        command(Key::FixProof, Agent, FixProof),
         command(Key::ShowDiagnostics, Anywhere, ShowDiagnostics),
         command(Key::NextProblem, Anywhere, NextProblem),
         command(Key::PreviousProblem, Anywhere, PreviousProblem),

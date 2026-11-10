@@ -20,6 +20,8 @@
 //! - `session`, `cli`: the child process and the CLI lookup.
 //! - `backend`, `claude`, `codex`: what differs between the CLIs, and each one's command line and stream.
 //! - `passes`, `style_sheet`: editing passes as Markdown files, and the style sheet they keep.
+//! - `fixing`: "Fix the proof", which hands the agent the trial tool of `crate::typesetter` and keeps a queue of the
+//!   fixes the app's own trial kept. `fixes_panel` draws the queue in the Proof tab.
 //! - `conversation`: events in, rows and approvals out.
 //! - `approval`, `diff`: what is shown before a tool is allowed.
 //! - `changes`: hunks of a turn from what Persistence saw on disk, found again in text that moved.
@@ -40,6 +42,8 @@ mod codex;
 mod context;
 mod conversation;
 mod diff;
+mod fixes_panel;
+mod fixing;
 mod markdown;
 mod notes;
 mod passes;
@@ -84,6 +88,7 @@ use session::{Event, Session as Child, SessionConfig};
 use store::{Remembered, Store};
 use strings::Key;
 
+pub use fixing::fix_proof;
 pub use run::{PassAction, pass_commands, run_pass_command};
 pub use tools::FLAG as NOTE_TOOL_FLAG;
 
@@ -108,6 +113,7 @@ pub fn mount(
     let view = cx.new(|cx| AgentView::new(parts, persist, workspace, window, cx));
     Current::set(&view, window, cx);
     card::mount(&view, slots, window, cx);
+    fixes_panel::mount(&view, cx);
     parts
         .inspector
         .update(cx, |inspector, _| inspector.mount(Tab::Agent, view.into()));
@@ -204,6 +210,10 @@ pub struct AgentView {
     /// How the last pass ended, for the line at the window's foot, until it has been shown a while.
     pass_result: Option<String>,
     pass_result_end: Task<()>,
+    /// The typesetter: a run of "Fix the proof", and the kept fixes that wait for review.
+    fixing: fixing::Fixing,
+    /// "Fix the proof" was asked for while the CLI was still being looked for.
+    fix_asked: bool,
     /// The chat card over the text.
     chat_open: bool,
     /// The prompt at the selection.
@@ -383,6 +393,8 @@ impl AgentView {
             enabled: settings::get(cx).agent,
             cli_kind,
             pass_run: None,
+            fixing: fixing::Fixing::default(),
+            fix_asked: false,
             pass_asked: None,
             pass_result: None,
             pass_result_end: Task::ready(()),
@@ -479,6 +491,9 @@ impl AgentView {
                 if let Some((slug, scope)) = view.pass_asked.take() {
                     view.run_pass(&slug, scope, window, cx);
                 }
+                if std::mem::take(&mut view.fix_asked) {
+                    view.fix_proof(window, cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -533,7 +548,10 @@ impl AgentView {
             resume: self.conversation.session_id().map(str::to_owned),
             // Without this executable's own path there are no tools, and the rest works.
             tool_server: std::env::current_exe().ok(),
-            access: self.pass_run.as_ref().map(run::PassRun::access).unwrap_or_default(),
+            document: self.project.clone(),
+            access: (self.pass_run.as_ref().map(run::PassRun::access))
+                .or(self.fix_access())
+                .unwrap_or_default(),
             ..SessionConfig::default()
         };
         #[cfg(any(debug_assertions, feature = "measure"))]
@@ -623,7 +641,7 @@ impl AgentView {
     fn take(&mut self, effect: Effect, window: &mut Window, cx: &mut Context<Self>) {
         match effect {
             // A pass's turns are not the conversation the chat card resumes.
-            Effect::SessionId(_) if self.pass_run.is_some() => {}
+            Effect::SessionId(_) if self.pass_run.is_some() || self.fixing.is_running() => {}
             Effect::SessionId(_) => self.remember(cx),
             Effect::Patched(path) => self.forget_patch_of_open_file(&path, cx),
             Effect::Created(_) => self.take_in_new_files(cx),
@@ -634,9 +652,11 @@ impl AgentView {
                         .note(strings::style_sheet_unwritten(&error.to_string()));
                 }
             }
+            Effect::FixesTried(input, answer) => self.fixes_tried(&input, &answer),
             Effect::TurnEnded(outcome) => {
                 self.end_turn(window, cx);
                 self.pass_turn_ended(outcome, window, cx);
+                self.fix_turn_ended(outcome, cx);
             }
             Effect::ProcessEnded => {
                 let never_started = self.running.as_ref().is_some_and(|running| !running.started);
@@ -645,6 +665,9 @@ impl AgentView {
                 if self.pass_run.is_some() {
                     // The chapter whose process ended is lost, and the rest still get their turn.
                     return self.pass_turn_ended(Outcome::Failed, window, cx);
+                }
+                if self.fixing.is_running() {
+                    return self.fix_turn_ended(Outcome::Failed, cx);
                 }
                 // A resume the CLI did not understand would fail the same way again.
                 if never_started && self.conversation.session_id().is_some() {
@@ -698,6 +721,7 @@ impl AgentView {
             self.cli = None;
             self.model = None;
             self.pass_run = None;
+            self.fixing.abandon();
             self.new_conversation(cx);
         }
         let enabled = settings::get(cx).agent;
@@ -708,6 +732,9 @@ impl AgentView {
         if !enabled {
             self.pass_run = None;
             self.pass_asked = None;
+            self.fix_asked = false;
+            self.fixing.abandon();
+            self.reject_all_fixes(cx);
             self.running = None;
             self.chat_open = false;
             self.close_selection_prompt(window, cx);
@@ -855,8 +882,8 @@ impl AgentView {
             cx.notify();
             return false;
         }
-        // A pass has its own label, from before its first chapter.
-        if self.pass_run.is_none() {
+        // A pass has its own label, from before its first chapter, and a typesetter's turn changes no file.
+        if self.pass_run.is_none() && !self.fixing.is_running() {
             self.label_local_history_before_turn(cx);
         }
         self.turn_start = Some(self.project_now(cx));
@@ -907,6 +934,7 @@ impl AgentView {
     }
 
     fn stop(&mut self, cx: &mut Context<Self>) {
+        self.stop_fixing(cx);
         let Some(running) = &mut self.running else {
             return;
         };

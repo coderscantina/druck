@@ -254,6 +254,14 @@ fn with_hub(cx: &mut App, work: impl FnOnce(&mut Hub, &mut Window, &mut Context<
     Current::<Hub>::defer(cx, work);
 }
 
+/// Puts a view above the Proof tab's list, for the part of the app that owns it.
+pub fn mount_above_proof(view: gpui::AnyView, cx: &mut App) {
+    if let Some(hub) = Current::<Hub>::view(cx) {
+        let diagnostics = hub.read(cx).diagnostics.clone();
+        diagnostics.update(cx, |panel, _| panel.set_above(view));
+    }
+}
+
 fn with_window(cx: &mut App, work: impl FnOnce(&mut Window, &mut App) + 'static) {
     cx.defer(move |cx| {
         if let Some(window) = cx.active_window().or_else(|| cx.windows().first().copied()) {
@@ -278,6 +286,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::ShowDetails, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Details, w, cx)));
     cx.on_action(|_: &menus::ShowAgent, cx| with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Agent, w, cx)));
     cx.on_action(|_: &menus::AskAgent, cx| crate::agent::ask(cx));
+    cx.on_action(|_: &menus::FixProof, cx| crate::agent::fix_proof(cx));
     cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
         with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Proof, w, cx));

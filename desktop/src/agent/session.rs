@@ -96,6 +96,8 @@ pub struct SessionConfig {
     pub resume: Option<String>,
     /// The executable that serves Druck's tools over MCP, which is this app. `None` leaves the CLI without them.
     pub tool_server: Option<PathBuf>,
+    /// What the app has open, a project's folder or a single file, which the tool server tries fixes on.
+    pub document: PathBuf,
     pub access: Access,
     /// More flags for the command line, which only a protocol probe passes.
     pub extra_args: Vec<OsString>,
