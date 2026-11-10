@@ -12,7 +12,7 @@ use std::ops::Range;
 use super::convert::{BlockType, Callout, gapped_edit, rewritten, type_of};
 use super::{Bias, Command, body_range, line_ending, moved, needs_gap, normalized};
 use crate::editor::strings::Key;
-use crate::session::TEMPLATES;
+use crate::session::templates_for;
 use crate::shell::strings::{Language, Table};
 use crate::source::inline::line_markers;
 use crate::source::{BlockKind, Blocks, Edit, Selection};
@@ -75,6 +75,8 @@ pub struct Context {
     pub has_labels: bool,
     /// The kind of the block the slash stands in.
     pub block: Option<BlockKind>,
+    /// The theme the book's manifest names, which decides the new sections offered.
+    pub theme: Option<String>,
 }
 
 /// Where a slash opens the menu: in running text, at the start of a word.
@@ -246,7 +248,7 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             Action::OpenReference,
         ));
     }
-    for template in TEMPLATES {
+    for template in templates_for(context.theme.as_deref()) {
         items.push(Item {
             label: template.name.text(language),
             other_label: template.name.text(other),
@@ -711,7 +713,7 @@ mod tests {
         assert_eq!(labels("überschrift 2"), ["Heading 2"]);
         assert_eq!(labels("TABLE")[0], "Table");
         assert!(labels("zzz").is_empty());
-        assert_eq!(labels("new section").len(), TEMPLATES.len());
+        assert_eq!(labels("new section").len(), crate::session::TEMPLATES.len());
         assert_eq!(labels("").len(), all.len());
     }
 

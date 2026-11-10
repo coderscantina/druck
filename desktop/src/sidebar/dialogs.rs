@@ -10,7 +10,7 @@ use super::strings::Key;
 use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::session::templates::Group;
-use crate::session::{ChapterId, TEMPLATES, Template};
+use crate::session::{ChapterId, Template};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{FocusNext, FocusPrevious};
 
@@ -41,6 +41,8 @@ pub struct SectionDialog {
     /// What had the keys before the dialog opened, to give them back.
     before: Option<FocusHandle>,
     templates: ScrollHandle,
+    /// The templates the open dialog lists, which follow the book's theme.
+    offered: Vec<&'static Template>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -63,11 +65,13 @@ impl SectionDialog {
             card: cx.focus_handle(),
             before: None,
             templates: ScrollHandle::new(),
+            offered: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
 
-    pub fn open_new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_new_section(&mut self, offered: Vec<&'static Template>, window: &mut Window, cx: &mut Context<Self>) {
+        self.offered = offered;
         self.remember_keys(window, cx);
         self.state = State::NewSection;
         self.open_name(String::new(), window, cx);
@@ -205,13 +209,17 @@ impl Render for SectionDialog {
         }
         let body = match state {
             State::NewSection => {
-                let groups = Group::ALL.iter().map(|&group| {
-                    let rows: Vec<_> = TEMPLATES
+                let offered = self.offered.clone();
+                let groups = Group::ALL.iter().filter_map(|&group| {
+                    let rows: Vec<_> = offered
                         .iter()
                         .filter(|template| template.group == group)
                         .map(|template| Self::template_row(template, &tokens, cx).into_any_element())
                         .collect();
-                    div()
+                    if rows.is_empty() {
+                        return None;
+                    }
+                    let labelled = div()
                         .pb(tokens::SPACE_2)
                         .child(
                             div()
@@ -221,7 +229,8 @@ impl Render for SectionDialog {
                                 .text_color(tokens.text_faint)
                                 .child(group.label()),
                         )
-                        .children(rows)
+                        .children(rows);
+                    Some(labelled)
                 });
                 div()
                     .relative()

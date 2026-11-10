@@ -417,6 +417,7 @@ fn context_for(text: &str, blocks: &Blocks, slash_at: usize) -> Context {
         has_works: true,
         has_labels: true,
         block: Some(blocks.as_slice()[blocks.index_at(slash_at)].kind),
+        theme: None,
     }
 }
 

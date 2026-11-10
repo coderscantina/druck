@@ -1,17 +1,13 @@
-title: Unbenannte Arbeit
-subtitle: Worum es in dieser Arbeit geht
+title: Unbenanntes Paper
 author: Dein Name
 date: Entwurf
 abstract: |
-  Ein Absatz über die Frage, die Methode und das Ergebnis. Die Titelseite zeigt ihn.
+  Die Zusammenfassung sagt in einem Absatz, was gefragt wurde, wie es untersucht wurde und was herauskam. Sie läuft unter dem Titel über die ganze Seite, und das Paper folgt in zwei Spalten. Das ist ein Beispieltext: Ersetze ihn und die Abschnitte darunter durch deine eigenen.
 lang: de
 theme: paper
-title-page: true
-toc: true
 bibliography: references.bib
 chapters:
-  - manuscript/01-einleitung.md
-  - manuscript/02-ergebnisse.md
+  - manuscript/01-paper.md
 exports:
   paper:
     output: build/paper.pdf

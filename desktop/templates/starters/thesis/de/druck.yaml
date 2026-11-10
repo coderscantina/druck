@@ -1,0 +1,17 @@
+title: Unbenannte Abschlussarbeit
+subtitle: Worum es in dieser Arbeit geht
+author: Dein Name
+date: Entwurf
+abstract: |
+  Ein Absatz über die Frage, die Methode und das Ergebnis. Die Titelseite zeigt ihn. Das ist ein Beispieltext: Ersetze ihn und die Kapitel durch deine eigenen.
+lang: de
+theme: thesis
+bibliography: references.bib
+chapters:
+  - manuscript/00-vorspann.md
+  - manuscript/01-einleitung.md
+  - manuscript/02-ergebnisse.md
+  - manuscript/03-anhang.md
+exports:
+  arbeit:
+    output: build/arbeit.pdf

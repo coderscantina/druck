@@ -540,6 +540,7 @@ impl EditorView {
             has_works: !self.rich.works.is_empty(),
             has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
+            theme: session.theme_setting(),
         }
     }
 

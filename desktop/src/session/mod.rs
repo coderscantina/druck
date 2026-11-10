@@ -40,7 +40,7 @@ pub use self::outline::Kind as RowKind;
 pub use self::outline::heading_text;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
 use self::strings::Key;
-pub use self::templates::{STARTERS, Starter, TEMPLATES, Template};
+pub use self::templates::{STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;
 use crate::source::buffer::EditError;
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};

@@ -122,6 +122,22 @@ pub const TEMPLATES: &[Template] = &[
         text: text!("part"),
     },
     Template {
+        slug: "section",
+        name: Key::SectionName,
+        description: Key::SectionDescription,
+        group: Group::Body,
+        icon: "icons/file.svg",
+        text: text!("section"),
+    },
+    Template {
+        slug: "columns",
+        name: Key::ColumnsName,
+        description: Key::ColumnsDescription,
+        group: Group::Body,
+        icon: "icons/directive-columns.svg",
+        text: text!("columns"),
+    },
+    Template {
         slug: "bibliography",
         name: Key::BibliographyName,
         description: Key::BibliographyDescription,
@@ -139,13 +155,19 @@ pub const TEMPLATES: &[Template] = &[
     },
 ];
 
-/// A whole project to start from.
+/// A whole project to start from: a theme, and sample text that shows the theme's elements.
 pub struct Starter {
     pub slug: &'static str,
     pub name: Key,
     pub description: Key,
     /// The new folder's suggested name, which becomes the title.
     pub folder: Key,
+    /// The name its manifest gives its theme. A project is known by it, never by a record of its starter.
+    pub theme: &'static str,
+    /// The page of the sample, counted from 0, that the gallery shows.
+    pub shown: usize,
+    /// The templates a new section is offered, by slug.
+    templates: &'static [&'static str],
     /// Paths in the new folder, with their contents, in English and in German.
     files: [&'static [(&'static str, &'static [u8])]; 2],
 }
@@ -175,49 +197,77 @@ pub const GITIGNORE_TEXT: &str = "build/\n";
 
 pub const STARTERS: &[Starter] = &[
     Starter {
-        slug: "book",
-        name: Key::BookName,
-        description: Key::BookDescription,
-        folder: Key::BookFolder,
+        slug: "novel",
+        name: Key::NovelName,
+        description: Key::NovelDescription,
+        folder: Key::NovelFolder,
+        theme: "novel",
+        shown: 6,
+        templates: &[
+            "half-title",
+            "title-page",
+            "imprint",
+            "dedication",
+            "contents",
+            "chapter",
+            "part",
+        ],
         files: [
             &[
-                file!("book", "druck.yaml"),
-                file!("book", "druck-words.txt"),
-                file!("book", "manuscript/00-front.md"),
-                file!("book", "manuscript/01-first-chapter.md"),
-                file!("book", "manuscript/02-second-chapter.md"),
-                file!("book", "themes/novel/theme.json"),
-                file!("book", "themes/novel/ornament.svg"),
+                file!("novel", "druck.yaml"),
+                file!("novel", "druck-words.txt"),
+                file!("novel", "manuscript/00-front.md"),
+                file!("novel", "manuscript/01-first-chapter.md"),
+                file!("novel", "manuscript/02-second-chapter.md"),
+                file!("novel", "themes/novel/theme.json"),
+                file!("novel", "themes/novel/ornament.svg"),
             ],
             &[
-                german!("book", "druck.yaml"),
-                german!("book", "manuscript/00-vorspann.md"),
-                german!("book", "manuscript/01-erstes-kapitel.md"),
-                german!("book", "manuscript/02-zweites-kapitel.md"),
-                file!("book", "themes/novel/theme.json"),
-                file!("book", "themes/novel/ornament.svg"),
+                german!("novel", "druck.yaml"),
+                german!("novel", "manuscript/00-vorspann.md"),
+                german!("novel", "manuscript/01-erstes-kapitel.md"),
+                german!("novel", "manuscript/02-zweites-kapitel.md"),
+                file!("novel", "themes/novel/theme.json"),
+                file!("novel", "themes/novel/ornament.svg"),
             ],
         ],
     },
     Starter {
-        slug: "paper",
-        name: Key::PaperName,
-        description: Key::PaperDescription,
-        folder: Key::PaperFolder,
+        slug: "nonfiction",
+        name: Key::NonfictionName,
+        description: Key::NonfictionDescription,
+        folder: Key::NonfictionFolder,
+        theme: "nonfiction",
+        shown: 6,
+        templates: &[
+            "half-title",
+            "title-page",
+            "imprint",
+            "dedication",
+            "contents",
+            "chapter",
+            "part",
+            "bibliography",
+            "index",
+        ],
         files: [
             &[
-                file!("paper", "druck.yaml"),
-                file!("paper", "references.bib"),
-                file!("paper", "manuscript/01-introduction.md"),
-                file!("paper", "manuscript/02-findings.md"),
-                file!("paper", "themes/paper/theme.json"),
+                file!("nonfiction", "druck.yaml"),
+                file!("nonfiction", "references.bib"),
+                file!("nonfiction", "manuscript/00-front.md"),
+                file!("nonfiction", "manuscript/01-first-chapter.md"),
+                file!("nonfiction", "manuscript/02-second-chapter.md"),
+                file!("nonfiction", "manuscript/03-back.md"),
+                file!("nonfiction", "themes/nonfiction/theme.json"),
             ],
             &[
-                german!("paper", "druck.yaml"),
-                file!("paper", "references.bib"),
-                german!("paper", "manuscript/01-einleitung.md"),
-                german!("paper", "manuscript/02-ergebnisse.md"),
-                file!("paper", "themes/paper/theme.json"),
+                german!("nonfiction", "druck.yaml"),
+                file!("nonfiction", "references.bib"),
+                german!("nonfiction", "manuscript/00-vorspann.md"),
+                german!("nonfiction", "manuscript/01-erstes-kapitel.md"),
+                german!("nonfiction", "manuscript/02-zweites-kapitel.md"),
+                german!("nonfiction", "manuscript/03-anhang.md"),
+                file!("nonfiction", "themes/nonfiction/theme.json"),
             ],
         ],
     },
@@ -226,6 +276,9 @@ pub const STARTERS: &[Starter] = &[
         name: Key::ArticleName,
         description: Key::ArticleDescription,
         folder: Key::ArticleFolder,
+        theme: "article",
+        shown: 0,
+        templates: &["section", "columns", "bibliography"],
         files: [
             &[
                 file!("article", "druck.yaml"),
@@ -239,7 +292,69 @@ pub const STARTERS: &[Starter] = &[
             ],
         ],
     },
+    Starter {
+        slug: "paper",
+        name: Key::PaperName,
+        description: Key::PaperDescription,
+        folder: Key::PaperFolder,
+        theme: "paper",
+        shown: 0,
+        templates: &["columns"],
+        files: [
+            &[
+                file!("paper", "druck.yaml"),
+                file!("paper", "references.bib"),
+                file!("paper", "manuscript/01-paper.md"),
+                file!("paper", "themes/paper/theme.json"),
+            ],
+            &[
+                german!("paper", "druck.yaml"),
+                file!("paper", "references.bib"),
+                german!("paper", "manuscript/01-paper.md"),
+                file!("paper", "themes/paper/theme.json"),
+            ],
+        ],
+    },
+    Starter {
+        slug: "thesis",
+        name: Key::ThesisName,
+        description: Key::ThesisDescription,
+        folder: Key::ThesisFolder,
+        theme: "thesis",
+        shown: 0,
+        templates: &["dedication", "abstract", "contents", "chapter", "bibliography", "index"],
+        files: [
+            &[
+                file!("thesis", "druck.yaml"),
+                file!("thesis", "references.bib"),
+                file!("thesis", "manuscript/00-front.md"),
+                file!("thesis", "manuscript/01-introduction.md"),
+                file!("thesis", "manuscript/02-findings.md"),
+                file!("thesis", "manuscript/03-back.md"),
+                file!("thesis", "themes/thesis/theme.json"),
+            ],
+            &[
+                german!("thesis", "druck.yaml"),
+                file!("thesis", "references.bib"),
+                german!("thesis", "manuscript/00-vorspann.md"),
+                german!("thesis", "manuscript/01-einleitung.md"),
+                german!("thesis", "manuscript/02-ergebnisse.md"),
+                german!("thesis", "manuscript/03-anhang.md"),
+                file!("thesis", "themes/thesis/theme.json"),
+            ],
+        ],
+    },
 ];
+
+/// The templates a new section is offered in a project whose manifest names `theme`: a starter's own in a project that
+/// keeps its starter's theme, and all of them in any other.
+pub fn templates_for(theme: Option<&str>) -> Vec<&'static Template> {
+    let starter = STARTERS.iter().find(|starter| Some(starter.theme) == theme);
+    TEMPLATES
+        .iter()
+        .filter(|template| starter.is_none_or(|starter| starter.templates.contains(&template.slug)))
+        .collect()
+}
 
 impl Starter {
     /// Creates the project in `dir`, a folder that does not exist or is empty, titled after the folder, in `language`.

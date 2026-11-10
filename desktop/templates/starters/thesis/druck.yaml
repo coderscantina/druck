@@ -1,0 +1,17 @@
+title: Untitled thesis
+subtitle: What this thesis is about
+author: Your Name
+date: Draft
+abstract: |
+  One paragraph on the question, the method, and the result. The title page shows it. This is sample text: replace it, and the chapters, with your own.
+lang: en
+theme: thesis
+bibliography: references.bib
+chapters:
+  - manuscript/00-front.md
+  - manuscript/01-introduction.md
+  - manuscript/02-findings.md
+  - manuscript/03-back.md
+exports:
+  thesis:
+    output: build/thesis.pdf

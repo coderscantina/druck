@@ -693,6 +693,41 @@ fn every_starter_opens_renders_without_a_warning_and_keeps_its_manifest_readable
 }
 
 #[test]
+fn a_project_made_from_a_starter_is_an_ordinary_one() {
+    for starter in STARTERS {
+        let folder = Folder::new(&format!("starter-ordinary-{}", starter.slug));
+        let dir = folder.0.join("Mine");
+        starter.create(&dir, Language::English).expect("creates");
+        let mut top: Vec<_> = fs::read_dir(&dir)
+            .expect("lists")
+            .map(|entry| entry.expect("an entry").file_name().to_string_lossy().into_owned())
+            .filter(|name| !matches!(name.as_str(), "references.bib" | "druck-words.txt"))
+            .collect();
+        top.sort();
+        assert_eq!(
+            top,
+            [".gitignore", "druck.yaml", "manuscript", "themes"],
+            "{}",
+            starter.slug
+        );
+        assert!(dir.join("themes").join(starter.theme).join("theme.json").is_file());
+        let session = Session::open(&dir).expect("opens");
+        assert_eq!(session.theme_setting().as_deref(), Some(starter.theme));
+        let manifest = fs::read_to_string(dir.join("druck.yaml")).expect("reads");
+        assert!(!manifest.contains("starter"), "{}", starter.slug);
+    }
+}
+
+#[test]
+fn new_sections_follow_the_theme_a_starter_gave() {
+    let slugs = |theme| -> Vec<_> { templates_for(theme).iter().map(|template| template.slug).collect() };
+    assert_eq!(slugs(Some("paper")), ["columns"]);
+    assert!(slugs(Some("novel")).contains(&"chapter") && !slugs(Some("novel")).contains(&"abstract"));
+    assert_eq!(slugs(Some("my-own")).len(), TEMPLATES.len());
+    assert_eq!(slugs(None).len(), TEMPLATES.len());
+}
+
+#[test]
 fn a_new_book_starts_after_the_title_of_its_first_chapter() {
     let folder = Folder::new("starter-caret");
     let dir = folder.0.join("book");

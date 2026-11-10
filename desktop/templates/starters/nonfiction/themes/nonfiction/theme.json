@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "document": {
+    "title-page": true,
+    "duplex": true,
+    "numbering-depth": 1,
+    "toc-depth": 2
+  },
+  "page": {
+    "size": { "width": "6in", "height": "9in" },
+    "margins": {
+      "top": "0.85in",
+      "bottom": "0.9in",
+      "inner": "0.85in",
+      "outer": "0.7in"
+    },
+    "header-offset": "0.35in",
+    "footer-offset": "0.4in"
+  },
+  "styles": {
+    "body": { "size": "10.5pt", "line-height": 1.4 },
+    "heading-1": { "size": "1.9em", "align": "left", "space-before": "0pt", "space-after": "2.2em" },
+    "heading-2": { "size": "1.15em", "space-before": "1.6em", "space-after": "0.5em" },
+    "title": { "align": "left" },
+    "subtitle": { "align": "left" },
+    "author": { "align": "left" },
+    "date": { "align": "left" },
+    "toc-heading": { "align": "left", "space-after": "1.5em" },
+    "header": { "size": "0.8em", "style": "italic" },
+    "footer": { "size": "0.9em" }
+  },
+  "custom-styles": {
+    "chapter-number": {
+      "based-on": "heading-1",
+      "size": "0.9em",
+      "weight": "regular",
+      "tracking": 0.12,
+      "uppercase": true,
+      "space-after": "0.6em"
+    },
+    "copyright": { "based-on": "body", "size": "0.8em", "align": "left", "first-line-indent": "0pt", "space-after": "0.6em" },
+    "dedication": { "based-on": "body", "style": "italic", "align": "center", "first-line-indent": "0pt" }
+  },
+  "chapters": {
+    "break-before": "recto",
+    "sink": "5em",
+    "number-position": "above",
+    "number-style": "chapter-number",
+    "number-label": true
+  },
+  "title-page": {
+    "groups": [
+      {
+        "anchor": "top-left",
+        "slots": [
+          { "text": "{title}", "style": "title", "required": true, "space-before": "5em" },
+          { "text": "{subtitle}", "style": "subtitle", "space-before": "0.6em" },
+          { "text": "{author}", "style": "author", "space-before": "3em" }
+        ]
+      },
+      {
+        "anchor": "bottom-left",
+        "slots": [{ "text": "{meta.publisher}", "style": "date" }]
+      }
+    ]
+  },
+  "pages": {
+    "first": null,
+    "opening": {
+      "header": null,
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    },
+    "odd": {
+      "header": [{ "anchor": "bottom-right", "align": "right", "slots": [{ "text": "{section}" }] }],
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    },
+    "even": {
+      "header": [{ "anchor": "bottom-left", "align": "left", "slots": [{ "text": "{title}" }] }],
+      "footer": [{ "anchor": "top-left", "align": "center", "slots": [{ "text": "{page}" }] }]
+    }
+  },
+  "labels": {
+    "en": { "section": "Chapter" },
+    "de": { "section": "Kapitel" }
+  }
+}

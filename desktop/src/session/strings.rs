@@ -29,6 +29,10 @@ crate::strings! {
         AbstractDescription => ("A brief summary of what this is about", "Eine kurze Zusammenfassung des Inhalts"),
         ChapterName => ("Chapter", "Kapitel"),
         ChapterDescription => ("A numbered chapter with its heading", "Ein nummeriertes Kapitel mit Überschrift"),
+        SectionName => ("Section", "Abschnitt"),
+        SectionDescription => ("A second-level heading with its text", "Eine Überschrift der zweiten Ebene mit Text"),
+        ColumnsName => ("Two-column section", "Abschnitt in zwei Spalten"),
+        ColumnsDescription => ("A heading and text set in two columns", "Überschrift und Text in zwei Spalten"),
         PartName => ("Part", "Teil"),
         PartDescription => (
             "An unnumbered heading that opens a part",
@@ -44,24 +48,21 @@ crate::strings! {
             "The marked terms, placed here instead of at the end",
             "Die markierten Begriffe, hier statt am Ende"
         ),
-        BookName => ("Book", "Buch"),
-        BookDescription => (
-            "Chapters, a title page, and print and ebook exports",
-            "Kapitel, Titelseite und Exporte für Druck und E-Book"
-        ),
-        BookFolder => ("Untitled book", "Unbenanntes Buch"),
-        PaperName => ("Paper", "Paper"),
-        PaperDescription => (
-            "Numbered headings, an abstract, and references",
-            "Nummerierte Überschriften, Abstract und Literatur"
-        ),
-        PaperFolder => ("Untitled paper", "Unbenannte Arbeit"),
+        NovelName => ("Novel", "Roman"),
+        NovelDescription => ("Chapters with ornaments, for print and ebook", "Kapitel mit Ornament, für Druck und E-Book"),
+        NovelFolder => ("Untitled novel", "Unbenannter Roman"),
+        NonfictionName => ("Non-fiction", "Sachbuch"),
+        NonfictionDescription => ("Numbered chapters, notes, and sources", "Nummerierte Kapitel, Fußnoten und Quellen"),
+        NonfictionFolder => ("Untitled book", "Unbenanntes Sachbuch"),
         ArticleName => ("Article", "Artikel"),
-        ArticleDescription => (
-            "One file, a title, and PDF and ebook exports",
-            "Eine Datei, ein Titel und Exporte für PDF und E-Book"
-        ),
+        ArticleDescription => ("One column under a title", "Eine Spalte unter einem Titel"),
         ArticleFolder => ("Untitled article", "Unbenannter Artikel"),
+        PaperName => ("Paper", "Paper"),
+        PaperDescription => ("Two columns under an abstract", "Zwei Spalten unter dem Abstract"),
+        PaperFolder => ("Untitled paper", "Unbenanntes Paper"),
+        ThesisName => ("Thesis", "Abschlussarbeit"),
+        ThesisDescription => ("Title page, contents, chapters, and references", "Titelseite, Inhalt, Kapitel und Literatur"),
+        ThesisFolder => ("Untitled thesis", "Unbenannte Abschlussarbeit"),
 
         CannotFindWorkingDir => ("cannot find the working directory: {error}", "Der Arbeitsordner ist nicht zu finden: {error}"),
         NoSuchFile => ("cannot open {path}: no such file or folder", "{path} lässt sich nicht öffnen: Datei oder Ordner gibt es nicht"),

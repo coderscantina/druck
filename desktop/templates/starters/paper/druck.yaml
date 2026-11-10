@@ -1,17 +1,13 @@
 title: Untitled paper
-subtitle: What this paper is about
 author: Your Name
 date: Draft
 abstract: |
-  One paragraph on the question, the method, and the result. The title page shows it.
+  The abstract says in one paragraph what was asked, how it was studied, and what was found. It runs across the whole page under the title, and the paper follows in two columns. This is sample text: replace it, and the sections below, with your own.
 lang: en
 theme: paper
-title-page: true
-toc: true
 bibliography: references.bib
 chapters:
-  - manuscript/01-introduction.md
-  - manuscript/02-findings.md
+  - manuscript/01-paper.md
 exports:
   paper:
     output: build/paper.pdf

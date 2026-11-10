@@ -441,7 +441,10 @@ impl Workspace {
 
     /// Opens the dialog for a new section.
     pub fn new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dialog.update(cx, |dialog, cx| dialog.open_new_section(window, cx));
+        let theme = self.parts.editor.read(cx).session().theme_setting();
+        let offered = crate::session::templates_for(theme.as_deref());
+        self.dialog
+            .update(cx, |dialog, cx| dialog.open_new_section(offered, window, cx));
     }
 
     /// While the pages are not on screen, has what Publish would show ready, for a window this size.
