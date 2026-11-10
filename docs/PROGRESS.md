@@ -48,7 +48,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [x] 19: Publish view. Built and checked, merged here. What only the owner can check is in the [note](#milestone-19-note).
 - [ ] 20: Writing partner. Built and checked with real turns, merged here. Stays unchecked until a person has clicked its buttons, see the [note](#milestone-20-note).
 - [ ] 21: Versions. Built and checked, merged here. Stays unchecked until the owner has tried a real mouse and signing, and decided whether the 20-minute soak stands in for the hour. See the note in the resume note.
-- [ ] 24: Gallery of finished looks.
+- [x] 24: Gallery of finished looks. Built and checked on `agentic-beta`. What was not driven by hand is in the [note](#milestone-24-note).
 - [ ] 25: No syntax to learn.
 - [ ] 26: Editing passes, with Codex.
 - [ ] 27: Typesetter.
@@ -99,9 +99,17 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
-### Agentic beta note
+### Milestone 24 note
 
-On 2026-11-10 the owner settled [the agentic beta direction](DECISIONS.md#2026-11-10-agentic-beta-direction): milestones 24 to 27 run in order before the gate of 22, on branch `agentic-beta`, not pushed. Next: milestone [24](milestones/24-gallery.md).
+On 2026-11-10 [the agentic beta direction](DECISIONS.md#2026-11-10-agentic-beta-direction) was settled: milestones 24 to 27 run in order before the gate of 22, on branch `agentic-beta`, not pushed. Milestone [24](milestones/24-gallery.md) is built on that branch: five starters, novel, non-fiction, article, paper, and thesis, each a theme and a sample in English and German; the launch card showing each as a page the engine laid out and Publish's painter painted; `Cmd+N`, New book, showing it over an open book; and new sections that follow the theme's name. Choices are in [decisions](DECISIONS.md#2026-11-10-milestone-24-gallery), the rules in [the design](DESIGN.md#the-window).
+
+Checks: `cargo test -p druck-desktop` (819 passed, 1 ignored), `cargo clippy -p druck-desktop --all-targets -- -D warnings`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --all --check`, all clean. `druck check` on all five starters in both languages: valid, no warning. `druck render` of each, and every export each manifest lists, PDF and EPUB, wrote its file. The pages of all five were looked at as images.
+
+Evidence by captures, debug build with `--features measure`, `DRUCK_GATE=2`, keys by PID, windows captured by id, sandboxed `XDG_CONFIG_HOME` and `DRUCK_DATA_DIR`: the gallery in dark and light, English and German, at the default size and at 720 by 480; Tab's ring on Open and on a starter; `Cmd+N` over an open book and Escape back to the caret; and a project of each starter made with `DRUCK_NEW_PROJECT`, the paper, thesis, novel, non-fiction book, and article in Publish, the non-fiction book in Write with the caret after its first title.
+
+Not verified: Return on a starter through the system's save panel, which keys by PID cannot drive, so the path from a chosen starter to the typed name ran only through `DRUCK_NEW_PROJECT`. Export from the app's Export button, which ran through the CLI instead. A real mouse on the gallery. The launch card with an offer row or an error at 720 by 480, where the card is about 30 px from the window's height already. Next: the owner's look at the five looks, then milestone [25](milestones/25-no-syntax.md).
+
+Follow-ups: `source::tests::an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame` and `spell::macos::tests::the_documents_language_decides_not_the_texts` each failed once in a full parallel run and pass alone. The section templates' text is English in a German book. The gallery shows one page per starter; a larger window could show a spread. A new non-fiction book or thesis puts the caret after the preface's or acknowledgements' title, its first heading, not the first chapter's. Arrow keys do not move between starters.
 
 ### Regions note
 

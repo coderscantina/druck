@@ -1952,3 +1952,19 @@ Settled with the owner in an interview on what would make Druck lead for books, 
 - **New milestones take 24 to 27 and run before 22,** since renumbering would break links.
 
 Unresolved: the vendors' answers on subscription logins, for both CLIs. What a whole-book run costs in tokens, to be measured in milestones 26 and 27. Nothing has been tried with Codex yet.
+
+## 2026-11-10: Milestone 24 gallery
+
+Built for [milestone 24](milestones/24-gallery.md). The rules on screen are in [the design](DESIGN.md#the-window).
+
+- **Five starters, three themes reused.** Novel keeps the `novel` theme and article the `article` theme. The former paper starter, with a title page, an abstract, and contents, became the thesis, and its theme is now `thesis`. Two themes are new: `nonfiction`, a 6 by 9 inch book with "Chapter 1" above the title, and `paper`, A4 in 9 pt with numeric citations. They live in `desktop/templates/starters/<slug>/themes/<theme>/` and are copied into each new project.
+- **The sample is the starter.** Each starter's text shows its theme's elements and says what to replace. There is no second sample for the gallery, so what the gallery shows is what the new project holds. Every sample passes `druck check` with no warning in English and German, which the session tests hold.
+- **The paper is one file in one `columns` block.** The title block, with the abstract, runs across the page above it, and the bibliography stands inside the block. Columns cannot span files, so a file per section would balance the columns at every section's end.
+- **The thesis and the non-fiction book end in a file that holds `::: back-matter` and `::: bibliography`,** so the references open a page of their own. Left to the end of the document, they followed the last chapter's text on the same page.
+- **One page per starter, painted on launch.** `preview::gallery::page` makes the starter in a temp folder of the process, opens it as a session, runs the `Typesetter`, and paints `Starter::shown` with the layout's `Painter`: the chapter opening for the two books, the first page for article and paper, the title page for the thesis. No picture is stored. Pages are painted off the main thread, one after another, at 336 px wide, and again when the language changes. A spread per starter was left out: at the smallest window a page would be 60 px wide.
+- **New Book shows the launch card over the open book.** `Cmd+N` and File, New book. The book stays open and untouched underneath, Escape gives the keys back where they were, and choosing a starter asks where to save as before. The three commands Book, Paper, and Article are gone, and so is their submenu.
+- **The title is still the folder's name,** typed in the system's save panel. A title field on the card was left out, since the panel already asks for a name and a place.
+- **New sections follow the theme's name.** `templates_for` offers a starter's templates in a project whose `druck.yaml` names that starter's theme, and every template in any other project. Nothing records the starter, so a project that changes or renames its theme gets the whole list. Novel: no abstract, bibliography, or index. Paper: only the two-column section. Thesis: no half title, imprint, or part.
+- **Two templates are new,** Section, a level 2 heading, and Two-column section, a heading and text in a `columns` block. Both are in the whole list too.
+
+Consequences: `DRUCK_NEW_PROJECT` takes the new slugs, `novel`, `nonfiction`, `article`, `paper`, and `thesis`. A project made from the old paper starter names the theme `paper` and keeps its own copy of it, so it renders as before, but its new section list is now the paper's single entry.
