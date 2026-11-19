@@ -99,6 +99,10 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Region editing note
+
+On 2026-11-19, on branch `region-editing`, marks, region edges, malformed regions, and front matter were reworked after a council review, see [the decision](DECISIONS.md#2026-11-19-marks-and-region-edges). Next: the owner's hand test with a real mouse on a mark's grip and on Remove line.
+
 ### Agentic beta follow-ups
 
 Milestones 24 to 27 were merged into `main` on 2026-11-11. Open across them, most important first. Each milestone's own note below has the detail.

@@ -2069,3 +2069,12 @@ Unresolved: that rule for theme values. What a run on all 243 warnings costs, wh
 
 Consequences: `SessionConfig` gained `document`. `agent::tools::serve` takes the trial tool as a `Trial`, so `tools.rs` still builds alone in `examples/agent_probe.rs`. `Typesetter` gained `set_theme_text`, and `Joined` gained `with_files` and `file`. `Effect` gained `FixesTried`. `DiagnosticsPanel` shows one view of another module above its list, through `shell::mount_above_proof`.
 
+## 2026-11-19: Marks and region edges
+
+A review of region editing by two models, Sol and Opus, scored it 4 and 5 out of 10. The rules on screen are in [the design](DESIGN.md#regions). Source: [region edges](../desktop/src/editor/directives/edges.rs) and [regions](../desktop/src/editor/directives/region.rs).
+
+- **A directive that holds no text no longer has a caret line. This reverses the 2026-11-10 rule that standalone directives keep theirs.** On that line the next key wrote into the syntax, so `::: toc` became `::: tocH` and the contents were gone. A caret landing there now selects the mark, so it keeps its stop for the keyboard and loses only the way to damage it.
+- **One rule for every edit over a selection.** `edges::pieces` decides what deleting, typing, cutting, pasting, Return, and an input method may take, so none of them can differ. Keeping a lone fence line was chosen over widening the selection to the whole region, which would delete text the author did not select.
+- **One repair for a line the engine refuses: remove it and keep the text.** Closing an unclosed region at a guessed place was left out, since only the author knows where it ends.
+- **Faults are judged across the book.** The engine reads a book as one text, so an unclosed region or a stray closing line that another chapter balances is not reported.
+- **Not built:** drawing the generated contents in Write, an empty paragraph written when Up or Down reaches a region at a file's edge, and a key path to a region that holds only a figure or table.
