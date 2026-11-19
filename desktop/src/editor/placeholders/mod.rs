@@ -396,7 +396,8 @@ pub fn query_at(text: &str, blocks: &Blocks, caret: usize) -> Option<Query> {
     }
     let before = &text[block.range.start..caret];
     let typed_len = before.len() - before.trim_end_matches(name_char).len();
-    let brace = caret - typed_len - 1;
+    // Letters from the very start of the text have no brace before them.
+    let brace = caret.checked_sub(typed_len + 1)?;
     let typed = &text[brace + 1..caret];
     if brace < block.range.start
         || text.as_bytes()[brace] != b'{'

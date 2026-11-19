@@ -103,6 +103,7 @@ fn a_todo_has_its_label_only_as_a_chip() {
 #[test]
 fn completion_fires_after_a_brace_and_letters_where_placeholders_are_read() {
     let query = |text: &str| query_at(text, &Blocks::parse(text), text.len());
+    assert_eq!(query("Z"), None, "letters at the very start have no brace before them");
     assert_eq!(
         query("Runs to {wo"),
         Some(Query {
