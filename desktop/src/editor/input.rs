@@ -298,6 +298,12 @@ impl EditorView {
             // The engine reads the whole book, so it alone knows what another chapter's regions allow here.
             directives::edges::Paste::Blocks(command) if !self.book_refuses(&command.edits) => {
                 self.run_command(command, window, cx);
+                // What was pasted may end on a line the caret cannot stand on, such as a code block's closing fence.
+                let head = self.selection.head;
+                let shown = self.skip_hidden(head, false);
+                if shown != head {
+                    self.set_selection(Selection::caret(shown), false, window, cx);
+                }
             }
             directives::edges::Paste::Blocks(_) => {
                 self.paste_words_of(&directives::edges::words_of(&pasted), window, cx)
