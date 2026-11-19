@@ -99,6 +99,43 @@ impl EditorView {
         self.toolbar_dismissed = true;
     }
 
+    /// A chapter opens on text: a caret that would open on a mark goes to what follows it, and selects the mark only when
+    /// nothing does.
+    pub(in crate::editor) fn leave_marker_on_open(&mut self) {
+        if !self.selection.is_empty() {
+            return;
+        }
+        let len = self.session.active_buffer().len();
+        let mut head = self.selection.head;
+        while let Some(region) = self.marker_at(self.blocks.index_at(head)) {
+            let end = self.blocks.as_slice()[self.directives.structure.regions[region].close]
+                .range
+                .end;
+            let next = self.skip_hidden(end, true);
+            if end >= len || next <= head {
+                break;
+            }
+            head = next;
+        }
+        self.selection = Selection::caret(head);
+        self.reveal_at = head;
+        self.select_marker_at_caret();
+    }
+
+    /// Where a selection being extended stops at a mark: past all of it, on the side it is heading.
+    pub(in crate::editor) fn across_marker(&self, target: usize, forward: bool) -> usize {
+        let Some(region) = self.marker_at(self.blocks.index_at(target)) else {
+            return target;
+        };
+        let found = &self.directives.structure.regions[region];
+        let list = self.blocks.as_slice();
+        if forward {
+            list[found.close].range.end
+        } else {
+            list[found.open].range.start
+        }
+    }
+
     /// Where a step right from the selected mark lands: past all of it.
     pub(in crate::editor) fn past_selected_marker(&self, head: usize, target: usize) -> usize {
         let marker = self.selected_region().filter(|&region| self.stands_as_marker(region));
@@ -111,6 +148,18 @@ impl EditorView {
         }
     }
 
+    /// A key that deletes takes a selected mark whole, however far it would reach. Returns whether one was selected.
+    pub(in crate::editor) fn delete_selected_marker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self
+            .selected_region()
+            .is_none_or(|region| !self.stands_as_marker(region))
+        {
+            return false;
+        }
+        self.delete_region(window, cx);
+        true
+    }
+
     /// Writing at a selected mark goes after it, or inside a region with nothing in it. Returns whether it made room.
     pub(in crate::editor) fn open_selected_marker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(region) = self.selected_region().filter(|&region| self.stands_as_marker(region)) else {
@@ -120,6 +169,19 @@ impl EditorView {
         let command = edits::room_at_marker(text, &self.blocks, &self.directives.structure, region);
         self.run_command(command, window, cx);
         true
+    }
+
+    /// The first text written at a selected mark, with the room it needs, as one undo step: the command and where the text
+    /// starts.
+    pub(in crate::editor) fn marker_room_with(&self, new: &str) -> Option<(Command, usize)> {
+        let region = self.selected_region().filter(|&region| self.stands_as_marker(region))?;
+        let text = self.session.active_buffer().text();
+        let mut command = edits::room_at_marker(text, &self.blocks, &self.directives.structure, region);
+        let at = command.selection.head;
+        let edit = command.edits.first_mut()?;
+        edit.text.insert_str(at - edit.range.start, new);
+        command.selection = Selection::caret(at + new.len());
+        Some((command, at))
     }
 
     /// Forgets the selected region and its menu, as any move of the caret does.

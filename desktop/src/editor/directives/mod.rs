@@ -289,8 +289,7 @@ impl EditorView {
     /// is a fault then.
     fn forgive_what_other_chapters_balance(&self, structure: &mut Structure) {
         use structure::Fault;
-        let open_ended = |rejected: &structure::Rejected| matches!(rejected.fault, Fault::Unclosed | Fault::Stray);
-        if !structure.rejected.iter().any(open_ended) || self.session.book().len() < 2 {
+        if structure.rejected.is_empty() || self.session.book().len() < 2 {
             return;
         }
         let session = &self.session;
@@ -309,6 +308,10 @@ impl EditorView {
             .rev()
             .filter_map(balance)
             .fold(0, |closes, (strays, left)| closes - left.min(closes) + strays);
+        // Inside a region an earlier chapter opened, what this text allows depends on that region, which it cannot see.
+        if carried_in > 0 {
+            structure.rejected.retain(|rejected| rejected.fault != Fault::Refused);
+        }
         let (mut strays, mut unclosed) = (carried_in, closed_later);
         let mut kept: Vec<structure::Rejected> = Vec::with_capacity(structure.rejected.len());
         for rejected in structure.rejected.drain(..) {
@@ -325,6 +328,21 @@ impl EditorView {
             }
         }
         structure.rejected = kept;
+    }
+
+    /// The directives the engine takes once that the book's other chapters already hold.
+    pub(super) fn kinds_in_other_chapters(&self) -> Vec<Kind> {
+        let session = &self.session;
+        (session.book().iter())
+            .filter(|id| **id != session.active())
+            .filter_map(|id| session.chapter(*id))
+            .flat_map(|chapter| {
+                let text = chapter.text();
+                structure::read(text, &crate::source::Blocks::parse(text)).regions
+            })
+            .map(|region| region.kind)
+            .filter(|kind| kind.only_once())
+            .collect()
     }
 
     /// The region standing as one mark at block `index`: a directive that holds no text, or a region with nothing in it

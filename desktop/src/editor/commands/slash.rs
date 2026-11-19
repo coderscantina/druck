@@ -61,16 +61,15 @@ pub const PARTS: [&str; 3] = ["front-matter", "main-matter", "back-matter"];
 
 /// The parts a text starts, each with where its line begins.
 pub fn parts_in(text: &str) -> Vec<(&'static str, usize)> {
-    let mut found = Vec::new();
-    let mut start = 0;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with(":::") {
-            let name = line.trim_start_matches(':').trim();
-            found.extend(PARTS.iter().find(|part| **part == name).map(|part| (*part, start)));
-        }
-        start += line.len();
-    }
-    found
+    let blocks = Blocks::parse(text);
+    (blocks.as_slice().iter())
+        .filter(|block| block.kind == BlockKind::Directive)
+        .filter_map(|block| {
+            let name = text[block.range.clone()].trim_start_matches(':').trim();
+            let part = PARTS.iter().find(|part| **part == name)?;
+            Some((*part, block.range.start))
+        })
+        .collect()
 }
 
 /// The parts that may start at the caret. `placed` is every part the book has, with whether it stands before the

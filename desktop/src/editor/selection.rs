@@ -74,6 +74,11 @@ impl EditorView {
             }
         };
         let target = self.past_selected_marker(head, target);
+        let target = if extend {
+            self.across_marker(target, target > head)
+        } else {
+            target
+        };
         let target = self.skip_hidden(target, target > head);
         let target = self.past_chip(target, target > head);
         // An arrow key that would pass a table puts the caret into it.
@@ -220,7 +225,13 @@ impl EditorView {
         let (offset, upstream) = self.offset_at(event.position, window);
         let offset = self.skip_hidden(offset, true);
         let text = self.session.active_buffer().text();
-        let (origin, unit) = match event.click_count {
+        // A mark has no words or lines to select: every click selects it whole.
+        let clicks = if self.marker_at(self.blocks.index_at(offset)).is_some() {
+            1
+        } else {
+            event.click_count
+        };
+        let (origin, unit) = match clicks {
             1 => (offset..offset, DragUnit::Character),
             2 => (motion::word_range(text, offset), DragUnit::Word),
             _ => (motion::line_range(text, offset), DragUnit::Line),

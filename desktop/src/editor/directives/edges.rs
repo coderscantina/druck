@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::structure::{self, Structure};
+use super::structure::{self, Kind, Structure};
 use crate::editor::commands::{Command, applied, line_ending};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
@@ -41,6 +41,7 @@ pub fn pieces(
         })
         .collect();
     kept.sort_by_key(|line| line.start);
+    let after_kept = kept.last().map(|line| line.end);
     let mut parts = Vec::with_capacity(kept.len() + 1);
     let mut from = range.start;
     for line in kept {
@@ -55,10 +56,23 @@ pub fn pieces(
             from += blank;
         }
     }
-    parts.push(from.min(range.end)..range.end);
+    // A selection ending where a fence line starts leaves the line ending before it, or the line would join the text.
+    let fence_follows = (structure.regions.iter()).any(|region| {
+        [region.open, region.close]
+            .iter()
+            .any(|&line| list[line].range.start == range.end)
+    });
+    let end = if fence_follows {
+        range.end - line_ending_before(text, range.end)
+    } else {
+        range.end
+    };
+    parts.push(from.min(end)..end.max(from.min(end)));
     parts.retain(|part| !part.is_empty());
     if parts.is_empty() {
-        parts.push(range.start..range.start);
+        // Nothing here can go. What is written over it goes after the fence line, never into it.
+        let at = after_kept.unwrap_or(range.start);
+        parts.push(at..at);
     }
     parts
 }
@@ -92,9 +106,12 @@ pub fn written_over(parts: &[Range<usize>], new: &str) -> (Vec<Edit>, Selection)
     (edits, Selection::caret(start + new.len()))
 }
 
-/// What the clipboard takes of `parts`: the text an edit would take, so no lone fence line travels.
+/// What the clipboard takes of `parts`: the text an edit would take, so no lone fence line travels. Text from either
+/// side of a fence line stays two paragraphs.
 pub fn copied(text: &str, parts: &[Range<usize>]) -> String {
-    parts.iter().map(|part| &text[part.clone()]).collect()
+    let eol = line_ending(text);
+    let pieces: Vec<&str> = parts.iter().map(|part| &text[part.clone()]).collect();
+    pieces.join(&format!("{eol}{eol}"))
 }
 
 /// What a paste of text holding directive lines does.
@@ -109,7 +126,15 @@ pub enum Paste {
 }
 
 /// How `pasted` goes in over `parts`. Regions stand on lines of their own, after the caret's block when that holds text.
-pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str) -> Paste {
+/// `placed` is what the rest of the book holds already, which the engine takes only once.
+pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str, placed: &[Kind]) -> Paste {
+    // In code, a comment, or settings a directive line is only text.
+    let blocks = Blocks::parse(text);
+    let at = parts.first().map_or(0, |part| part.start);
+    let kind = blocks.as_slice()[blocks.index_at(at)].kind;
+    if matches!(kind, BlockKind::Code | BlockKind::Comment | BlockKind::FrontMatter) {
+        return Paste::Text;
+    }
     let trimmed = pasted.trim_matches(['\n', '\r']);
     let held = Blocks::parse(trimmed);
     if !held.as_slice().iter().any(|block| block.kind == BlockKind::Directive) {
@@ -123,7 +148,19 @@ pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str) -> Paste {
         Paste::Refused(lines.map(|block| &trimmed[block.range.clone()]).collect())
     };
     let own = structure::read(trimmed, &held);
-    if !own.rejected.is_empty() {
+    let once_taken = |kind: Kind| kind.only_once() && placed.contains(&kind);
+    let list = held.as_slice();
+    // The engine reads a list table's rows from a list, and nothing else.
+    let bad_table = |region: &structure::Region| {
+        region.kind == Kind::Table
+            && (region.open + 1..region.close).any(|at| !matches!(list[at].kind, BlockKind::List | BlockKind::Blank))
+    };
+    if !own.rejected.is_empty()
+        || own
+            .regions
+            .iter()
+            .any(|region| once_taken(region.kind) || bad_table(region))
+    {
         return refused();
     }
     let (cut, caret) = written_over(parts, "");
@@ -250,11 +287,11 @@ mod tests {
         let blocks = Blocks::parse(text);
         let structure = structure::read(text, &blocks);
         let parts = pieces(text, &blocks, &structure, between(text, "Ab", "d\n"), 0);
-        assert_eq!(copied(text, &parts), "AbC");
+        assert_eq!(copied(text, &parts), "Ab\n\nC");
     }
 
     fn pasted(text: &str, caret: usize, new: &str) -> Paste {
-        paste(text, std::slice::from_ref(&(caret..caret)), new)
+        paste(text, std::slice::from_ref(&(caret..caret)), new, &[])
     }
 
     #[test]
@@ -277,5 +314,30 @@ mod tests {
         );
         assert_eq!(pasted("a\n", 1, ":::\nb\n"), Paste::Refused("b".to_owned()));
         assert_eq!(pasted("a\n", 1, "plain\n"), Paste::Text);
+        assert_eq!(
+            pasted("a\n", 1, "::: table\nWords\n:::\n"),
+            Paste::Refused("Words\n".to_owned())
+        );
+        let elsewhere = paste("a\n", std::slice::from_ref(&(1..1)), "::: toc\n", &[Kind::Toc]);
+        assert_eq!(elsewhere, Paste::Refused(String::new()));
+    }
+
+    #[test]
+    fn a_selection_ending_at_a_mark_leaves_it_on_its_own_line() {
+        let text = "Hello world\n\n::: toc\n";
+        let end = text.find(":::").unwrap();
+        assert_eq!(over(text, 6..end, ""), "Hello \n::: toc\n");
+    }
+
+    #[test]
+    fn a_directive_pasted_into_code_is_text() {
+        let text = "```\ncode\n```\n";
+        assert_eq!(pasted(text, 5, "::: toc\n"), Paste::Text);
+    }
+
+    #[test]
+    fn writing_over_only_a_fence_lines_word_leaves_the_line() {
+        let text = "::: keep\nAb\n:::\n";
+        assert_eq!(over(text, 4..8, "X"), "::: keep\nXAb\n:::\n");
     }
 }

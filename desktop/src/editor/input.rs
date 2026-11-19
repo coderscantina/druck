@@ -116,6 +116,9 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.delete_selected_marker(window, cx) {
+            return;
+        }
         let range = if self.selection.is_empty() {
             let head = self.selection.head;
             let other = target(self.session.active_buffer().text(), head);
@@ -277,14 +280,21 @@ impl EditorView {
             return;
         };
         let pasted = pasted.replace("\r\n", "\n");
+        if !pasted.lines().any(|line| line.starts_with(":::"))
+            && let Some((command, _)) = self.marker_room_with(&pasted)
+        {
+            self.run_command(command, window, cx);
+            return;
+        }
         self.open_selected_marker(window, cx);
         if self.source {
             self.replace_selection(&pasted, EditKind::Discrete, window, cx);
             return;
         }
         let parts = self.selection_pieces();
+        let placed = self.kinds_in_other_chapters();
         let text = self.session.active_buffer().text();
-        match directives::edges::paste(text, &parts, &pasted) {
+        match directives::edges::paste(text, &parts, &pasted, &placed) {
             directives::edges::Paste::Text => self.replace_selection(&pasted, EditKind::Discrete, window, cx),
             directives::edges::Paste::Blocks(command) => self.run_command(command, window, cx),
             directives::edges::Paste::Refused(words) => {
@@ -375,9 +385,17 @@ impl EntityInputHandler for EditorView {
             EditKind::Typing
         };
         self.options_release_keys();
-        self.open_selected_marker(window, cx);
-        let range = self.input_range(range_utf16);
         let typed_slash = new_text == "/" && kind == EditKind::Typing && !self.menu_is_open();
+        if let Some((command, at)) = self.marker_room_with(new_text) {
+            self.edit(kind, command.edits, command.selection, None, window, cx);
+            if typed_slash {
+                self.open_slash(at, cx);
+            } else if kind == EditKind::Typing {
+                self.open_completion(cx);
+            }
+            return;
+        }
+        let range = self.input_range(range_utf16);
         // A slash over several selected blocks opens what they can be wrapped in, and writes nothing.
         if typed_slash
             && let Some(blocks) = self.selected_blocks()
@@ -413,30 +431,34 @@ impl EntityInputHandler for EditorView {
             return;
         }
         self.options_release_keys();
-        self.open_selected_marker(window, cx);
-        let range = self.input_range(range_utf16);
         let new_len_utf16 = new_text.encode_utf16().count();
-        let marked = (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
+        // The first composition over a mark or a selection is planned as any other edit over it, so it keeps fence lines.
+        let (edits, start) = if let Some((command, at)) = self.marker_room_with(new_text) {
+            (command.edits, at)
+        } else {
+            let range = self.input_range(range_utf16);
+            if self.marked.is_none() && range == self.selection.range() {
+                let (edits, after) = self.written_over_selection(new_text);
+                (edits, after.head - new_text.len())
+            } else {
+                let start = range.start;
+                (vec![Edit::new(range, new_text)], start)
+            }
+        };
+        let marked = (!new_text.is_empty()).then(|| start..start + new_text.len());
         // The new selection is in UTF-16 units within the marked text, which is only known once it is written.
         let after_text = new_selected_range_utf16.map(|selected| {
             let (start, end) = (selected.start.min(new_len_utf16), selected.end.min(new_len_utf16));
             (byte_offset(new_text, start), byte_offset(new_text, end))
         });
         let after = match after_text {
-            Some((start, end)) => Selection {
-                anchor: range.start + start,
-                head: range.start + end,
+            Some((from, to)) => Selection {
+                anchor: start + from,
+                head: start + to,
             },
-            None => Selection::caret(range.start + new_text.len()),
+            None => Selection::caret(start + new_text.len()),
         };
-        self.edit(
-            EditKind::Composing,
-            vec![Edit::new(range, new_text)],
-            after,
-            marked,
-            window,
-            cx,
-        );
+        self.edit(EditKind::Composing, edits, after, marked, window, cx);
     }
 
     fn bounds_for_range(

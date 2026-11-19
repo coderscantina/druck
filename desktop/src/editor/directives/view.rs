@@ -630,6 +630,11 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // With the region's menu open the key means its row, which remembers where the caret stood.
+        if self.open_menu().is_some() {
+            self.choose_row(&Row::FullWidth, None, window, cx);
+            return;
+        }
         let text = self.session.active_buffer().text();
         let block = self.blocks.index_at(self.selection.head);
         if let Some(command) =

@@ -94,11 +94,12 @@ impl Blocks {
         // A comment still open before the edit can be closed by it, which changes the block the comment started in.
         let start = open_comment_before(text, splice.start).unwrap_or(splice.start);
         let start = self.index_at(start).saturating_sub(2);
-        // Front matter still open can be closed by a line far below it.
+        // Front matter still open can be closed by a line far below it, which moves where the first block ends.
         let first = &self.list[0];
-        let open_settings = first.kind == BlockKind::FrontMatter
-            && !front_matter_closes(&text[first.range.start..first.range.end.min(text.len())]);
-        let start = if open_settings { 0 } else { start };
+        let settings_moved = first.kind == BlockKind::FrontMatter
+            && splice.start >= first.range.end
+            && front_matter_end(text) != Some(first.range.end);
+        let start = if settings_moved { 0 } else { start };
         let mut pos = self.list[start].range.start;
         let mut next = start;
         let mut scanned = Vec::new();
@@ -782,6 +783,37 @@ mod tests {
                 (Heading { level: 1 }, "Title\n===\n"),
             ]
         );
+    }
+
+    #[test]
+    fn closing_front_matter_far_below_and_pasting_into_it_keep_the_blocks_right() {
+        let mut text = "---\na: b\n\nBody\n".to_owned();
+        let mut blocks = Blocks::parse(&text);
+        let at = text.len();
+        text.push_str("---\n");
+        blocks.apply(
+            &text,
+            Splice {
+                start: at,
+                old_end: at,
+                new_end: text.len(),
+            },
+        );
+        assert_eq!(blocks.as_slice(), Blocks::parse(&text).as_slice());
+        // Bytes pasted into closed front matter move its end into the middle of a character of the old text.
+        let mut text = "---\nx: a\n---\n\nText\n".to_owned();
+        let mut blocks = Blocks::parse(&text);
+        let at = "---\nx: a".len();
+        text.insert_str(at, "😀😀");
+        blocks.apply(
+            &text,
+            Splice {
+                start: at,
+                old_end: at,
+                new_end: at + "😀😀".len(),
+            },
+        );
+        assert_eq!(blocks.as_slice(), Blocks::parse(&text).as_slice());
     }
 
     #[test]

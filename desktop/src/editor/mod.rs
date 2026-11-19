@@ -476,6 +476,7 @@ impl EditorView {
         };
         view.rich.atoms = rich::atoms(view.session.active_buffer().text(), &view.blocks);
         view.read_directives();
+        view.leave_marker_on_open();
         view.restart_blink(window, cx);
         view.refresh_rich(window, cx);
         view
@@ -665,6 +666,7 @@ impl EditorView {
         self.release_region();
         self.read_directives();
         self.reveal_at = self.selection.head;
+        self.leave_marker_on_open();
         self.upstream = false;
         self.marked = None;
         self.goal_x = None;
@@ -891,6 +893,7 @@ impl EditorView {
             self.source_chapters.remove(&active);
             self.selection = self.visible_selection();
             self.reveal_at = self.selection.head;
+            self.select_marker_at_caret();
         }
         self.forget_shapes();
         self.float = Float::None;
