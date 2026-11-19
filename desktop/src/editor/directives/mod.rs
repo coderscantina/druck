@@ -330,21 +330,6 @@ impl EditorView {
         structure.rejected = kept;
     }
 
-    /// The directives the engine takes once that the book's other chapters already hold.
-    pub(super) fn kinds_in_other_chapters(&self) -> Vec<Kind> {
-        let session = &self.session;
-        (session.book().iter())
-            .filter(|id| **id != session.active())
-            .filter_map(|id| session.chapter(*id))
-            .flat_map(|chapter| {
-                let text = chapter.text();
-                structure::read(text, &crate::source::Blocks::parse(text)).regions
-            })
-            .map(|region| region.kind)
-            .filter(|kind| kind.only_once())
-            .collect()
-    }
-
     /// The region standing as one mark at block `index`: a directive that holds no text, or a region with nothing in it
     /// yet, at its opening line or the blank line inside it. The caret never stands in one: it is selected whole.
     pub(super) fn marker_at(&self, index: usize) -> Option<usize> {

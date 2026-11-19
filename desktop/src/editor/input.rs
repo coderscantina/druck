@@ -292,16 +292,27 @@ impl EditorView {
             return;
         }
         let parts = self.selection_pieces();
-        let placed = self.kinds_in_other_chapters();
         let text = self.session.active_buffer().text();
-        match directives::edges::paste(text, &parts, &pasted, &placed) {
+        match directives::edges::paste(text, &parts, &pasted) {
             directives::edges::Paste::Text => self.replace_selection(&pasted, EditKind::Discrete, window, cx),
-            directives::edges::Paste::Blocks(command) => self.run_command(command, window, cx),
-            directives::edges::Paste::Refused(words) => {
-                self.replace_selection(words.trim_matches('\n'), EditKind::Discrete, window, cx);
-                self.notify_paste_refused(cx);
+            // The engine reads the whole book, so it alone knows what another chapter's regions allow here.
+            directives::edges::Paste::Blocks(command) if !self.book_refuses(&command.edits) => {
+                self.run_command(command, window, cx);
             }
+            directives::edges::Paste::Blocks(_) => {
+                self.paste_words_of(&directives::edges::words_of(&pasted), window, cx)
+            }
+            directives::edges::Paste::Refused(words) => self.paste_words_of(&words, window, cx),
         }
+    }
+
+    /// Pasted regions the engine refuses go in as their words, and a paste with no words leaves the selection alone.
+    fn paste_words_of(&mut self, words: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let words = words.trim_matches('\n');
+        if !words.is_empty() {
+            self.replace_selection(words, EditKind::Discrete, window, cx);
+        }
+        self.notify_paste_refused(cx);
     }
 
     pub(super) fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {

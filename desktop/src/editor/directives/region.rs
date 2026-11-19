@@ -167,7 +167,12 @@ impl EditorView {
         };
         let text = self.session.active_buffer().text();
         let command = edits::room_at_marker(text, &self.blocks, &self.directives.structure, region);
-        self.run_command(command, window, cx);
+        // The room may be there already, and then only the caret moves.
+        if command.edits.is_empty() {
+            self.set_selection(command.selection, false, window, cx);
+        } else {
+            self.run_command(command, window, cx);
+        }
         true
     }
 
@@ -178,8 +183,11 @@ impl EditorView {
         let text = self.session.active_buffer().text();
         let mut command = edits::room_at_marker(text, &self.blocks, &self.directives.structure, region);
         let at = command.selection.head;
-        let edit = command.edits.first_mut()?;
-        edit.text.insert_str(at - edit.range.start, new);
+        // With room there already the command changes nothing, and the text goes in where it would have made it.
+        match command.edits.first_mut() {
+            Some(edit) => edit.text.insert_str(at - edit.range.start, new),
+            None => command.edits.push(crate::source::Edit::new(at..at, new)),
+        }
         command.selection = Selection::caret(at + new.len());
         Some((command, at))
     }

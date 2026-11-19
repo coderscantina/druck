@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::structure::{self, Kind, Structure};
+use super::structure::{self, Structure};
 use crate::editor::commands::{Command, applied, line_ending};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
@@ -126,8 +126,7 @@ pub enum Paste {
 }
 
 /// How `pasted` goes in over `parts`. Regions stand on lines of their own, after the caret's block when that holds text.
-/// `placed` is what the rest of the book holds already, which the engine takes only once.
-pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str, placed: &[Kind]) -> Paste {
+pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str) -> Paste {
     // In code, a comment, or settings a directive line is only text.
     let blocks = Blocks::parse(text);
     let at = parts.first().map_or(0, |part| part.start);
@@ -140,27 +139,9 @@ pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str, placed: &[Kind]) 
     if !held.as_slice().iter().any(|block| block.kind == BlockKind::Directive) {
         return Paste::Text;
     }
-    let refused = || {
-        let lines = held
-            .as_slice()
-            .iter()
-            .filter(|block| block.kind != BlockKind::Directive);
-        Paste::Refused(lines.map(|block| &trimmed[block.range.clone()]).collect())
-    };
+    let refused = || Paste::Refused(words_of(trimmed));
     let own = structure::read(trimmed, &held);
-    let once_taken = |kind: Kind| kind.only_once() && placed.contains(&kind);
-    let list = held.as_slice();
-    // The engine reads a list table's rows from a list, and nothing else.
-    let bad_table = |region: &structure::Region| {
-        region.kind == Kind::Table
-            && (region.open + 1..region.close).any(|at| !matches!(list[at].kind, BlockKind::List | BlockKind::Blank))
-    };
-    if !own.rejected.is_empty()
-        || own
-            .regions
-            .iter()
-            .any(|region| once_taken(region.kind) || bad_table(region))
-    {
+    if !own.rejected.is_empty() {
         return refused();
     }
     let (cut, caret) = written_over(parts, "");
@@ -192,6 +173,15 @@ pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str, placed: &[Kind]) 
         edits: vec![smallest_edit(text, &new)],
         selection: Selection::caret(end),
     })
+}
+
+/// The text of `pasted` without its directive lines.
+pub fn words_of(pasted: &str) -> String {
+    let held = Blocks::parse(pasted);
+    (held.as_slice().iter())
+        .filter(|block| block.kind != BlockKind::Directive)
+        .map(|block| &pasted[block.range.clone()])
+        .collect()
 }
 
 /// Where blocks go in for a caret at `caret`: on its line when that is empty, otherwise after its block's text.
@@ -291,7 +281,7 @@ mod tests {
     }
 
     fn pasted(text: &str, caret: usize, new: &str) -> Paste {
-        paste(text, std::slice::from_ref(&(caret..caret)), new, &[])
+        paste(text, std::slice::from_ref(&(caret..caret)), new)
     }
 
     #[test]
@@ -314,12 +304,6 @@ mod tests {
         );
         assert_eq!(pasted("a\n", 1, ":::\nb\n"), Paste::Refused("b".to_owned()));
         assert_eq!(pasted("a\n", 1, "plain\n"), Paste::Text);
-        assert_eq!(
-            pasted("a\n", 1, "::: table\nWords\n:::\n"),
-            Paste::Refused("Words\n".to_owned())
-        );
-        let elsewhere = paste("a\n", std::slice::from_ref(&(1..1)), "::: toc\n", &[Kind::Toc]);
-        assert_eq!(elsewhere, Paste::Refused(String::new()));
     }
 
     #[test]

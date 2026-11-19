@@ -67,14 +67,6 @@ impl Kind {
         )
     }
 
-    /// Whether the engine takes it once in a book.
-    pub fn only_once(self) -> bool {
-        matches!(
-            self,
-            Self::Toc | Self::Bibliography | Self::Index | Self::FrontMatter | Self::MainMatter | Self::BackMatter
-        )
-    }
-
     /// Whether the pages start a new one here.
     pub fn starts_page(self) -> bool {
         matches!(

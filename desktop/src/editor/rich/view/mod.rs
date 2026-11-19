@@ -377,6 +377,13 @@ impl EditorView {
         Ok(())
     }
 
+    /// Whether the engine, reading the whole book, finds a problem in these edits to the open chapter that it does not
+    /// find now.
+    pub(in crate::editor) fn book_refuses(&self, edits: &[Edit]) -> bool {
+        let before = check::problems_now(&self.session);
+        check::refusal(&self.session, self.session.active(), edits, &before).is_some()
+    }
+
     /// Shows a message over a block.
     pub(in crate::editor) fn notify_rich(
         &mut self,

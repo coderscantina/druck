@@ -295,6 +295,19 @@ fn removing_a_note_and_amending_its_undo_step_gives_the_exact_bytes_back() {
 }
 
 #[test]
+fn the_engine_refuses_a_pasted_region_the_rest_of_the_book_rules_out() {
+    let project = project("paste-regions");
+    let session = project.session();
+    let id = chapter_named(&session, "11-k01.md");
+    let at = session.buffer(id).text().len();
+    let before = check::problems_now(&session);
+    let table = [Edit::new(at..at, "\n\n::: table\n\n:::\n")];
+    assert!(check::refusal(&session, id, &table, &before).is_some());
+    let keep = [Edit::new(at..at, "\n\n::: keep\nWords\n:::\n")];
+    assert_eq!(check::refusal(&session, id, &keep, &before), None);
+}
+
+#[test]
 fn an_edit_that_would_not_parse_is_refused_with_the_engines_reason() {
     let project = project("refuse");
     let session = project.session();

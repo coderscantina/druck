@@ -95,7 +95,11 @@ fn without_lines(text: &str, blocks: &Blocks, removed: &mut [bool]) -> Vec<Edit>
         && last.range.start > 0
         && text[..last.range.start].ends_with('\n')
     {
-        last.range.start -= line_ending(text).len().min(last.range.start);
+        last.range.start -= if text[..last.range.start].ends_with("\r\n") {
+            2
+        } else {
+            1
+        };
     }
     edits
 }
@@ -598,6 +602,23 @@ mod tests {
         let command = room_at_marker(text, &blocks, &structure, keep);
         assert_eq!(applied(text, &command.edits), "::: keep\n\n\n:::\n");
         assert_eq!(command.selection.head, "::: keep\n\n".len());
+    }
+
+    #[test]
+    fn room_that_is_there_already_changes_nothing_and_still_names_the_place() {
+        let text = "::: toc\n\n";
+        let (blocks, structure, toc) = region_of(text, Kind::Toc);
+        let command = room_at_marker(text, &blocks, &structure, toc);
+        assert!(command.edits.is_empty());
+        assert_eq!(command.selection.head, text.len());
+    }
+
+    #[test]
+    fn a_repair_at_the_end_of_a_text_with_mixed_line_endings_stays_on_a_character() {
+        let text = "::: unknown\r\nCafé\n:::";
+        let blocks = Blocks::parse(text);
+        let rejected = structure::read(text, &blocks).rejected[0];
+        assert_eq!(applied(text, &repair(text, &blocks, &rejected).edits), "Café");
     }
 
     #[test]
