@@ -168,10 +168,19 @@ pub fn paste(text: &str, parts: &[Range<usize>], pasted: &str) -> Paste {
     if found.regions.len() != had.regions.len() + own.regions.len() || found.rejected.len() > had.rejected.len() {
         return refused();
     }
-    let end = at + before.len() + trimmed.len();
+    // The caret never stands on a fence line: it goes to the end of the pasted text, or onto a mark when there is none.
+    let last_words = (held.as_slice().iter())
+        .rev()
+        .find(|block| !matches!(block.kind, BlockKind::Directive | BlockKind::Blank))
+        .map(|block| block.range.start + trimmed[block.range.clone()].trim_end_matches(['\n', '\r']).len());
+    let last_region = own
+        .regions
+        .last()
+        .map(|region| held.as_slice()[region.open].range.start);
+    let caret = at + before.len() + last_words.or(last_region).unwrap_or(0);
     Paste::Blocks(Command {
         edits: vec![smallest_edit(text, &new)],
-        selection: Selection::caret(end),
+        selection: Selection::caret(caret),
     })
 }
 
@@ -292,7 +301,12 @@ mod tests {
         };
         let result = applied(text, &command.edits);
         assert_eq!(result, "Some text\n\n::: keep\nA\n:::\n\nNext\n");
-        assert_eq!(&result[..command.selection.head], "Some text\n\n::: keep\nA\n:::");
+        assert_eq!(&result[..command.selection.head], "Some text\n\n::: keep\nA");
+        let Paste::Blocks(command) = pasted(text, 4, "::: toc\n") else {
+            panic!("blocks");
+        };
+        let result = applied(text, &command.edits);
+        assert!(result[command.selection.head..].starts_with("::: toc"));
     }
 
     #[test]
