@@ -1294,13 +1294,16 @@ impl EditorView {
         let before = self.blocks.as_slice()[first].range.start;
         // The blank line after a table is its separator, not a place to stand.
         let after = match self.blocks.as_slice().get(last + 1) {
-            Some(next) if next.kind == BlockKind::Blank && last + 2 < count => next.range.end,
+            Some(next) if next.kind == BlockKind::Blank && last + 2 < count && !self.opens_at_rest(last) => {
+                next.range.end
+            }
             _ => self.blocks.as_slice()[last].range.end,
         };
         if (forward && after < text.len()) || before == 0 {
             after
         } else {
-            motion::left(text, before)
+            // What stands before may be hidden too, such as the closing line of the region above.
+            self.skip_hidden(motion::left(text, before), false)
         }
     }
 

@@ -101,7 +101,9 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ### Region editing note
 
-On 2026-11-19, on branch `region-editing`, marks, region edges, malformed regions, and front matter were reworked after a council review, see [the decision](DECISIONS.md#2026-11-19-marks-and-region-edges). Next: the owner's hand test with a real mouse on a mark's grip and on Remove line.
+On 2026-11-19, on branch `region-editing`, marks, region edges, malformed regions, and front matter were reworked after a council review, see [the decision](DECISIONS.md#2026-11-19-marks-and-region-edges). Checks: `cargo test -p druck-desktop` (896 passed), `cargo clippy -p druck-desktop --all-targets --no-deps -- -D warnings`, and `cargo fmt --all --check`, all clean. Key runs in a debug build with `DRUCK_GATE=2`, keys by PID, comparing the file after each step: marks, typing and undo at a mark, edits across a fence, Remove line, Select All, pasted regions, and Left and redo beside hidden fence lines.
+
+Not verified: a real mouse on a mark's grip, Remove line, and the second column's grip; a real input method; light appearance and German captures; Linux and Windows. The council's last scores, 7 from Opus and 7 from Sol, came before the final fixes, so 9 of 10 is not confirmed. Next: a closing council round, then the owner's hand test.
 
 ### Agentic beta follow-ups
 

@@ -253,7 +253,13 @@ impl EditorView {
         };
         let started = self.trace.input();
         self.resegment(restored.splice);
-        self.set_selection(restored.selection, false, window, cx);
+        // History may hold a caret from before a region took its shape, on a line that is hidden now.
+        let selection = if restored.selection.is_empty() {
+            Selection::caret(self.skip_hidden(restored.selection.head, false))
+        } else {
+            restored.selection
+        };
+        self.set_selection(selection, false, window, cx);
         window.notify_text_input_changed(&self.focus);
         self.trace.handled(started);
         self.schedule_rich(window, cx);
