@@ -1202,14 +1202,21 @@ impl EditorView {
         let prints_nothing = match block.kind {
             // A single file's part before its first heading may be front matter alone. It shows there, so that
             // part is never an empty page.
-            BlockKind::FrontMatter => (self.blocks.as_slice().iter())
-                .any(|other| !matches!(other.kind, BlockKind::FrontMatter | BlockKind::Blank)),
+            // Front matter that never closes is a mistake to show, as a comment that never closes is.
+            BlockKind::FrontMatter => {
+                crate::source::blocks::front_matter_closes(&self.session.active_buffer().text()[block.range.clone()])
+                    && (self.blocks.as_slice().iter())
+                        .any(|other| !matches!(other.kind, BlockKind::FrontMatter | BlockKind::Blank))
+            }
             BlockKind::Raw => {
                 commands::links::is_definitions(&self.session.active_buffer().text()[block.range.clone()])
             }
             _ => false,
         };
-        prints_nothing && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
+        let selected = self.selection.range();
+        let selection_in_it =
+            !selected.is_empty() && selected.start < block.range.end && block.range.start < selected.end;
+        prints_nothing && !selection_in_it && self.reveal_offset().is_none_or(|at| self.blocks.index_at(at) != index)
     }
 
     /// Whether a block takes no room in the galley: a hidden comment, a note's text that its reference shows, the later
@@ -1235,13 +1242,22 @@ impl EditorView {
                         BlockKind::Comment => self.comment_is_hidden(index - 1),
                         BlockKind::FootnoteDefinition => self.definition_is_hidden(index - 1),
                         BlockKind::FrontMatter | BlockKind::Raw => self.settings_are_hidden(index - 1),
-                        BlockKind::Directive => self.opens_at_rest(index - 1),
+                        // Room made after a mark to write in is more than the one blank line that follows it.
+                        BlockKind::Directive => self.opens_at_rest(index - 1) && self.blank_is_one_line(index),
                         _ => self.closes_before_a_blank(index + 1),
                     }
                 }
             }
             _ => false,
         }
+    }
+
+    fn blank_is_one_line(&self, index: usize) -> bool {
+        let block = &self.blocks.as_slice()[index];
+        self.session.active_buffer().text()[block.range.clone()]
+            .matches('\n')
+            .count()
+            <= 1
     }
 
     /// Whether a block takes no room: a hidden one, or a fence line the caret is away from, which still takes the caret.
@@ -2022,6 +2038,10 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::options_toggle))
             .on_action(cx.listener(Self::options_back))
             .on_action(cx.listener(Self::options_unwrap))
+            .on_action(cx.listener(Self::options_delete))
+            .on_action(cx.listener(Self::options_duplicate))
+            .on_action(cx.listener(Self::options_move_up))
+            .on_action(cx.listener(Self::options_move_down))
             .on_action(cx.listener(Self::full_width_from_caret))
             .on_action(cx.listener(Self::ghost_options))
             .on_action(cx.listener(Self::move_block_up))

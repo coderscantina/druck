@@ -9,6 +9,7 @@
 //! what a region's menu and keys write, and [`view`] draws the brackets, the grip, the menu, and the slash menu's ghost.
 
 mod balance;
+pub(super) mod edges;
 pub(super) mod edits;
 mod region;
 mod strings;
@@ -43,6 +44,11 @@ actions!(
         /// Closes the region's menu, or gives the ghost's keys back to the slash menu.
         OptionsBack,
         OptionsUnwrap,
+        /// The keys the region's menu shows beside its rows.
+        OptionsDelete,
+        OptionsDuplicate,
+        OptionsMoveUp,
+        OptionsMoveDown,
         /// Sets the part of two columns at the caret across both.
         FullWidthFromCaret,
         /// Gives the keys to the options of the slash menu's ghost.
@@ -107,6 +113,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("space", OptionsToggle, context),
         KeyBinding::new("escape", OptionsBack, context),
         KeyBinding::new("cmd-backspace", OptionsUnwrap, context),
+        KeyBinding::new("backspace", OptionsDelete, context),
+        KeyBinding::new("delete", OptionsDelete, context),
+        KeyBinding::new("cmd-d", OptionsDuplicate, context),
+        KeyBinding::new("alt-up", OptionsMoveUp, context),
+        KeyBinding::new("alt-down", OptionsMoveDown, context),
     ]);
 }
 
@@ -160,6 +171,8 @@ pub(super) struct Span {
     pub top: Pixels,
     pub bottom: Pixels,
     pub depth: usize,
+    /// It stands in the second of two columns, so only the pointer over that column is in it.
+    pub second: bool,
 }
 
 /// Where a dragged block would land when it crosses a region's edge: into `region`, or out of it, with the drop line
@@ -224,6 +237,8 @@ pub(super) struct Directives {
     names: Vec<(Bounds<Pixels>, usize)>,
     grips: Vec<(Bounds<Pixels>, usize)>,
     spans: Vec<Span>,
+    /// Each repair on screen in the last frame, with the rejected line's block.
+    repairs: Vec<(Bounds<Pixels>, usize)>,
     /// The ghost's table as last shaped, for the options and width it was shaped with.
     ghost_grid: Option<(TableOptions, Pixels, Rc<Whole>)>,
 }
@@ -258,7 +273,8 @@ impl EditorView {
     /// Reads the directives again, after the text or the chapter changed.
     pub(super) fn read_directives(&mut self) {
         let text = self.session.active_buffer().text();
-        let structure = structure::read(text, &self.blocks);
+        let mut structure = structure::read(text, &self.blocks);
+        self.forgive_what_other_chapters_balance(&mut structure);
         self.directives.runs = structure.column_runs(&self.blocks);
         self.directives.structure = structure;
         self.directives.shifted.clear();
@@ -266,6 +282,83 @@ impl EditorView {
         if self.selected_region().is_none() {
             self.directives.selected = None;
             self.directives.menu = None;
+        }
+    }
+
+    /// The engine reads a book as one text, so a region may open in one chapter and close in a later one. Neither line
+    /// is a fault then.
+    fn forgive_what_other_chapters_balance(&self, structure: &mut Structure) {
+        use structure::Fault;
+        let open_ended = |rejected: &structure::Rejected| matches!(rejected.fault, Fault::Unclosed | Fault::Stray);
+        if !structure.rejected.iter().any(open_ended) || self.session.book().len() < 2 {
+            return;
+        }
+        let session = &self.session;
+        let at = session.book().iter().position(|id| *id == session.active());
+        let Some(at) = at else {
+            return;
+        };
+        let balance =
+            |id: &crate::session::ChapterId| session.chapter(*id).map(|chapter| structure::balance(chapter.text()));
+        let carried_in = session.book()[..at]
+            .iter()
+            .filter_map(balance)
+            .fold(0, |open, (strays, left)| open - strays.min(open) + left);
+        let closed_later = session.book()[at + 1..]
+            .iter()
+            .rev()
+            .filter_map(balance)
+            .fold(0, |closes, (strays, left)| closes - left.min(closes) + strays);
+        let (mut strays, mut unclosed) = (carried_in, closed_later);
+        let mut kept: Vec<structure::Rejected> = Vec::with_capacity(structure.rejected.len());
+        for rejected in structure.rejected.drain(..) {
+            if rejected.fault == Fault::Stray && strays > 0 {
+                strays -= 1;
+            } else {
+                kept.push(rejected);
+            }
+        }
+        for at in (0..kept.len()).rev() {
+            if kept[at].fault == Fault::Unclosed && unclosed > 0 {
+                unclosed -= 1;
+                kept.remove(at);
+            }
+        }
+        structure.rejected = kept;
+    }
+
+    /// The region standing as one mark at block `index`: a directive that holds no text, or a region with nothing in it
+    /// yet, at its opening line or the blank line inside it. The caret never stands in one: it is selected whole.
+    pub(super) fn marker_at(&self, index: usize) -> Option<usize> {
+        if self.source {
+            return None;
+        }
+        let structure = &self.directives.structure;
+        let opening = |block: usize| structure.fence(block).filter(|&at| structure.regions[at].open == block);
+        let blank = self.blocks.as_slice()[index].kind == BlockKind::Blank;
+        // A blank line after a mark is text's place. Only one inside an empty region belongs to the region.
+        let inside = || {
+            let before = index.checked_sub(1).filter(|_| blank).and_then(opening)?;
+            structure.regions[before].kind.has_body().then_some(before)
+        };
+        let region = opening(index).or_else(inside)?;
+        self.stands_as_marker(region).then_some(region)
+    }
+
+    /// Whether `region` shows as one mark rather than as the text it holds.
+    pub(super) fn stands_as_marker(&self, region: usize) -> bool {
+        let found = &self.directives.structure.regions[region];
+        if found.kind == Kind::Table {
+            return false;
+        }
+        match found.close - found.open {
+            0 | 1 => true,
+            2 => {
+                let inside = &self.blocks.as_slice()[found.open + 1];
+                let text = self.session.active_buffer().text();
+                inside.kind == BlockKind::Blank && text[inside.range.clone()].matches('\n').count() <= 1
+            }
+            _ => false,
         }
     }
 
@@ -314,14 +407,9 @@ impl EditorView {
         (region.kind != Kind::Table).then_some(region)
     }
 
-    /// Whether the caret stands on block `index`.
-    fn caret_on(&self, index: usize) -> bool {
-        self.reveal_offset().is_some_and(|at| self.blocks.index_at(at) == index)
-    }
-
     /// Whether block `index` is a fence line of a directive with text, which takes no room and no caret in Write.
     pub(super) fn fence_at_rest(&self, index: usize) -> bool {
-        self.drawn_fence(index).is_some_and(|region| region.kind.has_body())
+        self.drawn_fence(index).is_some_and(|region| region.kind.has_body()) && self.marker_at(index).is_none()
     }
 
     /// Whether block `index` is a line where two columns start or end, while they show.
@@ -351,11 +439,10 @@ impl EditorView {
             && list.get(index + 1).is_some_and(|after| after.kind == BlockKind::Blank)
     }
 
-    /// The kind of a directive standing alone at block `index`, which shows its effect while the caret is away.
+    /// The kind of the mark whose opening line is block `index`, which always shows its effect and never its line.
     pub(super) fn standalone_at_rest(&self, index: usize) -> Option<Kind> {
-        self.drawn_fence(index)
-            .map(|region| region.kind)
-            .filter(|kind| !kind.has_body() && !self.caret_on(index))
+        let region = &self.directives.structure.regions[self.marker_at(index)?];
+        (region.open == index).then_some(region.kind)
     }
 
     /// The room a directive standing alone takes at rest: a new page's gap, or one line for the rest.

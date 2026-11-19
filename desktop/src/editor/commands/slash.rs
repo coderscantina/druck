@@ -47,6 +47,7 @@ pub enum Standalone {
     PageBreak,
     Toc,
     Bibliography,
+    Index,
     /// A `::: table` of rows from a list.
     ListTable,
     /// A part of a book by its directive's name, such as `front-matter`.
@@ -105,6 +106,8 @@ pub struct Context {
     pub has_toc: bool,
     /// Whether the book places its bibliography already.
     pub has_bibliography: bool,
+    /// Whether the book places its index already.
+    pub has_index: bool,
     /// Whether the bibliography holds a work to cite.
     pub has_works: bool,
     /// Whether the book has a label to refer to.
@@ -271,6 +274,13 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             Action::Insert(Standalone::Bibliography),
         ));
     }
+    if !held && !context.has_index {
+        items.push(label(
+            Key::IndexHere,
+            "icons/book.svg",
+            Action::Insert(Standalone::Index),
+        ));
+    }
     let in_note = context.block == Some(BlockKind::FootnoteDefinition);
     let in_heading = matches!(context.block, Some(BlockKind::Heading { .. }));
     if !in_note && !in_heading {
@@ -304,7 +314,17 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         "icons/block-comment.svg",
         Action::Insert(Standalone::Comment),
     ));
-    for template in templates_for(context.theme.as_deref()) {
+    // A section that would place a second table of contents, bibliography, or index is not offered.
+    let placed = |slug: &str| match slug {
+        "contents" => context.has_toc,
+        "bibliography" => context.has_bibliography,
+        "index" => context.has_index,
+        _ => false,
+    };
+    for template in templates_for(context.theme.as_deref())
+        .into_iter()
+        .filter(|template| !placed(template.slug))
+    {
         items.push(Item {
             label: template.name.text(language),
             other_label: template.name.text(other),
@@ -314,6 +334,55 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         });
     }
     items
+}
+
+/// Why a search for something the book cannot take here finds nothing: the reason for the first entry the query names.
+pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'static str> {
+    let open = &context.open_directives;
+    let held = open.iter().any(|name| name == "keep" || name == "bottom");
+    let refusals = [
+        (
+            Key::Toc,
+            context
+                .has_toc
+                .then_some(Key::TocTaken)
+                .or((!open.is_empty()).then_some(Key::TocInRegion)),
+        ),
+        (
+            Key::Bibliography,
+            (context.has_bibliography)
+                .then_some(Key::BibliographyTaken)
+                .or(held.then_some(Key::BibliographyHeld)),
+        ),
+        (
+            Key::IndexHere,
+            context
+                .has_index
+                .then_some(Key::IndexTaken)
+                .or(held.then_some(Key::IndexHeld)),
+        ),
+        (Key::PartFront, part_refused(context, "front-matter")),
+        (Key::PartMain, part_refused(context, "main-matter")),
+        (Key::PartBack, part_refused(context, "back-matter")),
+    ];
+    let query = query.trim().to_lowercase();
+    let named = |key: Key| {
+        [Language::English, Language::German]
+            .iter()
+            .any(|language| key.text(*language).to_lowercase().contains(&query))
+    };
+    (!query.is_empty())
+        .then(|| {
+            refusals
+                .into_iter()
+                .find_map(|(entry, why)| why.filter(|_| named(entry)))
+        })
+        .flatten()
+        .map(|why| why.text(language))
+}
+
+fn part_refused(context: &Context, part: &str) -> Option<Key> {
+    (!context.open_directives.is_empty() || !context.parts.contains(&part)).then_some(Key::PartRefused)
 }
 
 /// The entries matching a query: all its words in either language's label or the group, the ones starting with it first.
@@ -365,10 +434,12 @@ pub fn holds_toc(text: &str) -> bool {
     holds_directive(text, "toc")
 }
 
-/// Whether this text has a directive line naming `name` alone.
+/// Whether this text has a directive line naming `name` alone. A line in a code block is an example, not a directive.
 pub fn holds_directive(text: &str, name: &str) -> bool {
-    text.lines()
-        .any(|line| line.starts_with(":::") && line.trim_start_matches(':').trim() == name)
+    let blocks = Blocks::parse(text);
+    (blocks.as_slice().iter())
+        .filter(|block| block.kind == BlockKind::Directive)
+        .any(|block| text[block.range.clone()].trim_start_matches(':').trim() == name)
 }
 
 /// Whether choosing a wrapping entry for `slash` wraps the block it stands in, because its line holds other text, rather
@@ -440,6 +511,11 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
         }
         Action::Insert(Standalone::Bibliography) => {
             let text = "::: bibliography".to_owned();
+            let end = text.len();
+            (text, end..end)
+        }
+        Action::Insert(Standalone::Index) => {
+            let text = "::: index".to_owned();
             let end = text.len();
             (text, end..end)
         }

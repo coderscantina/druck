@@ -25,6 +25,7 @@ impl EditorView {
         self.follow_slash();
         self.follow_completion();
         self.release_region();
+        self.select_marker_at_caret();
         self.restart_blink(window, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
@@ -72,6 +73,7 @@ impl EditorView {
                 (target, upstream)
             }
         };
+        let target = self.past_selected_marker(head, target);
         let target = self.skip_hidden(target, target > head);
         let target = self.past_chip(target, target > head);
         // An arrow key that would pass a table puts the caret into it.
@@ -160,7 +162,8 @@ impl EditorView {
             } else {
                 return (0, false, goal);
             }
-            if !current.lines[line_index].skipped {
+            // A mark's line is hidden, but it is a stop: the caret landing on it selects the mark.
+            if !current.lines[line_index].skipped || self.marker_at(block).is_some() {
                 break;
             }
         }
@@ -187,9 +190,10 @@ impl EditorView {
 
     pub(super) fn select_all(&mut self, _: &SelectAll, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.session.active_buffer().text();
-        let anchor = notes::leading_region(text, &self.blocks)
+        let notes_end = notes::leading_region(text, &self.blocks)
             .filter(|region| !self.source && region.start == 0)
             .map_or(0, |region| region.end);
+        let anchor = notes_end.max(self.shown_start());
         let selection = Selection {
             anchor,
             head: self.session.active_buffer().len(),
@@ -204,6 +208,7 @@ impl EditorView {
         self.commit_rich_float(window, cx);
         self.close_float(cx);
         if self.scrollbar_mouse_down(event.position, cx)
+            || self.repair_mouse_down(event.position, window, cx)
             || self.region_mouse_down(event.position, cx)
             || self.gutter_mouse_down(event.position, cx)
         {

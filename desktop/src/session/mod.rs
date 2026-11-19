@@ -334,7 +334,19 @@ impl Session {
         let mut session = Self::empty(Kind::Single { path: path.to_owned() });
         session.synced.insert(path.to_owned(), Synced::new(&text, true));
         session.split_into_sections(&text);
-        session.active = session.book[0];
+        // A file opens on its first text, not on a section that holds only its settings.
+        let holds_text = |id: &&ChapterId| {
+            session.chapters.get(id).is_some_and(|chapter| {
+                let blocks = crate::source::Blocks::parse(chapter.text());
+                (blocks.as_slice().iter()).any(|block| {
+                    !matches!(
+                        block.kind,
+                        crate::source::BlockKind::FrontMatter | crate::source::BlockKind::Blank
+                    )
+                })
+            })
+        };
+        session.active = *session.book.iter().find(holds_text).unwrap_or(&session.book[0]);
         session.refresh_details();
         Ok(session)
     }
@@ -1062,10 +1074,37 @@ impl Session {
         let order = self.book.clone();
         self.book.remove(from);
         self.book.insert(target, id);
+        if self.parts_in_order(&order) && !self.parts_in_order(&self.book) {
+            self.book = order;
+            return Err(crate::t!(Key::PartsKeepTheirOrder).to_owned());
+        }
         self.write_chapter_list().inspect_err(|_| self.book = order.clone())?;
         self.moves.undo.push(order);
         self.moves.redo.clear();
         Ok(())
+    }
+
+    /// Whether front, main, and back matter open in that order when the chapters stand as `order` lists them.
+    fn parts_in_order(&self, order: &[ChapterId]) -> bool {
+        let rank = |line: &str| {
+            ["front-matter", "main-matter", "back-matter"]
+                .iter()
+                .position(|part| line.trim_start_matches(':').trim() == *part)
+        };
+        let mut last = None;
+        for chapter in order.iter().filter_map(|id| self.chapters.get(id)) {
+            let text = chapter.text();
+            let blocks = crate::source::Blocks::parse(text);
+            let directives =
+                (blocks.as_slice().iter()).filter(|block| block.kind == crate::source::BlockKind::Directive);
+            for found in directives.filter_map(|block| rank(text[block.range.clone()].trim_end())) {
+                if last.is_some_and(|last| found <= last) {
+                    return false;
+                }
+                last = Some(found);
+            }
+        }
+        true
     }
 
     /// Puts the book back in its order before the last move, returning whether there was one to undo.

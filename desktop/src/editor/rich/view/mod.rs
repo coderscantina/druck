@@ -98,6 +98,17 @@ pub struct NoticeFloat {
     offers_source: bool,
 }
 
+impl NoticeFloat {
+    /// A message at `at` with nothing to offer.
+    pub(in crate::editor) fn new(at: usize, message: &'static str) -> Self {
+        Self {
+            at,
+            message: message.into(),
+            offers_source: false,
+        }
+    }
+}
+
 /// The offer after a reference went: its definition has no reference left.
 pub struct OfferFloat {
     labels: Vec<String>,
@@ -367,7 +378,13 @@ impl EditorView {
     }
 
     /// Shows a message over a block.
-    pub(super) fn notify_rich(&mut self, at: usize, message: String, offers_source: bool, cx: &mut Context<Self>) {
+    pub(in crate::editor) fn notify_rich(
+        &mut self,
+        at: usize,
+        message: String,
+        offers_source: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.float = Float::Rich(RichFloat::Notice(NoticeFloat {
             at,
             message: message.into(),
@@ -508,6 +525,9 @@ impl EditorView {
 
     /// Cmd+Enter: answers the offer, or opens the editor of the chip or block the caret stands at.
     pub(in crate::editor) fn edit_rich_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.repair_at_caret(window, cx) {
+            return;
+        }
         if let Float::Rich(RichFloat::Offer(_)) = &self.float {
             self.accept_offer(window, cx);
             return;

@@ -8,8 +8,9 @@ use std::ops::Range;
 use gpui::{ClipboardItem, Context, Pixels, Point, Window};
 
 use super::{
-    Edge, Kind, Menu, MoveBlockDown, MoveBlockUp, RegionCopy, RegionCut, RegionDelete, RegionDown, RegionDuplicate,
-    RegionEnter, RegionMenu, RegionOut, RegionUp, edits, structure,
+    Edge, Kind, Menu, MoveBlockDown, MoveBlockUp, OptionsDelete, OptionsDuplicate, OptionsMoveDown, OptionsMoveUp,
+    RegionCopy, RegionCut, RegionDelete, RegionDown, RegionDuplicate, RegionEnter, RegionMenu, RegionOut, RegionUp,
+    edits, structure,
 };
 use crate::editor::EditorView;
 use crate::editor::commands::{Command, applied, moves};
@@ -45,7 +46,7 @@ impl EditorView {
         let block = self.blocks.index_at(at);
         let region = self.directives.structure.fence(block)?;
         let found = &self.directives.structure.regions[region];
-        let selectable = found.open == block && found.kind.has_body() && found.kind != Kind::Table;
+        let selectable = found.open == block && found.kind != Kind::Table;
         (selectable && self.blocks.as_slice()[block].range.start == at).then_some(region)
     }
 
@@ -79,6 +80,46 @@ impl EditorView {
         self.directives.menu = menu.then(Menu::default);
         self.toolbar_dismissed = true;
         cx.notify();
+    }
+
+    /// A caret that lands on a mark selects the mark: there is no place to stand inside it.
+    pub(in crate::editor) fn select_marker_at_caret(&mut self) {
+        if !self.selection.is_empty() {
+            return;
+        }
+        let Some(region) = self.marker_at(self.blocks.index_at(self.selection.head)) else {
+            return;
+        };
+        let open = self.blocks.as_slice()[self.directives.structure.regions[region].open]
+            .range
+            .start;
+        self.selection = Selection::caret(open);
+        self.reveal_at = open;
+        self.directives.selected = Some(open);
+        self.toolbar_dismissed = true;
+    }
+
+    /// Where a step right from the selected mark lands: past all of it.
+    pub(in crate::editor) fn past_selected_marker(&self, head: usize, target: usize) -> usize {
+        let marker = self.selected_region().filter(|&region| self.stands_as_marker(region));
+        match marker {
+            Some(region) if target > head => {
+                let close = self.directives.structure.regions[region].close;
+                target.max(self.blocks.as_slice()[close].range.end)
+            }
+            _ => target,
+        }
+    }
+
+    /// Writing at a selected mark goes after it, or inside a region with nothing in it. Returns whether it made room.
+    pub(in crate::editor) fn open_selected_marker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(region) = self.selected_region().filter(|&region| self.stands_as_marker(region)) else {
+            return false;
+        };
+        let text = self.session.active_buffer().text();
+        let command = edits::room_at_marker(text, &self.blocks, &self.directives.structure, region);
+        self.run_command(command, window, cx);
+        true
     }
 
     /// Forgets the selected region and its menu, as any move of the caret does.
@@ -116,7 +157,31 @@ impl EditorView {
         if self.full_width_command(region).is_some() {
             rows.push(Row::FullWidth);
         }
-        rows.extend([Row::Unwrap, Row::Duplicate, Row::MoveUp, Row::MoveDown, Row::Delete]);
+        // Only what would do something: a row that cannot act is left out, not shown to fail.
+        let found = &structure.regions[region];
+        let open = self.blocks.as_slice()[found.open].range.start;
+        let step = |down: bool| self.step_command(found.open..found.close + 1, down, Selection::caret(open));
+        let body = found.kind.has_body();
+        rows.extend(
+            [
+                (
+                    Row::Unwrap,
+                    body && edits::unwrap(text, &self.blocks, structure, region).is_some(),
+                ),
+                (
+                    Row::Duplicate,
+                    edits::duplicate_region(text, &self.blocks, structure, region).is_some(),
+                ),
+                (Row::MoveUp, step(false).is_some()),
+                (Row::MoveDown, step(true).is_some()),
+                (
+                    Row::Delete,
+                    edits::delete_region(text, &self.blocks, structure, region).is_some(),
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(row, offered)| offered.then_some(row)),
+        );
         rows
     }
 
@@ -182,6 +247,13 @@ impl EditorView {
         if self.selection.is_empty() {
             let block = self.blocks.index_at(self.selection.head);
             let found = &self.blocks.as_slice()[block];
+            // An empty line has no paragraph to select, so Escape goes straight to the region around it.
+            if found.kind == BlockKind::Blank
+                && let Some(region) = self.region_around(block)
+            {
+                self.select_region(region, false, Some(self.selection.head), window, cx);
+                return true;
+            }
             if found.kind == BlockKind::Blank || self.takes_no_caret(block) {
                 return false;
             }
@@ -236,6 +308,12 @@ impl EditorView {
         let origin = self.directives.origin;
         match parent {
             Some(parent) => self.select_region(parent, false, origin, window, cx),
+            // A mark has no text to go back to, so the caret goes to what follows it.
+            None if self.stands_as_marker(region) => {
+                let close = self.directives.structure.regions[region].close;
+                let after = self.skip_hidden(self.blocks.as_slice()[close].range.end, true);
+                self.set_selection(Selection::caret(after), false, window, cx);
+            }
             None => {
                 let caret = origin.unwrap_or_else(|| self.region_text_start(region));
                 self.set_selection(Selection::caret(caret), false, window, cx);
@@ -244,6 +322,9 @@ impl EditorView {
     }
 
     pub(in crate::editor) fn region_enter(&mut self, _: &RegionEnter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.open_selected_marker(window, cx) {
+            return;
+        }
         if let Some(region) = self.selected_region() {
             let caret = self.region_text_start(region);
             self.set_selection(Selection::caret(caret), false, window, cx);
@@ -276,6 +357,41 @@ impl EditorView {
 
     pub(in crate::editor) fn region_delete(&mut self, _: &RegionDelete, window: &mut Window, cx: &mut Context<Self>) {
         self.delete_region(window, cx);
+    }
+
+    pub(in crate::editor) fn options_delete(&mut self, _: &OptionsDelete, window: &mut Window, cx: &mut Context<Self>) {
+        self.directives.menu = None;
+        self.delete_region(window, cx);
+    }
+
+    pub(in crate::editor) fn options_duplicate(
+        &mut self,
+        _: &OptionsDuplicate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.directives.menu = None;
+        self.duplicate_region(window, cx);
+    }
+
+    pub(in crate::editor) fn options_move_up(
+        &mut self,
+        _: &OptionsMoveUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.directives.menu = None;
+        self.step_region(false, window, cx);
+    }
+
+    pub(in crate::editor) fn options_move_down(
+        &mut self,
+        _: &OptionsMoveDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.directives.menu = None;
+        self.step_region(true, window, cx);
     }
 
     pub(in crate::editor) fn region_copy(&mut self, _: &RegionCopy, _: &mut Window, cx: &mut Context<Self>) {
@@ -424,10 +540,13 @@ impl EditorView {
     /// Follows the pointer: the region it is in shows its grip. Returns whether that changed.
     pub(in crate::editor) fn follow_region_hover(&mut self, position: Point<Pixels>, inside: bool) -> bool {
         let reach = self.column.text_left + self.column.text_width;
+        let middle = self.column.text_left + self.directives.column_width + self.directives.column_gap * 0.5;
+        let grip_reach = middle - tokens::REGION_GRIP;
         let hover = (inside && !self.source && position.x < reach)
             .then(|| {
                 (self.directives.spans.iter())
                     .filter(|span| span.top <= position.y && position.y < span.bottom)
+                    .filter(|span| !span.second || position.x >= grip_reach)
                     .max_by_key(|span| span.depth)
                     .map(|span| span.region)
             })
@@ -450,7 +569,7 @@ impl EditorView {
         let Some(found) = self.directives.structure.regions.get(region).cloned() else {
             return false;
         };
-        if !found.kind.has_body() || found.kind == Kind::Table {
+        if found.kind == Kind::Table {
             return false;
         }
         self.grab_region(found.open, found.close, position, bounds, cx);

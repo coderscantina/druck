@@ -80,6 +80,10 @@ crate::strings! {
             "Eine einzelne Datei hat keine Kapitelliste: Ihre Reihenfolge ist ihr Text."
         ),
         OnlyBookChaptersMove => ("Only a chapter in the book can move.", "Nur ein Kapitel im Buch lässt sich verschieben."),
+        PartsKeepTheirOrder => (
+            "Front matter, main matter, and back matter have to stay in that order.",
+            "Vorspann, Hauptteil und Anhang müssen in dieser Reihenfolge bleiben."
+        ),
         OnlyBookChaptersHaveStatus => ("Only a chapter in the book has a state.", "Nur ein Kapitel im Buch hat einen Stand."),
         UnknownStatus => ("That state is not one of the book's statuses.", "Diesen Stand kennt das Buch nicht."),
         StatusDraft => ("Draft", "Entwurf"),

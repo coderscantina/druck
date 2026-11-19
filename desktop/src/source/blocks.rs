@@ -94,6 +94,11 @@ impl Blocks {
         // A comment still open before the edit can be closed by it, which changes the block the comment started in.
         let start = open_comment_before(text, splice.start).unwrap_or(splice.start);
         let start = self.index_at(start).saturating_sub(2);
+        // Front matter still open can be closed by a line far below it.
+        let first = &self.list[0];
+        let open_settings = first.kind == BlockKind::FrontMatter
+            && !front_matter_closes(&text[first.range.start..first.range.end.min(text.len())]);
+        let start = if open_settings { 0 } else { start };
         let mut pos = self.list[start].range.start;
         let mut next = start;
         let mut scanned = Vec::new();
@@ -254,8 +259,17 @@ fn skip_nonblank(text: &str, mut pos: usize) -> usize {
     pos
 }
 
-/// The end of front matter opening the text, by the engine's rule. Unclosed front matter runs to the end of the text,
-/// where the engine reports it, so that closing it later is an edit inside this block.
+/// Whether a front matter block ends in its closing line.
+pub fn front_matter_closes(block: &str) -> bool {
+    block
+        .lines()
+        .skip(1)
+        .last()
+        .is_some_and(|line| line == "---" || line == "...")
+}
+
+/// The end of front matter opening the text, by the engine's rule. Unclosed front matter ends at the first blank line, so
+/// a stray `---` on the first line does not swallow the file. The engine reports it.
 fn front_matter_end(text: &str) -> Option<usize> {
     let bom = if text.starts_with('\u{feff}') {
         '\u{feff}'.len_utf8()
@@ -270,6 +284,14 @@ fn front_matter_end(text: &str) -> Option<usize> {
         let (line, next) = line_at(text, pos);
         if line == "---" || line == "..." {
             return Some(next);
+        }
+        pos = next;
+    }
+    let (_, mut pos) = line_at(text, bom);
+    while pos < text.len() {
+        let (line, next) = line_at(text, pos);
+        if is_blank(line) {
+            return Some(pos);
         }
         pos = next;
     }
@@ -781,6 +803,17 @@ mod tests {
         assert_eq!(kinds("```\ncode\n\nmore"), [(Code, "```\ncode\n\nmore")]);
         assert_eq!(kinds("<!-- a\n\nb"), [(Comment, "<!-- a\n\nb")]);
         assert_eq!(kinds("---\na: b\n"), [(FrontMatter, "---\na: b\n")]);
+        // Never closed, it ends at the first blank line, so the text after it stays text.
+        assert_eq!(
+            kinds("---\na: b\n\n# Title\n"),
+            [
+                (FrontMatter, "---\na: b\n"),
+                (Blank, "\n"),
+                (Heading { level: 1 }, "# Title\n")
+            ]
+        );
+        assert!(front_matter_closes("---\na: b\n---\n"));
+        assert!(!front_matter_closes("---\na: b\n"));
     }
 
     #[test]

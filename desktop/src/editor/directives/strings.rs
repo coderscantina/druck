@@ -22,6 +22,16 @@ crate::strings! {
         MoveUp => ("Move up", "Nach oben"),
         MoveDown => ("Move down", "Nach unten"),
         DeleteWithText => ("Delete with its text", "Mit Text löschen"),
+        Delete => ("Delete", "Löschen"),
+        FaultUnknown => ("Druck does not know this region", "Diesen Bereich kennt Druck nicht"),
+        FaultRefused => ("This region cannot stand here", "Dieser Bereich kann hier nicht stehen"),
+        FaultUnclosed => ("This region never ends", "Dieser Bereich endet nie"),
+        FaultStray => ("This line ends no region", "Diese Zeile beendet keinen Bereich"),
+        RepairHint => ("Remove line", "Zeile entfernen"),
+        PasteRefused => (
+            "The regions cannot stand here, so only their text was pasted.",
+            "Die Bereiche können hier nicht stehen, darum wurde nur ihr Text eingefügt."
+        ),
         DropInto => ("Into", "In"),
         DropAfter => ("After", "Nach"),
         DropBefore => ("Before", "Vor"),

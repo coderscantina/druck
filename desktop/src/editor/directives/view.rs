@@ -12,6 +12,7 @@ use gpui::{
 use super::edits::{self, Align};
 use super::region::Row;
 use super::strings::Key;
+use super::structure::Fault;
 use super::{
     FullWidthFromCaret, GhostOptions, GhostTable, Kind, OptionsAccept, OptionsBack, OptionsDown, OptionsLeft,
     OptionsRight, OptionsToggle, OptionsUnwrap, OptionsUp, Span,
@@ -50,6 +51,8 @@ pub(in crate::editor) struct Marks {
     ghost_whole: Option<(Rc<Whole>, Point<Pixels>)>,
     /// The grips that show, the accent washes with their tint, and the label of a drop across a region's edge.
     grips: Vec<Bounds<Pixels>>,
+    /// What is wrong with a directive line the engine will not take, beside the line.
+    repairs: Vec<(ShapedLine, Point<Pixels>)>,
     washes: Vec<(Bounds<Pixels>, f32)>,
     drop_label: Option<(ShapedLine, Point<Pixels>)>,
 }
@@ -71,6 +74,7 @@ pub(in crate::editor) fn ghost_kind(action: &Action) -> Option<Kind> {
         Action::Insert(Standalone::PageBreak) => Some(Kind::PageBreak),
         Action::Insert(Standalone::Toc) => Some(Kind::Toc),
         Action::Insert(Standalone::Bibliography) => Some(Kind::Bibliography),
+        Action::Insert(Standalone::Index) => Some(Kind::Index),
         Action::Insert(Standalone::ListTable) => Some(Kind::Table),
         _ => None,
     }
@@ -168,6 +172,7 @@ impl EditorView {
         self.directives.names.clear();
         self.directives.grips.clear();
         self.directives.spans.clear();
+        self.directives.repairs.clear();
         if self.source || indices.is_empty() {
             return marks;
         }
@@ -203,18 +208,19 @@ impl EditorView {
             let Some((top, bottom)) = span else {
                 continue;
             };
-            let body = region.kind.has_body() && region.kind != Kind::Table;
+            let body = region.kind != Kind::Table;
+            // A group inside a second column has its bracket in the gap between the columns, where no name fits.
+            let in_second = region.kind != Kind::Columns
+                && (region.open..=region.close).any(|at| self.directives.shifted.contains_key(&at));
             if body {
                 self.directives.spans.push(Span {
                     region: number,
                     top,
                     bottom,
                     depth: region.depth,
+                    second: in_second,
                 });
             }
-            // A group inside a second column has its bracket in the gap between the columns, where no name fits.
-            let in_second = region.kind != Kind::Columns
-                && (region.open..=region.close).any(|at| self.directives.shifted.contains_key(&at));
             let is_selected = selected == Some(number);
             let into = drop.is_some_and(|(edge, _)| edge.into && edge.region == number);
             let is_lit = body && (hover == Some(number) || is_selected || into);
@@ -224,9 +230,14 @@ impl EditorView {
                 Some(y) => (top.min(y), bottom.max(y + tokens::KEY_BAR)),
                 None => (top, bottom),
             };
-            let grip = (body && !in_second && (hover == Some(number) || is_selected)).then(|| {
+            let grip_left = if in_second {
+                gap_middle - tokens::REGION_GRIP * 0.5
+            } else {
+                name_right - tokens::REGION_GRIP
+            };
+            let grip = (body && (hover == Some(number) || is_selected)).then(|| {
                 Bounds::new(
-                    point(name_right - tokens::REGION_GRIP, top),
+                    point(grip_left, top),
                     size(tokens::REGION_GRIP, tokens::TEXT_SMALL * 1.5),
                 )
             });
@@ -287,6 +298,27 @@ impl EditorView {
                 accent: into,
                 ghost: false,
             });
+        }
+        for rejected in self.directives.structure.rejected.clone() {
+            let Some(block) = shown(rejected.block).filter(|block| block.layout.height > px(0.)) else {
+                continue;
+            };
+            let Some(line) = block.layout.lines.first() else {
+                continue;
+            };
+            let reason = crate::t!(match rejected.fault {
+                Fault::Unknown => Key::FaultUnknown,
+                Fault::Refused => Key::FaultRefused,
+                Fault::Unclosed => Key::FaultUnclosed,
+                Fault::Stray => Key::FaultStray,
+            });
+            let hint = format!("{reason} \u{b7} {} \u{2318}\u{21a9}", crate::t!(Key::RepairHint));
+            let shaped = ui_line(&hint, colors.accent.into(), window);
+            let end = line.rows.first().map_or(px(0.), |row| line.x_in_row(row.end, 0));
+            let at = point(block.left + line.x + end + tokens::SPACE_3, block.top + line.y);
+            let bounds = Bounds::new(at, size(shaped.width, line.line_height));
+            self.directives.repairs.push((bounds, rejected.block));
+            marks.repairs.push((shaped, at));
         }
         // The drop's label names where the block lands, above the line's right end.
         if let (Some((edge, before)), Some(y)) = (drop, drop_y)
@@ -543,6 +575,55 @@ impl EditorView {
         }
     }
 
+    /// A press on what is wrong with a directive line takes the line out. Returns whether it was one.
+    pub(in crate::editor) fn repair_mouse_down(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let hit = self
+            .directives
+            .repairs
+            .iter()
+            .find(|(bounds, _)| bounds.contains(&position));
+        let Some(block) = hit.map(|(_, block)| *block) else {
+            return false;
+        };
+        self.repair_line(block, window, cx)
+    }
+
+    /// `Cmd+Return` on a directive line the engine will not take. Returns whether the caret stood on one.
+    pub(in crate::editor) fn repair_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let block = self.blocks.index_at(self.selection.head);
+        self.repair_line(block, window, cx)
+    }
+
+    fn repair_line(&mut self, block: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.source {
+            return false;
+        }
+        let structure = &self.directives.structure;
+        let Some(rejected) = structure
+            .rejected
+            .iter()
+            .find(|rejected| rejected.block == block)
+            .copied()
+        else {
+            return false;
+        };
+        let text = self.session.active_buffer().text();
+        let command = edits::repair(text, &self.blocks, &rejected);
+        self.run_command(command, window, cx);
+        true
+    }
+
+    /// Says why pasted regions went in as their text alone.
+    pub(in crate::editor) fn notify_paste_refused(&mut self, cx: &mut Context<Self>) {
+        let at = self.selection.head;
+        self.notify_rich(at, crate::t!(Key::PasteRefused).to_owned(), false, cx);
+    }
+
     pub(in crate::editor) fn full_width_from_caret(
         &mut self,
         _: &FullWidthFromCaret,
@@ -677,7 +758,8 @@ impl EditorView {
                     "icons/move-down.svg",
                     Some("\u{2325}\u{2193}"),
                 ),
-                Row::Delete => (crate::t!(Key::DeleteWithText), "icons/trash.svg", Some("\u{232b}")),
+                Row::Delete if own.has_body() => (crate::t!(Key::DeleteWithText), "icons/trash.svg", Some("\u{232b}")),
+                Row::Delete => (crate::t!(Key::Delete), "icons/trash.svg", Some("\u{232b}")),
             };
             let picked = row.clone();
             let element = row_base(("region-row", index), chosen, label.into(), icon).on_click(cx.listener(
@@ -961,6 +1043,10 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
                 ink,
                 cx,
             )
+            .ok();
+    }
+    for (line, at) in &marks.repairs {
+        line.paint(*at, tokens::TEXT_SMALL * 1.5, TextAlign::Left, None, window, cx)
             .ok();
     }
     if let Some((label, at)) = &marks.drop_label {

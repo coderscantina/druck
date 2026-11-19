@@ -74,9 +74,40 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let (edits, after) = self.written_over_selection(text);
+        self.edit(kind, edits, after, None, window, cx);
+    }
+
+    /// The parts of the selection an edit may take: a lone fence line and hidden settings stay.
+    fn selection_pieces(&self) -> Vec<Range<usize>> {
         let range = self.selection.range();
-        let after = Selection::caret(range.start + text.len());
-        self.edit(kind, vec![Edit::new(range, text)], after, None, window, cx);
+        if self.source || range.is_empty() {
+            return vec![range];
+        }
+        let text = self.session.active_buffer().text();
+        directives::edges::pieces(
+            text,
+            &self.blocks,
+            &self.directives.structure,
+            range,
+            self.shown_start(),
+        )
+    }
+
+    /// `text` written over the selection, with the caret after it.
+    fn written_over_selection(&self, text: &str) -> (Vec<Edit>, Selection) {
+        directives::edges::written_over(&self.selection_pieces(), text)
+    }
+
+    /// Where the text Write shows starts: after a file's front matter while that is hidden.
+    pub(super) fn shown_start(&self) -> usize {
+        let list = self.blocks.as_slice();
+        if self.source || list[0].kind != BlockKind::FrontMatter || !self.settings_are_hidden(0) {
+            return 0;
+        }
+        list.get(1)
+            .filter(|next| next.kind == BlockKind::Blank)
+            .map_or(list[0].range.end, |next| next.range.end)
     }
 
     pub(super) fn delete_towards(
@@ -90,6 +121,11 @@ impl EditorView {
             let other = target(self.session.active_buffer().text(), head);
             // A key deletes a chip whole.
             let other = self.past_chip(other, other > head);
+            // A key that would reach into a mark, or join the line before one to it, selects the mark instead.
+            if self.marker_at(self.blocks.index_at(other)).is_some() {
+                self.set_selection(Selection::caret(other), false, window, cx);
+                return;
+            }
             // A comment or fence line hidden there is not deleted by a key that cannot show it: the caret goes past it.
             let visible = self.skip_hidden(other, other > head);
             if visible != other {
@@ -100,7 +136,9 @@ impl EditorView {
             }
             head.min(other)..head.max(other)
         } else {
-            self.selection.range()
+            let (edits, after) = self.written_over_selection("");
+            self.edit(EditKind::Deleting, edits, after, None, window, cx);
+            return;
         };
         if !range.is_empty() {
             let after = Selection::caret(range.start);
@@ -167,11 +205,11 @@ impl EditorView {
                 return;
             }
         }
-        let edit = if self.selection.is_empty() {
-            typing::line_break(self.session.active_buffer().text(), &self.blocks, self.selection.head)
-        } else {
-            Edit::new(self.selection.range(), "\n\n")
-        };
+        if !self.selection.is_empty() {
+            self.replace_selection("\n\n", EditKind::Discrete, window, cx);
+            return;
+        }
+        let edit = typing::line_break(self.session.active_buffer().text(), &self.blocks, self.selection.head);
         let after = Selection::caret(edit.range.start + edit.text.len());
         self.edit(EditKind::Discrete, vec![edit], after, None, window, cx);
     }
@@ -221,22 +259,38 @@ impl EditorView {
 
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selection.is_empty() {
-            let text = self.session.active_buffer().text()[self.selection.range()].to_owned();
+            let text = directives::edges::copied(self.session.active_buffer().text(), &self.selection_pieces());
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selection.is_empty() {
-            let text = self.session.active_buffer().text()[self.selection.range()].to_owned();
+            let text = directives::edges::copied(self.session.active_buffer().text(), &self.selection_pieces());
             cx.write_to_clipboard(ClipboardItem::new_string(text));
             self.replace_selection("", EditKind::Discrete, window, cx);
         }
     }
 
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_selection(&text.replace("\r\n", "\n"), EditKind::Discrete, window, cx);
+        let Some(pasted) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        let pasted = pasted.replace("\r\n", "\n");
+        self.open_selected_marker(window, cx);
+        if self.source {
+            self.replace_selection(&pasted, EditKind::Discrete, window, cx);
+            return;
+        }
+        let parts = self.selection_pieces();
+        let text = self.session.active_buffer().text();
+        match directives::edges::paste(text, &parts, &pasted) {
+            directives::edges::Paste::Text => self.replace_selection(&pasted, EditKind::Discrete, window, cx),
+            directives::edges::Paste::Blocks(command) => self.run_command(command, window, cx),
+            directives::edges::Paste::Refused(words) => {
+                self.replace_selection(words.trim_matches('\n'), EditKind::Discrete, window, cx);
+                self.notify_paste_refused(cx);
+            }
         }
     }
 
@@ -311,12 +365,17 @@ impl EntityInputHandler for EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The region's menu has the keys: what is typed does not reach the text behind it.
+        if self.directives.menu.is_some() {
+            return;
+        }
         let kind = if self.marked.is_some() {
             EditKind::Composing
         } else {
             EditKind::Typing
         };
         self.options_release_keys();
+        self.open_selected_marker(window, cx);
         let range = self.input_range(range_utf16);
         let typed_slash = new_text == "/" && kind == EditKind::Typing && !self.menu_is_open();
         // A slash over several selected blocks opens what they can be wrapped in, and writes nothing.
@@ -327,8 +386,14 @@ impl EntityInputHandler for EditorView {
             return;
         }
         let at = range.start;
-        let after = Selection::caret(range.start + new_text.len());
-        self.edit(kind, vec![Edit::new(range, new_text)], after, None, window, cx);
+        // Typing over the selection keeps a lone fence line, as deleting it does.
+        let (edits, after) = if self.marked.is_none() && range == self.selection.range() {
+            self.written_over_selection(new_text)
+        } else {
+            let after = Selection::caret(range.start + new_text.len());
+            (vec![Edit::new(range, new_text)], after)
+        };
+        self.edit(kind, edits, after, None, window, cx);
         if typed_slash {
             self.open_slash(at, cx);
         } else if kind == EditKind::Typing {
@@ -344,7 +409,11 @@ impl EntityInputHandler for EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.directives.menu.is_some() {
+            return;
+        }
         self.options_release_keys();
+        self.open_selected_marker(window, cx);
         let range = self.input_range(range_utf16);
         let new_len_utf16 = new_text.encode_utf16().count();
         let marked = (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());

@@ -99,10 +99,34 @@ pub struct Region {
     pub depth: usize,
 }
 
+/// Why the engine will not take a directive line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// It names no directive the engine knows.
+    Unknown,
+    /// A known directive where the engine refuses it, such as a second table of contents.
+    Refused,
+    /// It opens a region that no line closes.
+    Unclosed,
+    /// It closes nothing.
+    Stray,
+}
+
+/// A directive line the engine will not take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rejected {
+    pub block: usize,
+    pub fault: Fault,
+    /// The block of the line that closes it, which goes with it.
+    pub close: Option<usize>,
+}
+
 /// The accepted directives of a text, in the order they open.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Structure {
     pub regions: Vec<Region>,
+    /// The directive lines the engine will not take, in text order. A rejected region's closing line is not listed.
+    pub rejected: Vec<Rejected>,
     /// Each accepted directive line's block, with the region it opens or closes, sorted.
     fences: Vec<(usize, usize)>,
 }
@@ -125,6 +149,8 @@ pub fn name_of(line: &str) -> (&str, &str) {
 pub fn read(text: &str, blocks: &Blocks) -> Structure {
     let mut stack: Vec<Open> = Vec::new();
     let mut found: Vec<(Kind, usize, usize)> = Vec::new();
+    let mut rejected: Vec<Rejected> = Vec::new();
+    let fault_of = |kind: Option<Kind>| if kind.is_some() { Fault::Refused } else { Fault::Unknown };
     let (mut toc, mut bibliography, mut index) = (false, false, false);
     let mut matter: Option<u8> = None;
     for (at, block) in blocks.as_slice().iter().enumerate() {
@@ -134,11 +160,22 @@ pub fn read(text: &str, blocks: &Blocks) -> Structure {
         let line = text[block.range.clone()].trim_end();
         let (name, attributes) = name_of(line);
         if name.is_empty() {
-            if let Some(open) = stack.pop()
-                && open.valid
-                && let Some(kind) = open.kind
-            {
-                found.push((kind, open.block, at));
+            match stack.pop() {
+                Some(Open {
+                    kind: Some(kind),
+                    block,
+                    valid: true,
+                }) => found.push((kind, block, at)),
+                Some(open) => rejected.push(Rejected {
+                    block: open.block,
+                    fault: fault_of(open.kind),
+                    close: Some(at),
+                }),
+                None => rejected.push(Rejected {
+                    block: at,
+                    fault: Fault::Stray,
+                    close: None,
+                }),
             }
             continue;
         }
@@ -169,12 +206,28 @@ pub fn read(text: &str, blocks: &Blocks) -> Structure {
             Some(kind) if !kind.has_body() => {
                 if valid {
                     found.push((kind, at, at));
+                } else {
+                    rejected.push(Rejected {
+                        block: at,
+                        fault: Fault::Refused,
+                        close: None,
+                    });
                 }
             }
             // An unknown name still opens a container, which its closing line closes.
             _ => stack.push(Open { kind, block: at, valid }),
         }
     }
+    rejected.extend(stack.into_iter().map(|open| Rejected {
+        block: open.block,
+        fault: if open.valid {
+            Fault::Unclosed
+        } else {
+            fault_of(open.kind)
+        },
+        close: None,
+    }));
+    rejected.sort_by_key(|rejected| rejected.block);
     found.sort_by_key(|(_, open, _)| *open);
     let mut regions: Vec<Region> = Vec::with_capacity(found.len());
     for (kind, open, close) in found {
@@ -197,7 +250,34 @@ pub fn read(text: &str, blocks: &Blocks) -> Structure {
         .collect();
     fences.sort_unstable();
     fences.dedup();
-    Structure { regions, fences }
+    Structure {
+        regions,
+        rejected,
+        fences,
+    }
+}
+
+/// How many closing lines of `text` close nothing in it, and how many regions it leaves open at its end.
+pub fn balance(text: &str) -> (usize, usize) {
+    let blocks = Blocks::parse(text);
+    let mut open = 0_usize;
+    let mut strays = 0;
+    for block in blocks
+        .as_slice()
+        .iter()
+        .filter(|block| block.kind == BlockKind::Directive)
+    {
+        let (name, _) = name_of(text[block.range.clone()].trim_end());
+        if name.is_empty() {
+            match open.checked_sub(1) {
+                Some(left) => open = left,
+                None => strays += 1,
+            }
+        } else if Kind::from_name(name).is_none_or(Kind::has_body) {
+            open += 1;
+        }
+    }
+    (strays, open)
 }
 
 impl Structure {
@@ -308,6 +388,28 @@ mod tests {
         ] {
             assert_eq!(kinds(text), expected, "{text:?}");
         }
+    }
+
+    #[test]
+    fn says_why_a_line_is_left_out() {
+        use Fault::*;
+        let faults = |text: &str| -> Vec<(Fault, bool)> {
+            (read(text, &Blocks::parse(text)).rejected.iter())
+                .map(|rejected| (rejected.fault, rejected.close.is_some()))
+                .collect()
+        };
+        assert_eq!(faults("::: aside\na\n:::\n"), [(Unknown, true)]);
+        assert_eq!(faults("::: keep\na\n"), [(Unclosed, false)]);
+        assert_eq!(faults("a\n\n:::\n"), [(Stray, false)]);
+        assert_eq!(faults("::: toc\n\n::: toc\n"), [(Refused, false)]);
+        assert_eq!(faults("::: full-width\na\n:::\n"), [(Refused, true)]);
+        assert_eq!(faults("::: keep\na\n:::\n"), []);
+    }
+
+    #[test]
+    fn balance_counts_what_runs_over_the_ends_of_a_text() {
+        assert_eq!(balance("a\n\n:::\n\n::: keep\nb\n"), (1, 1));
+        assert_eq!(balance("::: toc\n\n::: keep\nb\n:::\n"), (0, 0));
     }
 
     #[test]

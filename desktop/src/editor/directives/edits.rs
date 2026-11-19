@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::structure::{self, Kind, Structure};
+use super::structure::{self, Kind, Rejected, Structure};
 use crate::editor::commands::{Bias, Command, applied, line_ending, moved, needs_gap, normalized, selection_after};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
@@ -63,28 +63,9 @@ pub fn kinds_offered(text: &str, blocks: &Blocks, structure: &Structure, region:
         .collect()
 }
 
-/// Takes `region`'s lines away and keeps its text. Columns take their full-width parts' lines with them, which cannot
-/// stand without them. The caret goes to the start of what they held.
-pub fn unwrap(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
-    let found = &structure.regions[region];
-    if !found.kind.has_body() {
-        return None;
-    }
-    let mut taken = vec![region];
-    if found.kind == Kind::Columns {
-        taken.extend(
-            structure
-                .children(region)
-                .filter(|&child| structure.regions[child].kind == Kind::FullWidth),
-        );
-    }
+/// The edits that take the `removed` blocks away, with a blank line they would leave doubled or opening the text.
+fn without_lines(text: &str, blocks: &Blocks, removed: &mut [bool]) -> Vec<Edit> {
     let list = blocks.as_slice();
-    let mut removed = vec![false; list.len()];
-    for &index in &taken {
-        removed[structure.regions[index].open] = true;
-        removed[structure.regions[index].close] = true;
-    }
-    // A blank line that would follow another, or open the text, goes too.
     let mut last_kept: Option<BlockKind> = None;
     for (at, block) in list.iter().enumerate() {
         if removed[at] {
@@ -116,6 +97,75 @@ pub fn unwrap(text: &str, blocks: &Blocks, structure: &Structure, region: usize)
     {
         last.range.start -= line_ending(text).len().min(last.range.start);
     }
+    edits
+}
+
+/// Takes a directive line the engine will not take out of the text, with the line that closes it. What it held stays.
+pub fn repair(text: &str, blocks: &Blocks, rejected: &Rejected) -> Command {
+    let mut removed = vec![false; blocks.as_slice().len()];
+    removed[rejected.block] = true;
+    if let Some(close) = rejected.close {
+        removed[close] = true;
+    }
+    let edits = without_lines(text, blocks, &mut removed);
+    let caret = moved(blocks.as_slice()[rejected.block].range.start, &edits, Bias::After);
+    Command {
+        edits: normalized(edits, text),
+        selection: Selection::caret(caret),
+    }
+}
+
+/// Makes room to write after a marker that stands alone, or inside a region with nothing in it. The caret goes there.
+pub fn room_at_marker(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Command {
+    let found = &structure.regions[region];
+    let list = blocks.as_slice();
+    let eol = line_ending(text);
+    if found.kind.has_body() {
+        let inside = list[found.open].range.end..list[found.close].range.start;
+        let caret = inside.start + eol.len();
+        return Command {
+            edits: vec![Edit::new(inside, format!("{eol}{eol}"))],
+            selection: Selection::caret(caret),
+        };
+    }
+    let line = list[found.open].range.clone();
+    let written = text[line.clone()].trim_end_matches(['\n', '\r']);
+    let rest = &text[line.end..];
+    let blank_lead = rest.len() - rest.trim_start_matches(['\n', '\r']).len();
+    let mut new = format!("{written}{eol}{eol}");
+    let caret = line.start + new.len();
+    if blank_lead < rest.len() {
+        new.push_str(eol);
+        new.push_str(eol);
+    }
+    Command {
+        edits: normalized(vec![Edit::new(line.start..line.end + blank_lead, new)], text),
+        selection: Selection::caret(caret),
+    }
+}
+
+/// Takes `region`'s lines away and keeps its text. Columns take their full-width parts' lines with them, which cannot
+/// stand without them. The caret goes to the start of what they held.
+pub fn unwrap(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
+    let found = &structure.regions[region];
+    if !found.kind.has_body() {
+        return None;
+    }
+    let mut taken = vec![region];
+    if found.kind == Kind::Columns {
+        taken.extend(
+            structure
+                .children(region)
+                .filter(|&child| structure.regions[child].kind == Kind::FullWidth),
+        );
+    }
+    let list = blocks.as_slice();
+    let mut removed = vec![false; list.len()];
+    for &index in &taken {
+        removed[structure.regions[index].open] = true;
+        removed[structure.regions[index].close] = true;
+    }
+    let edits = without_lines(text, blocks, &mut removed);
     if !keeps_the_rest(text, structure, &edits, taken.len()) {
         return None;
     }
@@ -237,9 +287,6 @@ pub fn wraps_offered(text: &str, blocks: &Blocks, structure: &Structure, blocks_
 /// stood.
 pub fn delete_region(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
     let found = &structure.regions[region];
-    if !found.kind.has_body() {
-        return None;
-    }
     let list = blocks.as_slice();
     let (open, close) = (found.open, found.close);
     let mut removed = region_range(blocks, structure, region);
@@ -268,9 +315,6 @@ pub fn delete_region(text: &str, blocks: &Blocks, structure: &Structure, region:
 /// A copy of `region` after it. The caret goes to the copy's opening line.
 pub fn duplicate_region(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
     let found = &structure.regions[region];
-    if !found.kind.has_body() {
-        return None;
-    }
     let list = blocks.as_slice();
     let range = region_range(blocks, structure, region);
     let body = text[range.clone()].trim_end_matches(['\n', '\r']);
@@ -537,6 +581,35 @@ mod tests {
         let (blocks, structure, keep) = region_of(text, Kind::Keep);
         let command = delete_region(text, &blocks, &structure, keep).expect("a delete");
         assert_eq!(applied(text, &command.edits), "a\n\nc\n");
+    }
+
+    #[test]
+    fn a_marker_is_deleted_whole_and_makes_room_after_it() {
+        let text = "a\n\n::: toc\n\nb\n";
+        let (blocks, structure, toc) = region_of(text, Kind::Toc);
+        let command = delete_region(text, &blocks, &structure, toc).expect("a delete");
+        assert_eq!(applied(text, &command.edits), "a\n\nb\n");
+        let command = room_at_marker(text, &blocks, &structure, toc);
+        let result = applied(text, &command.edits);
+        assert_eq!(result, "a\n\n::: toc\n\n\n\nb\n");
+        assert_eq!(&result[..command.selection.head], "a\n\n::: toc\n\n");
+        let text = "::: keep\n:::\n";
+        let (blocks, structure, keep) = region_of(text, Kind::Keep);
+        let command = room_at_marker(text, &blocks, &structure, keep);
+        assert_eq!(applied(text, &command.edits), "::: keep\n\n\n:::\n");
+        assert_eq!(command.selection.head, "::: keep\n\n".len());
+    }
+
+    #[test]
+    fn a_repair_takes_the_line_and_keeps_the_text() {
+        let repaired = |text: &str| {
+            let blocks = Blocks::parse(text);
+            let rejected = structure::read(text, &blocks).rejected[0];
+            applied(text, &repair(text, &blocks, &rejected).edits)
+        };
+        assert_eq!(repaired("::: aside\nText\n:::\n\nNext\n"), "Text\n\nNext\n");
+        assert_eq!(repaired("::: keep\nText\n"), "Text\n");
+        assert_eq!(repaired("Text\n\n:::\n\nNext\n"), "Text\n\nNext\n");
     }
 
     #[test]

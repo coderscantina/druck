@@ -609,6 +609,7 @@ impl EditorView {
             open_directives: slash::open_directives(text, &self.blocks, at),
             has_toc: chapters().any(slash::holds_toc),
             has_bibliography: chapters().any(|text| slash::holds_directive(text, "bibliography")),
+            has_index: chapters().any(|text| slash::holds_directive(text, "index")),
             has_works: !self.rich.works.is_empty(),
             has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
@@ -662,7 +663,15 @@ impl EditorView {
         *items = slash::filtered(all.clone(), query);
         *selected = 0;
         if items.is_empty() {
+            let (at, query) = (*start, query.to_owned());
             self.float = Float::None;
+            // What was searched for exists, but not here: the author is told why rather than left with nothing.
+            let language = crate::shell::strings::language();
+            if let Some(why) = slash::withheld(&self.slash_context(at), &query, language) {
+                self.float = Float::Rich(super::rich::view::RichFloat::Notice(
+                    super::rich::view::NoticeFloat::new(at, why),
+                ));
+            }
         }
     }
 

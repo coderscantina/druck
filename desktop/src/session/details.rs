@@ -324,8 +324,12 @@ impl Session {
                     // Nothing is left between the fences, so the fences go too.
                     let body = split.body.as_ptr() as usize - text.as_ptr() as usize;
                     let blank = split.body.len() - split.body.trim_start_matches(['\n', '\r']).len();
-                    let fences = start - "---\n".len()..body + blank;
-                    Edit::new(fences, "")
+                    let opening = if text.starts_with('\u{feff}') {
+                        '\u{feff}'.len_utf8()
+                    } else {
+                        0
+                    };
+                    Edit::new(opening..body + blank, "")
                 } else {
                     Edit::new(start + change.range.start..start + change.range.end, change.text)
                 }
