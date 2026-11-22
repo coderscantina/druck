@@ -24,7 +24,7 @@ pub fn data_dir() -> Option<PathBuf> {
     }
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if cfg!(target_os = "macos") {
-        return Some(home?.join("Library/Application Support/Druck"));
+        return Some(home?.join("Library/Application Support").join(druck::resource::APP_ID));
     }
     if cfg!(windows) {
         return std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("Druck"));
@@ -33,6 +33,40 @@ pub fn data_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| Some(home?.join(".local/share")));
     Some(share?.join("druck"))
+}
+
+/// Moves what earlier versions kept on macOS, `~/Library/Application Support/Druck` and `~/.config/druck`, into the
+/// app's folder, once, so settings, themes, history, and recovery copies follow. Skipped while `DRUCK_DATA_DIR` or
+/// `XDG_CONFIG_HOME` points elsewhere. Nothing is overwritten, and errors leave the old folders where they are.
+pub fn move_old_folders() {
+    if !cfg!(target_os = "macos")
+        || std::env::var_os("DRUCK_DATA_DIR").is_some()
+        || std::env::var_os("XDG_CONFIG_HOME").is_some()
+    {
+        return;
+    }
+    if let (Some(home), Some(data)) = (std::env::var_os("HOME").map(PathBuf::from), data_dir()) {
+        move_into(&home, &data);
+    }
+}
+
+fn move_into(home: &Path, data: &Path) {
+    let old_data = home.join("Library/Application Support/Druck");
+    if !data.exists() && old_data.is_dir() {
+        fs::rename(&old_data, data).ok();
+    }
+    let old_config = home.join(".config/druck");
+    if !old_config.is_dir() || fs::create_dir_all(data).is_err() {
+        return;
+    }
+    for entry in fs::read_dir(&old_config).into_iter().flatten().flatten() {
+        let target = data.join(entry.file_name());
+        if !target.exists() {
+            fs::rename(entry.path(), target).ok();
+        }
+    }
+    // Fails while anything is left, which is the point.
+    fs::remove_dir(&old_config).ok();
 }
 
 /// Deletes kept copies last modified more than `max_age` ago, then the document folders that end up empty. The `kept`
@@ -167,6 +201,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("druck-recovery-{name}-{}", std::process::id()));
         fs::remove_dir_all(&dir).ok();
         dir
+    }
+
+    #[test]
+    fn old_folders_move_into_the_app_folder_without_overwriting() {
+        let home = data("move");
+        let app = home.join("Library/Application Support/com.coderscantina.druck");
+        let config = home.join(".config/druck");
+        fs::create_dir_all(home.join("Library/Application Support/Druck/history")).unwrap();
+        fs::write(home.join("Library/Application Support/Druck/state.json"), "old state").unwrap();
+        fs::create_dir_all(config.join("themes")).unwrap();
+        fs::write(config.join("themes/a.json"), "{}").unwrap();
+        fs::write(config.join("settings.json"), "{}").unwrap();
+        fs::write(config.join("state.json"), "stray").unwrap();
+        move_into(&home, &app);
+        assert!(!home.join("Library/Application Support/Druck").exists());
+        assert!(app.join("history").is_dir());
+        assert_eq!(fs::read_to_string(app.join("state.json")).unwrap(), "old state");
+        assert!(app.join("themes/a.json").is_file());
+        assert!(app.join("settings.json").is_file());
+        assert!(config.join("state.json").is_file());
+        fs::remove_dir_all(&home).ok();
     }
 
     #[test]

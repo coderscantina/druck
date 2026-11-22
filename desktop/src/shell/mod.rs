@@ -97,6 +97,7 @@ impl Prefs {
 
 /// Loads the settings and what was saved, and sets the language. `forced` is an appearance from the command line.
 pub fn init(forced: Option<Scheme>, cx: &mut App) {
+    crate::persist::recovery::move_old_folders();
     settings::init(cx);
     if let Some(data) = crate::persist::recovery::data_dir() {
         let max_age = settings::get(cx).kept_for.max_age();

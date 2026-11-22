@@ -164,13 +164,20 @@ impl FileResolver {
 
     /// The folder of named themes shared by all projects, if the platform has a config folder.
     pub fn shared_themes() -> Option<PathBuf> {
-        config_root(
-            cfg!(windows),
+        let os = if cfg!(windows) {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::Mac
+        } else {
+            Os::Unix
+        };
+        config_dir(
+            os,
             std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             std::env::var_os("HOME").map(PathBuf::from),
             std::env::var_os("APPDATA").map(PathBuf::from),
         )
-        .map(|root| root.join("druck").join("themes"))
+        .map(|dir| dir.join("themes"))
     }
 }
 
@@ -224,18 +231,31 @@ fn is_missing(kind: ErrorKind) -> bool {
     )
 }
 
-fn config_root(
-    windows: bool,
-    xdg: Option<PathBuf>,
-    home: Option<PathBuf>,
-    appdata: Option<PathBuf>,
-) -> Option<PathBuf> {
-    if windows {
-        appdata.filter(|path| path.is_absolute())
-    } else {
-        xdg.filter(|path| path.is_absolute())
-            .or_else(|| home.filter(|path| path.is_absolute()).map(|path| path.join(".config")))
+/// The app's identifier on macOS, which names its folders there.
+pub const APP_ID: &str = "com.coderscantina.druck";
+
+#[derive(Clone, Copy)]
+enum Os {
+    Mac,
+    Windows,
+    Unix,
+}
+
+/// Druck's config folder: `%APPDATA%\druck` on Windows; elsewhere an absolute `XDG_CONFIG_HOME` gives
+/// `$XDG_CONFIG_HOME/druck`, else macOS uses `~/Library/Application Support/com.coderscantina.druck` and other
+/// systems `~/.config/druck`.
+fn config_dir(os: Os, xdg: Option<PathBuf>, home: Option<PathBuf>, appdata: Option<PathBuf>) -> Option<PathBuf> {
+    if let Os::Windows = os {
+        return appdata.filter(|path| path.is_absolute()).map(|path| path.join("druck"));
     }
+    if let Some(xdg) = xdg.filter(|path| path.is_absolute()) {
+        return Some(xdg.join("druck"));
+    }
+    let home = home.filter(|path| path.is_absolute())?;
+    Some(match os {
+        Os::Mac => home.join("Library/Application Support").join(APP_ID),
+        _ => home.join(".config/druck"),
+    })
 }
 
 /// Serves files from memory. Nothing else is read, and installed fonts are not found.
@@ -331,24 +351,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uses_absolute_os_config_roots_and_ignores_relative_xdg_values() {
+    fn uses_absolute_os_config_folders_and_ignores_relative_xdg_values() {
         let root = std::env::temp_dir();
         let home = root.join("home");
         let xdg = root.join("xdg");
         let appdata = root.join("appdata");
         assert_eq!(
-            config_root(false, Some(xdg.clone()), Some(home.clone()), None),
-            Some(xdg)
+            config_dir(Os::Unix, Some(xdg.clone()), Some(home.clone()), None),
+            Some(xdg.join("druck"))
         );
         assert_eq!(
-            config_root(false, Some("relative".into()), Some(home.clone()), None),
-            Some(home.join(".config"))
+            config_dir(Os::Unix, Some("relative".into()), Some(home.clone()), None),
+            Some(home.join(".config/druck"))
         );
         assert_eq!(
-            config_root(true, None, Some(home), Some(appdata.clone())),
-            Some(appdata)
+            config_dir(Os::Mac, None, Some(home.clone()), None),
+            Some(home.join("Library/Application Support/com.coderscantina.druck"))
         );
-        assert_eq!(config_root(false, None, None, None), None);
+        assert_eq!(
+            config_dir(Os::Windows, None, Some(home), Some(appdata.clone())),
+            Some(appdata.join("druck"))
+        );
+        assert_eq!(config_dir(Os::Unix, None, None, None), None);
     }
 
     #[test]
