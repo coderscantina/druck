@@ -51,7 +51,7 @@ impl<'a> Fields<'a> {
             Placeholder::Sentences => count(self.statistics.sentences),
             Placeholder::Paragraphs => count(self.statistics.paragraphs),
             Placeholder::ReadingTime => {
-                let speed = metadata.reading_speed().unwrap_or_else(|| words_per_minute(lang));
+                let speed = metadata.reading_speed.unwrap_or_else(|| words_per_minute(lang));
                 count(self.statistics.reading_time(speed))
             }
             Placeholder::Figures => count(self.statistics.figures),

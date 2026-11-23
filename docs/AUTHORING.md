@@ -27,7 +27,7 @@ Front matter cannot redefine templates (title slots, headers, footers). That bel
 
 ### Metadata
 
-Metadata is plain text. A number or boolean is read as its text, so `date: 2024` needs no quotes; in `meta` and `--set`, a decimal such as `1.50` reads as `1.5`, so quote it to keep the zero. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
+Metadata is plain text. A number or boolean is read as its text, as written, so `date: 2024` and `price: 1.50` need no quotes. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
 
 | Key | Type | Effect |
 | --- | --- | --- |
