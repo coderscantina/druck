@@ -386,6 +386,12 @@ impl EditorView {
     /// change lands under a composition. Edits made against a file's text for [`Session::apply_to_file`] call this before
     /// reading that text, since the break moves what comes after it. Does nothing without marked text.
     pub fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_marked_in(self.session.active(), window, cx);
+    }
+
+    /// Commits marked text that belongs to `chapter`, which is the active one unless a change to the session switched
+    /// away from it while the composition was open.
+    pub(super) fn commit_marked_in(&mut self, chapter: ChapterId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(marked) = self.marked.clone() else {
             return;
         };
@@ -395,7 +401,9 @@ impl EditorView {
             old_end: marked.end,
             new_end: marked.end,
         };
-        if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
+        if let Some(gap) = self.session.keep_apart(chapter, splice).gap
+            && chapter == self.session.active()
+        {
             self.resegment(gap.into());
             self.schedule_rich(window, cx);
         }

@@ -82,6 +82,7 @@ impl ChapterNotes {
             cx.on_focus_out(&focus, window, |notes, _, window, cx| {
                 notes.set_unfolded(false, cx);
                 notes.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
+                notes.drop_marked(cx);
             }),
         ];
         let mut notes = Self {
@@ -100,6 +101,7 @@ impl ChapterNotes {
     }
 
     fn sync(&mut self, cx: &mut Context<Self>) {
+        self.drop_marked(cx);
         let editor = self.editor.read(cx);
         let chapter = editor.session().active();
         let shown = editor.note_texts();
@@ -123,6 +125,16 @@ impl ChapterNotes {
             field.update(cx, |field, cx| field.text_changed(cx));
         }
         cx.notify();
+    }
+
+    /// A commit or cancel of the composition sends [`TextChanged`] or [`SessionChanged`], and a note's marked range goes
+    /// with it: once the editor has none, a range left in a field would stand for text that is committed.
+    fn drop_marked(&mut self, cx: &mut Context<Self>) {
+        if !self.editor.read(cx).is_composing() {
+            for field in &self.fields {
+                field.update(cx, |field, _| field.marked = None);
+            }
+        }
     }
 
     fn hold_for_selection(&mut self, cx: &mut Context<Self>) {
@@ -877,6 +889,7 @@ impl EntityInputHandler for NoteField {
             .map(|range| from_utf16(&text, &range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range());
+        let range = clamped(&text, range);
         self.marked = None;
         self.replace(range, new_text, false, window, cx);
     }
@@ -894,6 +907,7 @@ impl EntityInputHandler for NoteField {
             .map(|range| from_utf16(&text, &range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range());
+        let range = clamped(&text, range);
         let start = range.start;
         if self.replace(range, new_text, true, window, cx) {
             self.marked = (!new_text.is_empty()).then(|| start..start + new_text.len());
@@ -926,7 +940,16 @@ impl EntityInputHandler for NoteField {
     }
 }
 
+/// `range` cut back to character boundaries inside `text`, so an offset that outlived a change to it cannot slice past
+/// the end or into a character.
+fn clamped(text: &str, range: Range<usize>) -> Range<usize> {
+    let at = |offset: usize| text.floor_char_boundary(offset);
+    at(range.start)..at(range.end)
+}
+
+/// `range` in UTF-16 units, clamped to `text`.
 fn to_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
+    let range = clamped(text, range.clone());
     text[..range.start].encode_utf16().count()..text[..range.end].encode_utf16().count()
 }
 
@@ -1380,6 +1403,14 @@ mod tests {
             y: px(y),
             height: px(height),
         }
+    }
+
+    #[test]
+    fn a_stale_range_is_kept_inside_the_text() {
+        assert_eq!(to_utf16("日本", &(0..6)), 0..2);
+        assert_eq!(to_utf16("日", &(0..6)), 0..1);
+        assert_eq!(to_utf16("日本", &(1..4)), 0..1);
+        assert_eq!(clamped("ab", 1..9), 1..2);
     }
 
     #[test]

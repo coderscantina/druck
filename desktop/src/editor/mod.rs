@@ -533,7 +533,8 @@ impl EditorView {
 
     /// Changes the session in a way that changes no text, as recording a finished save, which reads `druck.yaml` again
     /// after writing it. Everyone hears of it as from [`Self::update_session`], but an input method's marked text stays
-    /// open: a commit here would leave the input method composing on over text no longer marked.
+    /// open: a commit here would leave the input method composing on over text no longer marked. A change that switches
+    /// the active chapter commits it, as the galley takes the other chapter over.
     pub fn refresh_session<R>(
         &mut self,
         change: impl FnOnce(&mut Session) -> R,
@@ -551,6 +552,10 @@ impl EditorView {
     /// before the change.
     fn took_session_change(&mut self, before: (ChapterId, u64), window: &mut Window, cx: &mut Context<Self>) {
         if before != (self.session.active(), self.session.active_buffer().revision()) {
+            // Adopting another chapter drops the marked text, so it is committed as the chapter it was marked in.
+            if before.0 != self.session.active() {
+                self.commit_marked_in(before.0, window, cx);
+            }
             self.adopt_active(window, cx);
         }
         self.refresh_placeholder_values(cx);
