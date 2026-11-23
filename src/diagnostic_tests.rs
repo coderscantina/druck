@@ -77,9 +77,12 @@ fn an_error_in_a_project_names_the_chapter_file_and_its_line() {
     assert_eq!(errors[0].severity, Severity::Error);
     assert_eq!(errors[0].source, Some(Source::Document(chapter)));
     assert_eq!(errors[0].location, Some((3, 5).into()));
+    let shortened = Path::new("manuscript").join("two.md");
     assert!(
-        (errors[0].display_from(Path::new("/work/book")).to_string())
-            .starts_with("error: manuscript/two.md:3:5: a citation needs a bibliography"),
+        (errors[0].display_from(Path::new("/work/book")).to_string()).starts_with(&format!(
+            "error: {}:3:5: a citation needs a bibliography",
+            shortened.display()
+        )),
         "{}",
         errors[0]
     );
@@ -99,7 +102,8 @@ fn a_message_naming_another_chapter_shortens_it_like_the_source() {
     let errors = errors(&resolver, &input(text, no_theme(), Overrides::default()));
 
     let absolute = errors[0].message.clone();
-    assert!(absolute.contains("line 1 of /work/book/one.md"), "{absolute}");
+    let one: PathBuf = book().components().collect::<PathBuf>().join("one.md");
+    assert!(absolute.contains(&format!("line 1 of {}", one.display())), "{absolute}");
     let shown = errors[0].display_from(Path::new("/work/book")).to_string();
     assert!(shown.contains("line 1 of one.md"), "{shown}");
     assert!(shown.starts_with("error: two.md:1:"), "{shown}");

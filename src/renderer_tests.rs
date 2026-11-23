@@ -434,7 +434,7 @@ fn a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing() {
         image_error[0].message,
         format!(
             "image not found: \"gone.png\" relative to the document in {}",
-            memory_dir().display()
+            memory_dir().components().collect::<PathBuf>().display()
         )
     );
 
