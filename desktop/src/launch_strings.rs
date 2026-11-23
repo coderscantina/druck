@@ -15,6 +15,6 @@ crate::strings! {
             "Dafür muss Claude Code oder Codex auf diesem Computer installiert und mit einem API-Schlüssel eingerichtet sein. Druck speichert keine Schlüssel. In den Einstellungen lässt sich das jederzeit ändern."
         ),
         AgentOfferYes => ("Turn on", "Einschalten"),
-        AgentOfferNo => ("Not now", "Jetzt nicht"),
+        AgentOfferNo => ("Not now", "Nicht jetzt"),
     }
 }
