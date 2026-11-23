@@ -250,8 +250,13 @@ impl Render for TitlePageView {
             .map(|book| px(book.measure * tokens::POINT * self.zoom));
         // Centred on the window as the text column is, so the page stands where the text stood.
         let pane = self.pane.get();
+        let widths: Vec<Pixels> = (self.fields.iter())
+            .map(|(line, field)| self.width(*line, field.read(cx).text(), window))
+            .collect();
+        // A line wider than the measure, as a long title is, widens the column rather than scrolling out of sight.
+        let widest = widths.iter().copied().fold(px(0.), Pixels::max);
         let placed = (pane.size.width > px(0.)).then(|| {
-            let width = measure.unwrap_or(tokens::TEXT_MIN_WIDTH);
+            let width = measure.unwrap_or(tokens::TEXT_MIN_WIDTH).max(widest);
             let column = Column::place(pane, width, false, window.viewport_size().width * 0.5);
             (column.text_left - pane.left(), column.text_width)
         });
@@ -261,9 +266,8 @@ impl Render for TitlePageView {
             Line::Author => body * 1.5,
             Line::Publisher => body * 5.,
         };
-        let lines: Vec<_> = (self.fields.iter())
-            .map(|(line, field)| {
-                let width = self.width(*line, field.read(cx).text(), window);
+        let lines: Vec<_> = (self.fields.iter().zip(widths))
+            .map(|((line, field), width)| {
                 div()
                     .mt(space_before(*line))
                     .w(width)
