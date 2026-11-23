@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -275,14 +276,30 @@ impl<'de> Deserialize<'de> for MetaValue {
     }
 }
 
-/// The `meta` map, whose keys must be usable in `{meta.key}`.
+/// The `meta` key whose value replaces the language's reading speed for `{reading-time}`.
+const READING_SPEED: &str = "reading-speed";
+
+/// The `meta` map, whose keys must be usable in `{meta.key}`, with a valid `reading-speed`.
 fn meta<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, MetaValue>, D::Error> {
     let map = BTreeMap::<String, MetaValue>::deserialize(deserializer)?;
-    match map.keys().find(|key| !is_meta_key(key)) {
-        Some(key) => Err(de::Error::custom(format!(
+    if let Some(key) = map.keys().find(|key| !is_meta_key(key)) {
+        return Err(de::Error::custom(format!(
             "meta key \"{key}\" must consist of letters, digits, \"-\", and \"_\""
-        ))),
-        None => Ok(map),
+        )));
+    }
+    if let Some(speed) = map.get(READING_SPEED) {
+        reading_speed(speed).map_err(de::Error::custom)?;
+    }
+    Ok(map)
+}
+
+/// `meta.reading-speed` in words a minute: a whole number above 0.
+fn reading_speed(value: &MetaValue) -> Result<NonZeroUsize, String> {
+    let error =
+        |shown: &str| format!("meta.reading-speed must be a whole number of words a minute, such as 250, not {shown}");
+    match value {
+        MetaValue::Text(text) => text.trim().parse().map_err(|_| error(&format!("\"{text}\""))),
+        MetaValue::Lines(_) => Err(error("a list")),
     }
 }
 
@@ -456,6 +473,13 @@ pub struct Metadata {
     pub meta: BTreeMap<String, MetaValue>,
 }
 
+impl Metadata {
+    /// The words a minute `{reading-time}` reads at, if `meta.reading-speed` sets it.
+    pub fn reading_speed(&self) -> Option<NonZeroUsize> {
+        reading_speed(self.meta.get(READING_SPEED)?).ok()
+    }
+}
+
 fn insert(object: &mut Map<String, Value>, pointer: &[&str], value: Value) {
     let (last, parents) = pointer.split_last().expect("non-empty pointer");
     let mut target = object;
@@ -574,6 +598,22 @@ mod tests {
             parse("title: 1.50\ndate: 2024\n").unwrap().date.as_deref(),
             Some("2024")
         );
+    }
+
+    #[test]
+    fn reads_a_reading_speed_in_meta_and_rejects_anything_but_a_whole_number_above_0() {
+        let speed = |yaml: &str| parse(yaml).map(|front| front.metadata_overridden_by(&FrontMatter::default()));
+        let set = speed("meta:\n  reading-speed: 250\n").unwrap();
+        assert_eq!(set.reading_speed(), NonZeroUsize::new(250));
+        assert_eq!(set.meta["reading-speed"], MetaValue::Text("250".into()));
+        assert_eq!(speed("meta:\n  client: ACME\n").unwrap().reading_speed(), None);
+        for wrong in ["0", "fast", "250.5", "-3", "[250]"] {
+            let error = speed(&format!("meta:\n  reading-speed: {wrong}\n")).unwrap_err();
+            assert!(
+                error.contains("meta.reading-speed must be a whole number"),
+                "{wrong}: {error}"
+            );
+        }
     }
 
     #[test]

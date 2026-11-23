@@ -11,7 +11,7 @@ use crate::config::theme::Lang;
 use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Block, Document, Inline};
-use crate::statistics::Statistics;
+use crate::statistics::{Statistics, words_per_minute};
 
 pub struct Fields<'a> {
     config: &'a Config,
@@ -50,7 +50,10 @@ impl<'a> Fields<'a> {
             Placeholder::Words => count(self.statistics.words),
             Placeholder::Sentences => count(self.statistics.sentences),
             Placeholder::Paragraphs => count(self.statistics.paragraphs),
-            Placeholder::ReadingTime => count(self.statistics.reading_time(lang)),
+            Placeholder::ReadingTime => {
+                let speed = metadata.reading_speed().unwrap_or_else(|| words_per_minute(lang));
+                count(self.statistics.reading_time(speed))
+            }
             Placeholder::Figures => count(self.statistics.figures),
             Placeholder::Tables => count(self.statistics.tables),
             Placeholder::BuildDate => Some(self.today.long(lang)),

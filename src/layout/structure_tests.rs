@@ -309,6 +309,15 @@ fn body_placeholders_show_statistics_and_metadata_that_do_not_count_themselves()
     );
 }
 
+#[test]
+fn a_reading_speed_in_meta_replaces_the_languages() {
+    let body = "One two three four five six.\n\nRead in {reading-time} minutes.";
+    let at = |meta: &str| texts(&render(&config(meta, theme()), body).pages[0]);
+    assert!(at("{}").contains(&"Read in 1 minutes.".to_owned()));
+    let slow = at("meta: {reading-speed: 5}");
+    assert!(slow.contains(&"Read in 2 minutes.".to_owned()), "{slow:?}");
+}
+
 /// The watermark of a page: its text, size, and angle, if it is the first item, behind the content.
 fn watermark(page: &Page) -> Option<(String, f64, f64)> {
     match page.items.first()? {

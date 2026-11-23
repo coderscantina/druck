@@ -42,7 +42,7 @@ Metadata fills the title block at the start of the first page, or the separate t
 
 The PDF's document properties take the title, authors, and language. Without a `title`, the first level 1 heading is the PDF title, but no title block is set from it. The subject is the `abstract`, or else the `subtitle`. A `date` written as `2026-10-07` also becomes the creation date; any other text does not.
 
-`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
+`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required. One key means something to Druck itself: `reading-speed`, a whole number of words a minute, replaces the language's speed for [`{reading-time}`](#placeholders).
 
 ```yaml
 meta:
@@ -842,7 +842,7 @@ This report has {words} words and takes about {reading-time} minutes to read.
 | `{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{meta.key}` | The [metadata](#metadata). A `meta` list joins its entries with commas. |
 | `{chars}`, `{chars-no-spaces}` | Characters with and without spaces. |
 | `{words}`, `{sentences}`, `{paragraphs}` | Words, sentences, and paragraphs. |
-| `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German. |
+| `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German, or `meta.reading-speed`, as in `reading-speed: 250`. |
 | `{figures}`, `{tables}` | Figures and tables with a caption, the numbered ones. |
 | `{build-date}`, `{year}` | The day the document is rendered, as in "7 October 2026", and its year. |
 | `{draft}` | The draft label, "Draft" or "Entwurf", when `draft: true`. |
