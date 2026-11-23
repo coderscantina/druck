@@ -125,3 +125,82 @@ fn typing_after_an_outside_change_comes_back_first_and_elsewhere_stays() {
         "the typing in a section the change left alone stays"
     );
 }
+
+#[test]
+fn a_heading_typed_in_a_new_section_leaves_the_change_unreachable() {
+    let mut single = Single::new("resplit");
+    let theirs = TEXT.replace("First.", "First, theirs.");
+    single.outside(&theirs);
+    single.type_in(0, "First, theirs.", "First.\n\n# Half\n\nMore.");
+    // Leaving the section resplits the file, and the new section's buffer goes.
+    assert!(single.session.resplit());
+
+    assert!(!single.session.undo_is_outside_file_change());
+    assert!(!single.session.undo_outside_file_change());
+}
+
+#[test]
+fn a_change_from_an_unreadable_file_is_no_undo_step() {
+    let mut single = Single::new("unreadable");
+    let path = single.path.clone();
+    single.session.mark_unreadable(&path, "not UTF-8".into());
+    let theirs = TEXT.replace("Second.", "Second, readable again.");
+    fs::write(&path, &theirs).unwrap();
+    single.outside(&theirs);
+    single.session.set_synced(&path, theirs.as_str().into(), true);
+    single.session.mark_clean(&path);
+
+    assert!(!single.session.undo_outside_file_change());
+    assert_eq!(single.text(), theirs);
+    single.session.save().unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+}
+
+#[test]
+fn a_write_of_the_undone_version_leaves_the_redone_one_unsaved() {
+    let mut single = Single::new("redo-save");
+    let path = single.path.clone();
+    let theirs = TEXT.replace("First.", "First, theirs.");
+    fs::write(&path, &theirs).unwrap();
+    single.outside(&theirs);
+    single.session.set_synced(&path, theirs.as_str().into(), true);
+    single.session.mark_clean(&path);
+
+    single.undo();
+    let outgoing = single.session.outgoing();
+    assert_eq!(outgoing.len(), 1);
+    // The write is under way while the author redoes.
+    single.redo();
+    outgoing[0].write().unwrap();
+    single.session.written(&outgoing[0]);
+    assert_eq!(fs::read_to_string(&path).unwrap(), TEXT);
+
+    assert!(single.session.file_is_dirty(&path), "the disk holds the undone version");
+    single.session.save().unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+}
+
+#[test]
+fn undo_takes_typing_after_the_change_then_the_change_then_typing_before_it() {
+    let mut single = Single::new("order");
+    let third = single.session.book()[2];
+    single.session.set_active(third);
+    // Discrete steps stay apart, as typing with a pause between does.
+    let edit = |single: &mut Single, old: &str, new: &str| {
+        let at = single.session.buffer(third).text().find(old).unwrap();
+        (single.session)
+            .edit_chapter(third, vec![Edit::new(at..at + old.len(), new)], EditKind::Discrete)
+            .unwrap();
+    };
+    edit(&mut single, "Third.", "Third, A.");
+    let theirs = single.text().replace("First.", "First, theirs.");
+    single.outside(&theirs);
+    edit(&mut single, "Third, A.", "Third, AB.");
+
+    single.undo();
+    assert_eq!(single.text(), theirs);
+    single.undo();
+    assert_eq!(single.text(), TEXT.replace("Third.", "Third, A."));
+    single.undo();
+    assert_eq!(single.text(), TEXT);
+}

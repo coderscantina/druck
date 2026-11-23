@@ -239,12 +239,13 @@ impl Buffer {
         Ok(splice)
     }
 
-    pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
+    }
+
+    /// How many steps undo can take back. Unlike the revision, undo lowers it and redo raises it again.
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
     }
 
     /// Whether the next undo meets a change from outside.

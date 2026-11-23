@@ -300,7 +300,8 @@ impl Session {
         outgoing
     }
 
-    /// A write finished. Edits made since it started stay unsaved.
+    /// A write finished. Edits made since it started stay unsaved, and so do a single file's sections if they are not the
+    /// ones it wrote, after a resplit or an outside change undone or redone meanwhile.
     pub fn written(&mut self, outgoing: &Outgoing) {
         self.set_synced(&outgoing.path, outgoing.text.clone(), true);
         for (id, revision) in &outgoing.marks {
@@ -309,7 +310,8 @@ impl Session {
                 chapter.read = Read::Done;
             }
         }
-        if matches!(self.kind, Kind::Single { .. }) {
+        let same_sections = (outgoing.marks.iter().map(|(id, _)| id)).eq(&self.book);
+        if matches!(self.kind, Kind::Single { .. }) && same_sections {
             self.resplit_unsaved = false;
         }
         if self.manifest_path().is_some_and(|path| path == outgoing.path) {
