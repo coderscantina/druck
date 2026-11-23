@@ -47,6 +47,44 @@ impl Book {
         Session::open(path).map(|session| Self::of(&session))
     }
 
+    /// Writes the texts of the chapters and the theme to `file`, for the trial tool in the CLI's process to try fixes
+    /// on what the app has, which typing during a run makes differ from what is on disk.
+    pub fn write_copy(&self, file: &Path) -> std::io::Result<()> {
+        let files: serde_json::Map<String, serde_json::Value> = match &self.kind {
+            Kind::Single { path } => {
+                std::iter::once((path.display().to_string(), self.joined.text.clone().into())).collect()
+            }
+            Kind::Project { .. } => (self.joined.map.files())
+                .map(|(path, range)| (path.display().to_string(), self.joined.text[range].into()))
+                .collect(),
+        };
+        let theme = self.theme.as_ref().map(|(path, text)| serde_json::json!([path, text]));
+        let copy = serde_json::json!({"files": files, "theme": theme});
+        crate::persist::atomic::write(file, copy.to_string().as_bytes())
+    }
+
+    /// The book at `path` with the texts of a copy [`Book::write_copy`] wrote. A file the copy lacks is read from disk.
+    pub fn open_copy(path: &Path, copy: &Path) -> Result<Self, String> {
+        let unreadable = |error: String| format!("the app's copy of the book cannot be read: {error}");
+        let text = std::fs::read_to_string(copy).map_err(|error| unreadable(error.to_string()))?;
+        let copy: serde_json::Value = serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))?;
+        let text_of = |path: &Path| copy["files"][path.display().to_string()].as_str().map(str::to_owned);
+        let mut book = Self::open(path)?;
+        book.joined = match &book.kind {
+            Kind::Single { path } => Joined {
+                text: text_of(path).unwrap_or(book.joined.text),
+                ..book.joined
+            },
+            Kind::Project { .. } => book.joined.with_files(|path, _| text_of(path)),
+        };
+        if let [theme, text] = copy["theme"].as_array().map(Vec::as_slice).unwrap_or_default()
+            && let (Some(theme), Some(text)) = (theme.as_str(), text.as_str())
+        {
+            book.theme = Some((PathBuf::from(theme), text.to_owned()));
+        }
+        Ok(book)
+    }
+
     fn base(&self) -> PathBuf {
         self.kind.base_dir()
     }
@@ -267,9 +305,14 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The rule for keeping a fix: it clears a warning, causes no new one, and does more than hide the warning.
-    pub fn keeps(&self) -> bool {
-        !self.cleared.is_empty() && self.caused.is_empty() && !self.unchanged
+    /// The rule for keeping a fix. A directive clears a warning, causes no new one, and does more than hide the
+    /// warning. A theme value sets every page anew, so it is kept when it clears more warnings than it causes, and the
+    /// author sees both counts and the pages of what it causes.
+    pub fn keeps(&self, fix: &Fix) -> bool {
+        match fix {
+            Fix::Theme { .. } => self.cleared.len() > self.caused.len(),
+            _ => !self.cleared.is_empty() && self.caused.is_empty() && !self.unchanged,
+        }
     }
 }
 
@@ -315,6 +358,13 @@ pub struct Tried {
     /// The page to look at on each side: the one the fix's block stands on, or for a theme value the first warning
     /// it clears.
     pub shown: Option<(Shown, Shown)>,
+}
+
+impl Tried {
+    /// Whether the fix passed its rule, [`Outcome::keeps`].
+    pub fn kept(&self) -> bool {
+        self.outcome.keeps(&self.fix)
+    }
 }
 
 /// One layout of the copy: its pages, its warnings, and where each page starts.
@@ -411,7 +461,7 @@ impl Bench {
             after: after.layout.clone(),
             shown,
         };
-        if tried.outcome.keeps() {
+        if tried.kept() {
             self.kept = fixes;
             self.standing = Some(after);
         }
@@ -567,6 +617,15 @@ mod tests {
         }
     }
 
+    fn directive() -> Fix {
+        Fix::from_json(&json!({"kind": "keep", "file": "a.md", "line": 3})).expect("a fix")
+    }
+
+    fn theme_value() -> Fix {
+        Fix::from_json(&json!({"kind": "theme", "property": "typesetting.hyphen-fragments", "value": [2, 2]}))
+            .expect("a fix")
+    }
+
     #[test]
     fn a_fix_is_kept_only_if_it_clears_a_warning_and_causes_none() {
         let loose = warning("loose-line", Some(("a.md", 3)));
@@ -574,14 +633,24 @@ mod tests {
         let short = warning("page-short", None);
         let helps = compare(&[loose.clone(), short.clone()], std::slice::from_ref(&short));
         assert_eq!(helps.cleared, vec![loose.clone()]);
-        assert!(helps.keeps());
+        assert!(helps.keeps(&directive()));
         let nothing = compare(std::slice::from_ref(&loose), std::slice::from_ref(&loose));
-        assert!(!nothing.keeps(), "it clears nothing");
+        assert!(!nothing.keeps(&directive()), "it clears nothing");
         let trades = compare(std::slice::from_ref(&loose), std::slice::from_ref(&other));
-        assert!(!trades.keeps(), "it causes a new one");
+        assert!(!trades.keeps(&directive()), "it causes a new one");
         assert_eq!((trades.cleared.len(), trades.caused), (1, vec![other]));
         let more = compare(std::slice::from_ref(&short), &[short.clone(), short.clone()]);
         assert_eq!(more.caused.len(), 1, "a second short page is a new warning");
+    }
+
+    #[test]
+    fn a_theme_value_is_kept_when_it_clears_more_warnings_than_it_causes() {
+        let at = |line| warning("loose-line", Some(("a.md", line)));
+        let two_for_one = compare(&[at(3), at(5)], &[at(9)]);
+        assert!(two_for_one.keeps(&theme_value()));
+        assert!(!two_for_one.keeps(&directive()), "a directive keeps the strict rule");
+        let even = compare(&[at(3)], &[at(9)]);
+        assert!(!even.keeps(&theme_value()), "a trade is no gain");
     }
 
     #[test]
@@ -638,7 +707,7 @@ mod tests {
             .try_fix(fix("page-break", LAST), &Cancel::default())
             .expect("it can be tried");
         assert_eq!(tried.outcome.cleared, vec![warning]);
-        assert!(tried.outcome.unchanged && !tried.outcome.keeps());
+        assert!(tried.outcome.unchanged && !tried.kept());
         assert!(bench.kept.is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -652,7 +721,7 @@ mod tests {
             .try_fix(fix("page-break", 6), &Cancel::default())
             .expect("it can be tried");
         assert_eq!(tried.outcome.excused, vec![warning]);
-        assert!(tried.outcome.cleared.is_empty() && !tried.outcome.keeps());
+        assert!(tried.outcome.cleared.is_empty() && !tried.kept());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -664,7 +733,7 @@ mod tests {
             .try_fix(fix("keep", 1), &Cancel::default())
             .expect("it can be tried");
         assert!(tried.outcome.cleared.is_empty() && tried.outcome.caused.is_empty());
-        assert!(!tried.outcome.keeps());
+        assert!(!tried.kept());
         assert!(bench.kept.is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -679,10 +748,31 @@ mod tests {
         assert_eq!(tried.outcome.cleared, vec![warning.clone()]);
         let caused: Vec<&str> = tried.outcome.caused.iter().map(|warning| warning.kind).collect();
         assert_eq!(caused, ["page-short"]);
-        assert!(!tried.outcome.keeps());
+        assert!(!tried.kept());
         assert!(bench.kept.is_empty());
         let standing = bench.warnings(&Cancel::default()).expect("it sets");
         assert_eq!(standing, [warning], "the copy is as it was before the trial");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_tool_reads_the_apps_copy_of_the_text_not_the_disk() {
+        let dir = std::env::temp_dir().join(format!("druck-trial-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("plain.json"), json!({"version": 1}).to_string()).expect("theme");
+        let file = dir.join("book.md");
+        std::fs::write(&file, "---\ntheme: ./plain.json\n---\n\nSaved words.\n").expect("file");
+        let mut on_screen = Book::open(&file).expect("the book opens");
+        on_screen.joined.text = on_screen.joined.text.replace("Saved", "Typed");
+        if let Some((_, theme)) = &mut on_screen.theme {
+            *theme = json!({"version": 1, "typesetting": {"hyphen-fragments": [2, 2]}}).to_string();
+        }
+        let copy = dir.join("copy.json");
+        on_screen.write_copy(&copy).expect("the copy is written");
+        let opened = Book::open_copy(&file, &copy).expect("the copy opens");
+        assert!(opened.joined.text.contains("Typed words."));
+        assert_eq!(opened.theme, on_screen.theme);
+        assert!(std::fs::read_to_string(&file).expect("file").contains("Saved words."));
         std::fs::remove_dir_all(&dir).ok();
     }
 

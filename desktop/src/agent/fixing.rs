@@ -2,10 +2,13 @@
 //! fixes the author reviews.
 //!
 //! The agent's word keeps nothing. Each fix the tool says it kept is tried again here, on a copy of the book as the
-//! session has it, and enters the queue only if that trial clears a warning and causes none. The trials run on a thread
-//! of their own with a typesetter of their own, so neither typing nor Publish's pages wait for them. Nothing is written
-//! to a chapter or the theme before the author accepts an entry, and an accepted entry goes in as any edit does.
+//! session has it, and enters the queue only if that trial keeps it too. The trials run on a thread of their own with a
+//! typesetter of their own, so neither typing nor Publish's pages wait for them. Nothing is written to a chapter or the
+//! theme before the author accepts an entry, and an accepted entry goes in as any edit does. When an entry leaves the
+//! queue, or the theme changes, the entries left are tried again on the book as it is then, for pages and counts that
+//! say what accepting each would do now.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 
@@ -41,12 +44,38 @@ pub(super) struct Shot {
     pub mark: Option<[f32; 4]>,
 }
 
+/// What a fix did to the warnings, as its entry says it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Counts {
+    /// The warnings it clears, with those a page break excuses.
+    pub cleared: usize,
+    /// Of those, the ones on the page a page break ends, which may end short after a break the author set.
+    pub excused: usize,
+    /// The warnings it causes, which only a theme value may.
+    pub caused: usize,
+    /// The pages those are on, from 1, each once.
+    pub caused_pages: Vec<usize>,
+}
+
+impl Counts {
+    fn of(outcome: &trial::Outcome) -> Self {
+        let mut caused_pages: Vec<usize> = outcome.caused.iter().filter_map(|warning| warning.page).collect();
+        caused_pages.sort_unstable();
+        caused_pages.dedup();
+        Self {
+            cleared: outcome.cleared.len() + outcome.excused.len(),
+            excused: outcome.excused.len(),
+            caused: outcome.caused.len(),
+            caused_pages,
+        }
+    }
+}
+
 /// A kept fix waiting for the author.
 pub(super) struct Entry {
     pub id: u64,
     pub fix: Fix,
-    /// How many warnings the trial saw it clear.
-    pub cleared: usize,
+    pub counts: Counts,
     pub before: Option<Shot>,
     pub after: Option<Shot>,
     /// The first line of the fix's block and where it started, to find the block again in text that has changed.
@@ -94,9 +123,30 @@ enum Report {
 
 struct Kept {
     fix: Fix,
-    cleared: usize,
+    counts: Counts,
     pages: Option<(Painted, Painted)>,
     anchor: Option<(String, usize)>,
+}
+
+/// The app's copy of the book's text for the trial tool in the CLI's process, removed when the run ends.
+struct BookCopy(PathBuf);
+
+impl BookCopy {
+    fn write(book: &Book) -> std::io::Result<Self> {
+        let made = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let file = std::env::temp_dir().join(format!("druck-book-{}-{made}.json", std::process::id()));
+        book.write_copy(&file)?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for BookCopy {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
 }
 
 /// A run under way.
@@ -114,7 +164,20 @@ struct Run {
     kept: usize,
     /// The conversation the chat card had, which it gets back when the run ends.
     chat_session: Option<String>,
+    copy: BookCopy,
     _reports: Task<()>,
+}
+
+/// The entries tried again after one left the queue. Dropping it drops what it has not reported yet.
+struct Repaint {
+    cancel: Cancel,
+    _reports: Task<()>,
+}
+
+impl Drop for Repaint {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 /// The typesetter's state: the run, and the queue.
@@ -122,6 +185,7 @@ struct Run {
 pub(super) struct Fixing {
     run: Option<Run>,
     queue: Vec<Entry>,
+    repaint: Option<Repaint>,
     next_id: u64,
     /// A history label stands before the first accepted fix of this queue.
     labelled: bool,
@@ -143,6 +207,11 @@ impl Fixing {
 
     pub fn queue(&self) -> &[Entry] {
         &self.queue
+    }
+
+    /// The copy of the book the running turn's trial tool reads.
+    pub fn book_copy(&self) -> Option<PathBuf> {
+        self.run.as_ref().map(|run| run.copy.0.clone())
     }
 
     fn remove(&mut self, id: u64) -> Option<Entry> {
@@ -190,10 +259,10 @@ fn to_verify(input: &Value, answer: &str) -> Vec<Fix> {
         .collect()
 }
 
-/// The app's own trial of a fix, which alone decides whether it enters the queue: it must clear a warning and cause
-/// none, on top of the fixes kept before it.
+/// The app's own trial of a fix, which alone decides whether it enters the queue: it must pass its rule on top of the
+/// fixes kept before it.
 fn verified(bench: &mut Bench, fix: Fix, cancel: &Cancel) -> Option<Kept> {
-    let tried = bench.try_fix(fix, cancel).ok().filter(|tried| tried.outcome.keeps())?;
+    let tried = bench.try_fix(fix, cancel).ok().filter(Tried::kept)?;
     Some(kept_of(bench, tried))
 }
 
@@ -207,7 +276,7 @@ fn kept_of(bench: &Bench, tried: Tried) -> Kept {
         Some((text[block.clone()].lines().next()?.to_owned(), block.start))
     });
     Kept {
-        cleared: tried.outcome.cleared.len(),
+        counts: Counts::of(&tried.outcome),
         fix: tried.fix,
         pages,
         anchor,
@@ -289,7 +358,20 @@ impl AgentView {
         if !self.fixing.queue().is_empty() {
             return;
         }
+        // The agent and the trials work on what is on screen, also where the agent reads a file.
+        self.after_saving(window, cx, Self::start_fixing);
+    }
+
+    fn start_fixing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The save may have waited, and something else started meanwhile.
+        if !self.conversation.is_idle() || self.pass_run.is_some() || self.fixing.is_running() {
+            return;
+        }
         let book = Book::of(self.editor.read(cx).session());
+        let copy = match BookCopy::write(&book) {
+            Ok(copy) => copy,
+            Err(error) => return self.say(strings::fix_not_started(&error.to_string()), cx),
+        };
         let cancel = Cancel::default();
         let (jobs, todo) = channel::<Fix>();
         let (reports, mut incoming) = futures::channel::mpsc::unbounded::<Report>();
@@ -328,6 +410,7 @@ impl AgentView {
             ended: None,
             kept: 0,
             chat_session: self.conversation.session_id().map(str::to_owned),
+            copy,
             _reports: task,
         });
         cx.notify();
@@ -371,7 +454,7 @@ impl AgentView {
                     self.fixing.queue.push(Entry {
                         id: self.fixing.next_id,
                         fix: kept.fix,
-                        cleared: kept.cleared,
+                        counts: kept.counts,
                         before,
                         after,
                         anchor: kept.anchor,
@@ -458,16 +541,14 @@ impl AgentView {
                 }
             };
         }
-        let (Some(place), Some((words, near))) = (entry.fix.place(), &entry.anchor) else {
+        let (Some(place), Some(_)) = (entry.fix.place(), &entry.anchor) else {
             return true;
         };
         let path = self.base.join(&place.file);
         let session = self.editor.read(cx).session();
         let path = file_in_session(session, &path).unwrap_or(path);
-        // The block is found by its words, since typing may have moved it since the trial.
         let edits = session.file_text(&path).and_then(|text| {
-            let start = trial::nearest(&text, words, *near)?;
-            let here = fix_at(&entry.fix, fix::line_of(&text, start));
+            let here = located(entry, &text)?;
             fix::edits(&text, &[&here]).ok()
         });
         let Some(edits) = edits else {
@@ -493,29 +574,45 @@ impl AgentView {
     }
 
     pub(super) fn accept_fix(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(at) = self.fixing.queue.iter().position(|entry| entry.id == id) else {
-            return;
-        };
-        let entry = self.fixing.queue.remove(at);
-        if self.apply_fix(&entry, window, cx) {
-            self.fixing
-                .stale
-                .extend(entry.before.iter().chain(&entry.after).map(|shot| shot.image.clone()));
-        } else {
-            self.fixing.queue.insert(at, entry);
+        if self.accept_one(id, window, cx) {
+            self.repaint_fixes(window, cx);
         }
-        cx.notify();
     }
 
-    pub(super) fn reject_fix(&mut self, id: u64, cx: &mut Context<Self>) {
-        self.fixing.remove(id);
+    /// Accepts one entry. Returns whether the book is changed now: a theme value is written later, and the theme's
+    /// change brings the repaint.
+    fn accept_one(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(at) = self.fixing.queue.iter().position(|entry| entry.id == id) else {
+            return false;
+        };
+        let entry = self.fixing.queue.remove(at);
+        cx.notify();
+        if !self.apply_fix(&entry, window, cx) {
+            self.fixing.queue.insert(at, entry);
+            return false;
+        }
+        self.fixing
+            .stale
+            .extend(entry.before.iter().chain(&entry.after).map(|shot| shot.image.clone()));
+        !matches!(entry.fix, Fix::Theme { .. })
+    }
+
+    pub(super) fn reject_fix(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if self.fixing.remove(id).is_some() {
+            self.repaint_fixes(window, cx);
+        }
         cx.notify();
     }
 
     pub(super) fn accept_all_fixes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ids: Vec<u64> = self.fixing.queue.iter().map(|entry| entry.id).collect();
+        let mut changed = false;
         for id in ids {
-            self.accept_fix(id, window, cx);
+            changed |= self.accept_one(id, window, cx);
+        }
+        // What stays is a theme value that asks first, or one that could not be written.
+        if changed {
+            self.repaint_fixes(window, cx);
         }
     }
 
@@ -524,6 +621,74 @@ impl AgentView {
         for id in ids {
             self.fixing.remove(id);
         }
+        self.fixing.repaint = None;
+        cx.notify();
+    }
+
+    /// The theme was written: the entries left are tried again on it.
+    pub(super) fn theme_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.repaint_fixes(window, cx);
+    }
+
+    /// Tries every waiting entry again on the book as it is now, in the queue's order and each on top of those before
+    /// it that still pass their rule, as the run did. Each entry's pages and counts are replaced as its trial ends.
+    fn repaint_fixes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.fixing.repaint = None;
+        if self.fixing.queue.is_empty() {
+            return;
+        }
+        let book = Book::of(self.editor.read(cx).session());
+        let jobs: Vec<(u64, Fix)> = (self.fixing.queue.iter())
+            .filter_map(|entry| {
+                let text = entry
+                    .fix
+                    .place()
+                    .and_then(|place| book.file(&place.file))
+                    .map(|(_, text)| text);
+                let fix = match text {
+                    Some(text) => located(entry, text)?,
+                    None => entry.fix.clone(),
+                };
+                Some((entry.id, fix))
+            })
+            .collect();
+        let cancel = Cancel::default();
+        let stop = cancel.clone();
+        let (reports, mut incoming) = futures::channel::mpsc::unbounded::<(u64, Kept)>();
+        std::thread::Builder::new()
+            .name("druck-repaint".into())
+            .spawn(move || {
+                let mut bench = Bench::new(book);
+                for (id, fix) in jobs {
+                    let Ok(tried) = bench.try_fix(fix, &stop) else {
+                        continue;
+                    };
+                    if reports.unbounded_send((id, kept_of(&bench, tried))).is_err() {
+                        return;
+                    }
+                }
+            })
+            .expect("the system starts a thread");
+        let task = cx.spawn_in(window, async move |view, cx| {
+            while let Some((id, kept)) = incoming.next().await {
+                if view.update(cx, |view, cx| view.repainted(id, kept, cx)).is_err() {
+                    return;
+                }
+            }
+        });
+        self.fixing.repaint = Some(Repaint { cancel, _reports: task });
+    }
+
+    fn repainted(&mut self, id: u64, kept: Kept, cx: &mut Context<Self>) {
+        let Fixing { queue, stale, .. } = &mut self.fixing;
+        let Some(entry) = queue.iter_mut().find(|entry| entry.id == id) else {
+            return;
+        };
+        stale.extend(entry.before.iter().chain(&entry.after).map(|shot| shot.image.clone()));
+        (entry.before, entry.after) = kept.pages.map(|(before, after)| (shot(before), shot(after))).unzip();
+        entry.fix = kept.fix;
+        entry.counts = kept.counts;
+        entry.anchor = kept.anchor;
         cx.notify();
     }
 
@@ -537,6 +702,16 @@ impl AgentView {
             self.preview.update(cx, |preview, cx| preview.show_page(page, cx));
         }
     }
+}
+
+/// An entry's fix at the line its block starts on in `text`, its file as it is now. The block is found by its words,
+/// since typing or another accepted fix may have moved it since the trial. A theme value stands nowhere.
+fn located(entry: &Entry, text: &str) -> Option<Fix> {
+    let Some((words, near)) = &entry.anchor else {
+        return Some(entry.fix.clone());
+    };
+    let start = trial::nearest(text, words, *near)?;
+    Some(fix_at(&entry.fix, fix::line_of(text, start)))
 }
 
 /// The same fix at another line of its file.
@@ -570,7 +745,7 @@ mod tests {
             .filter_map(|fix| verified(&mut bench, fix, &cancel))
             .collect();
         assert_eq!(queue.len(), 1, "only the fix that clears a warning and causes none");
-        assert_eq!(queue[0].cleared, 1);
+        assert_eq!(queue[0].counts.cleared, 1);
         assert_eq!(queue[0].fix.place().map(|place| place.line), Some(69));
         assert!(queue[0].pages.is_some(), "its page is painted before and after");
         assert!(
@@ -583,6 +758,43 @@ mod tests {
         drop(queue);
         assert_eq!(snapshot(&dir), before);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_entry_counts_what_a_break_excuses_and_names_the_pages_of_what_it_causes() {
+        let warning = |kind, page| trial::Warning {
+            kind,
+            at: None,
+            page: Some(page),
+            first_block: None,
+            message: String::new(),
+        };
+        let outcome = trial::Outcome {
+            cleared: vec![warning("heading-at-foot", 3)],
+            excused: vec![warning("page-short", 3), warning("page-uneven", 4)],
+            caused: vec![
+                warning("loose-line", 9),
+                warning("loose-line", 4),
+                warning("short-last-line", 9),
+            ],
+            ..trial::Outcome::default()
+        };
+        let counts = Counts::of(&outcome);
+        assert_eq!((counts.cleared, counts.excused, counts.caused), (3, 2, 3));
+        assert_eq!(counts.caused_pages, [4, 9]);
+        let lines = strings::fix_counts(&counts);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains('3') && lines[0].contains('2'));
+        assert!(lines[1].contains("4, 9"));
+        let clean = Counts {
+            cleared: 1,
+            ..Counts::default()
+        };
+        assert_eq!(
+            strings::fix_counts(&clean).len(),
+            1,
+            "a directive causes nothing to name"
+        );
     }
 
     #[test]

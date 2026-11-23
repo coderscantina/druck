@@ -257,7 +257,7 @@ impl Backend for Codex {
                 "-c".into(),
                 format!("{server}.command={}", json!(executable)).into(),
                 "-c".into(),
-                format!("{server}.args={}", json!([tools::FLAG, config.document])).into(),
+                format!("{server}.args={}", json!(tools::server_args(config))).into(),
                 // A trial lays the whole book out, once per fix of a call.
                 "-c".into(),
                 format!("{server}.tool_timeout_sec={TOOL_TIMEOUT_SECONDS}").into(),

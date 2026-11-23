@@ -178,7 +178,7 @@ impl AgentView {
                 let at = rest.parse::<usize>().unwrap_or(0);
                 match (self.fixes().get(at).map(|entry| entry.id), verb) {
                     (Some(id), "fix-accept") => self.accept_fix(id, window, cx),
-                    (Some(id), _) => self.reject_fix(id, cx),
+                    (Some(id), _) => self.reject_fix(id, window, cx),
                     (None, _) => {}
                 }
             }
@@ -207,7 +207,7 @@ impl AgentView {
             self.pass_run.is_some(),
             self.fixing.is_running(),
             (self.fixes().iter())
-                .map(|entry| format!("{} ({})", entry.title(), entry.cleared))
+                .map(|entry| format!("{} ({})", entry.title(), super::strings::fix_counts(&entry.counts).join("; ")))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.warnings_to_fix(cx),

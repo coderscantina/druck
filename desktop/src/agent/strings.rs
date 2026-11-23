@@ -208,10 +208,36 @@ crate::strings! {
         FixWholeBook => ("Holds for the whole book", "Gilt für das ganze Buch"),
         FixClearsOne => ("Clears 1 warning", "Behebt 1 Warnung"),
         FixClearsMany => ("Clears {count} warnings", "Behebt {count} Warnungen"),
+        FixClearsExcusedOne => (
+            "Clears 1 warning, on the page the break ends",
+            "Behebt 1 Warnung auf der Seite, die der Umbruch beendet"
+        ),
+        FixClearsExcused => (
+            "Clears {count} warnings, {excused} of them on the page the break ends",
+            "Behebt {count} Warnungen, davon {excused} auf der Seite, die der Umbruch beendet"
+        ),
+        FixCausesOnPage => ("New warnings: {count}, on page {pages}", "Neue Warnungen: {count}, auf Seite {pages}"),
+        FixCausesOnPages => (
+            "New warnings: {count}, on pages {pages}",
+            "Neue Warnungen: {count}, auf den Seiten {pages}"
+        ),
+        FixPagesMore => ("{pages} and {more} more", "{pages} und {more} weiteren"),
+        FixNotStarted => (
+            "Fix the proof could not start: {problem}",
+            "Satzwarnungen beheben ließ sich nicht starten: {problem}"
+        ),
+        NotStartedHeld => (
+            "Nothing was started: a conflict is waiting at the window's foot. Settle it first.",
+            "Nichts gestartet: Am Fensterrand wartet ein Konflikt. Entscheide ihn zuerst."
+        ),
+        NotStartedUnsaved => (
+            "Nothing was started, since {file} cannot be saved: {reason}",
+            "Nichts gestartet, weil sich {file} nicht sichern lässt: {reason}"
+        ),
         FixShowPage => ("Show this page", "Diese Seite zeigen"),
         FixOffer => (
-            "The agent tries fixes on a copy of the book and keeps those that clear a warning and cause none.",
-            "Der Agent probiert Korrekturen an einer Kopie des Buchs und behält, was eine Warnung behebt und keine verursacht."
+            "The agent tries fixes on a copy of the book and keeps those that clear warnings without causing any. A theme value may cause some, and says where.",
+            "Der Agent probiert Korrekturen an einer Kopie des Buchs und behält, was Warnungen behebt, ohne neue zu verursachen. Ein Theme-Wert darf einige verursachen und sagt, wo."
         ),
         StyleSheetTitle => ("Style sheet", "Stilblatt"),
         StyleSheetIntro => (
@@ -406,11 +432,41 @@ pub fn fixes_to_review(count: usize) -> String {
     }
 }
 
-pub fn fix_clears(count: usize) -> String {
-    match count {
-        1 => crate::t!(Key::FixClearsOne).to_owned(),
-        count => crate::t!(Key::FixClearsMany, count = count),
+/// How many pages an entry names of those it causes warnings on, before it says how many more.
+const PAGES_NAMED: usize = 12;
+
+/// What an entry does to the warnings: what it clears, with those a page break excuses among them, and what it causes
+/// and on which pages. One line each.
+pub fn fix_counts(counts: &super::fixing::Counts) -> Vec<String> {
+    let cleared = match (counts.cleared, counts.excused) {
+        (1, 0) => crate::t!(Key::FixClearsOne).to_owned(),
+        (1, _) => crate::t!(Key::FixClearsExcusedOne).to_owned(),
+        (count, 0) => crate::t!(Key::FixClearsMany, count = count),
+        (count, excused) => crate::t!(Key::FixClearsExcused, count = count, excused = excused),
+    };
+    if counts.caused == 0 {
+        return vec![cleared];
     }
+    let named: Vec<String> = (counts.caused_pages.iter().take(PAGES_NAMED))
+        .map(usize::to_string)
+        .collect();
+    let mut pages = named.join(", ");
+    if counts.caused_pages.len() > PAGES_NAMED {
+        pages = crate::t!(
+            Key::FixPagesMore,
+            pages = pages,
+            more = counts.caused_pages.len() - PAGES_NAMED
+        );
+    }
+    let caused = match counts.caused_pages.len() {
+        1 => crate::t!(Key::FixCausesOnPage, count = counts.caused, pages = pages),
+        _ => crate::t!(Key::FixCausesOnPages, count = counts.caused, pages = pages),
+    };
+    vec![cleared, caused]
+}
+
+pub fn fix_not_started(problem: &str) -> String {
+    crate::t!(Key::FixNotStarted, problem = problem)
 }
 
 pub fn style_sheet_unwritten(error: &str) -> String {

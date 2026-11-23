@@ -20,8 +20,8 @@ pub fn definition() -> Value {
     json!({
         "name": TRY_FIXES,
         "description": "Try typesetting fixes on a copy of the book. Each fix is laid out on top of the fixes kept so \
-            far, and is kept for the author's review only if it clears at least one warning and causes no new one. \
-            Nothing is written to the book. The answer lists, per fix, whether it was kept and which warnings it \
+            far. A directive is kept for the author's review only if it clears at least one warning and causes no new \
+            one, a theme value if it clears more warnings than it causes. Nothing is written to the book. The answer lists, per fix, whether it was kept and which warnings it \
             cleared and caused. Send several fixes in one call.",
         "inputSchema": {
             "type": "object",
@@ -56,18 +56,29 @@ pub fn definition() -> Value {
     })
 }
 
-/// The copy of the book the tool tries fixes on, opened from disk at the first call.
+/// The copy of the book the tool tries fixes on, opened at the first call: from the app's copy of the session's text
+/// when the app wrote one, else from disk.
 pub struct Trials {
     /// The project folder or the single file.
     location: PathBuf,
+    /// The file [`Book::write_copy`] wrote for this run.
+    copy: Option<PathBuf>,
     bench: Option<Bench>,
 }
 
 impl Trials {
-    pub fn new(location: &Path) -> Self {
+    pub fn new(location: &Path, copy: Option<&Path>) -> Self {
         Self {
             location: location.to_owned(),
+            copy: copy.map(Path::to_owned),
             bench: None,
+        }
+    }
+
+    fn open(&self) -> Result<Book, String> {
+        match &self.copy {
+            Some(copy) => Book::open_copy(&self.location, copy),
+            None => Book::open(&self.location),
         }
     }
 
@@ -76,7 +87,7 @@ impl Trials {
         let fixes = arguments["fixes"].as_array().ok_or("fixes is required, as a list.")?;
         let bench = match &mut self.bench {
             Some(bench) => bench,
-            None => self.bench.insert(Bench::new(Book::open(&self.location)?)),
+            None => self.bench.insert(Bench::new(self.open()?)),
         };
         let cancel = Cancel::default();
         let results: Vec<Value> = fixes.iter().map(|input| try_one(bench, input, &cancel)).collect();
@@ -106,7 +117,7 @@ fn try_one(bench: &mut Bench, input: &Value, cancel: &Cancel) -> Value {
         Ok(tried) => {
             let outcome = &tried.outcome;
             let mut result = json!({
-                "kept": outcome.keeps(),
+                "kept": tried.kept(),
                 "cleared": some(&outcome.cleared),
                 "caused": some(&outcome.caused),
             });
@@ -239,8 +250,9 @@ pub fn prompt(book: &Book, warnings: &[Warning], limit: Option<usize>) -> String
          starts on that page instead.{cut}\n\
          <druck-warnings>{list}</druck-warnings>\n\n\
          Try fixes with the druck tool `{TRY_FIXES}`. It lays the book out on a copy with each fix and answers with the \
-         warnings the fix cleared and caused. A fix is kept only if it clears at least one warning and causes none, and \
-         a kept fix stays in the copy for the trials after it. The author reviews every kept fix before it is written, \
+         warnings the fix cleared and caused. A directive is kept only if it clears at least one warning and causes \
+         none, a theme value if it clears more warnings than it causes, and a kept fix stays in the copy for the \
+         trials after it. The author reviews every kept fix before it is written, \
          so do not edit, create, or delete any file. You need not read any file either: lines are those of the files \
          as they are on disk, also after fixes are kept.\n\n\
          A fix is a directive at a block or one book-wide theme value. There is no setting for a single paragraph.\n\
@@ -254,7 +266,7 @@ pub fn prompt(book: &Book, warnings: &[Warning], limit: Option<usize>) -> String
          - loose-line, too-many-hyphens, short-last-line: only a theme value moves these without changing words. Try \
          typesetting.hyphen-fragments as [2, 2] and [2, 3], styles.body.tracking between -0.02 and 0.02, and \
          styles.body.hyphenate as true in case the theme turned hyphenation off. A theme value changes every page, so \
-         it is kept only if it causes no new warning anywhere.\n\n\
+         it is weighed: kept if it clears more warnings than it causes anywhere, and the author sees both counts.\n\n\
          Send many fixes in one call and make few calls: one for the directives, one for theme values, and at most one \
          more for second attempts. Do not try a fix again that was not kept. Where only other words would help, leave \
          at most three margin notes with the druck tool `leave_note`, for the worst cases, quoting the words shown in \

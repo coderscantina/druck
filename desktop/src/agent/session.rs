@@ -98,6 +98,9 @@ pub struct SessionConfig {
     pub tool_server: Option<PathBuf>,
     /// What the app has open, a project's folder or a single file, which the tool server tries fixes on.
     pub document: PathBuf,
+    /// The app's copy of the book's text for a run of the typesetter, which the tool server tries fixes on in place of
+    /// the files on disk.
+    pub book_copy: Option<PathBuf>,
     pub access: Access,
     /// More flags for the command line, which only a protocol probe passes.
     pub extra_args: Vec<OsString>,

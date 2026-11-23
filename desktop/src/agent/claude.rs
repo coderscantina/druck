@@ -110,7 +110,7 @@ impl Backend for Claude {
             let allowed = tools::NAMES.map(tools::full_name).join(",");
             args.extend([
                 "--mcp-config".into(),
-                mcp_config(executable, &config.document).into(),
+                mcp_config(executable, &tools::server_args(config)).into(),
                 "--allowedTools".into(),
                 allowed.into(),
                 "--append-system-prompt".into(),
@@ -163,8 +163,8 @@ impl Backend for Claude {
 }
 
 /// The value for `--mcp-config`: this executable as a server, for this session only.
-fn mcp_config(executable: &Path, document: &Path) -> String {
-    let server = json!({"type": "stdio", "command": executable, "args": [tools::FLAG, document]});
+fn mcp_config(executable: &Path, args: &[&Path]) -> String {
+    let server = json!({"type": "stdio", "command": executable, "args": args});
     json!({"mcpServers": {tools::SERVER: server}}).to_string()
 }
 
@@ -402,6 +402,20 @@ mod tests {
             "mcp__druck__leave_note,mcp__druck__record_style,mcp__druck__try_fixes"
         );
         assert!(!args.iter().any(|arg| arg == "--strict-mcp-config"));
+
+        let typesetting = args_of(&SessionConfig {
+            tool_server: Some("/Apps/Druck App/druck".into()),
+            document: "/books/My Book".into(),
+            book_copy: Some("/tmp/copy.json".into()),
+            ..SessionConfig::default()
+        });
+        let at = typesetting.iter().position(|arg| arg == "--mcp-config").expect("flag");
+        let config: Value = serde_json::from_str(typesetting[at + 1].to_str().unwrap()).unwrap();
+        assert_eq!(
+            config["mcpServers"]["druck"]["args"],
+            json!([tools::FLAG, "/books/My Book", "/tmp/copy.json"]),
+            "the trial tool reads the app's copy of the text"
+        );
     }
 
     #[test]

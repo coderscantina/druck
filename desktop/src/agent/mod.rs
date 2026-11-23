@@ -73,8 +73,8 @@ use gpui::{App, Context, Entity, Focusable, ScrollHandle, Subscription, Task, We
 use crate::editor::review::{NoteClicked, ReviewClicked};
 use crate::editor::{EditorView, SessionChanged, TextChanged};
 use crate::inspector::input::{Submitted as ReasonSubmitted, TextInput};
-use crate::inspector::{InspectorView, Tab};
-use crate::persist::PersistView;
+use crate::inspector::{InspectorView, Tab, ThemeChanged};
+use crate::persist::{Closing, PersistView};
 use crate::preview::PreviewView;
 use crate::session::{ChapterId, Session as Document};
 use crate::settings::{self, AgentCli};
@@ -314,6 +314,7 @@ impl AgentView {
         let selection_prompt = cx.new(|cx| prompt::PromptInput::one_line(crate::t!(Key::SelectionPlaceholder), cx));
         let reason = cx.new(|cx| TextInput::new(window, cx));
         let prompt_focus = prompt.read(cx).focus_handle(cx);
+        let theme_model = parts.inspector.read(cx).model().clone();
         let selection_focus = selection_prompt.read(cx).focus_handle(cx);
         let subscriptions = vec![
             cx.subscribe_in(&prompt, window, |view, _, _: &prompt::Submitted, window, cx| {
@@ -380,6 +381,9 @@ impl AgentView {
                 view.text_changed(window, cx);
             }),
             cx.subscribe_in(&persist, window, Self::file_changed),
+            cx.subscribe_in(&theme_model, window, |view, _, _: &ThemeChanged, window, cx| {
+                view.theme_changed(window, cx)
+            }),
             cx.on_app_quit(|view, _| {
                 // The child must not outlive the app, even when the app exits without dropping its views.
                 view.running = None;
@@ -501,6 +505,35 @@ impl AgentView {
         .detach();
     }
 
+    /// Writes what is unsaved, then does `then`, so a run's agent and its trials work on what is on screen. A conflict
+    /// that waits for the author, or a save that fails, stops it and says why.
+    fn after_saving(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        crate::persist::commit_floats(window, cx);
+        let Some(closing) = crate::persist::settle(window, cx) else {
+            return then(self, window, cx);
+        };
+        cx.spawn_in(window, async move |view, cx| {
+            let Ok(closing) = closing.await else {
+                return;
+            };
+            view.update_in(cx, |view, window, cx| match closing {
+                Closing::Saved => then(view, window, cx),
+                Closing::Held => view.say(crate::t!(Key::NotStartedHeld).to_owned(), cx),
+                Closing::Failed { file, reason } => {
+                    let file = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    view.say(crate::t!(Key::NotStartedUnsaved, file = file, reason = reason), cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// The CLI the settings name, for its words and its wire.
     fn backend(&self) -> Box<dyn Backend> {
         self.cli_kind.backend()
@@ -549,6 +582,7 @@ impl AgentView {
             // Without this executable's own path there are no tools, and the rest works.
             tool_server: std::env::current_exe().ok(),
             document: self.project.clone(),
+            book_copy: self.fixing.book_copy(),
             access: (self.pass_run.as_ref().map(run::PassRun::access))
                 .or(self.fix_access())
                 .unwrap_or_default(),
