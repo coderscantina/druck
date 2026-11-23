@@ -329,16 +329,9 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         "icons/block-comment.svg",
         Action::Insert(Standalone::Comment),
     ));
-    // A section that would place a second table of contents, bibliography, or index is not offered.
-    let placed = |slug: &str| match slug {
-        "contents" => context.has_toc,
-        "bibliography" => context.has_bibliography,
-        "index" => context.has_index,
-        _ => false,
-    };
     for template in templates_for(context.theme.as_deref())
         .into_iter()
-        .filter(|template| !placed(template.slug))
+        .filter(|template| !MADE_PAGES.contains(&template.slug))
     {
         items.push(Item {
             label: template.name.text(language),
@@ -352,6 +345,9 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
     }
     items
 }
+
+/// Sections that are a page Druck makes, offered once under "Pages Druck makes" rather than again as a new section.
+const MADE_PAGES: [&str; 3] = ["contents", "bibliography", "index"];
 
 /// Why a search for something the book cannot take here finds nothing: the reason for the first entry the query names.
 pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'static str> {
@@ -883,7 +879,10 @@ mod tests {
         assert_eq!(labels("überschrift 2"), ["Heading 2"]);
         assert_eq!(labels("TABLE")[0], "Table");
         assert!(labels("zzz").is_empty());
-        assert_eq!(labels("new section").len(), crate::session::TEMPLATES.len());
+        assert_eq!(
+            labels("new section").len(),
+            crate::session::TEMPLATES.len() - MADE_PAGES.len()
+        );
         assert_eq!(labels("").len(), all.len());
     }
 

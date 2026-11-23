@@ -94,7 +94,7 @@ fn directive_paths(kind: Kind) -> Vec<Path> {
         Kind::PageBreak => vec![Path::Slash(Action::Insert(Standalone::PageBreak))],
         Kind::Toc => vec![Path::Slash(Action::Insert(Standalone::Toc))],
         Kind::Bibliography => vec![Path::Slash(Action::Insert(Standalone::Bibliography))],
-        Kind::Index => vec![Path::Slash(Action::Section("index"))],
+        Kind::Index => vec![Path::Slash(Action::Insert(Standalone::Index))],
         Kind::FrontMatter | Kind::MainMatter | Kind::BackMatter => vec![Path::Binder],
     }
 }

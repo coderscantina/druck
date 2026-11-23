@@ -527,7 +527,9 @@ fn an_image_from_a_projects_assets_renders_in_a_chapter() {
 #[test]
 fn every_template_is_on_the_list() {
     let items = slash::items(&Context::default(), Language::English);
-    for template in TEMPLATES {
+    // Contents, bibliography, and index are on it as the pages Druck makes.
+    let made = ["contents", "bibliography", "index"];
+    for template in TEMPLATES.iter().filter(|template| !made.contains(&template.slug)) {
         assert!(items.iter().any(|item| item.action == Action::Section(template.slug)));
     }
 }
