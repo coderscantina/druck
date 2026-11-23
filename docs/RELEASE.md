@@ -82,24 +82,32 @@ The bundle holds:
 
 - `Contents/MacOS/Druck`, the app. Its fonts (Libertinus) and icons are compiled into it.
 - `Contents/Info.plist`: name `Druck`, identifier `com.coderscantina.druck`, the version of the root `Cargo.toml` (the
-  calendar version, without the hash), the minimum macOS read from the binary, and two document types, Markdown
-  (`.md`, `.markdown`) and folders. Both are `Alternate`, so Druck is offered under Open With and takes drops on the
-  Dock icon, and it does not become the default editor.
-- `Contents/Resources`: `Druck.icns`, `THIRD_PARTY_NOTICES.md` (the About box has a button that opens it), `OFL.txt`, and
-  `LICENSE`.
+  calendar version, without the hash) as `CFBundleShortVersionString`, the commit count as `CFBundleVersion`, the
+  minimum macOS read from the binary, Sparkle's settings, and two document types, Markdown (`.md`, `.markdown`) and
+  folders. Both are `Alternate`, so Druck is offered under Open With and takes drops on the Dock icon, and it does not
+  become the default editor.
+- `Contents/Frameworks/Sparkle.framework`, the updater, without its XPC services, which only sandboxed apps use.
+- `Contents/Resources`: `Druck.icns`, `THIRD_PARTY_NOTICES.md` (the About box has a button that opens it), `OFL.txt`,
+  `LICENSE`, and `Sparkle-LICENSE.txt`.
+
+`CFBundleVersion` is what Sparkle compares, so it must only rise. The number of commits up to the release commit does:
+each release commit descends from the one before, also for two releases on one day. The script refuses a shallow
+clone, whose count would be too small.
 
 The icon is a placeholder drawn by the script. Ship a real `Druck.icns` before a release that reaches other people.
 
 ### Signing and notarizing
 
-Nothing secret is in the repository. The script reads two environment variables:
+Nothing secret is in the repository. The script reads these environment variables:
 
 | Variable | Holds |
 | --- | --- |
 | `DRUCK_SIGN_IDENTITY` | The name of a "Developer ID Application" certificate in a keychain `codesign` can reach, such as `Developer ID Application: Name (TEAMID)`. |
 | `DRUCK_NOTARY_PROFILE` | The name of a keychain profile made with `xcrun notarytool store-credentials`. |
+| `DRUCK_NOTARY_KEYCHAIN` | Optional: the keychain file that holds the profile, when it is not the login keychain. CI sets it. |
+| `DRUCK_SPARKLE_KEY` | With `--appcast` only: Sparkle's EdDSA private key. |
 
-With neither, the app is signed ad hoc with the hardened runtime. It runs on the Mac that built it and on others only
+With neither, the app is signed ad hoc, without the hardened runtime, whose library validation would refuse the ad-hoc Sparkle framework. It runs on the Mac that built it and on others only
 after right-click, Open. The script says so.
 
 The owner's steps, once:
@@ -130,14 +138,70 @@ xcrun stapler validate dist-desktop/druck-desktop-*.dmg
 `spctl` must say `accepted, source=Notarized Developer ID`. Open the DMG on a Mac that did not build it, from a
 download, to see that Gatekeeper opens the app with no warning.
 
-The release workflow builds the app in a `desktop` job on every tag and manual run, ad-hoc signed, and keeps it as the
-workflow artifact `desktop-aarch64-apple-darwin`. The publish job does not take it. Signing in CI needs the certificate
-and the notary credentials as secrets and a step that imports them into a temporary keychain. That is not set up.
+### Updates
+
+The app updates itself with [Sparkle 2](https://sparkle-project.org). The script downloads the version pinned in
+`SPARKLE_VERSION` and refuses the archive unless its SHA-256 matches `SPARKLE_SHA256`. The repository holds no
+framework. To move to a newer Sparkle, change both constants and check the release notes for new Info.plist keys.
+
+The app loads the framework from `Contents/Frameworks` when it starts, so a build run with cargo has no updater and no
+menu item. In the bundle, Sparkle checks the feed once a day and shows its own window, with the release notes, before
+it installs anything. It never installs on its own. A check that finds an update while the author is writing waits
+until Druck is next brought to the front. "Check for updates…" in the Druck menu checks at once.
+
+The feed is `https://github.com/coderscantina/druck/releases/latest/download/appcast.xml`. GitHub redirects it to the
+newest release's `appcast.xml`, and Sparkle follows the redirect. Each appcast has one item, the DMG on its own tag.
+The update, the feed, and its release notes are signed with an EdDSA key (`SURequireSignedFeed`), whose public half is
+`SPARKLE_PUBLIC_KEY` in the script. While that is empty, the script builds the bundle without Sparkle and says so.
+
+A release reaches the updater like this: the tag push runs the `desktop` job, which builds, signs, notarizes, and
+staples the app and the DMG, then runs Sparkle's `generate_appcast` with the newest `CHANGELOG.md` section as the
+release notes. The `publish-desktop` job adds the DMG, its `.sha256`, and then `appcast.xml` to the release the
+`publish` job created. From then on, `releases/latest` is the new release, and each running Druck offers it at its next
+daily check. A release marked as a pre-release is not `latest`, so the updater does not see it.
+
+`python3 scripts/package-desktop.py --appcast NOTES.md` writes the appcast locally as well, with the private key in
+`DRUCK_SPARKLE_KEY`.
+
+### Secrets for the release workflow
+
+On a tag, the `desktop` job signs with secrets of the repository (Settings, Secrets and variables, Actions). Without
+them the job fails and the CLI release goes out without the desktop app. The team id, `3XA3ND2F7P`, is in the
+workflow, as every signature names it. The job imports the certificate and the notary key into a keychain of its own,
+which it deletes at the end, and prints none of them.
+
+| Secret | Holds |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | The "Developer ID Application" certificate with its private key, as a `.p12` file in base64. |
+| `MACOS_CERTIFICATE_PASSWORD` | The password the `.p12` file was exported with. |
+| `MACOS_NOTARY_KEY` | The App Store Connect API key for notarization, the whole text of its `AuthKey_<id>.p8` file. |
+| `MACOS_NOTARY_KEY_ID` | That key's id, ten characters. |
+| `MACOS_NOTARY_ISSUER_ID` | The issuer id of the team's API keys, a UUID. |
+| `SPARKLE_ED_PRIVATE_KEY` | Sparkle's EdDSA private key, the one line `generate_keys -x` writes. |
+
+How to make each, once:
+
+1. **The certificate.** In Keychain Access, under My Certificates, select "Developer ID Application: … (3XA3ND2F7P)"
+   with its key, choose File, Export Items, save as `druck.p12`, and give it a strong password. Then
+   `base64 -i druck.p12 | pbcopy` and paste it as `MACOS_CERTIFICATE_P12`, the password as
+   `MACOS_CERTIFICATE_PASSWORD`. Delete `druck.p12` afterwards.
+2. **The notary key.** At App Store Connect, Users and Access, Integrations, App Store Connect API, make a team key with
+   the Developer role. Download `AuthKey_<id>.p8` (it can be downloaded once) and paste its text as `MACOS_NOTARY_KEY`,
+   the key id as `MACOS_NOTARY_KEY_ID`, and the issuer id shown above the list as `MACOS_NOTARY_ISSUER_ID`. An API key
+   was chosen over an Apple ID and app-specific password because it belongs to the team and can be revoked alone.
+3. **The EdDSA key.** From a Sparkle release (the version in `SPARKLE_VERSION`), run `./bin/generate_keys`. It keeps
+   the private key in the login keychain and prints the public key. Put the public key in `SPARKLE_PUBLIC_KEY` in
+   `scripts/package-desktop.py` and commit it. Run `./bin/generate_keys -x sparkle-private-key`, paste the file's
+   one line as `SPARKLE_ED_PRIVATE_KEY`, and delete the file. Keep the keychain item backed up: a lost key means the
+   builds in use accept no further update. Never change the public key after a build with it has shipped.
+
+The local steps under "Signing and notarizing" stay as they are for a build by hand.
 
 ## Not automated
 
 - Publishing to crates.io.
-- Signing and notarizing the desktop app (a script does it, the owner runs it), Homebrew or other package manager entries.
+- Homebrew or other package manager entries.
+- The repository secrets for signing, and `SPARKLE_PUBLIC_KEY`, which only the owner can add.
 - Running the manual visual review and recording it in `docs/PROGRESS.md`.
 
 ## If PDF comparison across OSes fails
