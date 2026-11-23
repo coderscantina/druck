@@ -2130,3 +2130,18 @@ Settled with the owner in an interview on what a finished, polished beta needs. 
 - **The soak runs on a migrated copy** of the owner's book with a `druck.yaml`. The original is the owner's call.
 
 Unresolved: the vendors' answers on subscription logins. The repository secrets for signing, which only the owner can add.
+
+## 2026-11-23: Beta polish, engine layout
+
+Wave 1 of [milestone 28](milestones/28-beta-polish.md), the engine's layout and PDF defects.
+
+- **`DisplayDocTitle` by patching krilla's output.** krilla 0.8.2 writes the viewer preference only for PDF/UA and has no setting for it. The writer adds `/ViewerPreferences<</DisplayDocTitle true>>` to the end of the catalog, which krilla writes as the last object before the cross-reference table, so only the table's offset moves. A forked krilla was heavier for one entry. A krilla update that moves the catalog fails the focused test in [pdf.rs](../src/pdf.rs).
+- **Soft hyphens through the run, not the text.** A run that ends in a hyphen a line break added says so in a crate-private flag; the PDF maps that glyph to U+00AD. The run text keeps `-`, so the source map, protrusion, and the desktop app see what they saw before.
+- **Notes from the inner column need the inner margin.** A document with a columns section and margin notes is an error when `margin-notes.gap` and `width` do not fit in `page.margins.inner`, as the outer column already is for the outer margin. The check is per document, not per note.
+- **Figure order is a cost, not a constraint.** A page that sets a figure or table in the text before a waiting placed one of its kind costs 1,000,000, ten times a page of placed blocks only, so it happens only where no other layout exists, and pagination never fails over it. The rule applies per kind, since figures and tables number separately.
+- **A split callout reaches half the footnote gap.** Above footnotes, a continued box goes at most `footnotes.gap / 2` below its last line, so it keeps clear of the rule whatever the padding. The default theme's box above footnotes is 0.2em shorter than before; pages without footnotes keep the full padding.
+- **Index page numbers take the entry style's color** through a copy of the inline styles with the link color replaced. Link underlines still apply.
+- **Type teal `#007c80`** replaces `#1b6b73` for types and attributes: lighter and more saturated, so it stands apart from the keyword blue (Lab distance 38 instead of 31) while keeping 5:1 contrast on white. Strings stay as close to it as before.
+- **`title-page.margin-top`** gives the title page its own top margin, `null` by default. The frame runs from there to the bottom margin. Only the top was asked for; other margins stay shared.
+- **The title block's first `space-before` is an empty line** that a page top keeps, like the chapter sink.
+- **A slashless URL breaks between characters** at a cost of 1000, far above a hyphen's 50, so it breaks there only where every other choice is much worse. A URL with slashes keeps breaking only after them, and a part between slashes wider than the line is still an error.
