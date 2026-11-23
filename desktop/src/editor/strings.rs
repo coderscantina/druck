@@ -85,6 +85,20 @@ crate::strings! {
         PlaceholderCell => ("Cell", "Zelle"),
         PlaceholderCaption => ("Caption", "Bildunterschrift"),
         PlaceholderFootnote => ("Footnote text.", "Text der Fußnote."),
+        MadeContents => (
+            "Druck writes this page from your chapter titles. It changes as they do.",
+            "Druck schreibt diese Seite aus deinen Kapiteltiteln. Sie ändert sich mit ihnen."
+        ),
+        MadeIndex => (
+            "Druck writes this page from the words you marked. It changes as they do.",
+            "Druck schreibt diese Seite aus den Wörtern, die du markiert hast. Sie ändert sich mit ihnen."
+        ),
+        MadeBibliography => (
+            "Druck writes this page from the works you cite. It changes as they do.",
+            "Druck schreibt diese Seite aus den Werken, die du zitierst. Sie ändert sich mit ihnen."
+        ),
+        MadeMore => ("and {count} more", "und {count} weitere"),
+        MadeRemove => ("Remove", "Entfernen"),
         Pinned => ("{count} pinned", "{count} angeheftet"),
         PinNextKey => ("\u{2325}\u{2193} Next pin", "\u{2325}\u{2193} Nächste"),
         PinInsertKey => ("\u{21e7}\u{21a9} Insert", "\u{21e7}\u{21a9} Einfügen"),

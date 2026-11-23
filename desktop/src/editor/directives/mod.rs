@@ -449,9 +449,14 @@ impl EditorView {
         (region.open == index).then_some(region.kind)
     }
 
-    /// The room a directive standing alone takes at rest: one body line for a new page's line.
-    pub(super) fn standalone_room(&self, _kind: Kind) -> Pixels {
-        self.style.body_size * self.style.leading
+    /// The room a directive standing alone takes at rest: the page Druck makes there, or one body line for a new
+    /// page's line.
+    pub(super) fn standalone_room(&self, kind: Kind) -> Pixels {
+        if super::made::is_made(kind) {
+            self.made_room(kind)
+        } else {
+            self.style.body_size * self.style.leading
+        }
     }
 
     /// The height two columns of `run` take, from what each block has been shaped or estimated at.

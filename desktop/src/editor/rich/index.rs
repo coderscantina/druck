@@ -102,6 +102,24 @@ fn marks(spans: &[InlineSpan]) -> impl Iterator<Item = Found> + '_ {
         })
 }
 
+/// Every mark's main entry in `text`, with where its braces start.
+pub fn entries(text: &str) -> Vec<(usize, String)> {
+    let blocks = Blocks::parse(text);
+    let mut found = Vec::new();
+    for block in blocks.as_slice() {
+        let written = &text[block.range.clone()];
+        let spans = inline_spans(block.kind, written);
+        for mark in marks(&spans) {
+            let bracketed = (mark.brackets.as_ref()).map(|brackets| &written[brackets.start + 1..brackets.end - 1]);
+            let terms = Terms::read(&written[mark.braces.clone()], bracketed);
+            if !terms.entry.is_empty() {
+                found.push((block.range.start + mark.braces.start, terms.entry));
+            }
+        }
+    }
+    found
+}
+
 /// The mark the caret stands at or in, with where its block starts.
 pub fn mark_at(text: &str, blocks: &Blocks, offset: usize) -> Option<(usize, Found)> {
     let block = &blocks.as_slice()[blocks.index_at(offset)];

@@ -532,6 +532,11 @@ impl PreviewView {
             })
     }
 
+    /// The last layout's pages, if there are any.
+    pub fn laid(&self) -> Option<Arc<Layout>> {
+        self.layout.clone()
+    }
+
     /// The written place of the first text on a page.
     pub fn first_place(&self, page: usize) -> Option<(PathBuf, usize)> {
         proof::first_place(&self.layout.as_ref()?.laid, page)

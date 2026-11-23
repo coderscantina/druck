@@ -18,6 +18,7 @@ mod gutter;
 mod input;
 mod keys;
 mod layout;
+mod made;
 mod margin;
 mod picks;
 mod place;
@@ -263,6 +264,8 @@ pub struct EditorView {
     trace: Trace,
     /// What the rich blocks know of the book. See [`rich`].
     rich: rich::Rich,
+    /// What the last layout printed on the pages Druck makes.
+    made: made::Made,
     /// Waits out a pause before reading the book again. Replaced by every edit.
     rich_pause: Task<()>,
     /// Reads the engine's text for chips, off the main thread.
@@ -447,6 +450,7 @@ impl EditorView {
             _focus_subscriptions: focus_subscriptions,
             trace: Trace::from_env(),
             rich: rich::Rich::default(),
+            made: made::Made::default(),
             rich_pause: Task::ready(()),
             rich_labels: Task::ready(()),
             writing: Writing::of(cx),

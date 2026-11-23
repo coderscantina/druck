@@ -218,6 +218,7 @@ impl Element for Galley {
             let margin = view.margin_element();
             let mut rows = view.review_rows(cx);
             rows.extend(view.chapter_label_element(cx));
+            rows.extend(view.made_buttons(cx));
             rows.extend(view.pin_markers(cx));
             let mut advice = view.advice_elements(window, cx);
             advice.extend(view.comment_notes(window, cx));

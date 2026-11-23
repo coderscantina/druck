@@ -20,6 +20,7 @@ use super::{
 use crate::editor::commands::slash::{Action, Standalone};
 use crate::editor::element::{Frame, FrameBlock};
 use crate::editor::float::Spot;
+use crate::editor::made::{MadeShape, is_made, paint_made};
 use crate::editor::rich::view::shapes::Whole;
 use crate::editor::rich::{Atom, AtomKind};
 use crate::editor::{EditorView, Float};
@@ -44,6 +45,8 @@ pub(in crate::editor) struct Marks {
     brackets: Vec<Bracket>,
     /// Each new page's line across the text, with its words, and whether it is a ghost.
     page_lines: Vec<PageLine>,
+    /// Each page Druck makes, with its top left.
+    made: Vec<(MadeShape, Point<Pixels>)>,
     /// The slash menu's ghost text, and a table it would insert.
     ghost_text: Option<(ShapedLine, Point<Pixels>, Pixels)>,
     ghost_whole: Option<(Rc<Whole>, Point<Pixels>)>,
@@ -291,6 +294,13 @@ impl EditorView {
                     );
                     marks.page_lines.push(page_line(bounds, false, window, cx));
                 }
+                if is_made(region.kind)
+                    && let Some(block) = shown(region.open)
+                    && self.standalone_at_rest(region.open).is_some()
+                {
+                    let shape = self.made_shape(region.kind, block.width, false, window, cx);
+                    marks.made.push((shape, point(self.block_left(region.open), block.top)));
+                }
                 continue;
             }
             marks.brackets.push(Bracket {
@@ -390,6 +400,10 @@ impl EditorView {
                 Kind::PageBreak => {
                     let bounds = Bounds::new(point(left, top), size(block.width, bottom - top));
                     marks.page_lines.push(page_line(bounds, true, window, cx));
+                }
+                kind if is_made(kind) => {
+                    let shape = self.made_shape(kind, block.width, true, window, cx);
+                    marks.made.push((shape, point(left, top)));
                 }
                 kind if kind.has_body() => {
                     let placeholder = crate::t!(crate::editor::strings::Key::PlaceholderText);
@@ -977,6 +991,9 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
     }
     for line in &marks.page_lines {
         paint_page_line(line, frame.rule, faint, window, cx);
+    }
+    for (shape, at) in &marks.made {
+        paint_made(shape, *at, window, cx);
     }
     if let Some((line, at, height)) = &marks.ghost_text {
         line.paint(*at, *height, TextAlign::Left, None, window, cx).ok();
