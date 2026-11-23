@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::bibliography::Bibliography;
 use crate::cancel::{Cancel, CheckPoint};
-use crate::config::front_matter::{self, FrontMatter};
+use crate::config::front_matter::{self, Decimals, FrontMatter};
 use crate::config::resolve::{Inputs, SettingsInput, ThemeInput, resolve};
 use crate::config::resolved::Config;
 use crate::config::source::{InputSource, Origin, Resource, normalize};
@@ -622,13 +622,17 @@ const PROJECT_FIELDS: &str = "chapters, statuses, and exports belong in a projec
 
 /// Reads settings from YAML that starts at 1-based line `first_line` of `source`.
 pub fn parse_settings(yaml: &str, first_line: u64, source: &InputSource) -> Result<FrontMatter, Vec<Diagnostic>> {
-    serde_saphyr::from_str(yaml).map_err(|error| {
+    let error = |error: serde_saphyr::Error| {
         let mut diagnostic = Diagnostic::new(Some(source.clone()), yaml_message(&error));
         if let Some(location) = error.location() {
             diagnostic = diagnostic.at(location.line() + first_line - 1, location.column());
         }
         vec![diagnostic]
-    })
+    };
+    let mut settings: FrontMatter = serde_saphyr::from_str(yaml).map_err(error)?;
+    let decimals: Decimals = serde_saphyr::from_str(yaml).map_err(error)?;
+    settings.keep_decimals(&decimals, yaml);
+    Ok(settings)
 }
 
 /// A YAML error message without the snippet and location, which the caller reports itself.
@@ -659,7 +663,8 @@ pub(crate) fn parse_overrides(pairs: &[String], source: &InputSource) -> Result<
         }
         let mut parsed: Value =
             serde_saphyr::from_str(value).map_err(|e| error(format!("--set {key}: {}", yaml_message(&e))))?;
-        if front_matter::TEXT_SETTINGS.contains(&key) && matches!(parsed, Value::Number(_) | Value::Bool(_)) {
+        let text_setting = front_matter::TEXT_SETTINGS.contains(&key) || key == "author" || key.starts_with("meta.");
+        if text_setting && matches!(parsed, Value::Number(_) | Value::Bool(_)) {
             parsed = Value::String(value.trim().to_owned());
         }
         let value = parsed;

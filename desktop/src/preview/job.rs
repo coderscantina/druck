@@ -425,7 +425,7 @@ impl Typesetter {
     }
 
     /// The document as the engine's input, with the warnings a project's manifest gives.
-    fn input(&self, joined: Joined) -> Result<(Input, Vec<Diagnostic>), Vec<Diagnostic>> {
+    fn input(&self, joined: Joined) -> Result<(Input, Vec<Diagnostic>), Failure> {
         let dirs = ThemeDirs {
             project: matches!(self.kind, Kind::Project { .. }).then(|| self.working_dir.clone()),
             shared: FileResolver::shared_themes(),

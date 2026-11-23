@@ -174,7 +174,7 @@ fn a_missing_image_has_a_resource_and_a_place_in_the_document() {
 #[test]
 fn a_bad_override_names_the_overrides() {
     let pairs = ["no-such-setting=1".to_owned()];
-    let Err(errors) = Overrides::parse(&pairs, &book()) else {
+    let Err(Failure::Errors(errors)) = Overrides::parse(&pairs, &book()) else {
         panic!("the setting does not exist")
     };
     assert_eq!(errors[0].source, Some(Source::Overrides));

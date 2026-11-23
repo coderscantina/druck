@@ -28,7 +28,7 @@ The public modules, as `cargo doc --no-deps` lists them:
 | root | `Renderer`, `Job`, `Configured`, `Rendered`, `Failure`, `LayoutOptions`, `PdfOptions`, `EpubOptions`, `API_VERSION`, `THEME_SCHEMA_VERSIONS` |
 | `input` | `Input`, `DocumentText`, `ThemeSelection`, `ThemeDirs`, `Overrides`, `Project`, `ExportSettings`, `Export`, `Date`, `MANIFEST` |
 | `resource` | `Resolver`, `FileResolver`, `MemoryResolver`, `Bytes`, `ResolveError`, `InstalledFace`, `Origin`, `Resource`, `normalize`, `source_date`, `clock_date` |
-| `output` | `Layout` and everything it returns: `Page`, `Item`, `Run`, `Glyph`, `Face`, `FaceId`, `Picture`, `Pixels`, `Link`, `Structure`, `Rect`, `Position`, `Bookmark`, `PageNumber`, `Hit`, `Located`, `Color`, `Pt`, and the source map types |
+| `output` | `Layout` and everything it returns: `Page`, `Item`, `Run`, `Glyph`, `Face`, `FaceId`, `Picture`, `Pixels`, `Link`, `Structure`, `Rect`, `Position`, `Bookmark`, `PageNumber`, `PageTitles`, `Hit`, `Located`, `Color`, `Pt`, and the source map types |
 | `diagnostic` | `Diagnostic`, `Severity`, `Code`, `PageName`, `Source`, `Location`, `Origin`, `Resource`, `path_from` |
 | `cancel` | `Cancel` |
 
@@ -107,7 +107,7 @@ pub enum DocumentText {
     /// A project: joined chapters without front matter, settings from the manifest.
     Project(Box<Project>),
 }
-impl DocumentText { pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Vec<Diagnostic>>; }
+impl DocumentText { pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Failure>; }
 
 pub enum ThemeSelection {
     Document { dirs: ThemeDirs },                                  // the document's own `theme` setting
@@ -120,15 +120,15 @@ impl ThemeSelection { pub fn asked(selection: &Path, base: &Path, dirs: ThemeDir
 pub struct ThemeDirs { pub project: Option<PathBuf>, pub shared: Option<PathBuf> }   // no environment is read
 
 impl Overrides {
-    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Vec<Diagnostic>>;          // --set syntax
-    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Vec<Diagnostic>>;
+    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Failure>;          // --set syntax
+    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Failure>;
 }
 
 impl Project {
-    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Vec<Diagnostic>>;
+    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Failure>;
     pub fn warnings(&self) -> &[Diagnostic];                                    // chapters not in the book
     pub fn exports(&self) -> impl Iterator<Item = (&str, &Export)>;
-    pub fn export(self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Vec<Diagnostic>>;
+    pub fn export(self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Failure>;
 }
 pub struct ExportSettings { pub pdf: PdfOptions, pub is_final: bool, pub output: Option<PathBuf>, pub print_conflict: Option<Diagnostic> }
 ```
@@ -179,6 +179,8 @@ impl Layout {
     pub fn anchor(&self, id: AnchorId) -> Position;
     pub fn outline(&self) -> &[Bookmark];
     pub fn page_numbers(&self) -> &[Option<PageNumber>];
+    pub fn contents_depth(&self) -> u8;                                   // the deepest level the contents list, 1 to 6
+    pub fn page_titles(&self) -> &PageTitles;                             // the headings of made pages, see below
     pub fn warnings(&self) -> &[Diagnostic];                              // typesetting rules the layout breaks
     pub fn source_map(&self) -> Option<&SourceMap>;
     pub fn hit(&self, page: usize, x: Pt, y: Pt) -> Option<Hit>;          // the text nearest a point
@@ -188,6 +190,7 @@ impl Layout {
 }
 
 pub struct Page { pub width: Pt, pub height: Pt, pub items: Vec<Item> }
+pub struct PageTitles { pub contents: String, pub index: String, pub bibliography: String }
 
 pub enum Item {
     Text { x: Pt, y: Pt, run: Run, color: Color, source: Option<TextId> },
@@ -210,6 +213,8 @@ pub enum Link { Url(String), Anchor(AnchorId) }
 Documented in `output.rs`, which is the reference for painters: points, origin at the top left of the page, y growing down. `Page::width` and `height` are the trim size; bleed and crop marks exist only in `PdfOptions`. Items draw in order, later over earlier. A run draws from `(x, y)` on the baseline: for each glyph, the outline of `id` in `face.data()` at `face.index()` with `face.coordinates()`, scaled by `size / units_per_em`, at `(pen + x_offset, y - y_offset)`, then `pen += x_advance`. `TurnedText` turns the run `angle` degrees counterclockwise about `(x, y)`. `Glyph::text` is the byte range of `Run::text` the glyph covers, empty for the second and later glyphs of a cluster. An image fills `rect`. `Link` rectangles and `Anchor` points are not drawn.
 
 PDF export is the old `pdf::write` with the faces taken from the layout. It paginates nothing, shapes nothing, and resolves nothing: `Face::space` is a cmap lookup done once when a face is built. `Picture::pixels` gives the size of a raster and the tree of an SVG, not RGBA samples, because the engine keeps krilla's decoded image and holding a second copy would double the memory of every image; `Picture::source` is the file, which painters decode themselves. `Structure` is the engine's tag mark, re-exported, with an opaque `StructureId`.
+
+`contents_depth` and `page_titles` were added on 2026-11-23 so a client shows what the PDF shows without resolving the theme: the `toc-depth` in effect, and the headings the theme gives the contents, the index, and the bibliography in the document's language (`labels.contents`, `labels.index`, `labels.references`). Both are the theme's whether or not the document has such a page. Adding them keeps `API_VERSION`.
 
 ## 6. Source mapping
 
@@ -257,7 +262,7 @@ impl Diagnostic {
 }
 ```
 
-`Failure::Errors` carries every error of the stage that failed, in reading order. Warnings sit beside success: `Configured::warnings`, `Project::warnings`, `Layout::warnings`, and `Rendered::warnings`. The engine never prints and never exits. The CLI prints exactly what it printed before; the byte guard and a command matrix check that.
+`Failure::Errors` carries every error of the stage that failed, in reading order. Every fallible public function returns `Failure`, reading inputs too (`DocumentText::read`, `Overrides::parse` and `from_json`, `Project::open` and `export`), so `?` goes into a `Failure` or a `Box<dyn Error>` alike. They returned `Vec<Diagnostic>` until 2026-11-23, which raised `API_VERSION` to 2. Warnings sit beside success: `Configured::warnings`, `Project::warnings`, `Layout::warnings`, and `Rendered::warnings`. The engine never prints and never exits. The CLI prints exactly what it printed before; the byte guard and a command matrix check that.
 
 ## 8. Cancellation
 
@@ -265,7 +270,7 @@ impl Diagnostic {
 
 ## 9. Compatibility and versioning
 
-The package version stays CalVer, so it says nothing about compatibility. `druck::API_VERSION` (1) is raised on any breaking change to the public modules, and a release that keeps it keeps every public signature. `druck::THEME_SCHEMA_VERSIONS` (`[1]`) lists the theme `version` values this release reads; any other fails in `configure` with a diagnostic at the `version` property. The two change independently. `druck.yaml` has no version. Private and free to change: everything not listed in section 1, the hash algorithm of `Bytes`, the cache eviction rule, the shape plan key, layout scoring, the tag tree, and the `editor` module.
+The package version stays CalVer, so it says nothing about compatibility. `druck::API_VERSION` (2) is raised on any breaking change to the public modules, and a release that keeps it keeps every public signature. `druck::THEME_SCHEMA_VERSIONS` (`[1]`) lists the theme `version` values this release reads; any other fails in `configure` with a diagnostic at the `version` property. The two change independently. `druck.yaml` has no version. Private and free to change: everything not listed in section 1, the hash algorithm of `Bytes`, the cache eviction rule, the shape plan key, layout scoring, the tag tree, and the `editor` module.
 
 ## 10. Migration, as it ran
 

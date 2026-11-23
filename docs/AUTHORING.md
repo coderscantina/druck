@@ -27,7 +27,7 @@ Front matter cannot redefine templates (title slots, headers, footers). That bel
 
 ### Metadata
 
-Metadata is plain text. A number or boolean is read as its text, so `date: 2024` needs no quotes; in `meta` and `--set`, a decimal such as `1.50` reads as `1.5`, so quote it to keep the zero. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
+Metadata is plain text. A number or boolean is read as its text, as written, so `date: 2024` and `price: 1.50` need no quotes. It is inserted into templates as text only: `*word*` stays two asterisks and a word. In `abstract`, a blank line starts a new paragraph.
 
 | Key | Type | Effect |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ Metadata fills the title block at the start of the first page, or the separate t
 
 The PDF's document properties take the title, authors, and language. Without a `title`, the first level 1 heading is the PDF title, but no title block is set from it. The subject is the `abstract`, or else the `subtitle`. A `date` written as `2026-10-07` also becomes the creation date; any other text does not.
 
-`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required.
+`meta` holds any other values a theme's slots use, such as an offer number or an address. Keys use letters, digits, `-`, and `_`. A list puts each entry on its own line; blank entries are skipped. Which keys a theme reads is up to the theme; a key no slot uses is ignored, and a key a slot needs but the document lacks leaves that slot out, or is an error if the theme marks the slot as required. One key means something to Druck itself: `reading-speed`, a whole number of words a minute, replaces the language's speed for [`{reading-time}`](#placeholders).
 
 ```yaml
 meta:
@@ -734,7 +734,7 @@ What changes from the PDF:
 - **Footnotes:** notes follow at the end of the file that references them, and readers that support EPUB notes show them in a pop-up. Sidenotes are footnotes there too.
 - **Margin notes:** a margin note follows the paragraph, heading, or list item that references it, set apart in the note style, since an ebook has no margin column.
 - **Placement:** figures and tables stay where they are written.
-- **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF.
+- **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF. A placeholder that depends on the page, such as `{page}`, is an error, since an EPUB has no pages.
 - **Bottom groups:** a `::: bottom` group ends its file, so a copyright page stays a page of its own, but its text starts at the top, since readers cannot place text at the bottom of a screen.
 - **Left out:** page numbers, headers and footers, page variants, two columns, keep groups, and the draft watermark. `--bleed` and `--crop-marks` are errors with an EPUB output path.
 
@@ -842,19 +842,20 @@ This report has {words} words and takes about {reading-time} minutes to read.
 | `{title}`, `{subtitle}`, `{author}`, `{date}`, `{abstract}`, `{meta.key}` | The [metadata](#metadata). A `meta` list joins its entries with commas. |
 | `{chars}`, `{chars-no-spaces}` | Characters with and without spaces. |
 | `{words}`, `{sentences}`, `{paragraphs}` | Words, sentences, and paragraphs. |
-| `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German. |
+| `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German, or `meta.reading-speed`, as in `reading-speed: 250`. |
 | `{figures}`, `{tables}` | Figures and tables with a caption, the numbered ones. |
 | `{build-date}`, `{year}` | The day the document is rendered, as in "7 October 2026", and its year. |
+| `{page}`, `{pages}`, `{section}`, `{subsection}`, `{section-page}`, `{section-pages}` | What a [header or footer](THEMES.md#header-and-footer-bands) shows on the page the placeholder lands on, as in "page {page} of {pages}". |
 | `{draft}` | The draft label, "Draft" or "Entwurf", when `draft: true`. |
 
-The value is set in the style of the text around it. Counts are grouped by thousands for the document language, as in "12,480" or "12.480".
+The value is set in the style of the text around it. Counts are grouped by thousands for the document language, as in "12,480" or "12.480". A page placeholder takes its value once the pages are laid out, and Druck lays the pages out again while a value changes the text enough to move it, up to five times.
 
 Placeholders are read in paragraphs, lists, quotations, table cells, captions, and footnotes, but not in headings or code. Write `\{` for a brace that should stay text. Braces around anything other than a name, such as `{a, b}` or `{.name}`, stay text too.
 
 These are errors with their location:
 
 - An unknown name, such as `{wrods}`.
-- A placeholder that depends on the page, such as `{page}` or `{section}`. Those are for [headers and footers](THEMES.md#header-and-footer-bands).
+- A page placeholder without a value where it lands, such as `{section}` on a page before the first chapter.
 - A placeholder in a heading.
 - A placeholder without a value, such as `{subtitle}` in a document without a subtitle, or `{draft}` outside a draft.
 
@@ -869,7 +870,7 @@ The statistics count the text you wrote in the body and the footnotes: paragraph
 
 ### Build date
 
-`{build-date}` and `{year}` use the date in UTC when Druck runs. For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Druck then uses that day.
+`{build-date}` and `{year}` use the date when Druck runs, in the computer's time zone (in UTC where the system names none). For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Druck then uses that day in UTC, whatever the time zone.
 
 ### Drafts
 

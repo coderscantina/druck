@@ -1,5 +1,8 @@
 //! Days of the calendar, for `{build-date}` and `{year}`. The caller says which day a run happens on.
 
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
+
 use crate::config::theme::Lang;
 
 const MONTHS_EN: [&str; 12] = [
@@ -90,6 +93,16 @@ impl Date {
         }
     }
 
+    /// The day `timestamp` falls on in `zone`.
+    pub(crate) fn of(timestamp: Timestamp, zone: &TimeZone) -> Self {
+        let date = zone.to_datetime(timestamp).date();
+        Self {
+            year: date.year().into(),
+            month: date.month().unsigned_abs(),
+            day: date.day().unsigned_abs(),
+        }
+    }
+
     /// The date written out in `lang`: "7 October 2026" or "7. Oktober 2026".
     pub fn long(&self, lang: Lang) -> String {
         let index = usize::from(self.month - 1);
@@ -112,6 +125,18 @@ mod tests {
         assert_eq!(Date::from_unix(951_782_400), date(2000, 2, 29));
         assert_eq!(Date::from_unix(1_791_417_599), date(2026, 10, 7));
         assert_eq!(Date::from_unix(1_791_417_600), date(2026, 10, 8));
+    }
+
+    #[test]
+    fn takes_the_day_of_the_time_zone() {
+        let late = Timestamp::from_second(1_791_412_200).expect("in range");
+        let date = |year, month, day| Date { year, month, day };
+        assert_eq!(Date::of(late, &TimeZone::UTC), date(2026, 10, 7));
+        assert_eq!(Date::of(late, &TimeZone::fixed(jiff::tz::offset(2))), date(2026, 10, 8));
+        assert_eq!(
+            Date::of(late, &TimeZone::fixed(jiff::tz::offset(-8))),
+            date(2026, 10, 7)
+        );
     }
 
     #[test]

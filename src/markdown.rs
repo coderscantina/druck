@@ -12,7 +12,8 @@
 //! the source text, so an escaped `\@` stays text.
 //!
 //! A `{name}` in text is a [placeholder](Placeholder) such as `{words}`, unless its brace is escaped.
-//! Placeholders whose value depends on the page are rejected, as are placeholders in headings.
+//! Placeholders whose value depends on the page are listed in [`Document::page_fields`] for layout to settle.
+//! Placeholders in headings are rejected.
 //!
 //! An index mark `{^entry!sub-entry}` marks its position for the index, and `[text]{^}` indexes the text in
 //! brackets. Either may end with `|see entry` or `|see also entry`. Marks are read from the source like
@@ -51,7 +52,7 @@ use crate::config::theme::{CalloutKind, Lang};
 use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{
     Block, Cell, Citation, Class, Column, ColumnAlign, ColumnWidth, Document, Footnote, ImageFile, IndexMark, Inline,
-    InlineStyle, LabelKind, Link, Location, Matter, Placement, Reference, Row, See, Todo,
+    InlineStyle, LabelKind, Link, Location, Matter, PageField, Placement, Reference, Row, See, Todo,
 };
 use crate::highlight;
 use crate::source_map::{BlockKind, MAPPED_LENGTH, Recorder, Spans};
@@ -306,6 +307,7 @@ struct Builder<'a> {
     /// The marks that [`Builder::script`] and `[text]{.name}` opened, by the offset of their closing text.
     closers: Vec<Closer>,
     todos: Vec<Todo>,
+    page_fields: Vec<PageField>,
     links: Vec<String>,
     /// Nesting depth inside a construct that is reported and otherwise ignored.
     skip: u32,
@@ -382,6 +384,7 @@ impl<'a> Builder<'a> {
             marks: Marks::default(),
             closers: Vec::new(),
             todos: Vec::new(),
+            page_fields: Vec::new(),
             links: Vec::new(),
             skip: 0,
             depth: 0,
@@ -553,6 +556,7 @@ impl<'a> Builder<'a> {
             citations: self.citations,
             index_marks: self.index_marks,
             todos: self.todos,
+            page_fields: self.page_fields,
             sources: self.recorder.map(Recorder::finish),
         })
     }
@@ -1734,15 +1738,25 @@ impl<'a> Builder<'a> {
             Ok(placeholder) => placeholder,
             Err(message) => return self.report(offset, format!("{message}; write \\{{ for a brace")),
         };
-        if placeholder.is_page_dependent() {
-            let message = format!("{{{placeholder}}} depends on the page and is available only in headers and footers");
-            return self.report(offset, message);
-        }
         if self.leaf.as_ref().is_some_and(|leaf| leaf.level.is_some()) {
             return self.report(offset, "a heading cannot hold a placeholder");
         }
         let (at, style) = (self.location(offset), self.style(false));
-        self.push_inline(offset, Inline::Field { placeholder, at, style });
+        let page = placeholder.is_page_dependent().then(|| {
+            let field = PageField {
+                at,
+                placeholder: placeholder.clone(),
+            };
+            self.page_fields.push(field);
+            self.page_fields.len() - 1
+        });
+        let field = Inline::Field {
+            placeholder,
+            at,
+            style,
+            page,
+        };
+        self.push_inline(offset, field);
     }
 
     /// Reads the index mark whose `{^` is at `offset` and returns where it ends. A mark after the bracketed
@@ -4183,6 +4197,7 @@ mod tests {
             placeholder,
             at: at(1, column),
             style,
+            page: None,
         };
         assert_eq!(
             inlines("About **{words}** words, {meta.client}; not \\{year}, {a b}, `{year}` {.x}\n"),
@@ -4204,27 +4219,47 @@ mod tests {
     }
 
     #[test]
-    fn reports_unknown_page_and_heading_placeholders() {
+    fn reports_unknown_and_heading_placeholders() {
         let body = "# On {words} words\n\nPage {page} and {wrods}.\n";
         let errors = diagnostics(body, 1);
-        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert_eq!(errors.len(), 2, "{errors:?}");
         assert_eq!(
             errors[0],
             (Some((1, 6)), "a heading cannot hold a placeholder".to_owned())
         );
-        assert_eq!(
-            errors[1],
-            (
-                Some((3, 6)),
-                "{page} depends on the page and is available only in headers and footers".to_owned()
-            )
-        );
         assert!(
-            errors[2].1.starts_with("unknown placeholder {wrods}"),
+            errors[1].1.starts_with("unknown placeholder {wrods}"),
             "{}",
-            errors[2].1
+            errors[1].1
         );
-        assert!(errors[2].1.ends_with("; write \\{ for a brace"), "{}", errors[2].1);
+        assert!(errors[1].1.ends_with("; write \\{ for a brace"), "{}", errors[1].1);
+    }
+
+    #[test]
+    fn lists_the_placeholders_that_depend_on_the_page() {
+        let body = "Page {page} of {pages}, {words} words.[^n]\n\n[^n]: In {section}.\n";
+        let document = parse(body, 1, &source(), Lang::En).expect("parses");
+        let fields: Vec<_> = (document.page_fields.iter())
+            .map(|field| (field.placeholder.to_string(), field.at.line, field.at.column))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                ("page".into(), 1, 6),
+                ("pages".into(), 1, 16),
+                ("section".into(), 3, 10)
+            ]
+        );
+        let Block::Paragraph { content, .. } = &document.blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        let pages: Vec<_> = (content.iter())
+            .filter_map(|inline| match inline {
+                Inline::Field { page, .. } => Some(*page),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pages, [Some(0), Some(1), None]);
     }
 
     fn styled(text: &str, style: InlineStyle) -> Inline {

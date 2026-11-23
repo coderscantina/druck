@@ -17,7 +17,7 @@ use crate::date::Date;
 use crate::diagnostic::Diagnostic;
 use crate::image::ImageCache;
 use crate::input::{DocumentText, Input};
-use crate::output::{Layout, Pt};
+use crate::output::{Layout, PageTitles, Pt};
 use crate::pipeline::{self, DocumentFile, JobContext};
 use crate::resource::Resolver;
 use crate::text::FontSet;
@@ -215,6 +215,12 @@ impl Configured<'_> {
             conformance: self.config.document.conformance.clone(),
             today: self.today,
             source: self.document.source.clone(),
+            contents_depth: self.config.document.toc_depth.get(),
+            page_titles: PageTitles {
+                contents: self.config.labels.contents.clone(),
+                index: self.config.labels.index.clone(),
+                bibliography: self.config.labels.references.clone(),
+            },
         })
     }
 

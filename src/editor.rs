@@ -93,12 +93,12 @@ pub mod placeholders {
 
     /// `{reading-time}` in whole minutes, at the speed for `lang`.
     pub fn reading_time(statistics: &Statistics, lang_code: &str) -> usize {
-        statistics.reading_time(lang(lang_code))
+        statistics.reading_time(crate::statistics::words_per_minute(lang(lang_code)))
     }
 
     /// The words a minute `{reading-time}` reads at in `lang`.
     pub fn words_per_minute(lang_code: &str) -> usize {
-        crate::statistics::words_per_minute(lang(lang_code))
+        crate::statistics::words_per_minute(lang(lang_code)).get()
     }
 
     /// `{build-date}`: the day written out for `lang`.
@@ -113,7 +113,7 @@ pub mod placeholders {
         theme["labels"][code]["draft"].as_str().unwrap_or_default().to_owned()
     }
 
-    /// The day a render run now would use: `SOURCE_DATE_EPOCH`'s, or the clock's in UTC.
+    /// The day a render run now would use: `SOURCE_DATE_EPOCH`'s, or the clock's in the local time zone.
     pub fn today() -> Option<Date> {
         match crate::resource::source_date() {
             Ok(Some(date)) => Some(date),

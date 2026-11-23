@@ -8,7 +8,7 @@ mod common;
 use druck::cancel::Cancel;
 use druck::input::{DocumentText, Input, Overrides, ThemeSelection};
 use druck::resource::{MemoryResolver, Origin, clock_date};
-use druck::{Failure, PdfOptions, Renderer};
+use druck::{PdfOptions, Renderer};
 
 const THEME: &str = r##"{
   "version": 1,
@@ -33,7 +33,7 @@ fn main() -> common::Outcome {
                 origin,
             },
             // The same syntax as `druck render --set`.
-            overrides: Overrides::parse(&["font-size=12pt".to_owned()], "/memory".as_ref()).map_err(Failure::from)?,
+            overrides: Overrides::parse(&["font-size=12pt".to_owned()], "/memory".as_ref())?,
             today: clock_date()?,
         };
         let renderer = Renderer::new();

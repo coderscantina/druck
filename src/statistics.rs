@@ -19,6 +19,8 @@
 //!   footnotes. Headings, table cells, and captions count toward characters and words only.
 //! - Figures and tables are those with a caption, which are the numbered ones.
 
+use std::num::NonZeroUsize;
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::config::theme::Lang;
@@ -57,11 +59,11 @@ const ORDINAL_NOUNS_DE: &[&str] = &[
 /// Silent reading speeds in words per minute, from the same study for both languages:
 /// Trauzettel-Klosinski and Dietz (2012), "Standardized Assessment of Reading Performance: The New
 /// International Reading Speed Texts IReST".
-const WORDS_PER_MINUTE_EN: usize = 228;
-const WORDS_PER_MINUTE_DE: usize = 179;
+const WORDS_PER_MINUTE_EN: NonZeroUsize = NonZeroUsize::new(228).unwrap();
+const WORDS_PER_MINUTE_DE: NonZeroUsize = NonZeroUsize::new(179).unwrap();
 
-/// The silent reading speed of `lang` in words per minute.
-pub(crate) fn words_per_minute(lang: Lang) -> usize {
+/// The silent reading speed of `lang` in words per minute, which `meta.reading-speed` replaces.
+pub(crate) fn words_per_minute(lang: Lang) -> NonZeroUsize {
     match lang {
         Lang::En => WORDS_PER_MINUTE_EN,
         Lang::De => WORDS_PER_MINUTE_DE,
@@ -93,9 +95,9 @@ impl Statistics {
         counter.statistics
     }
 
-    /// The reading time in whole minutes, rounded up, at least 1 for a document with words.
-    pub fn reading_time(&self, lang: Lang) -> usize {
-        self.words.div_ceil(words_per_minute(lang))
+    /// The reading time at `words_per_minute` in whole minutes, rounded up, at least 1 for a document with words.
+    pub fn reading_time(&self, words_per_minute: NonZeroUsize) -> usize {
+        self.words.div_ceil(words_per_minute.get())
     }
 }
 
@@ -325,6 +327,7 @@ mod tests {
             placeholder: Placeholder::Words,
             at: AT,
             style: InlineStyle::default(),
+            page: None,
         };
         let content = vec![
             text("This text has "),
@@ -403,13 +406,14 @@ mod tests {
     }
 
     #[test]
-    fn reading_time_rounds_up_by_language() {
+    fn reading_time_rounds_up_at_the_speed() {
         let statistics = Statistics {
             words: 229,
             ..Statistics::default()
         };
-        assert_eq!(statistics.reading_time(Lang::En), 2);
-        assert_eq!(statistics.reading_time(Lang::De), 2);
-        assert_eq!(Statistics::default().reading_time(Lang::En), 0);
+        assert_eq!(statistics.reading_time(words_per_minute(Lang::En)), 2);
+        assert_eq!(statistics.reading_time(words_per_minute(Lang::De)), 2);
+        assert_eq!(statistics.reading_time(NonZeroUsize::new(300).unwrap()), 1);
+        assert_eq!(Statistics::default().reading_time(words_per_minute(Lang::En)), 0);
     }
 }

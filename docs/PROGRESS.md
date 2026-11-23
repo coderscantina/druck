@@ -603,17 +603,13 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 
 ## Blockers and follow-ups
 
-- Phase 2: a long-lived process holds about five times the memory of one job on macOS (the allocator keeps freed memory; the program's own heap is flat). Measure it on Linux, and consider a note for service authors or an allocator choice.
-- Phase 2: `Overrides::parse`, `Project::open`, and `DocumentText::read` return `Vec<Diagnostic>` rather than `Failure`, so `?` into a `Failure` works but a plain `Box<dyn Error>` needs `map_err`. Unify if an outside client complains.
+- Phase 2: a long-lived process holds about five times the memory of one job on macOS (the allocator keeps freed memory; the program's own heap is flat). Measure it on Linux, and consider a note for service authors or an allocator choice. Not measured in milestone 28 wave 1 (2026-11-23): no Linux machine, and OrbStack's Docker daemon was not running.
 - Phase 2: only `druck-desktop` draws from a `Layout`, and the core's "no printing, no filesystem" rule has no automated check.
 - Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme.
 - Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
 
 - Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).
-- Unquoted decimals in `meta` and `author` lose trailing zeros (`1.50` reads `1.5`); serde-saphyr keeps source text only for plain string fields.
 - A URL without a single slash that is wider than its column is still an error.
-- `{pages}` and other page placeholders are rejected in the body; supporting them would need the settling loop to carry the page count.
-- Reading speed for `{reading-time}` is fixed per language, and `{build-date}` uses UTC, not the local time zone.
 
 ## Updating this file
 

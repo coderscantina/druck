@@ -5,10 +5,11 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroUsize;
 
 use serde_json::Value;
 
-use super::front_matter::FrontMatter;
+use super::front_matter::{self, FrontMatter, Metadata, READING_SPEED};
 use super::layer::{PropertyError, check_theme_layer, default_theme_value, deserialize_theme};
 use super::merge::Merged;
 use super::resolved::{self, Config, CustomStyle, FaceFile, FontFiles, PageGeometry, SlotContent, Style};
@@ -127,6 +128,22 @@ impl<'a> Resolver<'a> {
             colors: resolver.token_table(&theme.tokens.colors),
         };
         resolver
+    }
+
+    /// `meta.reading-speed` as a number, if set. An error names the layer that set it, the later of `layers` first.
+    fn reading_speed(&self, metadata: &Metadata, layers: [&SettingsInput; 2]) -> Option<NonZeroUsize> {
+        let value = metadata.meta.get(READING_SPEED)?;
+        let error = |message: String| {
+            let layer = layers
+                .iter()
+                .find(|layer| layer.settings.meta.contains_key(READING_SPEED));
+            let source = layer.map(|layer| layer.source.clone());
+            let property = format!("meta.{READING_SPEED}");
+            self.errors
+                .borrow_mut()
+                .push(Diagnostic::new(source, message).property(Some(property)));
+        };
+        front_matter::reading_speed(value).map_err(error).ok()
     }
 
     fn error(&self, property: &str, message: impl Into<String>) {
@@ -1225,8 +1242,11 @@ impl<'a> Resolver<'a> {
         let bibliography_file = file(|settings| settings.bibliography.as_ref());
         let cover_file = file(|settings| settings.cover.as_ref());
 
+        let mut metadata = document.settings.metadata_overridden_by(&overrides.settings);
+        metadata.reading_speed = self.reading_speed(&metadata, [overrides, document]);
+
         Some(Config {
-            metadata: document.settings.metadata_overridden_by(&overrides.settings),
+            metadata,
             document: theme.document.clone(),
             bibliography_file,
             cover_file,

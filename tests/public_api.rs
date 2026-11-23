@@ -3,11 +3,11 @@
 //! acceptance list is covered by the unit tests named in `docs/ACCEPTANCE.md`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use druck::cancel::Cancel;
 use druck::diagnostic::Source;
-use druck::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
+use druck::input::{Date, DocumentText, Input, Overrides, Project, ThemeDirs, ThemeSelection};
 use druck::output::Item;
 use druck::resource::{FileResolver, MemoryResolver, Origin};
 use druck::{Failure, LayoutOptions, Renderer, THEME_SCHEMA_VERSIONS};
@@ -132,14 +132,14 @@ fn explicit_overrides_beat_the_document_the_theme_and_the_defaults_in_that_order
         theme("10pt"),
         Overrides::default(),
     ));
-    let parsed = Overrides::parse(&["font-size=12pt".to_owned()], working).map_err(Failure::from);
+    let parsed = Overrides::parse(&["font-size=12pt".to_owned()], working);
     let overridden = size(&input(
         "---\nfont-size: 11pt\n---\n\nText.\n",
         dir.clone(),
         theme("10pt"),
         parsed.expect("a valid override"),
     ));
-    let from_json = Overrides::from_json(serde_json::json!({ "font-size": "13pt" }), working).map_err(Failure::from);
+    let from_json = Overrides::from_json(serde_json::json!({ "font-size": "13pt" }), working);
     let overridden_by_json = size(&input(
         "Text.\n",
         dir,
@@ -187,4 +187,45 @@ fn only_the_listed_theme_schema_versions_are_read_and_others_fail_at_the_version
             .to_string()
             .contains(&format!("unsupported theme version {unsupported}"))
     );
+}
+
+#[test]
+fn a_layout_tells_the_contents_depth_and_the_titles_of_made_pages_in_the_documents_language() {
+    let text = "---\nlang: de\ntoc-depth: 2\n---\n\nText.\n";
+    let input = input(text, PathBuf::from("/memory"), no_theme(), Overrides::default());
+    let layout = on_big_stack(|| {
+        let (renderer, resolver, cancel) = (Renderer::new(), MemoryResolver::new(), Cancel::default());
+        let configured = renderer
+            .job(&resolver, &input, &cancel)
+            .configure()
+            .expect("configures");
+        configured.layout(&LayoutOptions::default()).expect("lays out")
+    });
+    assert_eq!(layout.contents_depth(), 2);
+    let titles = layout.page_titles();
+    assert_eq!(
+        [
+            titles.contents.as_str(),
+            titles.index.as_str(),
+            titles.bibliography.as_str()
+        ],
+        ["Inhalt", "Register", "Literatur"]
+    );
+}
+
+#[test]
+fn reading_inputs_fails_with_a_failure_that_any_error_takes() -> Result<(), Box<dyn std::error::Error>> {
+    let resolver = MemoryResolver::new();
+    let working = Path::new("/memory");
+    Overrides::parse(&["font-size=12pt".to_owned()], working)?;
+    Overrides::from_json(serde_json::json!({ "toc": true }), working)?;
+    let failed: [Result<(), Failure>; 3] = [
+        Overrides::parse(&["no-such-setting=1".to_owned()], working).map(drop),
+        DocumentText::read(&resolver, &working.join("gone.md")).map(drop),
+        Project::open(&resolver, working).map(drop),
+    ];
+    for result in failed {
+        assert!(matches!(result, Err(Failure::Errors(errors)) if !errors.is_empty()));
+    }
+    Ok(())
 }

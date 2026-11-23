@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -182,7 +183,8 @@ fn bleed<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Pt>, D::Er
 }
 
 /// Implements the visitor methods that read a number or boolean as its text, so `date: 2024` and
-/// `offer: 2026` need no quotes. A float prints as its value, so `1.50` reads as `1.5`.
+/// `offer: 2026` need no quotes. A float prints as its value, so `1.50` reads as `1.5` until
+/// [`FrontMatter::keep_decimals`] gives it its text back.
 macro_rules! scalar_text {
     ($value:ty) => {
         fn visit_i64<E: de::Error>(self, value: i64) -> Result<$value, E> {
@@ -283,6 +285,104 @@ fn meta<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, M
             "meta key \"{key}\" must consist of letters, digits, \"-\", and \"_\""
         ))),
         None => Ok(map),
+    }
+}
+
+/// Where `author` and `meta` hold plain decimals, which the YAML parser hands a visitor only as numbers, so `1.50`
+/// would read as `1.5`. Entries of a list keep their text already, since they are read as strings.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+pub struct Decimals {
+    author: Option<Spanned<Decimal>>,
+    meta: BTreeMap<String, Spanned<Decimal>>,
+}
+
+/// Whether a value is written as a decimal.
+struct Decimal(bool);
+
+impl<'de> Deserialize<'de> for Decimal {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct DecimalVisitor;
+
+        impl<'de> Visitor<'de> for DecimalVisitor {
+            type Value = Decimal;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("any value")
+            }
+
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Decimal, E> {
+                Ok(Decimal(true))
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Decimal, E> {
+                Ok(Decimal(false))
+            }
+
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Decimal, E> {
+                Ok(Decimal(false))
+            }
+
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Decimal, E> {
+                Ok(Decimal(false))
+            }
+
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Decimal, E> {
+                Ok(Decimal(false))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Decimal, E> {
+                Ok(Decimal(false))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Decimal, A::Error> {
+                while seq.next_element::<de::IgnoredAny>()?.is_some() {}
+                Ok(Decimal(false))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Decimal, A::Error> {
+                while map.next_entry::<de::IgnoredAny, de::IgnoredAny>()?.is_some() {}
+                Ok(Decimal(false))
+            }
+        }
+
+        deserializer.deserialize_any(DecimalVisitor)
+    }
+}
+
+impl FrontMatter {
+    /// Gives each plain decimal in `author` and `meta` the text `yaml` writes it with. `yaml` is the text these
+    /// settings and `decimals` were read from.
+    pub fn keep_decimals(&mut self, decimals: &Decimals, yaml: &str) {
+        let written = |at: &Spanned<Decimal>| {
+            if !at.value.0 {
+                return None;
+            }
+            let span = at.defined.span();
+            let start = usize::try_from(span.byte_offset()?).ok()?;
+            let end = start + usize::try_from(span.byte_len()?).ok()?;
+            yaml.get(start..end).map(str::to_owned)
+        };
+        if let (Some(Authors(names)), Some(text)) = (&mut self.author, decimals.author.as_ref().and_then(written)) {
+            *names = vec![text];
+        }
+        for (key, at) in &decimals.meta {
+            if let (Some(MetaValue::Text(value)), Some(text)) = (self.meta.get_mut(key), written(at)) {
+                *value = text;
+            }
+        }
+    }
+}
+
+/// The `meta` key whose value replaces the language's reading speed for `{reading-time}`.
+pub const READING_SPEED: &str = "reading-speed";
+
+/// `meta.reading-speed` in words a minute: a whole number above 0.
+pub fn reading_speed(value: &MetaValue) -> Result<NonZeroUsize, String> {
+    let error = |shown: &str| format!("must be a whole number of words a minute, such as 250, not {shown}");
+    match value {
+        MetaValue::Text(text) => text.trim().parse().map_err(|_| error(&format!("\"{text}\""))),
+        MetaValue::Lines(_) => Err(error("a list")),
     }
 }
 
@@ -439,6 +539,7 @@ impl FrontMatter {
             date: later.date.clone().or_else(|| self.date.clone()),
             abstract_: later.abstract_.clone().or_else(|| self.abstract_.clone()),
             meta: self.meta.clone().into_iter().chain(later.meta.clone()).collect(),
+            reading_speed: None,
         }
     }
 }
@@ -454,6 +555,9 @@ pub struct Metadata {
     #[serde(rename = "abstract")]
     pub abstract_: Option<String>,
     pub meta: BTreeMap<String, MetaValue>,
+    /// The words a minute `{reading-time}` reads at, if `meta.reading-speed` sets it. Configuration checks it.
+    #[serde(skip)]
+    pub reading_speed: Option<NonZeroUsize>,
 }
 
 fn insert(object: &mut Map<String, Value>, pointer: &[&str], value: Value) {
@@ -574,6 +678,33 @@ mod tests {
             parse("title: 1.50\ndate: 2024\n").unwrap().date.as_deref(),
             Some("2024")
         );
+    }
+
+    #[test]
+    fn plain_decimals_in_authors_and_meta_keep_their_text() {
+        let yaml = "author: 1.50\nmeta: {ratio: 1.50, power: 2.5e3, lines: [1.50, x], quoted: '0.10', whole: 7}\n";
+        let mut front = parse(yaml).unwrap();
+        front.keep_decimals(&serde_saphyr::from_str(yaml).unwrap(), yaml);
+        assert_eq!(front.author, Some(Authors(vec!["1.50".into()])));
+        let text = |key: &str| front.meta[key].clone();
+        assert_eq!(text("ratio"), MetaValue::Text("1.50".into()));
+        assert_eq!(text("power"), MetaValue::Text("2.5e3".into()));
+        assert_eq!(text("lines"), MetaValue::Lines(vec!["1.50".into(), "x".into()]));
+        assert_eq!(text("quoted"), MetaValue::Text("0.10".into()));
+        assert_eq!(text("whole"), MetaValue::Text("7".into()));
+    }
+
+    #[test]
+    fn a_reading_speed_is_a_whole_number_above_0() {
+        let speed = |text: &str| reading_speed(&MetaValue::Text(text.into()));
+        assert_eq!(speed("250"), Ok(NonZeroUsize::new(250).unwrap()));
+        for wrong in ["0", "fast", "250.5", "250.0", "-3"] {
+            assert!(
+                speed(wrong).unwrap_err().starts_with("must be a whole number"),
+                "{wrong}"
+            );
+        }
+        assert!(reading_speed(&MetaValue::Lines(vec!["250".into()])).is_err());
     }
 
     #[test]
