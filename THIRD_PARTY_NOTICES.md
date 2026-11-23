@@ -312,7 +312,8 @@ Where a crate offers a choice of licenses (`OR`), either one applies.
 
 ## License texts
 
-Texts are copied from each crate's source. Identical texts are shown once.
+Texts are copied from each crate's source, or from its repository at the published commit where the crate
+ships none. Identical texts are shown once.
 
 ### LICENSE-APACHE
 
