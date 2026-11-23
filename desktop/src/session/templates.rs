@@ -4,7 +4,8 @@
 use std::fs;
 use std::path::Path;
 
-use super::outline;
+use super::outline::{self, Kind as RowKind};
+use super::parts::Place;
 use super::strings::Key;
 use super::yaml;
 use crate::shell::strings::Language;
@@ -78,7 +79,7 @@ pub const TEMPLATES: &[Template] = &[
         name: Key::ImprintName,
         description: Key::ImprintDescription,
         group: Group::Front,
-        icon: "icons/file.svg",
+        icon: "icons/copyright.svg",
         text: text!("imprint"),
     },
     Template {
@@ -86,8 +87,16 @@ pub const TEMPLATES: &[Template] = &[
         name: Key::DedicationName,
         description: Key::DedicationDescription,
         group: Group::Front,
-        icon: "icons/file.svg",
+        icon: "icons/dedication.svg",
         text: text!("dedication"),
+    },
+    Template {
+        slug: "epigraph",
+        name: Key::EpigraphName,
+        description: Key::EpigraphDescription,
+        group: Group::Front,
+        icon: "icons/file.svg",
+        text: text!("epigraph"),
     },
     Template {
         slug: "contents",
@@ -138,11 +147,27 @@ pub const TEMPLATES: &[Template] = &[
         text: text!("columns"),
     },
     Template {
+        slug: "acknowledgments",
+        name: Key::AcknowledgmentsName,
+        description: Key::AcknowledgmentsDescription,
+        group: Group::Back,
+        icon: "icons/book.svg",
+        text: text!("acknowledgments"),
+    },
+    Template {
+        slug: "about-the-author",
+        name: Key::AboutAuthorName,
+        description: Key::AboutAuthorDescription,
+        group: Group::Back,
+        icon: "icons/book.svg",
+        text: text!("about-the-author"),
+    },
+    Template {
         slug: "bibliography",
         name: Key::BibliographyName,
         description: Key::BibliographyDescription,
         group: Group::Back,
-        icon: "icons/contents.svg",
+        icon: "icons/bibliography.svg",
         text: text!("bibliography"),
     },
     Template {
@@ -150,8 +175,77 @@ pub const TEMPLATES: &[Template] = &[
         name: Key::IndexName,
         description: Key::IndexDescription,
         group: Group::Back,
-        icon: "icons/contents.svg",
+        icon: "icons/index.svg",
         text: text!("index"),
+    },
+];
+
+/// A page the Binder's gallery adds: its template, its name there, where it goes, and the role a book has once at
+/// most, if it is one.
+pub struct Page {
+    pub slug: &'static str,
+    pub name: Key,
+    pub place: Place,
+    pub once: Option<RowKind>,
+}
+
+impl Page {
+    pub fn template(&self) -> &'static Template {
+        TEMPLATES
+            .iter()
+            .find(|template| template.slug == self.slug)
+            .expect("every page has its template")
+    }
+}
+
+pub const PAGES: &[Page] = &[
+    Page {
+        slug: "title-page",
+        name: Key::TitlePageName,
+        place: Place::Opening(0),
+        once: Some(RowKind::TitlePage),
+    },
+    Page {
+        slug: "imprint",
+        name: Key::CopyrightName,
+        place: Place::Opening(1),
+        once: None,
+    },
+    Page {
+        slug: "dedication",
+        name: Key::DedicationName,
+        place: Place::Opening(2),
+        once: None,
+    },
+    Page {
+        slug: "epigraph",
+        name: Key::EpigraphName,
+        place: Place::Opening(3),
+        once: None,
+    },
+    Page {
+        slug: "contents",
+        name: Key::ContentsName,
+        place: Place::Contents,
+        once: Some(RowKind::Contents),
+    },
+    Page {
+        slug: "acknowledgments",
+        name: Key::AcknowledgmentsName,
+        place: Place::Back,
+        once: None,
+    },
+    Page {
+        slug: "about-the-author",
+        name: Key::AboutAuthorName,
+        place: Place::Back,
+        once: None,
+    },
+    Page {
+        slug: "index",
+        name: Key::IndexName,
+        place: Place::End,
+        once: Some(RowKind::Index),
     },
 ];
 

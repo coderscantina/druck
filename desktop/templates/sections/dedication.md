@@ -1,3 +1,1 @@
-*For someone who kept a light burning.*
-
-::: page-break
+For someone who kept a light burning. {.dedication}

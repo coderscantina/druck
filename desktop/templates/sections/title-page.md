@@ -3,5 +3,3 @@
 {subtitle}
 
 {author}
-
-::: page-break
