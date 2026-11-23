@@ -52,7 +52,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
 - [x] 27: Typesetter. Built and checked with real turns on both CLIs on `agentic-beta`, on a copy of the owner's book with the list cut to 20 of its 243 warnings, see the [note](#milestone-27-note).
-- [ ] 28: Beta polish, in three waves. Wave 1, the defects, built on `beta-polish`.
+- [ ] 28: Beta polish, in three waves. Waves 1 and 2 built on `beta-polish`; wave 3, the gates, waits on the owner's secrets and hand checks.
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 28.
 - [ ] 23: Desktop 1.0, replacing 17.
 
@@ -110,7 +110,7 @@ For the owner: in two columns a note from the inner column falls back to the out
 
 Not verified: veraPDF on the patched catalog (not installed), the Linux memory measure, the block menu filter on screen (synthetic `Ctrl+Return` does not reach the window), German and light captures for the writing surface, trackpad scrolling of the launch card. Once, three letters typed during an undo run did not appear and did not repeat in three tries: worth a hand test.
 
-Follow-ups from wave 1: the app's placeholder chips still treat page placeholders as open and ignore `meta.reading-speed`; the app should read `Layout::contents_depth` and `Layout::page_titles` (wave 2). A `{pages}` near a page boundary may not settle in 5 passes. After an outside change to a single file the foot named the title page instead of the chapter. The turn summary's diff rows cut long lines from the start. The palette may run past the window's right edge with the Binder open. New pass files list after older ones, not by name. `AUTHORING.md` has no typesetter section, and a table's placement is no fix kind. `f64` and `Self` highlight as keywords in Rust.
+Follow-ups left after wave 2: page placeholders are not offered in completion, and bibliography entries in Write are read from the text without the engine's formatting. The issue body after a panic is mostly backtrace.
 
 Wave 2 built these follow-ups on its own branch, see [the decision](DECISIONS.md#2026-11-23-beta-polish-wave-2-follow-ups). The `{pages}` case did not occur in about 7,000 generated documents, so the loop is unchanged. Not verified on screen: the turn summary's cut rows and a table placement in a real agent turn (unit tests only), and Rust colors in a rendered PDF.
 
