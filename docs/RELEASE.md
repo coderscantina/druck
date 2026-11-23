@@ -172,16 +172,21 @@ menu item. In the bundle, Sparkle checks the feed once a day and shows its own w
 it installs anything. It never installs on its own. A check that finds an update while the author is writing waits
 until Druck is next brought to the front. "Check for updates…" in the Druck menu checks at once.
 
-The feed is `https://github.com/coderscantina/druck/releases/latest/download/appcast.xml`. GitHub redirects it to the
-newest release's `appcast.xml`, and Sparkle follows the redirect. Each appcast has one item, the DMG on its own tag.
-The update, the feed, and its release notes are signed with an EdDSA key (`SURequireSignedFeed`), whose public half is
-`SPARKLE_PUBLIC_KEY` in the script. While that is empty, the script builds the bundle without Sparkle and says so.
+The feed is `https://github.com/coderscantina/druck/releases/download/appcast/appcast.xml`, the one asset of a
+pre-release with the fixed tag `appcast`. A pre-release is never `latest`, so this one never stands in for a versioned
+release. GitHub redirects the URL to the asset, and Sparkle follows the redirect. Each appcast has one item, the DMG on
+its own versioned tag. The update, the feed, and its release notes are signed with an EdDSA key
+(`SURequireSignedFeed`), whose public half is `SPARKLE_PUBLIC_KEY` in the script. While that is empty, the script
+builds the bundle without Sparkle and says so.
 
 A release reaches the updater like this: the tag push runs the `desktop` job, which builds, signs, notarizes, and
 staples the app and the DMG, then runs Sparkle's `generate_appcast` with the newest `CHANGELOG.md` section as the
-release notes. The `publish-desktop` job adds the DMG, its `.sha256`, and then `appcast.xml` to the release the
-`publish` job created. From then on, `releases/latest` is the new release, and each running Druck offers it at its next
-daily check. A release marked as a pre-release is not `latest`, so the updater does not see it.
+release notes. The `publish-desktop` job adds the DMG and its `.sha256` to the release the `publish` job created, and
+then replaces `appcast.xml` on the `appcast` release (`gh release upload --clobber`), creating that release the first
+time. From then on, each running Druck offers the new version at its next daily check. A release whose desktop job
+fails, or a CLI-only release, leaves the feed as it was, naming the last DMG there is, so the updater keeps working.
+Every tag the workflow publishes moves the feed, so marking a versioned release a pre-release afterwards does not hold
+its update back. Do not delete the `appcast` release or its tag: installed apps read the feed from it.
 
 `python3 scripts/package-desktop.py --appcast NOTES.md` writes the appcast locally as well, with the private key in
 `DRUCK_SPARKLE_KEY`.
