@@ -6,17 +6,22 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 
 ## Gaps
 
-- **Linux and Windows:** layout identity across platforms, `cargo test`, and the sample renders were never run. CI covers them, but no workflow has run because nothing is pushed.
-- **Owner's visual review:** not done.
-- **Continuing footnote in the corpus:** no sample shows one. `samples/pagination.md` says note 3 continues, but it fits on page 2. `layout/pages.rs: a_long_note_continues_on_the_next_page` covers the behavior.
-- **Conformance validators:** veraPDF (PDF/A, PDF/UA), epubcheck, Ace, and screen readers were never run.
-- **Performance limits are not enforced** by a test or CI.
-- **Phase 2 on other platforms:** parity, the examples, the doctests, and the API tests ran on macOS only. The `Examples` and `Documentation` steps of the CI workflow are new and have not run.
+What only the owner can do, with the commands in [the release procedure](RELEASE.md#conformance-validators-by-hand):
+
+- **Owner's visual review** of the samples: not done. Since the 2026-11-03 pass, `report`, `report-de`, and `images` changed their page breaks and `pagination` its long note, see [decisions](DECISIONS.md#2026-11-23-beta-polish-release-acceptance); those pages were inspected by me on 2026-11-23.
+- **veraPDF** (PDF/A-2a, PDF/UA-1) and **epubcheck**: never run. Both install with Homebrew.
+- **Ace** and **screen readers** (VoiceOver, NVDA): never run.
+- **The Windows offline run by hand,** or a look at CI's first Windows `render` job, which now runs `scripts/check-offline.sh` behind a firewall rule. The rule's effect on a real Windows machine is untried.
+
+What waits on CI, which has never run because nothing is pushed:
+
+- **Linux and Windows:** layout identity across platforms, `cargo test`, the sample renders, the performance limits, and the Windows offline check.
+- **Phase 2 on other platforms:** parity, the examples, the doctests, and the API tests ran on macOS only. The `Examples` and `Documentation` steps are new and have not run.
+
+Not closed by a program:
+
 - **Phase 2, a second painter:** only `druck-desktop` draws from a `Layout`.
-- **Phase 2, no printing and no filesystem in the core** is checked by a grep run by hand, not by a test.
 - **Phase 2, mouse clicks on a page:** automated mouse events did not reach the window on macOS. The click was proven through gpui's dispatch, and a real mouse click is untried.
-- **Windows offline run:** `scripts/check-offline.sh` has no Windows branch.
-- **Desktop notices:** 41 crates have no license file, one is MPL-2.0.
 
 ## Test files by name
 
@@ -25,6 +30,8 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 | acceptance | `tests/acceptance.rs: every_sample_passes_the_acceptance_checks`, run over every sample and each sample's theme: overflow (nothing drawn outside its page), lost content (every long word of the prose is on a page), references (every link, anchor, and bookmark has a placed destination, no `??`), stability (two renders write the same PDF), PDF features (fonts embedded with a text map, link annotations equal links, outline present) |
 | samples | `scripts/render-samples.sh` then `scripts/check-pdfs.sh` (fonts embedded, Unicode maps, text extracts) |
 | offline | `scripts/check-offline.sh` |
+| performance | `tests/performance.rs: a_hundred_pages_render_within_the_time_and_memory_limits`, release builds only |
+| core boundary | `tests/core_boundary.rs: the_core_neither_touches_the_filesystem_nor_prints` |
 
 ## Authoring contract
 
@@ -75,16 +82,16 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 
 | Requirement | Evidence |
 | --- | --- |
-| Scored breaks, real heights | `layout/pages.rs: a_note_moves_the_break_before_its_reference`; `layout/tests.rs: a_heading_keeps_two_lines_of_its_paragraph_wants_a_third_and_pages_strand_no_line`, `a_page_break_next_to_a_one_line_paragraph_costs_much` |
+| Scored breaks, real heights | `layout/pages.rs: a_note_moves_the_break_before_its_reference`, `a_page_left_short_by_the_block_after_it_takes_no_lines_from_the_page_before`; `layout/tests.rs: a_heading_keeps_two_lines_of_its_paragraph_wants_a_third_and_pages_strand_no_line`, `a_page_break_next_to_a_one_line_paragraph_costs_much` |
 | Heading kept with text, no stranded lines | `layout/pages.rs: a_heading_near_the_bottom_moves_with_its_text`, `avoids_widows_and_orphans`, `a_page_strands_no_line_even_when_it_runs_short` |
 | Keep groups, conflicts reported | `layout/tests.rs: reports_a_keep_group_taller_than_the_page_at_its_directive`, `reports_a_keep_group_taller_than_a_column_at_its_directive` |
 | Bounded spacing, short last pages | `layout/tests.rs: reports_the_rules_a_page_breaks_as_warnings_naming_the_page`; `druck check samples/report.md` lists pages that end short |
 | Mid-page 1-2-1 columns, gap configurable | `layout/tests.rs: changing_from_one_to_two_columns_and_back_does_not_start_a_new_page`, `text_flows_down_the_first_column_then_the_second`; sample `columns` p1 |
-| Sections across pages, balancing | `layout/tests.rs: a_column_section_continues_across_pages_with_full_columns`, `the_final_columns_of_a_section_are_balanced`; sample `columns` p1 to p2, `report` p3 to p5 |
+| Sections across pages, balancing | `layout/tests.rs: a_column_section_continues_across_pages_with_full_columns`, `the_final_columns_of_a_section_are_balanced`; sample `columns` p1 to p2, `report` p3 to p4 |
 | Full-width blocks | `layout/tests.rs: a_full_width_image_sits_between_balanced_column_regions`, `a_full_width_table_sits_between_balanced_columns_that_resume_below`; samples `images` p2, `tables` p3, `report` p4 |
 | Balancing with footnotes and keep groups | `layout/tests.rs: notes_from_both_columns_share_one_area_in_reference_order`; sample `columns` p1 and p2 |
 | Footnotes: one full-width area, reading order, on the reference page | `layout/pages.rs: places_notes_in_order_on_the_pages_of_their_references`; `layout/tests.rs: notes_from_both_columns_share_one_area_in_reference_order`; sample `columns` |
-| Footnote continuation with marker | `layout/pages.rs: a_long_note_continues_on_the_next_page`, `layout/tests.rs: sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker`. **No sample shows it, see Gaps** |
+| Footnote continuation with marker | `layout/pages.rs: a_long_note_continues_on_the_next_page`, `layout/tests.rs: sets_raised_markers_and_notes_below_the_text_with_a_continuation_marker`; sample `pagination` p2 to p3, inspected 2026-11-23 |
 | Footnotes part of page scoring | `layout/pages.rs: a_note_moves_the_break_before_its_reference` |
 
 ## Images and tables
@@ -125,7 +132,7 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 | Clickable links and cross-references | acceptance (references, pdf); `cli.rs: renders_the_report_with_navigation_in_both_themes_the_same_every_time` |
 | Heading bookmarks | acceptance (pdf); `pdf.rs: links_to_anchors_and_nests_bookmarks_by_level` |
 | Identical layout across platforms | **Missing**: CI `compare` job, never run. Same-machine stability: acceptance (stability), `cli.rs: ..._the_same_every_time` tests |
-| Offline on all three platforms | offline (macOS run, network denied by `sandbox-exec`, 13 samples identical); Linux and Windows missing |
+| Offline on all three platforms | offline (macOS run, network denied by `sandbox-exec`, 13 samples identical); Windows in CI's `render` job behind a firewall rule, never run; Linux missing |
 
 ## Amendments
 
@@ -151,13 +158,13 @@ Test files: `src/<module>` unit tests, `tests/cli.rs` (CLI), `tests/acceptance.r
 | Requirement | Evidence |
 | --- | --- |
 | Reviewed English and German samples, custom themes | `samples/`: `en`, `de`, `report`, `report-de` (with `samples/themes/report.json` as well), `book`, `offer`, `typography`, `margins`, `columns`, `pagination`, `images`, `tables`, `marks`, `project`. Inspected 2026-11-03; owner's review missing |
-| Corpus: columns 1-2-1, across pages, full-width, mixed footnotes, long footnote continuation, multipage tables | See the rows above. **Long footnote continuation missing from samples** |
+| Corpus: columns 1-2-1, across pages, full-width, mixed footnotes, long footnote continuation, multipage tables | See the rows above; long footnote continuation in `pagination` |
 | Automated overflow, lost content, references, stability | acceptance |
 | Theme behavior: default and one custom theme | `cli.rs` theme tests; samples rendered with `report.json`, `margins.json`, `business.json`, `novel.json`, `typography-styles.json` |
 | Page variants, missing slot values, invalid versions, unknown fields | rows under Theme architecture |
 | Customization keeps pagination, column, footnote guarantees | acceptance runs on every themed sample; `layout/table_tests.rs`, `layout/style_tests.rs` |
 | Visual review of spacing, hyphenation, hierarchy, density, balance, captions, footnotes, bibliography | 2026-11-03 pass in progress; owner's review missing |
-| Benchmarks 10, 50, 100 pages | [progress](PROGRESS.md#verification), limits in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci) |
+| Benchmarks 10, 50, 100 pages | [progress](PROGRESS.md#verification), limits in [decisions](DECISIONS.md#2026-11-03-release-acceptance-limits-desktop-stack-desktop-ci), enforced by performance (103 pages, 0.25 s, 38 MB heap on the M1 Pro) |
 
 ## Phase 2 contract
 
@@ -181,7 +188,7 @@ Every requirement of [the phase 2 contract](RUST_CRATE_API_PHASE_2.md), in its o
 | Configuration errors are reported before layout | renderer: `errors_in_the_configuration_are_structured`; `Job::configure` is the only way to a `Configured`, so a `Layout` cannot exist for an invalid configuration |
 | **Resource resolution** | |
 | Fonts, images, and bibliography come through a caller-supplied resolver, with file and memory implementations | `resource.rs: a_memory_resolver_reads_by_origin_and_lists_below_a_folder`; renderer: `a_memory_resolver_renders_a_report_...`; parity (file resolver) |
-| No implicit filesystem or network access in the core | `grep -rnE 'std::fs\|std::env\|process::exit\|println!' src` outside `src/main.rs`, `src/resource.rs`, tests, and doc comments finds nothing (run 2026-11-04); the dependency list has no network crate; `scripts/check-offline.sh` for the CLI. No automated test: the grep is by hand |
+| No implicit filesystem or network access in the core | `grep -rnE 'std::fs\|std::env\|process::exit\|println!' src` outside `src/main.rs`, `src/resource.rs`, tests, and doc comments finds nothing: core boundary, the same rule as a test; the dependency list has no network crate; `scripts/check-offline.sh` for the CLI |
 | Bundled fonts and hyphenation need no discovery | renderer: `the_simple_and_the_explicit_path_write_the_same_pdf` renders with an empty `MemoryResolver` |
 | Explicit document and theme origins | public API test above; `Origin` is a field of `DocumentText::Single` and `ThemeSelection::Json` |
 | Failures name the resource, the origin, and the source location | renderer: `a_resolver_failure_names_the_resource_and_its_origin_and_harms_nothing`; diagnostic: `a_missing_image_has_a_resource_and_a_place_in_the_document` |
@@ -208,7 +215,7 @@ Every requirement of [the phase 2 contract](RUST_CRATE_API_PHASE_2.md), in its o
 | Success, warnings, fatal errors, and cancellation are distinct | `Failure` and `Rendered::warnings`; diagnostic: `warnings_sit_beside_success`; cancel tests |
 | Phase 1 behavior for unsupported syntax, invalid configuration, missing citations and resources, constraints, and overflow | cli: `reports_unsupported_content_with_its_location_and_writes_nothing`, `reports_citations_without_a_bibliography_or_entry_at_their_location`, `reports_a_missing_theme_font_relative_to_the_theme`, `check_reports_layout_errors_without_writing_a_pdf`, `rejects_code_lines_wider_than_the_text_area`; a matrix of 87 CLI commands gave the same stdout, stderr, and exit code before and after step 5 |
 | Stable meanings for public categories | rustdoc of `Severity`, `Source`, `Diagnostic`, and `Failure` |
-| The crate does not exit or print | the grep above. No automated test |
+| The crate does not exit or print | core boundary |
 | **CLI parity** | |
 | The CLI uses the public API only | `src/main.rs` is a binary crate: it cannot see `pub(crate)` items, and it builds without `editor` and `doc(hidden)` items. Its tests are all of `tests/cli.rs` |
 | Identical layout for the CLI and an embedded client, direct and layout-then-export | `tests/parity.rs`: every sample, each with its theme, the sample project and its `print` export, and the book when `DRUCK_BOOK` names a project, through `Renderer::render`, through configure, layout, and `Layout::pdf`, and through the binary: all write the same bytes, which is stricter than the same layout. EPUBs too. Run on macOS only |

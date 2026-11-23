@@ -33,10 +33,33 @@ CI runs the same scripts. Nothing in this section publishes, tags, or pushes.
 1. Build: `cargo build --release --locked`. The release profile uses fat LTO, one codegen unit, and stripped symbols. Expect about a minute.
 2. Check the binary:
    - Render all samples from another directory: `scripts/render-samples.sh target/release/druck /tmp/druck-pdfs`.
-   - Run it without network: `scripts/check-offline.sh target/release/druck` renders every sample normally and with the network denied (`sandbox-exec` on macOS, `unshare -rn` on Linux) from an empty directory with an empty home, and the PDFs must be equal. Druck has no network code, so this guards against a future dependency adding one. Windows has no script: check by hand.
+   - Run it without network: `scripts/check-offline.sh target/release/druck` renders every sample normally and with the network denied (`sandbox-exec` on macOS, `unshare -rn` on Linux, an outbound Windows Firewall rule for the binary on Windows) from an empty directory with an empty home, and the PDFs must be equal. Druck has no network code, so this guards against a future dependency adding one. On Windows, run it in Git Bash started as administrator, with the firewall on; CI's `render` job runs it on `windows-latest`.
+   - Check the limits: `cargo test --release --locked --test performance -- --nocapture` renders a 100-page report and fails over 2 s or 150 MB of heap. CI runs it on every OS.
    - Confirm fonts are embedded: `pdffonts /tmp/druck-pdfs/report.pdf` must show `yes` in the `emb` column for every row (Libertinus Serif and Mono).
    - To compare platforms by hand, copy each platform's PDFs into `DIR/<platform>/` and run `scripts/check-pdfs.sh DIR`.
 3. Package: `python3 scripts/package.py <target> target/release/druck dist`. This writes `dist/druck-<version>-<hash>-<target>.tar.gz` (`.zip` for Windows) and a `.sha256` file with it. Verify with `shasum -a 256 -c` (macOS) or `sha256sum -c` (Linux) inside `dist/`.
+
+## Conformance validators by hand
+
+CI does not run these. They need Java (veraPDF, epubcheck) or Node (Ace), and their results need reading. Run them before a release and record the results in `docs/PROGRESS.md`. On macOS:
+
+```sh
+brew install verapdf epubcheck
+npm install -g @daisy/ace
+cargo build --release --locked
+out=$(mktemp -d)
+for md in samples/*.md; do
+  name=$(basename "$md" .md)
+  target/release/druck render "$md" --set 'conformance=[pdf/a-2a, pdf/ua-1]' -o "$out/$name.pdf"
+  target/release/druck render "$md" -o "$out/$name.epub"
+done
+verapdf --flavour 2a --format text "$out"/*.pdf
+verapdf --flavour ua1 --format text "$out"/*.pdf
+for epub in "$out"/*.epub; do epubcheck "$epub"; done
+for epub in "$out"/*.epub; do ace --outdir "$out/ace-$(basename "$epub" .epub)" "$epub"; done
+```
+
+veraPDF prints `PASS` or `FAIL` per file with the failed rules. epubcheck ends each file with its count of errors and warnings. Ace writes `report.html` into each `ace-NAME` folder. A sample that `conformance` rejects, such as one with an image without a description, reports why and writes no PDF; that is the check working, not a validator failure. Screen readers (VoiceOver on macOS, NVDA on Windows) are tried by hand on `report.pdf` and `report.epub`.
 
 ## Archive layout
 
