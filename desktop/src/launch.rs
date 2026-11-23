@@ -41,6 +41,8 @@ pub struct LaunchView {
     focus: FocusHandle,
     /// The offer's row, which gets the keys while it shows.
     offer_focus: FocusHandle,
+    /// Each starter's card, in the order of [`STARTERS`], so the arrow keys can move between them.
+    starter_focus: Vec<FocusHandle>,
     /// Each starter's page by its slug, once painted, in the language of `painted`.
     pages: HashMap<&'static str, Arc<RenderImage>>,
     painted: Language,
@@ -64,6 +66,7 @@ impl LaunchView {
             offer: None,
             focus: cx.focus_handle(),
             offer_focus: cx.focus_handle().tab_stop(true),
+            starter_focus: STARTERS.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
             pages: HashMap::new(),
             painted: language(),
             stale: Vec::new(),
@@ -114,6 +117,7 @@ impl LaunchView {
         &self,
         tokens: &Tokens,
         starter: &'static Starter,
+        focus: &FocusHandle,
         width: Pixels,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -130,6 +134,7 @@ impl LaunchView {
         div()
             .id(starter.slug)
             .button(tokens, name)
+            .track_focus(focus)
             .w(width)
             .p(tokens::SPACE_2)
             .flex()
@@ -154,6 +159,20 @@ impl LaunchView {
                         .child(crate::t!(starter.description)),
                 ),
             )
+    }
+
+    /// Left and Right move the keys between the starters, stopping at the first and the last.
+    fn step_starters(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(at) = self.starter_focus.iter().position(|focus| focus.is_focused(window)) else {
+            return false;
+        };
+        let next = if forward {
+            (at + 1).min(self.starter_focus.len() - 1)
+        } else {
+            at.saturating_sub(1)
+        };
+        window.focus(&self.starter_focus[next], cx);
+        true
     }
 
     /// The first launch's question about the writing partner: what it does, what it needs, and the two answers.
@@ -267,9 +286,8 @@ impl Render for LaunchView {
         let width = (window.viewport_size().width - tokens::SPACE_4 * 2.).min(tokens::LAUNCH_WIDTH);
         let starter_width = ((width - tokens::SPACE_2 * 2. - px(2.)) / STARTERS.len() as f32).floor();
         let offering = crate::settings::get(cx).offers_agent();
-        let starters: Vec<_> = STARTERS
-            .iter()
-            .map(|starter| self.starter_card(&tokens, starter, starter_width, cx))
+        let starters: Vec<_> = (STARTERS.iter().zip(&self.starter_focus))
+            .map(|(starter, focus)| self.starter_card(&tokens, starter, focus, starter_width, cx))
             .collect();
         div()
             .flex_1()
@@ -281,11 +299,15 @@ impl Render for LaunchView {
             .track_focus(&self.focus)
             .on_action(|_: &crate::workspace::FocusNext, window, cx| crate::a11y::tab(true, window, cx))
             .on_action(|_: &crate::workspace::FocusPrevious, window, cx| crate::a11y::tab(false, window, cx))
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
-                    cx.emit(LaunchEvent::Dismiss);
-                }
-            }))
+            .on_key_down(cx.listener(
+                |view, event: &KeyDownEvent, window, cx| match event.keystroke.key.as_str() {
+                    "escape" => cx.emit(LaunchEvent::Dismiss),
+                    "left" | "right" if view.step_starters(event.keystroke.key == "right", window, cx) => {
+                        cx.stop_propagation();
+                    }
+                    _ => {}
+                },
+            ))
             .bg(tokens.canvas)
             .child(
                 div()
