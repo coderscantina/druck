@@ -556,8 +556,9 @@ impl EditorView {
         }
     }
 
-    /// Cmd+Z in the field undoes its own typing first, and then, with nothing typed, the last change to the table.
-    fn grid_undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Cmd+Z in the field undoes its own typing first, and then, with nothing typed, the last change to the table, in
+    /// the session's order. Cmd+Shift+Z redoes the same way.
+    fn grid_history(&mut self, undo: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(float) = self.grid_float() else {
             return;
         };
@@ -570,7 +571,12 @@ impl EditorView {
                 .is_some_and(|old| old.text == typed),
         });
         if unchanged {
-            if self.undo_once(window, cx) {
+            let same_text = if undo {
+                self.undo_once(window, cx)
+            } else {
+                self.redo_once(window, cx)
+            };
+            if same_text {
                 self.autoscroll = false;
                 self.open_table_place(start, place, window, cx);
             } else {
@@ -831,7 +837,8 @@ impl EditorView {
                 this.leave_grid(true, window, cx);
                 cx.stop_propagation();
             }))
-            .capture_action(cx.listener(|this, _: &input::Undo, window, cx| this.grid_undo(window, cx)))
+            .capture_action(cx.listener(|this, _: &input::Undo, window, cx| this.grid_history(true, window, cx)))
+            .capture_action(cx.listener(|this, _: &input::Redo, window, cx| this.grid_history(false, window, cx)))
             .on_action(cx.listener(|this, _: &NextField, window, cx| this.grid_step_cell(true, window, cx)))
             .on_action(cx.listener(|this, _: &PreviousField, window, cx| this.grid_step_cell(false, window, cx)))
             .on_action(cx.listener(|this, _: &StepColumnAlign, window, cx| this.grid_set_align(None, window, cx)))
