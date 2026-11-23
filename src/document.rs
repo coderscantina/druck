@@ -31,6 +31,9 @@ pub struct Document {
     pub index_marks: Vec<IndexMark>,
     /// The `{todo: text}` placeholders in source order. A final export fails while any remain.
     pub todos: Vec<Todo>,
+    /// The placeholders whose value depends on the page, such as `{pages}`, in source order. Layout places an
+    /// anchor at each and settles what they show. [`Inline::Field::page`] refers to them by index.
+    pub page_fields: Vec<PageField>,
     /// Where the blocks are written, when a source map was asked for.
     pub sources: Option<Sources>,
 }
@@ -43,6 +46,13 @@ pub struct Todo {
     pub at: Location,
     /// The note without the `todo:` label, white space runs as one space.
     pub text: String,
+}
+
+/// A placeholder that shows what the page it lands on shows in its header, such as `{page}` or `{section}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageField {
+    pub at: Location,
+    pub placeholder: Placeholder,
 }
 
 /// An index mark, `{^entry!sub-entry}` or `[text]{^}`, with an optional `|see` or `|see also` reference.
@@ -332,6 +342,8 @@ pub enum Inline {
         placeholder: Placeholder,
         at: Location,
         style: InlineStyle,
+        /// The index into [`Document::page_fields`] of a placeholder that depends on the page.
+        page: Option<usize>,
     },
     /// An index mark: an index into [`Document::index_marks`]. It shows nothing; layout places an anchor here.
     IndexMark(usize),

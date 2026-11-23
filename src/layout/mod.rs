@@ -66,6 +66,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 
+use self::bands::PageValues;
 use self::fields::Fields;
 use self::notes::NoteStyles;
 use self::numbering::Numbering;
@@ -162,6 +163,7 @@ pub fn layout(
         first: usize::from(title_page.is_some()) + usize::from(blank.is_some()),
     };
     let shown = structure.shown_pages(config);
+    let values: Vec<usize> = structure.fields.iter().map(|(anchor, _)| *anchor).collect();
     let (
         Laid {
             mut body,
@@ -170,7 +172,21 @@ pub fn layout(
             texts,
         },
         anchors,
-    ) = settle(&structure.anchors, &shown, source, cancel, |assumed| pass.run(assumed))?;
+        showing,
+    ) = settle(&structure.anchors, &shown, &values, source, cancel, |assumed| {
+        pass.run(assumed)
+    })?;
+    let empty = (structure.fields.iter()).filter(|(anchor, _)| showing[*anchor].trim().is_empty());
+    let empty: Vec<Diagnostic> = empty
+        .map(|(anchor, placeholder)| {
+            let at = structure.anchors[*anchor].0;
+            let message = format!("{{{placeholder}}} has no value on page {}", anchors[*anchor].page + 1);
+            Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)
+        })
+        .collect();
+    if !empty.is_empty() {
+        return Err(empty.into());
+    }
     let no_number = |anchor: &usize| numbering.page(anchors[*anchor].page).is_none();
     let error = |anchor: usize, shows: &str| {
         let (at, what) = &structure.anchors[anchor];
@@ -378,42 +394,41 @@ pub(crate) fn check(
     fields.check(document, source)
 }
 
-/// Repeats `pass` until the page number of every anchor in `shown` is the one the pass assumed for it,
-/// and returns the pages and anchor positions of that pass. A pass also returns the number each page
-/// shows, empty for none. The first pass assumes page 1 everywhere. Without shown pages one pass is
-/// enough. Page numbers that keep moving are reported at the anchor that moved, after [`PASSES`] passes.
+/// Repeats `pass` until what every anchor in `shown` shows is what the pass assumed for it, and returns
+/// the pages, the anchor positions, and what each anchor shows in that pass. A pass returns for each anchor
+/// the number of its page, empty for none, or for the anchors in `values`, which are page placeholders, their
+/// value there. The first pass assumes "1" everywhere. Without shown anchors one pass is enough. What keeps
+/// changing is reported at the anchor that changed, after [`PASSES`] passes.
 fn settle<T>(
     anchors: &[(Location, String)],
     shown: &[usize],
+    values: &[usize],
     source: &InputSource,
     cancel: &Cancel,
     mut pass: impl FnMut(&[String]) -> Result<(T, Vec<Position>, Vec<String>), Failure>,
-) -> Result<(T, Vec<Position>), Failure> {
+) -> Result<(T, Vec<Position>, Vec<String>), Failure> {
     let mut assumed = vec!["1".to_owned(); anchors.len()];
     let mut count = 0;
     loop {
         cancel.check(CheckPoint::Pass)?;
-        let (laid, positions, numbers) = pass(&assumed)?;
+        let (laid, positions, showing) = pass(&assumed)?;
         count += 1;
-        let number = |anchor: usize| &numbers[positions[anchor].page];
-        let moved = shown.iter().copied().find(|&anchor| *number(anchor) != assumed[anchor]);
+        let moved = shown.iter().copied().find(|&anchor| showing[anchor] != assumed[anchor]);
         let Some(anchor) = moved else {
-            return Ok((laid, positions));
+            return Ok((laid, positions, showing));
         };
         if count == PASSES {
             let (at, what) = &anchors[anchor];
-            let message = format!(
-                "page numbers did not settle after {PASSES} layout passes: {what} moves between page {} and \
-                 page {}",
-                assumed[anchor],
-                number(anchor)
-            );
+            let (before, after) = (&assumed[anchor], &showing[anchor]);
+            let change = if values.contains(&anchor) {
+                format!("shows \"{before}\", then \"{after}\"")
+            } else {
+                format!("moves between page {before} and page {after}")
+            };
+            let message = format!("page numbers did not settle after {PASSES} layout passes: {what} {change}");
             return Err(vec![Diagnostic::new(Some(source.clone()), message).at(at.line, at.column)].into());
         }
-        assumed = positions
-            .iter()
-            .map(|position| numbers[position.page].clone())
-            .collect();
+        assumed = showing;
     }
 }
 
@@ -437,8 +452,8 @@ struct Pass<'a> {
 }
 
 impl Pass<'_> {
-    /// Lays out the body with `assumed` page numbers for the anchors, and returns the body pages with the
-    /// numbers of all pages, where each anchor is in the whole document, and the number each page shows.
+    /// Lays out the body with what the anchors are `assumed` to show, and returns the body pages with the
+    /// numbers of all pages, where each anchor is in the whole document, and what each anchor shows there.
     fn run(&self, assumed: &[String]) -> Result<(Laid, Vec<Position>, Vec<String>), Failure> {
         let (content, matters, tags, texts) = self.content(assumed)?;
         let body = pages::compose(content, self.first, self.config, self.source, self.cancel)?;
@@ -454,7 +469,7 @@ impl Pass<'_> {
                 }
             }
         }
-        let positions = positions
+        let positions: Vec<Position> = positions
             .into_iter()
             .map(|position| position.expect("layout places every anchor"))
             .collect();
@@ -466,8 +481,19 @@ impl Pass<'_> {
                 Some((self.first + page, matter))
             })
             .collect();
-        let numbering = Numbering::new(self.first + body.pages.len(), &starts, self.config);
+        let pages = self.first + body.pages.len();
+        let numbering = Numbering::new(pages, &starts, self.config);
         let numbers = numbering.texts();
+        let mut showing: Vec<String> = (positions.iter())
+            .map(|position| numbers[position.page].clone())
+            .collect();
+        if !self.structure.fields.is_empty() {
+            let values = PageValues::new(self.structure, &positions, pages);
+            for (anchor, placeholder) in &self.structure.fields {
+                let page = positions[*anchor].page;
+                showing[*anchor] = values.text(page, placeholder, &numbering).unwrap_or_default();
+            }
+        }
         Ok((
             Laid {
                 body,
@@ -476,7 +502,7 @@ impl Pass<'_> {
                 texts,
             },
             positions,
-            numbers,
+            showing,
         ))
     }
 
@@ -1620,7 +1646,8 @@ impl<'a> Flow<'a> {
 
     /// Replaces cross-references, citations, and placeholders with their text, cross-references and
     /// citations linked to their anchor, and index marks with their anchors. A page reference shows the
-    /// page this pass assumes. Each work in a citation links to its bibliography entry.
+    /// page this pass assumes, and a page placeholder its anchor and the value this pass assumes. Each work
+    /// in a citation links to its bibliography entry.
     fn resolve<'c>(&self, content: &'c [Inline]) -> Cow<'c, [Inline]> {
         if !content.iter().any(|inline| {
             matches!(
@@ -1657,6 +1684,19 @@ impl<'a> Flow<'a> {
                         },
                         source: Spans::default(),
                     }));
+                }
+                Inline::Field {
+                    page: Some(field),
+                    style,
+                    ..
+                } => {
+                    let anchor = self.structure.fields[*field].0;
+                    resolved.push(Inline::Anchor(anchor));
+                    resolved.push(Inline::Text {
+                        text: self.assumed[anchor].clone(),
+                        style: style.clone(),
+                        source: Spans::default(),
+                    });
                 }
                 Inline::Field { placeholder, style, .. } => resolved.push(Inline::Text {
                     text: self.fields.text(placeholder).expect("fields are checked before layout"),

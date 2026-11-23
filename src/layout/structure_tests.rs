@@ -310,6 +310,34 @@ fn body_placeholders_show_statistics_and_metadata_that_do_not_count_themselves()
 }
 
 #[test]
+fn page_placeholders_in_the_text_show_what_their_page_shows() {
+    let body = "# One\n\nPage {page} of {pages} in {section}, {section-page} of {section-pages}.\n\n\
+        ::: page-break\n# Two\n\nPage {page} of {pages} in {section}, {section-page} of {section-pages}.\n\n\
+        ::: page-break\nLast.";
+    let output = render(&config("{}", theme()), body);
+    let texts: Vec<_> = output.pages.iter().map(texts).collect();
+    assert!(
+        texts[0].contains(&"Page 1 of 3 in 1 One, 1 of 1.".to_owned()),
+        "{texts:?}"
+    );
+    assert!(
+        texts[1].contains(&"Page 2 of 3 in 2 Two, 1 of 2.".to_owned()),
+        "{texts:?}"
+    );
+
+    let errors = render_images(
+        &config("{}", theme()),
+        "Before {section}.\n\n::: page-break\n# One",
+        &[],
+    )
+    .unwrap_err();
+    let errors: Vec<_> = (errors.iter())
+        .map(|e| (e.location.map(|at| (at.line, at.column)), e.message.as_str()))
+        .collect();
+    assert_eq!(errors, [(Some((1, 8)), "{section} has no value on page 1")]);
+}
+
+#[test]
 fn a_reading_speed_in_meta_replaces_the_languages() {
     let body = "One two three four five six.\n\nRead in {reading-time} minutes.";
     let at = |meta: &str| texts(&render(&config(meta, theme()), body).pages[0]);
@@ -472,10 +500,10 @@ fn settling_repeats_layout_until_shown_pages_agree_and_reports_pages_that_keep_m
     let run = |shown: &[usize], next: fn(usize) -> usize| {
         let mut passes = 0;
         let numbers: Vec<String> = (1..=5).map(|page: usize| page.to_string()).collect();
-        let result = settle(&anchors, shown, &source(), &Cancel::default(), |assumed| {
+        let result = settle(&anchors, shown, &[], &source(), &Cancel::default(), |assumed| {
             passes += 1;
             let page = next(assumed[0].parse().expect("a number"));
-            Ok(((), vec![position(page)], numbers.clone()))
+            Ok(((), vec![position(page)], vec![numbers[page - 1].clone()]))
         });
         (passes, result.map(|_| ()).map_err(Failure::into_errors))
     };

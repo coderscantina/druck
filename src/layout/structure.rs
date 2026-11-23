@@ -11,11 +11,15 @@
 //!
 //! The index's heading is one too, with the `index` label. Each index mark has an anchor, and the heading it
 //! falls under, which a footnote's marks take from the footnote's reference.
+//!
+//! Each placeholder that depends on the page, such as `{pages}` in the text, has an anchor too, whose page
+//! decides what it shows.
 
 use std::collections::HashMap;
 
 use crate::bibliography::Reference;
 use crate::config::resolved::{Config, CustomStyle};
+use crate::config::template::Placeholder;
 use crate::document::{Block, Document, Inline, Location, Matter};
 use crate::index::Index;
 
@@ -39,6 +43,8 @@ pub(crate) struct Structure {
     pub mark_headings: Vec<Option<usize>>,
     /// The index, if the document has marks.
     pub index: Option<Index>,
+    /// The anchor and placeholder of each of [`Document::page_fields`].
+    pub fields: Vec<(usize, Placeholder)>,
     /// The labels that page references point to.
     paged: Vec<String>,
     /// The anchor and reference text of each label.
@@ -86,6 +92,7 @@ impl Structure {
             marks: Vec::new(),
             mark_headings: vec![None; document.index_marks.len()],
             index: Index::new(document),
+            fields: Vec::new(),
             paged: Vec::new(),
             labels: HashMap::new(),
         };
@@ -112,6 +119,10 @@ impl Structure {
             let anchor = walk.anchor(mark.at, format!("the index mark \"{}\"", mark.terms.join("!")));
             walk.structure.marks.push(anchor);
         }
+        for field in &document.page_fields {
+            let anchor = walk.anchor(field.at, format!("the placeholder {{{}}}", field.placeholder));
+            walk.structure.fields.push((anchor, field.placeholder.clone()));
+        }
         structure
     }
 
@@ -130,9 +141,9 @@ impl Structure {
         anchors
     }
 
-    /// The anchors whose page numbers the document shows: headings in the table of contents and the
-    /// targets of page references. Running headers and footers do not count, since they never change
-    /// the layout.
+    /// The anchors whose page numbers the document shows: headings in the table of contents, the
+    /// targets of page references, and page placeholders in the text, which show a value of their page.
+    /// Running headers and footers do not count, since they never change the layout.
     pub fn shown_pages(&self, config: &Config) -> Vec<usize> {
         let document = &config.document;
         let contents = self
@@ -141,7 +152,8 @@ impl Structure {
             .filter(|heading| self.has_contents(config) && heading.listed && heading.level <= document.toc_depth.get())
             .map(|heading| heading.anchor);
         let references = self.paged();
-        let mut anchors: Vec<usize> = contents.chain(references).chain(self.indexed()).collect();
+        let fields = self.fields.iter().map(|(anchor, _)| *anchor);
+        let mut anchors: Vec<usize> = (contents.chain(references).chain(self.indexed()).chain(fields)).collect();
         anchors.sort_unstable();
         anchors.dedup();
         anchors

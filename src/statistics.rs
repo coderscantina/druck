@@ -327,6 +327,7 @@ mod tests {
             placeholder: Placeholder::Words,
             at: AT,
             style: InlineStyle::default(),
+            page: None,
         };
         let content = vec![
             text("This text has "),

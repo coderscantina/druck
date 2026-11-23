@@ -75,6 +75,18 @@ pub fn write(book: &Book) -> Result<Written, Failure> {
     let Book { document, config, .. } = *book;
     let fields = Fields::new(document, config, book.today);
     crate::layout::check(document, config, &fields, book.source)?;
+    let paged: Vec<Diagnostic> = (document.page_fields.iter())
+        .map(|field| {
+            let message = format!(
+                "{{{}}} depends on the page, and an EPUB has no pages",
+                field.placeholder
+            );
+            Diagnostic::new(Some(book.source.clone()), message).at(field.at.line, field.at.column)
+        })
+        .collect();
+    if !paged.is_empty() {
+        return Err(paged.into());
+    }
     let metadata = &config.metadata;
     let lang = match config.document.lang {
         Lang::En => "en",

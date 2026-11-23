@@ -734,7 +734,7 @@ What changes from the PDF:
 - **Footnotes:** notes follow at the end of the file that references them, and readers that support EPUB notes show them in a pop-up. Sidenotes are footnotes there too.
 - **Margin notes:** a margin note follows the paragraph, heading, or list item that references it, set apart in the note style, since an ebook has no margin column.
 - **Placement:** figures and tables stay where they are written.
-- **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF.
+- **Placeholders:** `{words}`, `{build-date}`, and the other values that do not depend on the page fill in as in the PDF. A placeholder that depends on the page, such as `{page}`, is an error, since an EPUB has no pages.
 - **Bottom groups:** a `::: bottom` group ends its file, so a copyright page stays a page of its own, but its text starts at the top, since readers cannot place text at the bottom of a screen.
 - **Left out:** page numbers, headers and footers, page variants, two columns, keep groups, and the draft watermark. `--bleed` and `--crop-marks` are errors with an EPUB output path.
 
@@ -845,16 +845,17 @@ This report has {words} words and takes about {reading-time} minutes to read.
 | `{reading-time}` | Minutes of silent reading, rounded up: 228 words a minute in English, 179 in German, or `meta.reading-speed`, as in `reading-speed: 250`. |
 | `{figures}`, `{tables}` | Figures and tables with a caption, the numbered ones. |
 | `{build-date}`, `{year}` | The day the document is rendered, as in "7 October 2026", and its year. |
+| `{page}`, `{pages}`, `{section}`, `{subsection}`, `{section-page}`, `{section-pages}` | What a [header or footer](THEMES.md#header-and-footer-bands) shows on the page the placeholder lands on, as in "page {page} of {pages}". |
 | `{draft}` | The draft label, "Draft" or "Entwurf", when `draft: true`. |
 
-The value is set in the style of the text around it. Counts are grouped by thousands for the document language, as in "12,480" or "12.480".
+The value is set in the style of the text around it. Counts are grouped by thousands for the document language, as in "12,480" or "12.480". A page placeholder takes its value once the pages are laid out, and Druck lays the pages out again while a value changes the text enough to move it, up to five times.
 
 Placeholders are read in paragraphs, lists, quotations, table cells, captions, and footnotes, but not in headings or code. Write `\{` for a brace that should stay text. Braces around anything other than a name, such as `{a, b}` or `{.name}`, stay text too.
 
 These are errors with their location:
 
 - An unknown name, such as `{wrods}`.
-- A placeholder that depends on the page, such as `{page}` or `{section}`. Those are for [headers and footers](THEMES.md#header-and-footer-bands).
+- A page placeholder without a value where it lands, such as `{section}` on a page before the first chapter.
 - A placeholder in a heading.
 - A placeholder without a value, such as `{subtitle}` in a document without a subtitle, or `{draft}` outside a draft.
 

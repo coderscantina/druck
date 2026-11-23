@@ -52,15 +52,9 @@ pub(super) fn draw(
     fonts: &Fonts,
 ) -> Result<(), Vec<Diagnostic>> {
     let geometry = &config.page;
-    let headings: Vec<(usize, u8, String)> = structure
-        .headings
-        .iter()
-        .map(|heading| (anchors[heading.anchor].page, heading.level, heading.title()))
-        .collect();
-    let marks = marks(&headings, pages.len());
-    let section_pages = section_pages(&marks);
+    let shown = PageValues::new(structure, anchors, pages.len());
     let title_page = config.document.title_page;
-    let mut openings: Vec<usize> = (headings.iter())
+    let mut openings: Vec<usize> = (shown.headings.iter())
         .filter(|heading| heading.1 == 1)
         .map(|heading| heading.0)
         .collect();
@@ -71,20 +65,12 @@ pub(super) fn draw(
             continue;
         }
         let opening = openings.binary_search(&index).is_ok();
-        let (number, total) = (numbering.page(index), numbering.pages(index));
-        let title_like = (title_page && index == 0) || number.is_none();
+        let title_like = (title_page && index == 0) || numbering.page(index).is_none();
         let (name, variant) = variant(config, index, title_like, first, opening);
-        let (section, subsection) = marks[index];
-        let title = |heading: Option<usize>| heading.map(|heading| Value::Text(headings[heading].2.clone()));
-        let in_section = section_pages[index];
-        let value = |placeholder: &Placeholder| match placeholder {
-            Placeholder::Section => title(section),
-            Placeholder::Subsection => title(subsection),
-            Placeholder::Page => number.clone().map(Value::Text),
-            Placeholder::Pages => total.clone().map(Value::Text),
-            Placeholder::SectionPage => in_section.map(|(page, _)| Value::Text(page.to_string())),
-            Placeholder::SectionPages => in_section.map(|(_, pages)| Value::Text(pages.to_string())),
-            other => fields.value(other),
+        let value = |placeholder: &Placeholder| match shown.text(index, placeholder, numbering) {
+            Some(text) => Some(Value::Text(text)),
+            None if placeholder.is_page_dependent() => None,
+            None => fields.value(placeholder),
         };
         if let Some(mark) = &config.watermark {
             match watermark::item(mark, &value, page, config, fonts) {
@@ -152,6 +138,49 @@ fn variant(config: &Config, index: usize, title: bool, first: usize, opening: bo
         .into_iter()
         .find_map(|(name, variant)| Some((name, variant?)))
         .expect("the body variant always exists")
+}
+
+/// What the placeholders that depend on the page show on each page, for bands and the text alike.
+pub(super) struct PageValues {
+    /// Each heading's page index, level, and title, in document order.
+    headings: Vec<(usize, u8, String)>,
+    marks: Vec<(Option<usize>, Option<usize>)>,
+    section_pages: Vec<Option<(usize, usize)>>,
+}
+
+impl PageValues {
+    /// The values of `pages` pages, with the headings where `anchors` put them.
+    pub fn new(structure: &Structure, anchors: &[Position], pages: usize) -> Self {
+        let headings: Vec<(usize, u8, String)> = structure
+            .headings
+            .iter()
+            .map(|heading| (anchors[heading.anchor].page, heading.level, heading.title()))
+            .collect();
+        let marks = marks(&headings, pages);
+        let section_pages = section_pages(&marks);
+        Self {
+            headings,
+            marks,
+            section_pages,
+        }
+    }
+
+    /// What a page placeholder shows on the page at `index`, numbered by `numbering`. `None` for one without a
+    /// value there and for a placeholder that does not depend on the page.
+    pub fn text(&self, index: usize, placeholder: &Placeholder, numbering: &Numbering) -> Option<String> {
+        let (section, subsection) = self.marks[index];
+        let title = |heading: Option<usize>| heading.map(|heading| self.headings[heading].2.clone());
+        let in_section = self.section_pages[index];
+        match placeholder {
+            Placeholder::Section => title(section),
+            Placeholder::Subsection => title(subsection),
+            Placeholder::Page => numbering.page(index),
+            Placeholder::Pages => numbering.pages(index),
+            Placeholder::SectionPage => in_section.map(|(page, _)| page.to_string()),
+            Placeholder::SectionPages => in_section.map(|(_, pages)| pages.to_string()),
+            _ => None,
+        }
+    }
 }
 
 /// The headings that `{section}` and `{subsection}` show on each page, as indexes into `headings`, which

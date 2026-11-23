@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 
 use crate::cancel::Cancel;
 use crate::input::{Date, DocumentText, Input, Overrides, ThemeDirs, ThemeSelection};
-use crate::renderer::{Failure, LayoutOptions, Missing, PdfOptions, Renderer};
+use crate::renderer::{EpubOptions, Failure, LayoutOptions, Missing, PdfOptions, Renderer};
 use crate::resource::{Bytes, FileResolver, MemoryResolver, Origin, ResolveError, Resolver};
 use crate::text::bundled;
 
@@ -598,4 +598,24 @@ fn a_final_export_refuses_what_is_missing() {
             }),
         })
     );
+}
+
+#[test]
+fn page_placeholders_in_the_text_are_errors_in_an_epub_only() {
+    let input = document("Page {page} of {pages}.\n", memory_dir(), "doc.md", no_theme());
+    let (renderer, resolver, cancel) = (Renderer::new(), MemoryResolver::new(), Cancel::default());
+    let configured = renderer
+        .job(&resolver, &input, &cancel)
+        .configure()
+        .expect("configures");
+    let epub = configured.epub(&EpubOptions::default()).map(|rendered| rendered.bytes);
+    let messages: Vec<_> = errors(epub).into_iter().map(|error| error.message).collect();
+    assert_eq!(
+        messages,
+        [
+            "{page} depends on the page, and an EPUB has no pages",
+            "{pages} depends on the page, and an EPUB has no pages"
+        ]
+    );
+    assert!(try_pdf(&renderer, &resolver, &input).is_ok());
 }

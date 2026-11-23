@@ -1,5 +1,5 @@
 //! Placeholder values that do not depend on the page: metadata, text statistics, the build date, and
-//! the draft label. Slots and the body share them; bands add the page values.
+//! the draft label. Slots and the body share them; the page values are the [bands](super::bands)'.
 //!
 //! Counts are grouped by thousands for the document language, as in "12,480" and "12.480".
 
@@ -80,12 +80,18 @@ impl<'a> Fields<'a> {
         }
     }
 
-    /// Reports each placeholder in the body and footnotes without a value, at the placeholder.
+    /// Reports each placeholder in the body and footnotes without a value, at the placeholder. Page
+    /// placeholders have theirs once the pages are laid out.
     pub fn check(&self, document: &Document, source: &InputSource) -> Result<(), Vec<Diagnostic>> {
         let mut errors = Vec::new();
         let mut visit = |content: &[Inline]| {
             for inline in content {
-                if let Inline::Field { placeholder, at, .. } = inline
+                if let Inline::Field {
+                    placeholder,
+                    at,
+                    page: None,
+                    ..
+                } = inline
                     && self.text(placeholder).is_none()
                 {
                     let message = match placeholder {
