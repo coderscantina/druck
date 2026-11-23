@@ -2,7 +2,7 @@
 //! click or the walking keys go to a problem's place on the pages, and Write opens there next.
 
 use gpui::prelude::*;
-use gpui::{Context, EventEmitter, FontWeight, ScrollHandle, SharedString, Window, div};
+use gpui::{Context, EventEmitter, FocusHandle, FontWeight, ScrollHandle, SharedString, Window, div};
 
 use super::report::{Counts, Entry, Kind, Report};
 use super::text::Key;
@@ -39,10 +39,12 @@ pub struct DiagnosticsPanel {
     scroll: ScrollHandle,
     /// What another part of the app shows above the list: the typesetter's fixes.
     above: Option<gpui::AnyView>,
+    /// The panel itself, which is no stop of its own, for giving the keys to its first control.
+    focus: FocusHandle,
 }
 
 impl DiagnosticsPanel {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             items: Vec::new(),
             counts: super::report::Counts::default(),
@@ -50,7 +52,26 @@ impl DiagnosticsPanel {
             current: None,
             scroll: ScrollHandle::new(),
             above: None,
+            focus: cx.focus_handle(),
         }
+    }
+
+    /// Gives the keys to the panel's first control once it is drawn: the fixes' command above the list, or the first row.
+    /// With none, the panel holds them, so they stay in it. The step waits a frame more, since the frame drawn as the tab
+    /// is asked for may still be Write's, whose tab order has no panel.
+    pub fn take_keys(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        cx.on_next_frame(window, |_, window, cx| {
+            cx.on_next_frame(window, |panel, window, cx| {
+                if !panel.focus.is_focused(window) {
+                    return;
+                }
+                crate::a11y::tab(true, window, cx);
+                if !panel.focus.contains_focused(window, cx) {
+                    window.focus(&panel.focus, cx);
+                }
+            });
+        });
     }
 
     pub fn set_above(&mut self, view: gpui::AnyView) {
@@ -178,6 +199,7 @@ impl Render for DiagnosticsPanel {
         let rows: Vec<_> = (0..self.items.len()).map(|at| self.row(at, &tokens, cx)).collect();
         div()
             .id("diagnostics")
+            .track_focus(&self.focus)
             .flex_1()
             .min_h_0()
             .flex()
