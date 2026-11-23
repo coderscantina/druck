@@ -351,7 +351,15 @@ impl EditorView {
         let text = self.session.active_buffer().text();
         let written = text[word.clone()].to_owned();
         let language = self.spelling_language();
-        let mut suggestions = self.spelling.checker.suggestions(&written, &language);
+        let paragraph = self
+            .blocks
+            .as_slice()
+            .iter()
+            .find(|block| block.range.contains(&word.start))
+            .and_then(|block| prose_of(block.kind, &text[block.range.clone()]))
+            .map(|prose| prose.text)
+            .unwrap_or_default();
+        let mut suggestions = self.spelling.checker.suggestions(&written, &paragraph, &language);
         suggestions.truncate(SUGGESTIONS);
         self.set_selection(
             Selection {

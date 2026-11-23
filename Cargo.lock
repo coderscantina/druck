@@ -1339,7 +1339,6 @@ dependencies = [
 name = "druck-desktop"
 version = "0.0.0"
 dependencies = [
- "block2 0.6.2",
  "clap",
  "druck",
  "futures",

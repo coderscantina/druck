@@ -11,14 +11,16 @@ use std::rc::Rc;
 /// Called with the misspelled words' byte ranges in the text, on any thread.
 pub type Done = Box<dyn FnOnce(Vec<Range<usize>>) + Send>;
 
-/// A platform's spell checker. `language` is the document's `lang`.
+/// A platform's spell checker. `language` is the document's `lang`, and each paragraph is checked in the language it is
+/// written in where the checker can tell, in the document's otherwise.
 pub trait Checker {
-    /// Checks `text` off the calling thread and calls `done` when it knows. A language the system has no dictionary for
-    /// finds nothing.
+    /// Checks the paragraph `text` off the calling thread and calls `done` when it knows. A language the system has no
+    /// dictionary for finds nothing.
     fn check(&self, text: String, language: &str, done: Done);
 
-    /// What the word might have been, best first. Asked for when the writer asks, on the main thread.
-    fn suggestions(&self, word: &str, language: &str) -> Vec<String>;
+    /// What the word in `paragraph` might have been, best first, in the paragraph's language. Asked for when the writer
+    /// asks, on the main thread.
+    fn suggestions(&self, word: &str, paragraph: &str, language: &str) -> Vec<String>;
 }
 
 /// No spell checker: nothing is ever misspelled.
@@ -31,7 +33,7 @@ impl Checker for NoChecker {
         done(Vec::new());
     }
 
-    fn suggestions(&self, _: &str, _: &str) -> Vec<String> {
+    fn suggestions(&self, _: &str, _: &str, _: &str) -> Vec<String> {
         Vec::new()
     }
 }
