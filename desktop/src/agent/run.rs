@@ -12,8 +12,9 @@ use super::passes::{self, Listed, Origin, Pass, Returns, Target};
 use super::session::Access;
 use super::strings::{self, Key};
 use super::{AgentView, relative, style_sheet};
+use crate::inspector::Tab;
 use crate::session::Kind;
-use crate::workspace::Current;
+use crate::workspace::{Current, Mode};
 
 /// How long the line at the window's foot says how a run ended.
 const RESULT_SHOWN: Duration = Duration::from_secs(8);
@@ -165,10 +166,12 @@ impl AgentView {
         cx.notify();
     }
 
-    /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended.
-    pub(super) fn pass_line(&self) -> Option<String> {
+    /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended. A run of the
+    /// typesetter is left to the Proof panel while Publish shows it, so the run shows once.
+    pub(super) fn pass_line(&self, cx: &App) -> Option<String> {
+        let in_panel = self.mode == Mode::Publish && self.inspector.read(cx).active() == Tab::Proof;
         (self.pass_run.as_ref().map(PassRun::progress))
-            .or_else(|| self.fix_line())
+            .or_else(|| self.fix_line().filter(|_| !in_panel))
             .or_else(|| self.pass_result.clone())
     }
 

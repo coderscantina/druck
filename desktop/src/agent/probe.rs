@@ -211,7 +211,7 @@ impl AgentView {
                 .collect::<Vec<_>>()
                 .join(", "),
             self.warnings_to_fix(cx),
-            self.pass_line().unwrap_or_default(),
+            self.pass_line(cx).unwrap_or_default(),
             self.conversation.approvals().count(),
             editor.review().len(),
             self.notes.all().len(),
