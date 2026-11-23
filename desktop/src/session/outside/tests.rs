@@ -127,6 +127,30 @@ fn typing_after_an_outside_change_comes_back_first_and_elsewhere_stays() {
 }
 
 #[test]
+fn typing_right_after_an_outside_change_is_its_own_step_and_comes_back_first() {
+    let mut single = Single::new("coalesce");
+    single.type_in(2, "Third.", "Third, mine.");
+    let mine = single.text();
+    let theirs = mine.replace("First.", "First, theirs.");
+    single.outside(&theirs);
+    // Within a second, at the caret the typing before left: it would join that step.
+    single.type_in(2, "mine.", "mine, again.");
+
+    single.undo();
+    assert_eq!(single.text(), theirs);
+    single.undo();
+    assert_eq!(single.text(), mine);
+
+    // Typing after an undo is newer than the change too, also where it would join the step below.
+    single.redo();
+    single.type_in(2, "mine.", "mine, again.");
+    single.undo();
+    single.type_in(2, "mine.", "mine, once more.");
+    single.undo();
+    assert_eq!(single.text(), theirs);
+}
+
+#[test]
 fn a_heading_typed_in_a_new_section_leaves_the_change_unreachable() {
     let mut single = Single::new("resplit");
     let theirs = TEXT.replace("First.", "First, theirs.");

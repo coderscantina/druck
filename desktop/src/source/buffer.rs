@@ -90,6 +90,13 @@ pub struct Splice {
     pub new_end: usize,
 }
 
+impl Splice {
+    /// The span of this change and a `later` one together.
+    pub fn then(self, later: Self) -> Self {
+        merge(self, later)
+    }
+}
+
 /// A transaction rejected before any of it applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditError {
@@ -128,6 +135,8 @@ struct Group {
     last_edit: Instant,
     before: Selection,
     after: Selection,
+    /// The buffer's [`Buffer::clock`] when the group was made, undone, or redone last.
+    moved: u64,
 }
 
 pub struct Buffer {
@@ -137,6 +146,10 @@ pub struct Buffer {
     revision: u64,
     /// What the change to this revision touched.
     last_splice: Option<Splice>,
+    /// Counts the undo steps made, undone, and redone.
+    clock: u64,
+    /// Whether the next edit starts a new undo step, whatever its kind.
+    closed: bool,
 }
 
 impl Buffer {
@@ -147,6 +160,8 @@ impl Buffer {
             redo: Vec::new(),
             revision: 0,
             last_splice: None,
+            clock: 0,
+            closed: false,
         }
     }
 
@@ -192,20 +207,25 @@ impl Buffer {
         self.redo.clear();
         self.revision += 1;
         self.last_splice = Some(splice);
+        let closed = std::mem::take(&mut self.closed);
         match self.undo.last_mut() {
-            Some(group) if group.after == before && kind.joins(group.kind, now - group.last_edit) => {
+            Some(group) if !closed && group.after == before && kind.joins(group.kind, now - group.last_edit) => {
                 group.steps.push(step);
                 group.kind = kind;
                 group.last_edit = now;
                 group.after = after;
             }
-            _ => self.undo.push(Group {
-                steps: vec![step],
-                kind,
-                last_edit: now,
-                before,
-                after,
-            }),
+            _ => {
+                self.clock += 1;
+                self.undo.push(Group {
+                    steps: vec![step],
+                    kind,
+                    last_edit: now,
+                    before,
+                    after,
+                    moved: self.clock,
+                });
+            }
         }
         Ok(splice)
     }
@@ -228,24 +248,44 @@ impl Buffer {
                 group.last_edit = now;
                 group.after = after;
             }
-            None => self.undo.push(Group {
-                steps: vec![step],
-                kind: EditKind::Discrete,
-                last_edit: now,
-                before: after,
-                after,
-            }),
+            None => {
+                self.clock += 1;
+                self.undo.push(Group {
+                    steps: vec![step],
+                    kind: EditKind::Discrete,
+                    last_edit: now,
+                    before: after,
+                    after,
+                    moved: self.clock,
+                });
+            }
         }
         Ok(splice)
     }
 
-    pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
+    /// Adds `text` at the end, in the last undo step, so one undo takes both back. The selections that step restores
+    /// stay as they are.
+    pub fn append(&mut self, text: &str, now: Instant) -> Splice {
+        let end = self.text.len();
+        let after = self.undo.last().map_or(Selection::caret(end), |group| group.after);
+        self.amend(vec![Edit::new(end..end, text)], after, now)
+            .expect("the end of the text is a place to edit")
     }
 
-    /// How many steps undo can take back. Unlike the revision, undo lowers it and redo raises it again.
-    pub fn undo_depth(&self) -> usize {
-        self.undo.len()
+    /// Ends the open undo step, so the next edit starts one of its own even if it would join it, as typing does.
+    pub fn close_step(&mut self) {
+        self.closed = true;
+    }
+
+    /// Counts the undo steps made, undone, and redone. Compare it with [`Self::moved_since`].
+    pub fn clock(&self) -> u64 {
+        self.clock
+    }
+
+    /// Whether the step undo, or redo, would take next was made, undone, or redone after the clock read `clock`.
+    pub fn moved_since(&self, clock: u64, undo: bool) -> bool {
+        let stack = if undo { &self.undo } else { &self.redo };
+        stack.last().is_some_and(|group| group.moved > clock)
     }
 
     /// Whether the next undo meets a change from outside.
@@ -255,17 +295,24 @@ impl Buffer {
 
     /// Takes back the last undo step. A change from outside is one step too, so the edits typed around it stay.
     pub fn undo(&mut self) -> Option<Restored> {
-        let group = self.undo.pop()?;
+        let mut group = self.undo.pop()?;
         let splice = self.replay(group.steps.iter().rev().map(|step| &step.backward));
         let selection = group.before;
+        self.clock += 1;
+        group.moved = self.clock;
+        // Typing after an undo or redo is a step of its own, not part of the one now on top.
+        self.closed = true;
         self.redo.push(group);
         Some(Restored { splice, selection })
     }
 
     pub fn redo(&mut self) -> Option<Restored> {
-        let group = self.redo.pop()?;
+        let mut group = self.redo.pop()?;
         let splice = self.replay(group.steps.iter().map(|step| &step.forward));
         let selection = group.after;
+        self.clock += 1;
+        group.moved = self.clock;
+        self.closed = true;
         self.undo.push(group);
         Some(Restored { splice, selection })
     }

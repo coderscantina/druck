@@ -20,8 +20,8 @@ const KEPT: usize = 50;
 /// One swap of sections, from the book as it is after the step to the book as it is on the other side. Every section
 /// it holds is readable: a change from or to an unreadable file is no step.
 pub(super) struct Turn {
-    /// The book's sections where this turn starts, with how many undo steps each had then.
-    here: Vec<(ChapterId, usize)>,
+    /// The book's sections where this turn starts, with each one's undo clock then.
+    here: Vec<(ChapterId, u64)>,
     /// The sections of `here` that the turn sets aside, with the text they must still hold.
     leaving: Vec<(ChapterId, String)>,
     /// The book's sections on the other side.
@@ -85,7 +85,7 @@ impl Session {
         self.outside.redo.clear();
         if readable {
             let turn = Turn {
-                here: self.depths(),
+                here: self.close_steps(),
                 leaving: made,
                 there,
                 away,
@@ -104,8 +104,7 @@ impl Session {
     /// Whether the next undo takes back a change from outside to a single file: nothing typed since in its sections,
     /// and nothing typed since in the caret's section that undo would take first.
     pub fn undo_is_outside_file_change(&self) -> bool {
-        // Steps the caret's section gained since are newer than the change.
-        (self.outside.undo.last()).is_some_and(|turn| self.can_turn(turn, |then, own| own.undo_depth() > then))
+        (self.outside.undo.last()).is_some_and(|turn| self.can_turn(turn, true))
     }
 
     /// Takes back the last change from outside to a single file, in all its sections. See
@@ -122,9 +121,7 @@ impl Session {
 
     /// Whether the next redo brings back a change from outside that undo took back.
     pub fn redo_is_outside_file_change(&self) -> bool {
-        // Steps the caret's section took back since, and can still redo, are redone first.
-        (self.outside.redo.last())
-            .is_some_and(|turn| self.can_turn(turn, |then, own| own.undo_depth() < then && own.can_redo()))
+        (self.outside.redo.last()).is_some_and(|turn| self.can_turn(turn, false))
     }
 
     pub fn redo_outside_file_change(&mut self) -> bool {
@@ -138,9 +135,9 @@ impl Session {
     }
 
     /// A turn applies while the book is as it left it, readable, and the sections it sets aside hold what it gave them.
-    /// It goes before the caret's own history unless `own_first`, given the caret section's undo depth at the turn and
-    /// its buffer now, says that history has a newer step. A resplit since leaves other sections, and the turn unreachable.
-    fn can_turn(&self, turn: &Turn, own_first: impl Fn(usize, &Buffer) -> bool) -> bool {
+    /// It goes before the caret's own history unless that history's next step to undo, or to redo, moved after the turn:
+    /// typing since, or an undo since. A resplit since leaves other sections, and the turn unreachable.
+    fn can_turn(&self, turn: &Turn, undo: bool) -> bool {
         let same_book = turn.here.len() == self.book.len()
             && (turn.here.iter().zip(&self.book)).all(|((recorded, _), id)| recorded == id);
         // Only the book's sections are known to the session, so the rest is read only once the book is the same.
@@ -149,7 +146,7 @@ impl Session {
             && (turn.leaving.iter()).all(|(id, text)| self.known(*id).buffer.text() == text)
             && !(turn.here.iter())
                 .find(|(id, _)| *id == self.active)
-                .is_some_and(|(_, then)| own_first(*then, self.active_buffer()))
+                .is_some_and(|(_, then)| self.active_buffer().moved_since(*then, undo))
     }
 
     /// Swaps the book to the other side of `turn`, and returns the turn that swaps it back.
@@ -167,7 +164,7 @@ impl Session {
         }
         self.book = there;
         let back = Turn {
-            here: self.depths(),
+            here: self.close_steps(),
             leaving: (self.book.iter())
                 .filter(|id| !here.iter().any(|(kept, _)| kept == *id))
                 .map(|id| (*id, self.known(*id).buffer.text().to_owned()))
@@ -184,9 +181,16 @@ impl Session {
         back
     }
 
-    fn depths(&self) -> Vec<(ChapterId, usize)> {
-        (self.book.iter())
-            .map(|id| (*id, self.known(*id).buffer.undo_depth()))
+    /// Ends every section's open undo step, so typing after a turn never joins typing before it, and returns each one's
+    /// undo clock.
+    fn close_steps(&mut self) -> Vec<(ChapterId, u64)> {
+        let book = self.book.clone();
+        (book.into_iter())
+            .map(|id| {
+                let buffer = &mut self.known_mut(id).buffer;
+                buffer.close_step();
+                (id, buffer.clock())
+            })
             .collect()
     }
 
