@@ -58,6 +58,8 @@ pub struct Config {
     pub typesetting: Typesetting,
     pub title_block: TitleBlock,
     pub title_page: Vec<Group<TitleSlot>>,
+    /// The top margin of the title page, which may differ from the body's.
+    pub title_page_top: Pt,
     pub pages: PageVariants,
     pub watermark: Option<Watermark>,
     /// Token colors of code blocks; a category left out keeps the code block color.

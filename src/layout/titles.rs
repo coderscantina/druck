@@ -6,7 +6,8 @@
 //! order, each `space-before` below the previous one; slot styles add no spacing of their own. An
 //! optional slot whose placeholders lack a value is omitted with its spacing. A slot in the `abstract`
 //! style starts with the `abstract` label in the `abstract-heading` style and that style's
-//! `space-after`. The title block keeps `title-block.space-after` from the body.
+//! `space-after`. The title block keeps `title-block.space-after` from the body, and the space above its first
+//! slot also at the top of a page.
 //!
 //! Each title page group stacks its slots in a box as wide as the group, placed at its anchor on the
 //! margin frame: its top edge `y` below the frame's top, its middle `y` below the frame's middle, or its
@@ -127,8 +128,8 @@ pub(super) fn block<'a>(config: &'a Config, fields: &Fields) -> Option<&'a [Titl
     shown.then_some(slots.as_slice())
 }
 
-/// The title page: each `title-page` group placed at its anchor on the margin frame. Its slots are added to
-/// `tags`.
+/// The title page: each `title-page` group placed at its anchor on the margin frame, whose top is the title page's
+/// own top margin. Its slots are added to `tags`.
 pub(super) fn page(
     config: &Config,
     fields: &Fields,
@@ -139,7 +140,9 @@ pub(super) fn page(
 ) -> Result<Page, Vec<Diagnostic>> {
     let geometry = &config.page;
     let error = |message: String| vec![Diagnostic::new(Some(source.clone()), message)];
-    let (frame_width, frame_height) = (geometry.text_width().0, geometry.text_height().0);
+    let top_margin = config.title_page_top.0;
+    let frame_width = geometry.text_width().0;
+    let frame_height = geometry.height.0 - top_margin - geometry.margin_bottom.0;
     let mut items = Vec::new();
     for (index, group) in config.title_page.iter().enumerate() {
         let lines = slots(
@@ -169,7 +172,7 @@ pub(super) fn page(
             ]);
         }
         let left = geometry.left_margin(0).0 + group_left(group, frame_width);
-        let mut y = geometry.margin_top.0 + top;
+        let mut y = top_margin + top;
         for (space, line) in lines {
             y += space;
             items.extend(line.items.into_iter().map(|item| super::translate(item, left, y)));
@@ -209,7 +212,12 @@ impl<'a> Flow<'a> {
             Ok(lines) => {
                 let count = lines.len();
                 for (index, (space, line)) in lines.into_iter().enumerate() {
-                    self.space(space);
+                    // The space above the first slot stays at a page top, where space between lines is dropped.
+                    if index == 0 && space > 0.0 {
+                        self.push(Line::space(space), FRONT_MATTER, Break::Never);
+                    } else {
+                        self.space(space);
+                    }
                     let after = if index + 1 == count {
                         Break::Allowed(0.0)
                     } else {

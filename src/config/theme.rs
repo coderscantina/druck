@@ -1263,6 +1263,9 @@ pub struct TitleBlock {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TitleLayout {
+    /// The top margin of the title page, instead of `page.margins.top`.
+    #[serde(default)]
+    pub margin_top: Option<Spec<Spacing>>,
     pub groups: Vec<Group<TitleSlot>>,
 }
 

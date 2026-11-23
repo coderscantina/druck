@@ -1169,6 +1169,19 @@ impl<'a> Resolver<'a> {
             body,
         );
         let title_block_space = self.spacing(&theme.title_block.space_after, "title-block.space-after", body);
+        let title_page_top = match &theme.title_page.margin_top {
+            Some(spec) => self.spacing(spec, "title-page.margin-top", body).filter(|top| {
+                let room = page.height.0 - page.margin_bottom.0;
+                let fits = top.0 >= 0.0 && top.0 < room;
+                if !fits {
+                    let message =
+                        format!("the top margin must be from 0 to less than the {room:.1}pt above the bottom margin");
+                    self.error("title-page.margin-top", message);
+                }
+                fits
+            }),
+            None => Some(page.margin_top),
+        };
         let title_page = self.groups(
             "title-page.groups",
             &theme.title_page.groups,
@@ -1258,6 +1271,7 @@ impl<'a> Resolver<'a> {
                 space_after: title_block_space?,
             },
             title_page: title_page?,
+            title_page_top: title_page_top?,
             pages: pages?,
             watermark,
             highlight,

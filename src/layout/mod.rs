@@ -638,6 +638,20 @@ struct Line {
 }
 
 impl Line {
+    /// An empty line of `height`, which holds space that a page top keeps.
+    fn space(height: f64) -> Self {
+        Self {
+            height,
+            baseline: 0.0,
+            items: Vec::new(),
+            notes: Vec::new(),
+            marks: Vec::new(),
+            hyphenated: false,
+            flaw: None,
+            sources: Vec::new(),
+        }
+    }
+
     /// Keeps `spans` for a text item of this line, and returns the number to give the item.
     fn source(&mut self, spans: Spans) -> Option<TextId> {
         (!spans.is_empty()).then(|| {
@@ -1244,17 +1258,7 @@ impl<'a> Flow<'a> {
         }
         if chapters.sink.0 > 0.0 {
             self.space = 0.0;
-            let sink = Line {
-                height: chapters.sink.0,
-                baseline: 0.0,
-                items: Vec::new(),
-                notes: Vec::new(),
-                marks: Vec::new(),
-                hyphenated: false,
-                flaw: None,
-                sources: Vec::new(),
-            };
-            self.push(sink, at, Break::Never);
+            self.push(Line::space(chapters.sink.0), at, Break::Never);
         }
         true
     }

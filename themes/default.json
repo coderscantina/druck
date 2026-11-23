@@ -935,6 +935,7 @@
     "space-after": "2em"
   },
   "title-page": {
+    "margin-top": null,
     "groups": [
       {
         "anchor": "top-left",

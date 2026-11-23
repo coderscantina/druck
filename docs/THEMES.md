@@ -504,7 +504,7 @@ Because arrays replace whole, a theme that changes one slot restates the whole l
 
 The `title-page` groups fill the first page when a document sets `title-page: true`, see [slot groups](#slot-groups). Otherwise the `title-block` slots start the body, provided the document has a value for at least one of their placeholders; a document without metadata has no title block. `title-block.space-after` is the space between the block and the body.
 
-Slots are set in order, each `space-before` below the previous one. The style of a slot sets its font, alignment, and indent; its own `space-before` and `space-after` are not used. An optional slot whose value is missing is left out with its `space-before`. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style, followed by that style's `space-after`. Each line of slot text wraps at the available width. In values, blank lines start a new paragraph, which gets the style's `first-line-indent`, and other line breaks are spaces. An image slot is aligned like text in its style.
+Slots are set in order, each `space-before` below the previous one. The first slot's `space-before` stays at the top of a page, so a title block can start lower than the body text. The style of a slot sets its font, alignment, and indent; its own `space-before` and `space-after` are not used. An optional slot whose value is missing is left out with its `space-before`. A slot in the `abstract` style starts with the `abstract` label in the `abstract-heading` style, followed by that style's `space-after`. Each line of slot text wraps at the available width. In values, blank lines start a new paragraph, which gets the style's `first-line-indent`, and other line breaks are spaces. An image slot is aligned like text in its style.
 
 ### Slot groups
 
@@ -521,6 +521,8 @@ The title page and each header and footer are arrays of slot groups. A group sta
 Lengths in `offset` and `width` use the body size for `em`. Because margins position the frame, a group moves with them, and with `mirror: true` a band's left and right anchors follow the margins on even pages.
 
 On the title page an anchor places the group's box, from the space above its first slot to the bottom of its last line: its top edge `y` below the frame's top, its middle `y` below the frame's middle, or its bottom edge `y` above the frame's bottom. A group that runs past the top or bottom of the frame is an error naming the group. The default theme has one group at `top-left` that stacks its slots from the top of the text area.
+
+`title-page.margin-top` gives the title page its own top margin, so a cover can start higher or lower than the body pages; `null`, the default, keeps `page.margins.top`. The frame of the title page runs from there to the bottom margin. A value that leaves no room above the bottom margin is an error.
 
 ### Header and footer bands
 

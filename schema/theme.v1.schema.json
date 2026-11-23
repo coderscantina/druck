@@ -1924,6 +1924,17 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "margin-top": {
+          "description": "Top margin of the title page instead of page.margins.top. em is relative to the body size.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/spacingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "groups": {
           "type": "array",
           "items": {

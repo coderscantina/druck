@@ -896,6 +896,48 @@ fn title_page_groups_sit_at_their_anchor_and_offset() {
 }
 
 #[test]
+fn the_title_page_takes_its_own_top_margin() {
+    let groups = json!([{"anchor": "top-left", "slots": [{"text": "{title}", "style": "date"}]}]);
+    let top = |margin: Value| {
+        let theme = json!({"version": 1, "title-page": {"margin-top": margin, "groups": groups}});
+        let config = config("title: Cover\ntitle-page: true", theme);
+        let output = render(&config, "Text.");
+        (run_baseline(&output.pages[0], "Cover"), config.page.margin_top.0)
+    };
+    let (body, margin) = top(Value::Null);
+    let (own, _) = top(json!("10mm"));
+    assert!(close(body - own, margin - 10.0 * MM), "{body} {own}");
+
+    let settings = |source| SettingsInput {
+        source,
+        settings: FrontMatter::default(),
+    };
+    let errors = resolve(Inputs {
+        theme: Some(ThemeInput {
+            source: InputSource::Theme("/fake/theme.json".into()),
+            value: json!({"version": 1, "title-page": {"margin-top": "2000pt", "groups": groups}}),
+        }),
+        document: settings(source()),
+        overrides: settings(InputSource::Overrides {
+            working_dir: "/fake".into(),
+        }),
+    })
+    .expect_err("a top margin past the page");
+    assert_eq!(errors[0].property.as_deref(), Some("title-page.margin-top"));
+}
+
+#[test]
+fn a_title_block_keeps_the_space_above_its_first_slot_at_the_page_top() {
+    let slots = json!([{"text": "{title}", "style": "title", "space-before": "30mm"}]);
+    let theme = json!({"version": 1, "title-block": {"slots": slots}});
+    let output = render(&config("title: Report", theme.clone()), "Text.");
+    let spaced = baseline(&output.pages[0], "Report");
+    let flush = json!({"version": 1, "title-block": {"slots": [{"text": "{title}", "style": "title"}]}});
+    let output = render(&config("title: Report", flush), "Text.");
+    assert!(close(spaced - baseline(&output.pages[0], "Report"), 30.0 * MM));
+}
+
+#[test]
 fn band_groups_stack_multi_line_slots_and_meta_lists_at_the_band_baseline() {
     let footer = json!([
         {"anchor": "top-left", "width": "50mm", "slots": [
