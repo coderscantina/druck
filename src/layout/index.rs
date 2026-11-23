@@ -13,6 +13,7 @@
 use std::borrow::Cow;
 
 use super::{Flow, Frame, Role, heading_style, pages, translate_line};
+use crate::config::resolved::InlineStyles;
 use crate::config::values::Pt;
 use crate::document::{Inline, InlineStyle, Link, Location};
 use crate::index::{Entry, locators};
@@ -102,7 +103,12 @@ impl<'a> Flow<'a> {
         let width = self.width(frame) - 2.0 * style.indent.0 - indent - hang;
         self.space(style.space_before.0);
         let scope = self.open(Kind::Paragraph, true);
-        match self.set(&content, style, width, -hang) {
+        // Page numbers link to their marks but read as part of the entry, in its color.
+        let inline = InlineStyles {
+            link_color: style.color,
+            ..config.inline.clone()
+        };
+        match self.set_with(&content, style, &inline, width, -hang) {
             Ok(lines) => {
                 let count = lines.len();
                 for (index, line) in lines.into_iter().enumerate() {

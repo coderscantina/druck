@@ -73,7 +73,7 @@ use self::pages::IssueKind;
 use self::structure::Structure;
 use crate::cancel::{Cancel, CheckPoint};
 use crate::citations::Cited;
-use crate::config::resolved::{Config, CustomStyle, PageGeometry, SceneMark, Style};
+use crate::config::resolved::{Config, CustomStyle, InlineStyles, PageGeometry, SceneMark, Style};
 use crate::config::source::{InputSource, Resource};
 use crate::config::theme::{Align, BreakBefore, FontStyle, NumberPosition, Weight, WideBlock};
 use crate::config::values::{Color, Pt};
@@ -1621,11 +1621,23 @@ impl<'a> Flow<'a> {
 
     /// Breaks inline content into lines of `width` in `style`, with cross-references and citations resolved.
     fn set(&self, content: &[Inline], style: &Style, width: f64, first_indent: f64) -> Result<Vec<Line>, String> {
+        self.set_with(content, style, &self.config.inline, width, first_indent)
+    }
+
+    /// Sets `content` as [`Self::set`] does, with the `inline` styles in place of the theme's.
+    fn set_with(
+        &self,
+        content: &[Inline],
+        style: &Style,
+        inline: &InlineStyles,
+        width: f64,
+        first_indent: f64,
+    ) -> Result<Vec<Line>, String> {
         let content = self.resolve(content);
         paragraph::lines(
             &content,
             style,
-            &self.config.inline,
+            inline,
             self.fonts,
             paragraph::Rules::of(self.config),
             width,

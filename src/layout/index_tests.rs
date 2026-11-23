@@ -155,6 +155,15 @@ fn the_index_lists_final_pages_as_ranges_with_sub_entries_and_see_references_lin
     let shown: Vec<&str> = links.iter().map(|(text, _)| text.as_str()).collect();
     assert_eq!(shown, ["1", "4", "1", "2", "4"]);
     assert!(links.iter().all(|(text, page)| text == page), "{links:?}");
+    // The linked page numbers are in the entry's color, not the link color.
+    let mut colors = output.pages[3..]
+        .iter()
+        .flat_map(|page| &page.items)
+        .filter_map(|item| match item {
+            Item::Text { color, .. } => Some(*color),
+            _ => None,
+        });
+    assert!(colors.all(|color| color != config.inline.link_color));
     let outline: Vec<&str> = output.outline.iter().map(|bookmark| bookmark.title.as_str()).collect();
     assert_eq!(outline, ["1 One", "Index"]);
 }

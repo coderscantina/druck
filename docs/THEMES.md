@@ -639,7 +639,7 @@ The styles:
 | `index-entry` | Entries. |
 | `index-sub-entry` | Sub-entries, at both levels. |
 
-An entry stays with its first sub-entry, and its last sub-entry with the one before. Page numbers are links and use `inline.link`. "see" and "see also" are set in italics. Page numbers are separated by a comma, ranges joined by an en dash, and references by a semicolon.
+An entry stays with its first sub-entry, and its last sub-entry with the one before. Page numbers are links in the color of their entry's style; only `inline.link.underline` applies to them. "see" and "see also" are set in italics. Page numbers are separated by a comma, ranges joined by an en dash, and references by a semicolon.
 
 ## Books
 
