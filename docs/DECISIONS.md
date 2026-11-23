@@ -2087,3 +2087,11 @@ The owner asked that all of Druck's data on macOS live in one folder named by th
 - **`XDG_CONFIG_HOME` still overrides,** on macOS too, since tests and scripted runs sandbox the config with it. `DRUCK_DATA_DIR` still replaces the data folder.
 - **Earlier folders move once.** At launch the app renames `~/Library/Application Support/Druck` into the new folder when that does not exist yet, then moves each entry of `~/.config/druck` that the new folder lacks, and removes the old folder once empty. Nothing is overwritten. It is skipped while either override is set, so a sandboxed run never touches the owner's files. The CLI does not move anything: someone who only uses the CLI on macOS moves `~/.config/druck/themes` by hand.
 - **No cache folder.** Druck writes no disk cache today. One would go in `~/Library/Caches/com.coderscantina.druck`.
+
+## 2026-11-23: Pages in the Binder, writing in the text
+
+The owner found the special blocks too obtrusive for a minimal writing experience: a margin name in engine words beside an empty grey bar for a new page, the contents, and each part. Rated boards ([the design](DESIGN.md#binder), [ratings](DESIGN.md#special-page-ratings-2026-11-23)) settled that the text holds only writing and the book's pages live in the Binder.
+
+- **Ties went to the combination.** C, the Binder, and A, the page shown, both scored 9 on contents, parts, and opening pages, with no notes. They do not conflict: a page opened from the Binder takes A's look. Where two scored 9 for a new page, B's line and C's paragraph setting, both are built. The gallery of pages scored 8, at the bar, and stays beside the slash menu's 9.
+- **Part markers are kept by the app, not the author.** They never show in Write, the slash menu no longer offers them, and in a book that already uses parts the app rewrites them after its own moves, additions, and removals, never while typing. A book without parts is left alone, so its numbering does not change behind the author's back.
+- **A single file splits into pages.** Before the first chapter at the page edges the engine makes, after a `::: bottom` group and before a `::: page-break`, and around each made page anywhere, so each gets a row. A project file holding several pages stays one row, named by its first page.
