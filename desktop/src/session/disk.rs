@@ -13,7 +13,6 @@ use druck::input::MANIFEST;
 use super::{Chapter, ChapterId, Group, Kind, MANUSCRIPT, NOTES, PASSES, RESEARCH, Read, Session};
 use crate::persist::atomic::{self, Outcome, content_hash};
 use crate::persist::merge::{edits_between, map_offset};
-use crate::source::blocks::break_before;
 use crate::source::buffer::EditError;
 use crate::source::{Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -164,40 +163,24 @@ impl Session {
         })
     }
 
-    /// A file's text as the disk gets it: [`Self::file_text`] with an input method's marked text left out, and in a
-    /// single file with the break [`Session::keep_apart`] would give its section without it. So the disk never holds
-    /// provisional text, nor two sections run together. Also names the chapter whose marked text was left out.
+    /// A file's text as the disk gets it: [`Self::file_text`], with the text a chapter had before an input method began
+    /// composing in it, see [`Session::start_composing`]. That text is committed and kept apart, so the disk never holds
+    /// provisional text, nor sections that only the commit keeps apart. Also names that chapter, whose file then does
+    /// not hold what its buffer does. A missing chapter that was empty has nothing to write yet.
     fn stored_text(&self, path: &Path) -> Option<(String, Option<ChapterId>)> {
-        let mut text = self.file_text(path)?;
-        let Some((id, range)) = self.marked.clone() else {
-            return Some((text, None));
+        let composing = (self.composing.as_ref()).filter(|(id, _)| self.ids_of(path).contains(id));
+        let Some((id, before)) = composing else {
+            return Some((self.file_text(path)?, None));
         };
-        let Some(own) = (self.chapters.get(&id))
-            .filter(|chapter| chapter.path == path && chapter.read == Read::Done)
-            .map(|chapter| chapter.buffer.text())
-            .filter(|own| own.get(range.clone()).is_some())
-        else {
-            return Some((text, None));
+        let text = match self.kind {
+            Kind::Single { .. } => (self.book.iter())
+                .filter(|other| self.known(**other).read == Read::Done)
+                .map(|other| if other == id { before } else { self.known(*other).text() })
+                .collect(),
+            Kind::Project { .. } if before.is_empty() && self.known(*id).read == Read::Missing => return None,
+            Kind::Project { .. } => before.clone(),
         };
-        let mut left = [&own[..range.start], &own[range.end..]].concat();
-        let mut start = 0;
-        if matches!(self.kind, Kind::Single { .. }) {
-            let at = self.book.iter().position(|other| *other == id)?;
-            if let Some(next) = self.book.get(at + 1) {
-                left.push_str(break_before(
-                    &left,
-                    &Blocks::parse(&left),
-                    self.known(*next).text(),
-                    at == 0,
-                ));
-            }
-            start = (self.book[..at].iter().map(|other| self.known(*other)))
-                .filter(|chapter| chapter.read == Read::Done)
-                .map(|chapter| chapter.buffer.len())
-                .sum();
-        }
-        text.replace_range(start..start + own.len(), &left);
-        Some((text, Some(id)))
+        Some((text, Some(*id)))
     }
 
     /// The chapter holding a place in a file's text, and the place in that chapter. A single file's sections each hold
@@ -300,7 +283,7 @@ impl Session {
 
     /// The files whose text differs from the disk, ready to write, as [`Self::stored_text`] gives it. Skips the ones held
     /// back. A buffer that came back to what the file holds, as after an undo, is marked saved and needs no write. A
-    /// buffer whose marked text was left out stays unsaved, so the commit is written too.
+    /// chapter written with its text from before a composition stays unsaved, so the commit is written too.
     pub fn outgoing(&mut self) -> Vec<Outgoing> {
         let root = self.base_dir();
         let mut paths: Vec<PathBuf> = match &self.kind {
@@ -314,14 +297,14 @@ impl Session {
         paths.retain(|path| !self.held.contains(path));
         let mut outgoing = Vec::with_capacity(paths.len());
         for path in paths {
-            let Some((text, left_out)) = self.stored_text(&path) else {
+            let Some((text, composing)) = self.stored_text(&path) else {
                 continue;
             };
             let text = one_final_break(&text).into_owned();
             let hash = content_hash(text.as_bytes());
             let synced = self.synced.get(&path);
             if synced.is_some_and(|synced| synced.on_disk && synced.hash == hash) {
-                if left_out.is_none() {
+                if composing.is_none() {
                     self.mark_clean(&path);
                 }
                 continue;
@@ -333,7 +316,7 @@ impl Session {
                     let revision = self.known(id).buffer.revision();
                     (
                         id,
-                        if left_out == Some(id) {
+                        if composing == Some(id) {
                             revision.wrapping_sub(1)
                         } else {
                             revision

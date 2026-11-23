@@ -616,9 +616,10 @@ impl PersistView {
         }));
     }
 
-    /// Writing on may have taken away what a conflict was about.
+    /// Writing on may have taken away what a conflict was about. Not while an input method composes: the merge would take
+    /// its provisional text into the file. Its commit counts as an edit, so the next save tries again.
     fn retry_conflicts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.sync.can_settle_a_conflict(self.session(cx)) {
+        if self.editor.read(cx).is_composing() || !self.sync.can_settle_a_conflict(self.session(cx)) {
             return;
         }
         let sync = &mut self.sync;
@@ -690,7 +691,8 @@ impl PersistView {
 
     /// Writes everything now and waits for it: the app is about to go. What cannot be written stays as a recovery copy.
     fn flush_blocking(&mut self, cx: &mut Context<Self>) {
-        // A footnote's text being typed counts as written.
+        // A footnote's text being typed, and an input method's marked text, count as written. Without the window, the
+        // composing chapter's text from before the composition is written.
         if let Some(handle) = Current::<PersistView>::window(cx) {
             let editor = self.editor.clone();
             handle
@@ -723,10 +725,8 @@ impl PersistView {
     }
 
     fn settle_now(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Closing {
-        // The document goes with what is on screen, so an input method's text started meanwhile is committed, not left out.
-        if self.editor.read(cx).is_composing() {
-            self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
-        }
+        // The document goes with what is on screen, so an input method's text started meanwhile is committed too.
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let lock = self.write_lock.clone();
         let _writing = lock.lock();
         self.retry_conflicts(window, cx);

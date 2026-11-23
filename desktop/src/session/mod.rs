@@ -356,8 +356,9 @@ pub struct Session {
     made: HashSet<PathBuf>,
     /// The theme file the pages use instead of the one the document names: from the command line or a fork.
     theme_override: Option<PathBuf>,
-    /// An input method's marked text in a chapter: provisional, so it never reaches the disk, see [`Self::outgoing`].
-    marked: Option<(ChapterId, Range<usize>)>,
+    /// The chapter an input method composes in, with its text from before the composition: what the disk gets of it
+    /// meanwhile, see [`Self::outgoing`].
+    composing: Option<(ChapterId, String)>,
 }
 
 /// Orders of the book to go back or forward to.
@@ -428,7 +429,7 @@ impl Session {
             page_titles: None,
             made: HashSet::new(),
             theme_override: None,
-            marked: None,
+            composing: None,
         }
     }
 
@@ -1170,9 +1171,18 @@ impl Session {
         break_before(chapter.buffer.text(), blocks, next.buffer.text(), starts_file)
     }
 
-    /// Says which text in the active chapter an input method has marked, or that none is.
-    pub fn set_marked(&mut self, marked: Option<Range<usize>>) {
-        self.marked = marked.map(|range| (self.active, range));
+    /// Keeps the active chapter's text as an input method is about to mark text in it, unless a composition there
+    /// already kept it. Until [`Self::stop_composing`], saves and recovery copies write that text for the chapter: it is
+    /// committed and kept apart, which the text with marked text in it is not.
+    pub fn start_composing(&mut self) {
+        if self.composing.as_ref().is_none_or(|(id, _)| *id != self.active) {
+            self.composing = Some((self.active, self.active_buffer().text().to_owned()));
+        }
+    }
+
+    /// The input method committed or cancelled its marked text: the chapter's text is what the disk gets again.
+    pub fn stop_composing(&mut self) {
+        self.composing = None;
     }
 
     /// Reads a chapter's title and kind again after its text changed. Returns whether the sidebar should change.

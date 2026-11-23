@@ -233,41 +233,95 @@ fn a_section_ending_without_a_line_break_keeps_the_next_heading_on_its_own_line(
     assert_eq!(folder.read("whole.md"), "# One\n\nText.\n\n\nAdded.\n# Two\n\nMore.\n");
 }
 
+/// An input method's provisional text over `range` of the active chapter, as the editor writes it.
+fn compose(session: &mut Session, range: std::ops::Range<usize>, text: &str) {
+    session.start_composing();
+    let caret = Caret::caret(range.start);
+    let edits = vec![Edit::new(range, text)];
+    (session.active_buffer_mut())
+        .transact(EditKind::Composing, edits, caret, caret, Instant::now())
+        .expect("edit");
+}
+
+/// Writes what is unsaved, as the app's saves do.
+fn write_outgoing(session: &mut Session) {
+    for outgoing in session.outgoing() {
+        outgoing.write().expect("writes");
+        session.written(&outgoing);
+    }
+}
+
 #[test]
-fn a_save_leaves_out_marked_text_and_keeps_the_sections_apart_until_the_commit() {
+fn a_save_while_composing_writes_the_text_from_before_and_the_commit_after() {
     let folder = Folder::new("marked");
-    let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nMore.\n");
+    let text = "# One\n\nText.\n\n# Two\n\nMore.\n";
+    let path = folder.write("whole.md", text);
     let mut session = Session::open(&path).expect("opens");
     let one = session.book()[0];
     session.set_active(one);
     // An input method composes over the section's closing break, as over a selection reaching its end.
-    let caret = Caret::caret(12);
-    let edits = vec![Edit::new(12..14, "日本")];
-    let buffer = &mut session.known_mut(one).buffer;
-    buffer
-        .transact(EditKind::Composing, edits, caret, caret, Instant::now())
-        .expect("edit");
-    session.set_marked(Some(12..18));
-    let write = |session: &mut Session| {
-        for outgoing in session.outgoing() {
-            outgoing.write().expect("writes");
-            session.written(&outgoing);
-        }
-    };
-    write(&mut session);
-    assert_eq!(folder.read("whole.md"), "# One\n\nText.\n# Two\n\nMore.\n");
-    assert!(session.is_dirty(), "the marked text is still to be saved");
+    compose(&mut session, 12..14, "日本");
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("whole.md"), text);
+    assert_eq!(session.unsaved()[0].text, text, "the recovery copy too");
+    assert!(session.is_dirty(), "the composition is still to be saved");
 
-    session.set_marked(None);
+    session.stop_composing();
     let splice = Splice {
         start: 12,
         old_end: 18,
         new_end: 18,
     };
     session.keep_apart(one, splice);
-    write(&mut session);
+    write_outgoing(&mut session);
     assert_eq!(folder.read("whole.md"), "# One\n\nText.日本\n# Two\n\nMore.\n");
     assert!(!session.is_dirty());
+}
+
+#[test]
+fn a_save_while_composing_over_a_selection_keeps_the_selected_text() {
+    let folder = Folder::new("compose-selection");
+    let path = folder.write("whole.md", "Keep this word.\n");
+    let mut session = Session::open(&path).expect("opens");
+    compose(&mut session, 5..10, "日本");
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("whole.md"), "Keep this word.\n");
+    assert!(session.is_dirty(), "the composition is still to be saved");
+}
+
+#[test]
+fn a_save_while_composing_over_a_headings_marker_keeps_the_sections_as_they_were() {
+    let folder = Folder::new("compose-heading");
+    let text = "# One\n\nText.\n# Two\n===\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let mut session = Session::open(&path).expect("opens");
+    let two = session.book()[1];
+    session.set_active(two);
+    compose(&mut session, 0..2, "日本");
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("whole.md"), text);
+    assert!(session.is_dirty());
+}
+
+#[test]
+fn a_composition_in_a_missing_chapter_is_not_written_nor_marked_saved() {
+    let folder = Folder::new("compose-missing");
+    folder.write("druck.yaml", "chapters:\n  - there.md\n  - gone.md\n");
+    folder.write("there.md", "Text.\n");
+    let mut session = Session::open(&folder.0).expect("opens");
+    let gone = session.book()[1];
+    session.set_active(gone);
+    compose(&mut session, 0..0, "日本");
+    write_outgoing(&mut session);
+    assert!(!folder.0.join("gone.md").exists());
+    assert!(session.is_dirty());
+
+    // Committed, then composed on: the commit is written, and the chapter stays unsaved.
+    session.stop_composing();
+    compose(&mut session, 6..6, "語");
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("gone.md"), "日本\n");
+    assert!(session.is_dirty());
 }
 
 #[test]

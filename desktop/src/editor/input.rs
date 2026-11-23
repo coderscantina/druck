@@ -14,6 +14,9 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         let started = self.trace.input();
+        if marked.is_some() {
+            self.session.start_composing();
+        }
         match self
             .session
             .active_buffer_mut()
@@ -27,6 +30,9 @@ impl EditorView {
             }
             Err(error) => {
                 eprintln!("edit rejected: {error}");
+                if self.marked.is_none() {
+                    self.session.stop_composing();
+                }
                 return;
             }
         }
@@ -249,6 +255,7 @@ impl EditorView {
     /// Undo from any surface of the open text, in the session's order, see [`Session::undo`]. Returns whether it was
     /// a step of the open chapter's own, which leaves the galley on the same text.
     pub(super) fn undo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.commit_marked(window, cx);
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         match self.session.undo() {
@@ -272,6 +279,7 @@ impl EditorView {
 
     /// Redo from any surface of the open text, in the order of [`Self::undo_once`], returning the same.
     pub(super) fn redo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.commit_marked(window, cx);
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         match self.session.redo() {
@@ -372,23 +380,25 @@ impl EditorView {
         self.notify_paste_refused(cx);
     }
 
-    /// Keeps the marked text as it is, committed, and gives the section's end the break it may need now. The text was
-    /// provisional until here, left out of saves, so the commit counts as a change, and the break may have gone into a
-    /// neighbouring section alone.
+    /// Keeps the marked text as it is, committed, and gives the section's end the break it may need now. Until here
+    /// saves wrote the chapter's text from before the composition, so the commit counts as a change, also when the break
+    /// went into a neighbouring section alone. Anything else that changes the text or the sections commits first, so no
+    /// change lands under a composition. Does nothing without marked text.
     pub fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(marked) = self.marked.clone() {
-            self.set_marked(None);
-            let splice = crate::source::buffer::Splice {
-                start: marked.start,
-                old_end: marked.end,
-                new_end: marked.end,
-            };
-            if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
-                self.resegment(gap.into());
-                self.schedule_rich(window, cx);
-            }
-            cx.emit(TextChanged);
+        let Some(marked) = self.marked.clone() else {
+            return;
+        };
+        self.set_marked(None);
+        let splice = crate::source::buffer::Splice {
+            start: marked.start,
+            old_end: marked.end,
+            new_end: marked.end,
+        };
+        if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
+            self.resegment(gap.into());
+            self.schedule_rich(window, cx);
         }
+        cx.emit(TextChanged);
         window.notify_text_input_changed(&self.focus);
         cx.notify();
     }

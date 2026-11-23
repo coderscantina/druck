@@ -517,13 +517,15 @@ impl EditorView {
     }
 
     /// Changes the session from outside the galley: anything that edits a chapter, moves chapters, or changes settings
-    /// goes through here. The galley then shows the result, and [`SessionChanged`] tells everyone else.
+    /// goes through here. An input method's marked text is committed first. The galley then shows the result, and
+    /// [`SessionChanged`] tells everyone else.
     pub fn update_session<R>(
         &mut self,
         change: impl FnOnce(&mut Session) -> R,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> R {
+        self.commit_marked(window, cx);
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         let result = change(&mut self.session);
@@ -552,6 +554,7 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), crate::source::buffer::EditError> {
+        self.commit_marked(window, cx);
         self.store_view();
         let before = self.session.active_buffer().revision();
         self.session.edit_chapter(id, edits, kind)?;
@@ -581,14 +584,19 @@ impl EditorView {
         self.is_composing() || self.float_takes_keys()
     }
 
-    /// Writes what a float's fields hold, before something closes it.
+    /// Writes what a float's fields hold, and commits an input method's marked text, before something closes the
+    /// document or the app quits.
     pub fn commit_floats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_rich_float(window, cx);
+        self.commit_marked(window, cx);
     }
 
-    /// Marked text, as the editor and the session both know it: the session leaves it out of what goes to the disk.
+    /// Marked text, as the editor shows it. Once none is left, saves write the chapter's own text again, see
+    /// [`Session::start_composing`].
     fn set_marked(&mut self, marked: Option<Range<usize>>) {
-        self.session.set_marked(marked.clone());
+        if marked.is_none() {
+            self.session.stop_composing();
+        }
         self.marked = marked;
     }
 
