@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use druck::editor::engine;
-use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter};
+use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter, StyleKind};
 use druck::input::{MANIFEST, ThemeDirs};
 use druck::output::PageTitles;
 use druck::resource::{FileResolver, Origin, Resolver, normalize};
@@ -304,11 +304,11 @@ pub struct Session {
     page_titles: Option<PageTitles>,
 }
 
-/// Orders of the book to go back or forward to.
+/// Orders of the book to go back or forward to, each with the part lines it had.
 #[derive(Default)]
 struct Moves {
-    undo: Vec<Vec<ChapterId>>,
-    redo: Vec<Vec<ChapterId>>,
+    undo: Vec<(Vec<ChapterId>, Vec<parts::Line<ChapterId>>)>,
+    redo: Vec<(Vec<ChapterId>, Vec<parts::Line<ChapterId>>)>,
 }
 
 impl Session {
@@ -733,6 +733,12 @@ impl Session {
     /// The texts of the book's chapters, in reading order.
     fn book_texts(&self) -> Vec<&str> {
         self.book.iter().map(|id| self.known(*id).text()).collect()
+    }
+
+    /// The book's part lines and the order of its pages, before a structural action changes them.
+    fn parts(&self) -> parts::Parts<ChapterId> {
+        let book: Vec<(ChapterId, &str)> = (self.book.iter()).map(|id| (*id, self.known(*id).text())).collect();
+        parts::Parts::read(&book)
     }
 
     /// Whether the Binder shows a Title page row before a project's chapters: its theme sets a title page or its
@@ -1175,16 +1181,19 @@ impl Session {
         if target == from {
             return Ok(());
         }
+        let parts = self.parts();
         let order = self.book.clone();
         self.book.remove(from);
         self.book.insert(target, id);
         self.write_chapter_list().inspect_err(|_| self.book = order.clone())?;
-        self.moves.undo.push(order);
+        self.moves.undo.push((order, parts.lines.clone()));
         self.moves.redo.clear();
-        self.keep_parts()
+        let before = self.book.get(target + 1).copied();
+        self.keep_parts(&parts.moved(id, before), None)
     }
 
-    /// Puts the book back in its order before the last move, returning whether there was one to undo.
+    /// Puts the book back in its order before the last move, with its part lines, returning whether there was one to
+    /// undo.
     pub fn undo_move(&mut self) -> Result<bool, String> {
         self.step_move(true)
     }
@@ -1200,7 +1209,7 @@ impl Session {
         } else {
             self.moves.redo.pop()
         };
-        let Some(order) = popped else {
+        let Some((order, lines)) = popped else {
             return Ok(false);
         };
         let (mut wanted, mut book) = (order.clone(), self.book.clone());
@@ -1211,6 +1220,7 @@ impl Session {
             self.moves = Moves::default();
             return Ok(false);
         }
+        let parts = self.parts();
         let current = std::mem::replace(&mut self.book, order);
         let (back, forth) = match self.write_chapter_list() {
             Ok(()) => (current, true),
@@ -1221,7 +1231,7 @@ impl Session {
                 } else {
                     &mut self.moves.redo
                 };
-                stack.push(order);
+                stack.push((order, lines));
                 return Err(error);
             }
         };
@@ -1230,25 +1240,31 @@ impl Session {
         } else {
             &mut self.moves.undo
         };
-        stack.push(back);
-        self.keep_parts()?;
+        stack.push((back, parts.lines.clone()));
+        // Part lines the author changed since are theirs, and stay.
+        if parts.same_parts(&lines) {
+            self.keep_parts(&lines, None)?;
+        }
         Ok(forth)
     }
 
-    /// Makes the part lines agree with the order of the book's pages after the app changed its structure, see
-    /// [`parts::part_edits`]. Each chapter it changes takes the change as one undo step. Never run on typing.
-    fn keep_parts(&mut self) -> Result<(), String> {
-        let edits = parts::part_edits(&self.book_texts());
-        if edits.is_empty() {
+    /// Puts the part lines where `wanted` says after the app changed the book's structure, taking them out of `left`,
+    /// a chapter that left the book, see [`parts::part_edits`]. Each chapter it changes takes the change as one undo
+    /// step. Never run on typing.
+    fn keep_parts(&mut self, wanted: &[parts::Line<ChapterId>], left: Option<ChapterId>) -> Result<(), String> {
+        let text = |id: &ChapterId| (*id, self.known(*id).text());
+        let book: Vec<(ChapterId, &str)> = self.book.iter().map(text).collect();
+        let left: Vec<(ChapterId, &str)> = left.iter().map(text).collect();
+        let edits = parts::part_edits(&book, &left, wanted);
+        let mut by_chapter: BTreeMap<ChapterId, Vec<Edit>> = BTreeMap::new();
+        for (id, edit) in edits {
+            by_chapter.entry(id).or_default().push(edit);
+        }
+        if by_chapter.is_empty() {
             return Ok(());
         }
-        let ids = self.book.clone();
-        let mut by_section: BTreeMap<usize, Vec<Edit>> = BTreeMap::new();
-        for (section, edit) in edits {
-            by_section.entry(section).or_default().push(edit);
-        }
-        for (section, edits) in by_section {
-            (self.edit_chapter(ids[section], edits, EditKind::Discrete)).map_err(|error| error.to_string())?;
+        for (id, edits) in by_chapter {
+            (self.edit_chapter(id, edits, EditKind::Discrete)).map_err(|error| error.to_string())?;
         }
         self.resplit();
         Ok(())
@@ -1299,6 +1315,7 @@ impl Session {
             return Err(crate::t!(Key::BookNeedsChapter).to_owned());
         }
         let before = self.revision();
+        let parts = self.parts();
         let order = self.book.clone();
         self.book.retain(|other| *other != id);
         if let Err(error) = self.write_chapter_list() {
@@ -1307,7 +1324,7 @@ impl Session {
         }
         self.known_mut(id).group = Group::NotInBook;
         self.set_revision_above(before);
-        self.keep_parts()
+        self.keep_parts(&parts.removed(id), Some(id))
     }
 
     /// Adds a file from "Not in book" at the end of the book.
@@ -1391,7 +1408,7 @@ impl Session {
         let name = name.map(str::trim).filter(|name| !name.is_empty());
         let markdown = self.fill_missing(template.markdown(name, self.book_language()));
         let at = (self.book.iter().position(|other| *other == after)).map_or(self.book.len(), |at| at + 1);
-        self.insert_page(&markdown, name.unwrap_or(template.slug), at)
+        self.insert_page(&markdown, name.unwrap_or(template.slug), at, None)
     }
 
     /// The language the book is written in, by its `lang`, for the text a template writes into it.
@@ -1416,7 +1433,7 @@ impl Session {
         }
     }
 
-    /// Adds a page where books have it, see [`parts::place`], keeps the part lines in step, and makes it active.
+    /// Adds a page where books have it, see [`parts::place`], keeps each part line with the page it opens, and makes it active.
     pub fn add_page(&mut self, page: &Page) -> Result<ChapterId, String> {
         if page.once == Some(RowKind::TitlePage) {
             return self.add_title_page();
@@ -1424,8 +1441,11 @@ impl Session {
         let template = page.template();
         let markdown = self.fill_missing(template.markdown(None, self.book_language()));
         let at = parts::place(page.place, &self.book_texts());
-        self.insert_page(&markdown, template.slug, at)?;
-        self.keep_parts()?;
+        let (parts, before) = (self.parts(), self.book.get(at).copied());
+        let id = self.insert_page(&markdown, template.slug, at, Some(page.place))?;
+        if matches!(self.kind, Kind::Project { .. }) {
+            self.keep_parts(&parts.added(before, page.place, id), None)?;
+        }
         Ok(self.active)
     }
 
@@ -1452,12 +1472,21 @@ impl Session {
     }
 
     /// Puts a page's Markdown at place `at` of the book, with the page breaks it needs to stand on a page of its own,
-    /// and makes it active. A project's page is a new file named after `base`.
-    fn insert_page(&mut self, markdown: &str, base: &str, at: usize) -> Result<ChapterId, String> {
+    /// and makes it active. A project's page is a new file named after `base`. In a single file, a page added at a
+    /// `place` goes on the side of the part lines there that keeps each opening its page, see [`parts::in_gap`].
+    fn insert_page(
+        &mut self,
+        markdown: &str,
+        base: &str,
+        at: usize,
+        place: Option<parts::Place>,
+    ) -> Result<ChapterId, String> {
         let Kind::Project { dir } = self.kind.clone() else {
-            let (id, offset) = match at.checked_sub(1) {
-                Some(previous) => (self.book[previous], self.known(self.book[previous]).buffer.len()),
-                None => (self.book[0], parts::after_settings(self.known(self.book[0]).text())),
+            let gap = place.and_then(|place| parts::in_gap(&self.book_texts(), at, place));
+            let (id, offset) = match (gap, at.checked_sub(1)) {
+                (Some((section, offset)), _) => (self.book[section], offset),
+                (None, Some(previous)) => (self.book[previous], self.known(self.book[previous]).buffer.len()),
+                (None, None) => (self.book[0], parts::after_settings(self.known(self.book[0]).text())),
             };
             let joined = self.joined().text;
             let (_, position) = self.file_position(id, offset).unwrap_or_default();
@@ -1532,9 +1561,14 @@ impl Session {
                 markdown = markdown.replace(placeholder, words);
             }
         }
-        // A paragraph whose style the theme lacks is set in italics instead, since the engine rejects the style.
-        let theme = self.theme_json();
-        let styles = theme.as_ref().and_then(|theme| theme.get("custom-styles")?.as_object());
+        // A paragraph whose style the theme, resolved over the bundled default as the engine resolves it, has not as a
+        // paragraph style is set in italics instead, since the engine rejects the style.
+        let config = (self.theme_file().zip(self.theme_json()))
+            .and_then(|(path, theme)| crate::theme_file::resolved(&path, &theme));
+        let styled = |class: &str| {
+            (config.as_ref().and_then(|config| config.custom_styles.get(class)))
+                .is_some_and(|style| style.kind() == StyleKind::Paragraph)
+        };
         let lines: Vec<String> = (markdown.lines())
             .map(|line| {
                 match line
@@ -1542,7 +1576,7 @@ impl Session {
                     .strip_suffix('}')
                     .and_then(|line| line.rsplit_once(" {."))
                 {
-                    Some((words, class)) if !styles.is_some_and(|styles| styles.contains_key(class)) => {
+                    Some((words, class)) if !styled(class) => {
                         format!("*{words}*")
                     }
                     _ => line.to_owned(),

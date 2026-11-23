@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use druck::editor::theme_value::{default_theme_value, merge};
 use serde_json::Value;
 
-pub use validate::Problem;
+pub use validate::{Problem, resolved};
 use writer::Commit;
 
 /// The bundled specimen: every element of a document, to see a theme on and to try a change against.

@@ -49,8 +49,9 @@ TARGET = "aarch64-apple-darwin"
 COPYRIGHT = "© 2026 Michael Wallner, Coders Cantina. MIT licensed."
 ENTITLEMENTS = ROOT / "scripts" / "desktop.entitlements"
 REPOSITORY = "https://github.com/coderscantina/druck"
-# The latest release's appcast. GitHub redirects it to the asset, and Sparkle's URL session follows the redirect.
-FEED_URL = f"{REPOSITORY}/releases/latest/download/appcast.xml"
+# The feed on the `appcast` pre-release, which each desktop release replaces, so a release without a desktop build
+# leaves it naming the last DMG. GitHub redirects it to the asset, and Sparkle's URL session follows the redirect.
+FEED_URL = f"{REPOSITORY}/releases/download/appcast/appcast.xml"
 SPARKLE_VERSION = "2.10.1"
 SPARKLE_URL = f"https://github.com/sparkle-project/Sparkle/releases/download/{SPARKLE_VERSION}/Sparkle-{SPARKLE_VERSION}.tar.xz"
 SPARKLE_SHA256 = "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27"

@@ -4,8 +4,9 @@ name: Release
 # workflow artifacts. A tag push from scripts/release.sh also creates the GitHub
 # release with the newest CHANGELOG.md section. The desktop job builds the macOS app. On a manual run it is ad-hoc
 # signed and kept as a workflow artifact. On a tag it is signed with the Developer ID, notarized, and stapled, the
-# update and the appcast are signed with the EdDSA key, and the publish-desktop job adds the DMG, its checksum, and
-# appcast.xml to the release, where the app's updater finds them. The CLI release does not wait for the desktop app.
+# update and the appcast are signed with the EdDSA key, and the publish-desktop job adds the DMG and its checksum to
+# the release and replaces appcast.xml on the `appcast` pre-release, where the app's updater finds it. The CLI
+# release does not wait for the desktop app.
 # The secrets are listed in docs/RELEASE.md.
 on:
   workflow_dispatch:
@@ -157,14 +158,20 @@ jobs:
         with:
           name: desktop-aarch64-apple-darwin
           path: dist-desktop
-      # The appcast goes last, so the feed never names a DMG that is not there yet.
-      - name: Add the DMG and the appcast
+      # The feed lives on a release of its own, the pre-release `appcast`, which is never latest. Only this job
+      # replaces its appcast.xml, after the DMG is up, so a release without a desktop build leaves the feed naming
+      # the last DMG there is.
+      - name: Add the DMG and point the feed at it
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist-desktop
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" ./*.dmg ./*.dmg.sha256
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" appcast.xml
+          if ! gh release view appcast --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create appcast --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Desktop update feed" --notes "The feed the desktop app checks for updates. Each release replaces appcast.xml."
+          fi
+          gh release upload appcast --repo "$GITHUB_REPOSITORY" --clobber appcast.xml
 
   publish:
     name: GitHub release

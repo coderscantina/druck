@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::Path;
 
 use druck::editor::installed_fonts;
-use druck::editor::resolved_config::{FrontMatter, InputSource, Inputs, SettingsInput, ThemeInput, resolve};
+use druck::editor::resolved_config::{Config, FrontMatter, InputSource, Inputs, SettingsInput, ThemeInput, resolve};
 use druck::resource::FileResolver;
 use serde_json::Value;
 
@@ -34,9 +34,13 @@ impl fmt::Display for Problem {
     }
 }
 
-/// Resolves the theme over the bundled default, as a render would, and checks the files it names.
-pub fn check(path: &Path, theme: &Value) -> Vec<Problem> {
-    let inputs = Inputs {
+/// The theme resolved over the bundled default, as a render resolves it, or `None` when the engine refuses it.
+pub fn resolved(path: &Path, theme: &Value) -> Option<Config> {
+    resolve(inputs(path, theme)).ok()
+}
+
+fn inputs(path: &Path, theme: &Value) -> Inputs {
+    Inputs {
         theme: Some(ThemeInput {
             source: InputSource::Theme(path.to_owned()),
             value: theme.clone(),
@@ -51,8 +55,12 @@ pub fn check(path: &Path, theme: &Value) -> Vec<Problem> {
             },
             settings: FrontMatter::default(),
         },
-    };
-    match resolve(inputs) {
+    }
+}
+
+/// Resolves the theme over the bundled default, as a render would, and checks the files it names.
+pub fn check(path: &Path, theme: &Value) -> Vec<Problem> {
+    match resolve(inputs(path, theme)) {
         Ok(config) => {
             let missing = config
                 .resources()
