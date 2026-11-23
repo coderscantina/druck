@@ -333,8 +333,11 @@ impl Conversation {
         effects
     }
 
-    /// Notes the files a finished tool changed, from the result the CLI attaches to it.
+    /// Notes the files a finished tool changed, from the result the CLI attaches to it: one file's, or a list of them.
     fn record_changes(&mut self, details: &Value) -> Vec<Effect> {
+        if let Some(files) = details.as_array() {
+            return files.iter().flat_map(|file| self.record_changes(file)).collect();
+        }
         let Some(path) = details["filePath"].as_str().map(PathBuf::from) else {
             return Vec::new();
         };

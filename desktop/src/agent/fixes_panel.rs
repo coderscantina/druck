@@ -126,12 +126,12 @@ impl FixesPanel {
                             .text_color(tokens.text_quiet)
                             .child(entry.place()),
                     )
-                    .child(
+                    .children(strings::fix_counts(&entry.counts).into_iter().map(|line| {
                         div()
                             .text_size(tokens::TEXT_SMALL)
                             .text_color(tokens.text_faint)
-                            .child(strings::fix_clears(entry.cleared)),
-                    ),
+                            .child(line)
+                    })),
             )
             .child(
                 div()
@@ -144,7 +144,7 @@ impl FixesPanel {
                     )
                     .child(
                         small_button(tokens, ("fix-reject", id as usize), crate::t!(Key::FixReject))
-                            .on_click(on(|agent, id, _, cx| agent.reject_fix(id, cx))),
+                            .on_click(on(|agent, id, window, cx| agent.reject_fix(id, window, cx))),
                     ),
             )
             .children(pages)

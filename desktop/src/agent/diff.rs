@@ -44,8 +44,29 @@ pub fn lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The lines of a unified diff, numbered from its hunk headers. Anything else in it, such as a file header, is left out.
+/// The lines of a unified diff, numbered from its hunk headers, and cut as [`diff`] cuts them. Anything else in it, such
+/// as a file header, is left out.
 pub fn unified(patch: &str) -> Vec<DiffLine> {
+    let mut shown = unified_whole(patch);
+    for hunk in shown.split_mut(|line| matches!(line, DiffLine::Gap(_))) {
+        let marks: Vec<(Mark, String)> = (hunk.iter())
+            .filter_map(|line| match line {
+                DiffLine::Line { mark, text, .. } => Some((*mark, text.clone())),
+                DiffLine::Gap(_) => None,
+            })
+            .collect();
+        let marks: Vec<(Mark, &str)> = marks.iter().map(|(mark, text)| (*mark, text.as_str())).collect();
+        for (line, (_, cut, span)) in hunk.iter_mut().zip(shorten(&marks)) {
+            if let DiffLine::Line { text, emphasis, .. } = line {
+                (*text, *emphasis) = (cut, span);
+            }
+        }
+    }
+    shown
+}
+
+/// The lines of a unified diff, whole.
+fn unified_whole(patch: &str) -> Vec<DiffLine> {
     let (mut old, mut new) = (0, 0);
     let mut shown = Vec::new();
     for line in lines(patch) {
@@ -424,6 +445,28 @@ mod tests {
         let out = diff(&old, "");
         assert_eq!(out.len(), MAX_LINES + 1);
         assert_eq!(out.last(), Some(&DiffLine::Gap(400 - MAX_LINES)));
+    }
+
+    #[test]
+    fn a_long_line_of_a_unified_diff_is_cut_around_its_change() {
+        let old = format!("{} Amiga 500 {}", "x".repeat(90), "y".repeat(90));
+        let new = old.replace("Amiga 500", "Atari ST");
+        let shown = unified(&format!("@@ -7 +7 @@\n-{old}\n+{new}\n"));
+        let [
+            DiffLine::Line {
+                number: 7,
+                text: removed,
+                emphasis: Some(span),
+                ..
+            },
+            DiffLine::Line { text: added, .. },
+        ] = &shown[..]
+        else {
+            panic!("a pair of lines: {shown:?}")
+        };
+        assert_eq!(&removed[span.clone()], "Amiga 500");
+        assert!(removed.starts_with('\u{2026}') && removed.chars().count() < 100);
+        assert!(added.contains("Atari ST") && added.chars().count() < 100);
     }
 
     #[test]

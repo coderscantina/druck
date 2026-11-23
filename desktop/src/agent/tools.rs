@@ -11,6 +11,8 @@ use std::path::{Component, Path};
 
 use serde_json::{Value, json};
 
+use super::session::SessionConfig;
+
 /// The argument that runs the app as this server.
 pub const FLAG: &str = "--agent-note-tool";
 /// The server's name, which is part of each tool's full name.
@@ -19,6 +21,14 @@ pub const LEAVE_NOTE: &str = "leave_note";
 pub const RECORD_STYLE: &str = "record_style";
 pub const TRY_FIXES: &str = "try_fixes";
 pub const NAMES: [&str; 3] = [LEAVE_NOTE, RECORD_STYLE, TRY_FIXES];
+
+/// The arguments the CLI starts the server with: [`FLAG`], the document, and the app's copy of the book if a run of
+/// the typesetter has one.
+pub fn server_args(config: &SessionConfig) -> Vec<&Path> {
+    let mut args = vec![Path::new(FLAG), config.document.as_path()];
+    args.extend(config.book_copy.as_deref());
+    args
+}
 
 /// A tool's name as a CLI's stream has it: `mcp__<server>__<tool>`.
 pub fn full_name(tool: &str) -> String {

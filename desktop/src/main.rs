@@ -74,10 +74,13 @@ struct Cli {
 fn main() -> ExitCode {
     // The CLI starts this executable again as the server of its own tools. See `agent::tools`.
     if std::env::args().nth(1).as_deref() == Some(agent::NOTE_TOOL_FLAG) {
-        // The document follows the flag: a project's folder or a single file. An older caller names none.
+        // The document follows the flag: a project's folder or a single file. An older caller names none. Then, for a
+        // run of the typesetter, the app's copy of the book's text.
         let document = std::env::args_os().nth(2).map(PathBuf::from);
+        let copy = std::env::args_os().nth(3).map(PathBuf::from);
         let served = std::env::current_dir().and_then(|folder| {
-            let mut trials = typesetter::tool::Trials::new(document.as_deref().unwrap_or(&folder));
+            let location = document.as_deref().unwrap_or(&folder);
+            let mut trials = typesetter::tool::Trials::new(location, copy.as_deref());
             let trial = agent::tools::Trial {
                 definition: typesetter::tool::definition(),
                 call: &mut |arguments| trials.call(arguments),

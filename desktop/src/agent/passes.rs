@@ -185,19 +185,59 @@ pub fn prompt(pass: &Pass, project: &Path, target: &Target, style_sheet: Option<
             target.file
         ),
     };
-    let sheet = match style_sheet.map(str::trim).filter(|sheet| !sheet.is_empty()) {
+    let sheet = sheet_section(style_sheet);
+    format!(
+        "Run the editing pass \"{}\".\n\n<druck-pass>\n{}\n</druck-pass>\n\n{scope}\n\n{returns}\n\n{sheet}\n\nWhen you \
+         are done, reply with one short sentence in the book's language saying what you found.",
+        pass.name, pass.instructions
+    )
+}
+
+/// The pass that reads the whole book first, before its run over the book edits chapter by chapter: one turn sees
+/// every chapter, which no chapter's own turn does. A project's copy of it, of the same file name, does too.
+pub const SURVEYS_BOOK: &str = "consistency";
+
+/// What the CLI is sent for the read-only turn that starts a run of [`SURVEYS_BOOK`] over the book: read every file and
+/// record the book's rules in the style sheet, which the chapters' turns are then handed. For the model, so never
+/// translated.
+pub fn survey_prompt(pass: &Pass, project: &Path, files: &[String], style_sheet: Option<&str>) -> String {
+    let files: Vec<String> = (files.iter())
+        .map(|file| format!("- `{file}`, whose full path is `{}`", project.join(file).display()))
+        .collect();
+    format!(
+        "Run the first step of the editing pass \"{}\": collect the rules of the whole book, before its chapters are \
+         edited one by one.\n\nRead every file of the book, in this order:\n\n{}\n\nFind what the book writes in more \
+         than one way, and what a chapter could write differently from the others:\n\n\
+         - Names of people, places, organisations, and products, and their short forms.\n\
+         - Spelling variants of one word: with or without a hyphen, as one word or two, capitalised or not, British or \
+         American forms, old or reformed German spelling.\n\
+         - Hyphenation of compounds, and dashes, quotation marks, and ellipses.\n\
+         - The number style: digits or words, dates, times, units, and currencies.\n\
+         - Abbreviations, and terms the book uses with a fixed meaning.\n\n\
+         For each, take the form the book uses most. If two forms are equally common, take the one a good dictionary \
+         of the text's language prefers. Record each decision with the druck tool `{}`: the entry is the thing as it \
+         will be written, the rule says in a few words what was decided, in the book's language. Record only what a \
+         chapter could get wrong: a word written one way everywhere needs no entry. The decisions in the style sheet \
+         are settled: do not record them again.\n\nDo not edit, create, or delete any file. Each chapter is edited in \
+         a later step, which follows what you record.\n\n{}\n\nWhen you are done, reply with one short sentence in \
+         the book's language saying what you recorded.",
+        pass.name,
+        files.join("\n"),
+        tools::RECORD_STYLE,
+        sheet_section(style_sheet),
+    )
+}
+
+/// The style sheet as a prompt hands it on.
+fn sheet_section(style_sheet: Option<&str>) -> String {
+    match style_sheet.map(str::trim).filter(|sheet| !sheet.is_empty()) {
         Some(sheet) => format!(
             "The book's style sheet, `{}`, holds the decisions made so far:\n\n<druck-style-sheet>\n{sheet}\n\
              </druck-style-sheet>",
             style_sheet::FILE
         ),
         None => "The book has no style sheet yet.".to_owned(),
-    };
-    format!(
-        "Run the editing pass \"{}\".\n\n<druck-pass>\n{}\n</druck-pass>\n\n{scope}\n\n{returns}\n\n{sheet}\n\nWhen you \
-         are done, reply with one short sentence in the book's language saying what you found.",
-        pass.name, pass.instructions
-    )
+    }
 }
 
 fn quoted(text: &str) -> String {
@@ -337,5 +377,23 @@ mod tests {
         assert!(sent.contains("lines 3 to 4 of the file `manuscript/01.md`"));
         assert!(sent.contains("> One.\n> Two."));
         assert!(sent.contains("Edit the file in place") && sent.contains("no style sheet yet"));
+    }
+
+    #[test]
+    fn the_first_turn_of_consistency_reads_every_file_and_only_records() {
+        let consistency = find(Path::new("/nonexistent"), SURVEYS_BOOK).unwrap().pass.unwrap();
+        let files = ["manuscript/01.md".to_owned(), "manuscript/02.md".to_owned()];
+        let sent = survey_prompt(
+            &consistency,
+            Path::new("/book"),
+            &files,
+            Some("- **Anna**: never Anne\n"),
+        );
+        assert!(sent.contains(
+            "- `manuscript/01.md`, whose full path is `/book/manuscript/01.md`\n- `manuscript/02.md`, whose full path is \
+             `/book/manuscript/02.md`"
+        ));
+        assert!(sent.contains("`record_style`") && sent.contains("Do not edit, create, or delete any file"));
+        assert!(sent.contains("<druck-style-sheet>\n- **Anna**: never Anne\n</druck-style-sheet>"));
     }
 }

@@ -1064,7 +1064,9 @@ Four passes are built in:
 
 A pass that returns changes edits the files, and each change shows tinted in the text with Accept and Reject. A pass that returns notes changes nothing: each point stands in the margin beside its passage. Local history is labelled before every run, so the timeline takes a whole run back.
 
-A whole-book run works through the chapters one after another. The line at the window's foot says which chapter it is on and has Stop. A chapter that fails is named at the end, and the others are still done.
+A whole-book run works through the chapters one after another. The line at the window's foot says which chapter it is on and has Stop. A chapter that fails is named at the end, and the others are still done. Unsaved text is saved before a run starts, so the agent reads what is on screen.
+
+Consistency over the whole book first reads every chapter in one turn that changes nothing. It records the book's rules in the style sheet: names, spellings, the number style, hyphenation. Then each chapter's turn applies them, so a name written two ways in chapters 1 and 9 is caught although no chapter's turn sees the other. That first turn is the long one of the run.
 
 ### Your own passes
 
@@ -1105,3 +1107,5 @@ Druck runs an agent program that is installed on your computer: Claude Code or C
 - **Codex:** install it as OpenAI's documentation describes, and sign in with an API key: `printenv OPENAI_API_KEY | codex login --with-api-key`.
 
 A project's `CLAUDE.md` or `AGENTS.md`, and your own settings for the program, apply as they do in a terminal.
+
+Druck is tested with Claude Code 2.1.317 and later 2.1 releases, and with Codex 0.166. With another version it says so once at the window's foot and on the agent card, and goes on.

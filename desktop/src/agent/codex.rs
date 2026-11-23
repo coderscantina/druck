@@ -9,7 +9,7 @@
 //! `thread/start`, so a prompt sent before that waits here and goes out with that reply. Druck's tools come in as an
 //! MCP server through `-c mcp_servers.druck...` for one run, which touches no `config.toml`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 
 use serde_json::{Value, json};
@@ -17,9 +17,11 @@ use serde_json::{Value, json};
 use super::backend::{Backend, Read, Verdict, parse_version};
 use super::cli::{CliState, Login};
 use super::session::{Access, Event, PermissionRequest, SessionConfig};
+use super::strings::{DENIED_DEFAULT, STOPPED_DENIAL};
 use super::tools;
 
-/// The CLI line this protocol code was captured and tested against.
+/// The tested range: 0.166.x, the line this protocol code was captured and tested against. The app server is
+/// experimental, so any other version is untested.
 const TESTED: (u32, u32) = (0, 166);
 
 /// The ids of the two requests this side sends once. Prompts and interrupts count on from there.
@@ -44,6 +46,8 @@ pub struct Codex {
     inputs: HashMap<String, Value>,
     /// The assistant has said something this turn, so its next message starts a new paragraph.
     spoke: bool,
+    /// The ids of `turn/steer` requests sent, whose replies say only whether the reason arrived.
+    steers: HashSet<u64>,
 }
 
 impl Default for Codex {
@@ -55,6 +59,7 @@ impl Default for Codex {
             waiting: Vec::new(),
             inputs: HashMap::new(),
             spoke: false,
+            steers: HashSet::new(),
         }
     }
 }
@@ -112,11 +117,13 @@ impl Codex {
                 .unwrap_or_else(|| text(&item["error"]["message"])),
             _ => String::new(),
         };
+        // A change comes with its hunks, as Claude's edits do, so one to a file the app does not hold open is listed too.
+        let details = (item["type"] == "fileChange" && !failed).then(|| patches(&item["changes"]));
         vec![Event::ToolResult {
             tool_use_id: id,
             content,
             is_error: failed,
-            details: None,
+            details,
         }]
     }
 
@@ -161,6 +168,15 @@ impl Codex {
 
     fn answered(&mut self, id: u64, message: &Value) -> Read {
         let error = message["error"]["message"].as_str();
+        if self.steers.remove(&id) {
+            // A reason that did not arrive leaves the turn as it was.
+            return Read::events(
+                error
+                    .map(|error| Event::Error(format!("Codex did not take the reason: {error}")))
+                    .into_iter()
+                    .collect(),
+            );
+        }
         match (id, error) {
             (INITIALIZE, _) => Read::default(),
             (THREAD, None) => {
@@ -257,7 +273,7 @@ impl Backend for Codex {
                 "-c".into(),
                 format!("{server}.command={}", json!(executable)).into(),
                 "-c".into(),
-                format!("{server}.args={}", json!([tools::FLAG, config.document])).into(),
+                format!("{server}.args={}", json!(tools::server_args(config))).into(),
                 // A trial lays the whole book out, once per fix of a call.
                 "-c".into(),
                 format!("{server}.tool_timeout_sec={TOOL_TIMEOUT_SECONDS}").into(),
@@ -309,7 +325,9 @@ impl Backend for Codex {
         }
     }
 
-    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Value {
+    /// Codex's answers carry no text, so a reason the author gave follows the decline as a message into the running
+    /// turn, `turn/steer`, which the model reads before it goes on.
+    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Vec<Value> {
         // The id goes back as it came, a number or a string.
         let id: Value = serde_json::from_str(&request.request_id).unwrap_or_else(|_| json!(request.request_id));
         let result = if request.tool_name.starts_with("mcp__") {
@@ -327,7 +345,22 @@ impl Backend for Codex {
             };
             json!({"decision": decision})
         };
-        json!({"id": id, "result": result})
+        let mut messages = vec![json!({"id": id, "result": result})];
+        let authored = match verdict {
+            Verdict::Deny(reason) => Some(reason).filter(|reason| ![DENIED_DEFAULT, STOPPED_DENIAL].contains(reason)),
+            _ => None,
+        };
+        if let (Some(reason), Some(thread), Some(turn)) = (authored, &self.thread, &self.turn) {
+            self.next_id += 1;
+            self.steers.insert(self.next_id);
+            let text = format!("I declined that. My reason: {reason}");
+            messages.push(json!({
+                "id": self.next_id,
+                "method": "turn/steer",
+                "params": {"threadId": thread, "expectedTurnId": turn, "input": [{"type": "text", "text": text}]},
+            }));
+        }
+        messages
     }
 
     fn interrupt(&mut self) -> Vec<Value> {
@@ -381,6 +414,47 @@ impl Backend for Codex {
             read
         }
     }
+}
+
+/// A Codex file change as Claude reports an edit after the fact, one entry per file: a new file as created, and a
+/// changed one with its hunks as `structuredPatch` holds them. A deleted file is left out, as Claude has no such report.
+fn patches(changes: &Value) -> Value {
+    let patches = (changes.as_array().into_iter().flatten()).filter_map(|change| {
+        let path = change["path"].as_str()?;
+        match change["kind"]["type"].as_str()? {
+            "add" => Some(json!({"type": "create", "filePath": path})),
+            "update" => Some(json!({
+                "type": "update",
+                "filePath": change["kind"]["move_path"].as_str().unwrap_or(path),
+                "structuredPatch": hunks(change["diff"].as_str().unwrap_or_default()),
+            })),
+            _ => None,
+        }
+    });
+    Value::Array(patches.collect())
+}
+
+/// The hunks of a unified diff, each with where it starts on both sides and its marked lines.
+fn hunks(diff: &str) -> Value {
+    let mut hunks: Vec<Value> = Vec::new();
+    for line in diff.lines() {
+        if let Some(header) = line.strip_prefix("@@ -") {
+            let start = |side: &str| side.split([',', ' ']).next()?.parse::<u64>().ok();
+            let Some((old, new)) = header.split_once(" +") else {
+                continue;
+            };
+            let (Some(old), Some(new)) = (start(old), start(new)) else {
+                continue;
+            };
+            hunks.push(json!({"oldStart": old, "newStart": new, "lines": []}));
+        } else if let Some(hunk) = hunks.last_mut()
+            && line.starts_with([' ', '+', '-', '\\'])
+            && let Some(lines) = hunk["lines"].as_array_mut()
+        {
+            lines.push(json!(line));
+        }
+    }
+    Value::Array(hunks)
 }
 
 fn text(value: &Value) -> String {
@@ -479,6 +553,28 @@ mod tests {
     }
 
     #[test]
+    fn a_change_lands_in_the_turns_summary_whether_or_not_its_file_is_open() {
+        let mut conversation = super::super::conversation::Conversation::new("/book".into());
+        conversation.begin_turn("Change Hello to Howdy".into(), None);
+        let accepted = captured().remove(2);
+        for event in accepted.events {
+            conversation.apply(event, &|_| Some("Hello world.\n".to_owned()));
+        }
+        let turn = conversation.current_turn().expect("a turn");
+        let changes = conversation.changes(turn).expect("the patch is listed");
+        assert_eq!((changes.files.len(), changes.hunk_count()), (1, 1));
+
+        let added = json!([{"path": "/book/b.md", "kind": {"type": "add"}, "diff": "New.\n"}]);
+        assert_eq!(patches(&added), json!([{"type": "create", "filePath": "/book/b.md"}]));
+        let two = hunks("--- a/a.md\n+++ b/a.md\n@@ -1,2 +1,2 @@\n-One.\n+Uno.\n Two.\n@@ -9 +9 @@\n-Nine.\n+Neun.\n");
+        assert_eq!(
+            two[0],
+            json!({"oldStart": 1, "newStart": 1, "lines": ["-One.", "+Uno.", " Two."]})
+        );
+        assert_eq!(two[1]["oldStart"], 9);
+    }
+
+    #[test]
     fn answers_go_back_under_the_requests_own_id() {
         let mut codex = Codex::default();
         let request = |tool: &str| PermissionRequest {
@@ -491,20 +587,51 @@ mod tests {
         let session = json!({});
         assert_eq!(
             codex.answer(&request(PATCH), Verdict::Allow),
-            json!({"id": 7, "result": {"decision": "accept"}})
+            [json!({"id": 7, "result": {"decision": "accept"}})]
         );
         assert_eq!(
-            codex.answer(&request(COMMAND), Verdict::AllowForSession(&session))["result"]["decision"],
+            codex.answer(&request(COMMAND), Verdict::AllowForSession(&session))[0]["result"]["decision"],
             "acceptForSession"
         );
         assert_eq!(
-            codex.answer(&request(PATCH), Verdict::Deny("no"))["result"]["decision"],
+            codex.answer(&request(PATCH), Verdict::Deny("no"))[0]["result"]["decision"],
             "decline"
         );
         assert_eq!(
-            codex.answer(&request("mcp__other"), Verdict::Deny("no"))["result"]["action"],
+            codex.answer(&request("mcp__other"), Verdict::Deny("no"))[0]["result"]["action"],
             "decline"
         );
+    }
+
+    #[test]
+    fn a_reason_for_a_decline_follows_it_into_the_running_turn() {
+        let mut codex = Codex::default();
+        codex.read(r#"{"id":2,"result":{"thread":{"id":"t1"},"model":"m"}}"#);
+        codex.read(r#"{"method":"turn/started","params":{"threadId":"t1","turn":{"id":"u1"}}}"#);
+        let request = PermissionRequest {
+            request_id: "0".into(),
+            tool_use_id: None,
+            tool_name: PATCH.into(),
+            input: Value::Null,
+            suggestions: Vec::new(),
+        };
+        let sent = codex.answer(&request, Verdict::Deny("Keep the old spelling."));
+        assert_eq!(sent[0]["result"]["decision"], "decline");
+        assert_eq!(sent[1]["method"], "turn/steer");
+        assert_eq!(sent[1]["params"]["expectedTurnId"], "u1");
+        assert!(text(&sent[1]["params"]["input"][0]["text"]).ends_with("My reason: Keep the old spelling."));
+        let id = sent[1]["id"].as_u64().unwrap();
+        let failed = codex.read(&json!({"id": id, "error": {"code": -32600, "message": "no active turn"}}).to_string());
+        assert!(
+            matches!(failed.events.as_slice(), [Event::Error(_)]),
+            "a reason that did not arrive does not end the turn"
+        );
+        assert_eq!(
+            codex.answer(&request, Verdict::Deny(DENIED_DEFAULT)).len(),
+            1,
+            "no words, no message"
+        );
+        assert_eq!(codex.answer(&request, Verdict::Deny(STOPPED_DENIAL)).len(), 1);
     }
 
     #[test]

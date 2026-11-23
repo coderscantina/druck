@@ -45,6 +45,11 @@ impl ChapterMap {
         let place = self.places.iter().find(|place| place.path == path)?;
         Some(place.range.clone())
     }
+
+    /// Each chapter file and its part of the joined text, in the book's order.
+    pub(crate) fn files(&self) -> impl Iterator<Item = (&Path, Range<usize>)> {
+        (self.places.iter()).map(|place| (place.path.as_path(), place.range.clone()))
+    }
 }
 
 impl Joined {
