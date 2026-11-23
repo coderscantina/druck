@@ -120,7 +120,9 @@ impl EditorView {
         let elsewhere = (chapter != self.session.active()).then(|| self.session.title_of(chapter));
         let original = body.clone();
         let input = cx.new(|cx| {
-            let mut input = TextInput::multiline(window, cx).in_prose();
+            let mut input = TextInput::multiline(window, cx)
+                .in_prose()
+                .with_label(crate::t!(Key::FootnoteTitle, label = label));
             input.set_value(body, true, cx);
             if fresh {
                 input.select_all(cx);

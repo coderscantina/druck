@@ -103,7 +103,7 @@ impl StylesPanel {
                 Control::Reference(_) | Control::Number | Control::Weight | Control::List | Control::Count
             ) {
                 inputs.entry(property.key()).or_insert_with(|| {
-                    let input = cx.new(|cx| TextInput::new(window, cx));
+                    let input = cx.new(|cx| TextInput::new(window, cx).with_label(property.label));
                     subscriptions.push(cx.subscribe(&input, move |panel, _, Committed(text), cx| {
                         panel.commit(property, text, cx);
                     }));
@@ -316,7 +316,7 @@ impl StylesPanel {
         let Some(Selected::Custom(name)) = self.selected.clone() else {
             return;
         };
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let input = cx.new(|cx| TextInput::new(window, cx).with_label(Key::Rename));
         input.update(cx, |input, cx| input.set_value(name.clone(), true, cx));
         self._subscriptions
             .push(cx.subscribe(&input, move |panel, input, _: &Submitted, cx| {

@@ -386,6 +386,8 @@ impl Render for CommitCard {
         let (left, width) = TextColumn::over_text(cx, tokens::COMMIT_CARD_WIDTH);
         let card = div()
             .id("commit-card")
+            .role(gpui::Role::Dialog)
+            .aria_label(crate::t!(Key::CommitLabel))
             .occlude()
             .w_full()
             .flex()

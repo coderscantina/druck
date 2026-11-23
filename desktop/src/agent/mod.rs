@@ -312,7 +312,7 @@ impl AgentView {
             .and_then(|model| backend.models().iter().copied().find(|known| *known == model));
         let prompt = cx.new(|cx| prompt::PromptInput::new(crate::t!(Key::Placeholder), cx));
         let selection_prompt = cx.new(|cx| prompt::PromptInput::one_line(crate::t!(Key::SelectionPlaceholder), cx));
-        let reason = cx.new(|cx| TextInput::new(window, cx));
+        let reason = cx.new(|cx| TextInput::new(window, cx).with_label(Key::ReasonLabel));
         let prompt_focus = prompt.read(cx).focus_handle(cx);
         let theme_model = parts.inspector.read(cx).model().clone();
         let selection_focus = selection_prompt.read(cx).focus_handle(cx);
@@ -499,6 +499,12 @@ impl AgentView {
                         .update(cx, |persist, cx| persist.show_note(note, window, cx));
                 }
                 view.cli = Some(cli);
+                // The prompt shows only once the CLI is found, so a card opened before that gets the keys now, unless
+                // the author took them elsewhere meanwhile.
+                let editor = view.editor.read(cx).focus_handle(cx);
+                if view.chat_open && view.cli_usable() && window.focused(cx).is_none_or(|focused| focused == editor) {
+                    window.focus(&view.prompt.read(cx).focus_handle(cx), cx);
+                }
                 if let Some((slug, scope)) = view.pass_asked.take() {
                     view.run_pass(&slug, scope, window, cx);
                 }

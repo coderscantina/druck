@@ -66,7 +66,7 @@ impl SectionDialog {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // A field that keeps its focus reports Escape, which closes the dialog. Otherwise Escape would only blur the
         // field and the dialog would stay.
-        let name = cx.new(|cx| TextInput::new(window, cx).keep_focus_on_enter());
+        let name = cx.new(|cx| TextInput::new(window, cx).keep_focus_on_enter().with_label(Key::Name));
         let subscriptions = vec![
             cx.subscribe_in(&name, window, |dialog, _, Submitted, window, cx| {
                 dialog.submit(window, cx)
@@ -210,6 +210,7 @@ impl SectionDialog {
         div()
             .id(page.slug)
             .button(tokens, name)
+            .aria_selected(chosen)
             .flex()
             .flex_col()
             .items_center()
@@ -492,6 +493,8 @@ impl Render for SectionDialog {
         };
         let card = div()
             .id("dialog")
+            .role(gpui::Role::Dialog)
+            .aria_label(heading.clone())
             .track_focus(&self.card)
             .on_key_down(cx.listener(Self::gallery_key))
             .occlude()

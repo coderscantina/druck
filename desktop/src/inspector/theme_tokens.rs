@@ -86,7 +86,7 @@ impl TokensPanel {
             let input = match self.values.get(&key) {
                 Some(input) => input.clone(),
                 None => {
-                    let input = cx.new(|cx| TextInput::new(window, cx));
+                    let input = cx.new(|cx| TextInput::new(window, cx).with_label(name.clone()));
                     self._subscriptions
                         .push(cx.subscribe(&input, move |panel, _, Committed(text), cx| {
                             panel.set_value(group, &name, text, cx);
@@ -198,7 +198,7 @@ impl TokensPanel {
     }
 
     fn start_renaming(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let input = cx.new(|cx| TextInput::new(window, cx).with_label(Key::Rename));
         input.update(cx, |input, cx| input.set_value(name.to_owned(), true, cx));
         let from = name.to_owned();
         self._subscriptions

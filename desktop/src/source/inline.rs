@@ -434,6 +434,21 @@ fn gaps(len: usize, covered: &[Range<usize>]) -> Vec<Range<usize>> {
     gaps
 }
 
+/// Where a trailing `{#id .style placement=top}` or `{-}` starts, which belongs to the block and not to its text.
+pub fn trailing_attribute(text: &str) -> Option<usize> {
+    let body = text.trim_end();
+    if !body.ends_with('}') {
+        return None;
+    }
+    let open = body.rfind('{')?;
+    let inner = &body[open + 1..body.len() - 1];
+    let is_attribute = !inner.is_empty()
+        && inner
+            .split_whitespace()
+            .all(|word| word.starts_with(['.', '#']) || word == "-" || word.contains('='));
+    is_attribute.then_some(open)
+}
+
 /// The line markers of a block.
 pub fn line_markers(kind: BlockKind, text: &str) -> Vec<LineMarker> {
     match kind {

@@ -1114,6 +1114,10 @@ impl Workspace {
             .editor
             .update(cx, |editor, cx| editor.set_type(book_type.clone(), cx));
         self.book_type = Some(book_type.clone());
+        // A title page shown before the book's type was read takes it now, so its lines stand in the book's face.
+        let zoom = self.parts.editor.read(cx).zoom();
+        self.title_view
+            .update(cx, |view, cx| view.set_type(Some(book_type.clone()), zoom, cx));
     }
 
     fn mode_switch(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {

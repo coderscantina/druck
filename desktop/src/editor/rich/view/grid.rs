@@ -152,7 +152,14 @@ impl EditorView {
         let Some(grid) = self.grid_at(start) else {
             return;
         };
-        self.caret_out_of(atom.first, atom.last, window, cx);
+        // The caret waits after the table while a cell has the keys, so the block it came from shows at rest, with no
+        // list marker or heading sign revealed beside the cell.
+        let after = self.blocks.as_slice()[atom.last]
+            .range
+            .end
+            .min(self.session.active_buffer().len());
+        self.selection = Selection::caret(self.skip_hidden(after, true));
+        self.reveal_at = self.selection.head;
         let place = match place {
             Place::Caption if !grid.caption.text.is_empty() => Place::Caption,
             Place::Caption => Place::Cell(0, 0),
@@ -168,12 +175,17 @@ impl EditorView {
         // A list table's cell holds paragraphs and lists, so its field takes several lines.
         let multiline = grid.is_list() && place != Place::Caption;
         let face = self.style.line_style(BlockKind::FootnoteDefinition);
+        let label = match place {
+            Place::Caption => crate::t!(Key::CaptionLabel).to_owned(),
+            Place::Cell(row, cell) => crate::t!(Key::CellLabel, row = row + 1, column = cell + 1),
+        };
         let input = cx.new(|cx| {
-            let mut input = if multiline {
+            let input = if multiline {
                 TextInput::multiline(window, cx).in_prose().bare()
             } else {
                 TextInput::new(window, cx).keep_focus_on_enter().bare()
             };
+            let mut input = input.with_label(label);
             input.set_book_type(Some((face.font, face.size)), cx);
             input.set_value(value, true, cx);
             input.select_all(cx);
@@ -827,6 +839,7 @@ impl EditorView {
             .on_action(cx.listener(|this, _: &ToggleUnderline, _, cx| this.grid_mark(Mark::Underline, cx)))
             .on_action(cx.listener(|this, _: &ToggleStrike, _, cx| this.grid_mark(Mark::Strike, cx)))
             .child(input)
+            .child(super::bounds_probe(self.float_bounds.clone()))
             // The handle of the table's menu, in the margin right of the table, level with the caret's row.
             .child(
                 div()

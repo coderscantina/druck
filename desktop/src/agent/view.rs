@@ -571,6 +571,7 @@ impl AgentView {
 
     fn chip(&self, kind: ChipKind, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let label = self.chip_label(kind);
+        let remove = crate::t!(Key::RemoveChip, chip = label);
         div()
             .id(match kind {
                 ChipKind::Chapter => "chip-chapter",
@@ -592,7 +593,7 @@ impl AgentView {
             .child(
                 div()
                     .id(("chip-remove", kind as usize))
-                    .button(tokens, crate::t!(Key::RemoveChip))
+                    .button(tokens, remove)
                     .flex_none()
                     .size(tokens::CHIP_CLOSE)
                     .flex()
