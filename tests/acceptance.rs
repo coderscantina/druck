@@ -135,8 +135,9 @@ fn strip_comments(text: &str) -> String {
 }
 
 /// The words of the plain paragraphs of Markdown source: letters only, long enough that markup, smart
-/// punctuation, and no-break spaces cannot change them.
+/// punctuation, and no-break spaces cannot change them. A Windows checkout ends lines with CRLF.
 fn source_words(source: &str) -> BTreeSet<String> {
+    let source = &source.replace("\r\n", "\n");
     let body = match source.strip_prefix("---\n").and_then(|rest| rest.split_once("\n---\n")) {
         Some((_, body)) => body,
         None => source,
