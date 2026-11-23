@@ -96,6 +96,7 @@ fn main() -> ExitCode {
         };
     }
     report::install();
+    agent::sweep_book_copies();
     let cli = Cli::parse();
     if let Some(path) = cli.open.as_deref().filter(|path| !path.exists()) {
         eprintln!("cannot open {}: no such file or folder", path.display());

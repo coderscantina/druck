@@ -1,6 +1,6 @@
 //! Errors stay on the machine, and reporting one is a click. [`log`] keeps panics and the errors shown to the author in
-//! a file in the app's folder. The Help menu's report opens a new GitHub issue in the browser with the version, the
-//! system, and the end of that log, and shows the file in the Finder to attach. Nothing is sent from here.
+//! a file in the app's folder. The Help menu's report opens a new GitHub issue in the browser with the version and the
+//! system, and shows the log in the Finder for the author to read and attach. Nothing is sent from here.
 //!
 //! A panic also leaves a marker, so the next launch offers the report once, at the window's foot.
 
@@ -22,8 +22,6 @@ actions!(report, [ReportProblem]);
 
 /// The marker a panic leaves in the data folder.
 const MARKER: &str = "panicked";
-/// How much of the log goes in the issue, before the address is cut to fit.
-const LOG_BYTES: u64 = 6000;
 /// A panic message is cut here, since a failed text operation can quote the text it was on.
 const MESSAGE_CHARS: usize = 200;
 
@@ -98,14 +96,12 @@ pub fn install_actions(cx: &mut App) {
 /// Opens the browser on a new issue and shows the log in the Finder.
 pub fn open(cx: &mut App) {
     let log = log::path();
-    let tail = log.map(|path| log::tail(path, LOG_BYTES)).unwrap_or_default();
     let address = issue::url(
         &issue::Facts {
             version: druck::editor::VERSION,
             system: &system(),
         },
         "Problem report",
-        &tail,
     );
     #[cfg(debug_assertions)]
     if let Some(file) = std::env::var_os("DRUCK_REPORT_URL_FILE") {

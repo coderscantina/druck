@@ -339,13 +339,25 @@ fn fence_open(line: &str) -> Option<Fence> {
 fn fence_end(text: &str, mut pos: usize, fence: Fence) -> usize {
     while pos < text.len() {
         let (line, next) = line_at(text, pos);
-        let content = line.trim();
-        if indent(line) <= 3 && content.len() >= fence.len && content.bytes().all(|byte| byte == fence.marker) {
+        if closes_fence(line, fence.marker, fence.len) {
             return next;
         }
         pos = next;
     }
     text.len()
+}
+
+/// Whether `line` closes a code fence opened with `len` of `marker`, as CommonMark and so the engine read it: at most
+/// three columns of indent, at least as many of the marker, then nothing but spaces and tabs. The block list and the
+/// editor's fence lines both ask this, so they never disagree on where a code block ends.
+pub fn closes_fence(line: &str, marker: u8, len: usize) -> bool {
+    let line = line.trim_end_matches(['\n', '\r']);
+    if indent(line) > 3 {
+        return false;
+    }
+    let content = line.trim_start_matches(' ');
+    let run = content.bytes().take_while(|byte| *byte == marker).count();
+    run >= len && content.bytes().skip(run).all(|byte| matches!(byte, b' ' | b'\t'))
 }
 
 fn is_comment_start(line: &str) -> bool {

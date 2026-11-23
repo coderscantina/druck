@@ -8,7 +8,7 @@
 //! queue, or the theme changes, the entries left are tried again on the book as it is then, for pages and counts that
 //! say what accepting each would do now.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 
@@ -134,16 +134,59 @@ struct Kept {
 /// The app's copy of the book's text for the trial tool in the CLI's process, removed when the run ends.
 struct BookCopy(PathBuf);
 
+/// A book copy's file name starts with this and the app's process id: `druck-book-{pid}-{nanos}.json`.
+const COPY_PREFIX: &str = "druck-book-";
+
 impl BookCopy {
     fn write(book: &Book) -> std::io::Result<Self> {
         let made = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let file = std::env::temp_dir().join(format!("druck-book-{}-{made}.json", std::process::id()));
+        let file = std::env::temp_dir().join(format!("{COPY_PREFIX}{}-{made}.json", std::process::id()));
         book.write_copy(&file)?;
         Ok(Self(file))
     }
+}
+
+/// Removes the book copies that apps which ended without their run's end, as in a crash, left in the temp folder. A
+/// copy whose process still runs as Druck stays, since its run may be under way. For the start of the app.
+pub fn sweep_book_copies() {
+    sweep_copies_in(&std::env::temp_dir(), runs_as_druck);
+}
+
+fn sweep_copies_in(dir: &Path, running: impl Fn(u32) -> bool) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let pid = (name.to_str())
+            .and_then(|name| name.strip_prefix(COPY_PREFIX)?.strip_suffix(".json"))
+            .and_then(|rest| rest.split('-').next()?.parse().ok());
+        if let Some(pid) = pid
+            && !running(pid)
+        {
+            std::fs::remove_file(entry.path()).ok();
+        }
+    }
+}
+
+/// Whether the process `pid` runs and is Druck, by its executable's name: `Druck` in the bundle, `druck-desktop` from
+/// cargo.
+#[cfg(target_os = "macos")]
+fn runs_as_druck(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    let mut name = [0_u8; 256];
+    // SAFETY: proc_name writes at most the buffer's length and returns how much it wrote, 0 for no such process.
+    let written = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+    let name = &name[..usize::try_from(written).unwrap_or(0)];
+    String::from_utf8_lossy(name).to_lowercase().contains("druck")
+}
+
+/// Elsewhere no process is looked up, so every copy stays.
+#[cfg(not(target_os = "macos"))]
+fn runs_as_druck(_pid: u32) -> bool {
+    true
 }
 
 impl Drop for BookCopy {
@@ -723,6 +766,21 @@ mod tests {
 
     use super::*;
     use crate::typesetter::trial::testing::{fix_at_block, short_ending, snapshot};
+
+    #[test]
+    fn a_copy_whose_app_is_gone_is_swept_and_a_running_ones_stays() {
+        let dir = std::env::temp_dir().join(format!("druck-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let names = ["druck-book-11-5.json", "druck-book-22-5.json", "notes.json"];
+        for name in names {
+            std::fs::write(dir.join(name), "{}").expect("file");
+        }
+        sweep_copies_in(&dir, |pid| pid == 22);
+        let left: Vec<bool> = names.iter().map(|name| dir.join(name).exists()).collect();
+        assert_eq!(left, [false, true, true]);
+        assert!(runs_as_druck(std::process::id()), "the test binary is druck_desktop");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn the_apps_own_trial_decides_whatever_the_tool_answered() {

@@ -105,8 +105,15 @@ impl Versions {
             return;
         };
         let files = self.session(cx).files();
+        let made = self.just_made(cx);
         let work = cx.background_spawn(async move {
-            let followed = store.follow(&files);
+            // A book just made from a starter is new: its chapters start their own history.
+            let followed = if made {
+                store.begin(&files, now_ms()).ok();
+                Followed::default()
+            } else {
+                store.follow(&files, &files)
+            };
             store.thin_daily(now_ms());
             followed
         });
@@ -114,6 +121,12 @@ impl Versions {
     }
 
     /// Says at the foot what following history did, once `work` is done, and offers what it could not place.
+    /// Whether the open book is one the app just made from a starter.
+    fn just_made(&self, cx: &App) -> bool {
+        cx.try_global::<super::NewProject>()
+            .is_some_and(|new| self.book(cx).as_ref() == Some(&new.0))
+    }
+
     fn tell_followed(&mut self, work: gpui::Task<Followed>, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |view, cx| {
             let followed = work.await;
@@ -234,16 +247,20 @@ impl Versions {
                     (before != path).then(|| (before.clone(), path.clone()))
                 })
                 .collect();
-            let came: Vec<PathBuf> = (now.iter())
+            let session = self.session(cx);
+            // A page the app made is new, so it starts its own history; only a file from outside may be one that moved.
+            let (made, came): (Vec<PathBuf>, Vec<PathBuf>) = (now.iter())
                 .filter(|(id, _)| !self.history.paths.contains_key(id))
                 .map(|(_, path)| path.clone())
-                .collect();
-            if !renamed.is_empty() || !came.is_empty() {
+                .partition(|path| session.made_here(path));
+            let live = session.files();
+            if !renamed.is_empty() || !came.is_empty() || !made.is_empty() {
                 let work = cx.background_spawn(async move {
                     for (from, to) in renamed {
                         store.moved(&from, &to).ok();
                     }
-                    store.follow(&came)
+                    store.begin(&made, now_ms()).ok();
+                    store.follow(&came, &live)
                 });
                 self.tell_followed(work, window, cx);
             }

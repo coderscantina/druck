@@ -391,6 +391,15 @@ mod tests {
     }
 
     #[test]
+    fn a_closing_code_fence_with_trailing_spaces_is_a_fence_too() {
+        let text = "```rust\nlet x;\n```  \n\nEf\n";
+        assert_eq!(
+            over(text, between(text, "x;", "f\n"), ""),
+            "```rust\nlet \n```  \n\nf\n"
+        );
+    }
+
+    #[test]
     fn writing_over_only_a_fence_lines_word_leaves_the_line() {
         let text = "::: keep\nAb\n:::\n";
         assert_eq!(over(text, 4..8, "X"), "::: keep\nXAb\n:::\n");

@@ -88,7 +88,7 @@ use session::{Event, Session as Child, SessionConfig};
 use store::{Remembered, Store};
 use strings::Key;
 
-pub use fixing::fix_proof;
+pub use fixing::{fix_proof, sweep_book_copies};
 pub use run::{PassAction, pass_commands, run_pass_command};
 pub use tools::FLAG as NOTE_TOOL_FLAG;
 
@@ -1072,15 +1072,7 @@ impl AgentView {
             .map(|chapter| relative(&self.base, chapter.path()));
         let chapter_title = session.title_of(session.active());
         let range = editor.selection_range();
-        let selection = (!range.is_empty()).then(|| {
-            let buffer = session.active_buffer();
-            let text = editor.text();
-            let last = range.end - usize::from(text[..range.end].ends_with('\n'));
-            Selected {
-                lines: (buffer.line_of(range.start), buffer.line_of(last.max(range.start))),
-                text: text[range].to_owned(),
-            }
-        });
+        let selection = (!range.is_empty()).then(|| Selected::in_file(session, session.active(), range));
         let diagnostics = (self.preview.read(cx).diagnostics().iter())
             .map(|diagnostic| diagnostic.display_from(&self.base).to_string())
             .collect();

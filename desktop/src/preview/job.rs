@@ -268,8 +268,8 @@ pub struct Typesetter {
     working_dir: PathBuf,
     renderer: Renderer,
     resolver: FileResolver,
-    /// A theme file's text to typeset with in place of what the disk holds, for a trial.
-    stand_in: Option<(PathBuf, Bytes)>,
+    /// Files' texts to typeset with in place of what the disk holds, for a trial: its theme file and manifest.
+    stand_ins: Vec<(PathBuf, Bytes)>,
     painter: Option<Arc<Painter>>,
     /// The theme's type, read from its fonts when the last layout failed after the theme and fonts were in order.
     failed_type: Option<BookType>,
@@ -289,7 +289,7 @@ impl Typesetter {
             working_dir,
             renderer: Renderer::new(),
             resolver: FileResolver::new(),
-            stand_in: None,
+            stand_ins: Vec::new(),
             painter: None,
             failed_type: None,
         }
@@ -305,10 +305,12 @@ impl Typesetter {
         self.theme = theme;
     }
 
-    /// Typesets the next runs with `text` as the theme file at `file`, which stays as it is on disk, or with the file
-    /// itself when `None`.
-    pub fn set_theme_text(&mut self, theme: Option<(PathBuf, String)>) {
-        self.stand_in = theme.map(|(file, text)| (druck::resource::normalize(&file), Bytes::from(text.into_bytes())));
+    /// Typesets the next runs with each of `files` holding the text given, while the files stay as they are on disk.
+    /// Every other file is read as before.
+    pub fn set_stand_ins(&mut self, files: impl IntoIterator<Item = (PathBuf, String)>) {
+        self.stand_ins = (files.into_iter())
+            .map(|(file, text)| (druck::resource::normalize(&file), Bytes::from(text.into_bytes())))
+            .collect();
     }
 
     /// Lays out on a thread of its own. The executor's pool threads, libdispatch workers on macOS, have 512 KB
@@ -377,7 +379,7 @@ impl Typesetter {
         let (input, unlisted) = self.input(joined)?;
         let resolver = WithStandIn {
             files: &self.resolver,
-            stand_in: self.stand_in.as_ref(),
+            stand_ins: &self.stand_ins,
         };
         let configured = self
             .renderer
@@ -451,7 +453,12 @@ impl Typesetter {
                 (text, Vec::new())
             }
             Kind::Project { dir } => {
-                let project = Project::open(&LiveResolver::new(&joined, &self.resolver), dir)?;
+                let live = LiveResolver::new(&joined, &self.resolver);
+                let resolver = WithStandIn {
+                    files: &live,
+                    stand_ins: &self.stand_ins,
+                };
+                let project = Project::open(&resolver, dir)?;
                 let warnings = project.warnings().to_vec();
                 (project.export(None)?.0, warnings)
             }
@@ -466,17 +473,22 @@ impl Typesetter {
     }
 }
 
-/// Reads one file from memory and every other from disk.
+/// Reads the stand-ins from memory and every other file through `files`.
 struct WithStandIn<'a> {
-    files: &'a FileResolver,
-    stand_in: Option<&'a (PathBuf, Bytes)>,
+    files: &'a dyn Resolver,
+    stand_ins: &'a [(PathBuf, Bytes)],
 }
 
 impl Resolver for WithStandIn<'_> {
     fn read(&self, origin: &Origin, path: &str) -> Result<Bytes, ResolveError> {
-        match self.stand_in {
-            Some((file, text)) if origin.file(path).as_ref() == Some(file) => Ok(text.clone()),
-            _ => self.files.read(origin, path),
+        let file = origin.file(path);
+        match self
+            .stand_ins
+            .iter()
+            .find(|(stand_in, _)| file.as_ref() == Some(stand_in))
+        {
+            Some((_, text)) => Ok(text.clone()),
+            None => self.files.read(origin, path),
         }
     }
 
