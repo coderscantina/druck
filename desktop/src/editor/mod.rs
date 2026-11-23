@@ -1971,7 +1971,9 @@ impl Render for EditorView {
                 .text_color(tokens.text_faint)
                 .child(self.status.clone())
         });
-        let chapter = self.session.active_chapter().heading().unwrap_or_default().to_owned();
+        // A page without a heading, such as the copyright page, goes by the name the Binder gives it.
+        let chapter = (self.session.active_chapter().heading().map(str::to_owned))
+            .unwrap_or_else(|| self.session.title_of(self.session.active()));
         let shown = self.a11y_lines();
         let selection = self.selection;
         let pane = div()
