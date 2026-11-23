@@ -575,25 +575,21 @@ impl EditorView {
         self.marked.is_some()
     }
 
-    /// Whether saves must wait for the input method's commit: in a single file, marked text gets the break a section's
-    /// end needs only then, so the file written meanwhile could join it to the next heading.
-    pub fn holds_saves(&self) -> bool {
-        self.is_composing() && matches!(self.session.kind(), crate::session::Kind::Single { .. })
-    }
-
     /// Whether an outside change must wait: it would move text under an input method, and a change to the buffer closes
     /// what floats, with what was typed in its field.
     pub fn holds_outside_changes(&self) -> bool {
         self.is_composing() || self.float_takes_keys()
     }
 
-    /// Writes what a float's fields hold, and commits an input method's marked text, before something closes the
-    /// document or the app quits.
+    /// Writes what a float's fields hold, before something closes it.
     pub fn commit_floats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_rich_float(window, cx);
-        if self.is_composing() {
-            self.commit_marked(window, cx);
-        }
+    }
+
+    /// Marked text, as the editor and the session both know it: the session leaves it out of what goes to the disk.
+    fn set_marked(&mut self, marked: Option<Range<usize>>) {
+        self.session.set_marked(marked.clone());
+        self.marked = marked;
     }
 
     /// Opens a chapter in the galley, where the caret last was in it, with its own undo history.
@@ -690,7 +686,7 @@ impl EditorView {
         self.reveal_at = self.selection.head;
         self.leave_marker_on_open();
         self.upstream = false;
-        self.marked = None;
+        self.set_marked(None);
         self.goal_x = None;
         self.drag = None;
         self.drag_scroll = None;

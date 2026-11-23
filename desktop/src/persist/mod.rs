@@ -153,8 +153,6 @@ pub struct PersistView {
     writing: Option<Task<()>>,
     /// Another save was asked for while one was running.
     write_again: bool,
-    /// A save waited for an input method's commit in a single file, see [`EditorView::holds_saves`].
-    save_on_commit: bool,
     /// Callers of [`settle`] that wait for the running save to land first.
     settling: Vec<futures::channel::oneshot::Sender<Closing>>,
     waiting: Waiting,
@@ -259,9 +257,6 @@ impl PersistView {
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |view, _, _: &TextChanged, window, cx| {
                 view.edited(window, cx);
-                if std::mem::take(&mut view.save_on_commit) {
-                    view.flush(window, cx);
-                }
                 if view.passage.is_some() {
                     view.sync_passage(cx);
                 }
@@ -294,7 +289,6 @@ impl PersistView {
             write_lock: Arc::new(Mutex::new(())),
             writing: None,
             write_again: false,
-            save_on_commit: false,
             settling: Vec::new(),
             waiting: Waiting::default(),
             signals,
@@ -589,10 +583,6 @@ impl PersistView {
 
     /// Writes what is unsaved now, in the background. Cmd+S and the pause after typing both land here.
     fn flush(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editor.read(cx).holds_saves() {
-            self.save_on_commit = true;
-            return;
-        }
         if self.writing.is_some() {
             self.write_again = true;
             return;
@@ -733,6 +723,10 @@ impl PersistView {
     }
 
     fn settle_now(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Closing {
+        // The document goes with what is on screen, so an input method's text started meanwhile is committed, not left out.
+        if self.editor.read(cx).is_composing() {
+            self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
+        }
         let lock = self.write_lock.clone();
         let _writing = lock.lock();
         self.retry_conflicts(window, cx);
@@ -746,10 +740,6 @@ impl PersistView {
 
     /// Stores a recovery copy of every file with unsaved text that changed since its last copy, on another thread.
     fn store_recovery(&mut self, cx: &mut Context<Self>) {
-        // The commit counts as an edit, which brings the copy due again.
-        if self.editor.read(cx).holds_saves() {
-            return;
-        }
         let Some(copies) = self.sync.copies().cloned().filter(|_| self.restored) else {
             return;
         };

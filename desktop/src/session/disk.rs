@@ -13,6 +13,7 @@ use druck::input::MANIFEST;
 use super::{Chapter, ChapterId, Group, Kind, MANUSCRIPT, NOTES, PASSES, RESEARCH, Read, Session};
 use crate::persist::atomic::{self, Outcome, content_hash};
 use crate::persist::merge::{edits_between, map_offset};
+use crate::source::blocks::break_before;
 use crate::source::buffer::EditError;
 use crate::source::{Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -163,6 +164,42 @@ impl Session {
         })
     }
 
+    /// A file's text as the disk gets it: [`Self::file_text`] with an input method's marked text left out, and in a
+    /// single file with the break [`Session::keep_apart`] would give its section without it. So the disk never holds
+    /// provisional text, nor two sections run together. Also names the chapter whose marked text was left out.
+    fn stored_text(&self, path: &Path) -> Option<(String, Option<ChapterId>)> {
+        let mut text = self.file_text(path)?;
+        let Some((id, range)) = self.marked.clone() else {
+            return Some((text, None));
+        };
+        let Some(own) = (self.chapters.get(&id))
+            .filter(|chapter| chapter.path == path && chapter.read == Read::Done)
+            .map(|chapter| chapter.buffer.text())
+            .filter(|own| own.get(range.clone()).is_some())
+        else {
+            return Some((text, None));
+        };
+        let mut left = [&own[..range.start], &own[range.end..]].concat();
+        let mut start = 0;
+        if matches!(self.kind, Kind::Single { .. }) {
+            let at = self.book.iter().position(|other| *other == id)?;
+            if let Some(next) = self.book.get(at + 1) {
+                left.push_str(break_before(
+                    &left,
+                    &Blocks::parse(&left),
+                    self.known(*next).text(),
+                    at == 0,
+                ));
+            }
+            start = (self.book[..at].iter().map(|other| self.known(*other)))
+                .filter(|chapter| chapter.read == Read::Done)
+                .map(|chapter| chapter.buffer.len())
+                .sum();
+        }
+        text.replace_range(start..start + own.len(), &left);
+        Some((text, Some(id)))
+    }
+
     /// The chapter holding a place in a file's text, and the place in that chapter. A single file's sections each hold
     /// part of its text.
     pub fn place_in_file(&self, path: &Path, at: usize) -> Option<(ChapterId, usize)> {
@@ -261,8 +298,9 @@ impl Session {
         (single && self.resplit_unsaved) || self.ids_of(path).into_iter().any(|id| self.known(id).is_dirty())
     }
 
-    /// The files whose text differs from the disk, ready to write. Skips the ones held back. A buffer that came back to
-    /// what the file holds, as after an undo, is marked saved and needs no write.
+    /// The files whose text differs from the disk, ready to write, as [`Self::stored_text`] gives it. Skips the ones held
+    /// back. A buffer that came back to what the file holds, as after an undo, is marked saved and needs no write. A
+    /// buffer whose marked text was left out stays unsaved, so the commit is written too.
     pub fn outgoing(&mut self) -> Vec<Outgoing> {
         let root = self.base_dir();
         let mut paths: Vec<PathBuf> = match &self.kind {
@@ -276,18 +314,32 @@ impl Session {
         paths.retain(|path| !self.held.contains(path));
         let mut outgoing = Vec::with_capacity(paths.len());
         for path in paths {
-            let Some(text) = self.file_text(&path).map(|text| one_final_break(&text).into_owned()) else {
+            let Some((text, left_out)) = self.stored_text(&path) else {
                 continue;
             };
+            let text = one_final_break(&text).into_owned();
             let hash = content_hash(text.as_bytes());
             let synced = self.synced.get(&path);
             if synced.is_some_and(|synced| synced.on_disk && synced.hash == hash) {
-                self.mark_clean(&path);
+                if left_out.is_none() {
+                    self.mark_clean(&path);
+                }
                 continue;
             }
             let expected = synced.filter(|synced| synced.on_disk).map(|synced| synced.hash);
+            // Revisions only grow, so one before the current one is never the buffer's again.
             let marks = (self.ids_of(&path).into_iter())
-                .map(|id| (id, self.known(id).buffer.revision()))
+                .map(|id| {
+                    let revision = self.known(id).buffer.revision();
+                    (
+                        id,
+                        if left_out == Some(id) {
+                            revision.wrapping_sub(1)
+                        } else {
+                            revision
+                        },
+                    )
+                })
                 .collect();
             outgoing.push(Outgoing {
                 path,
@@ -319,7 +371,7 @@ impl Session {
         }
     }
 
-    /// The files with text not on disk, also those held back.
+    /// The files with text not on disk, also those held back, as [`Self::stored_text`] gives it.
     pub fn unsaved(&self) -> Vec<Unsaved> {
         let paths: Vec<PathBuf> = match &self.kind {
             Kind::Single { path } if self.is_dirty() => vec![path.clone()],
@@ -331,7 +383,7 @@ impl Session {
         };
         (paths.into_iter())
             .filter_map(|path| {
-                let text = self.file_text(&path)?;
+                let (text, _) = self.stored_text(&path)?;
                 let base = self.synced.get(&path)?.base.clone();
                 Some(Unsaved { path, base, text })
             })

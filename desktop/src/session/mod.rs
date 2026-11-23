@@ -356,6 +356,8 @@ pub struct Session {
     made: HashSet<PathBuf>,
     /// The theme file the pages use instead of the one the document names: from the command line or a fork.
     theme_override: Option<PathBuf>,
+    /// An input method's marked text in a chapter: provisional, so it never reaches the disk, see [`Self::outgoing`].
+    marked: Option<(ChapterId, Range<usize>)>,
 }
 
 /// Orders of the book to go back or forward to.
@@ -426,6 +428,7 @@ impl Session {
             page_titles: None,
             made: HashSet::new(),
             theme_override: None,
+            marked: None,
         }
     }
 
@@ -1165,6 +1168,11 @@ impl Session {
         let (chapter, next) = (self.known(id), self.known(next));
         let blocks = &chapter.blocks.as_ref().expect("read just now").1;
         break_before(chapter.buffer.text(), blocks, next.buffer.text(), starts_file)
+    }
+
+    /// Says which text in the active chapter an input method has marked, or that none is.
+    pub fn set_marked(&mut self, marked: Option<Range<usize>>) {
+        self.marked = marked.map(|range| (self.active, range));
     }
 
     /// Reads a chapter's title and kind again after its text changed. Returns whether the sidebar should change.

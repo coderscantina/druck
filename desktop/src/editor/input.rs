@@ -34,7 +34,7 @@ impl EditorView {
         if matches!(&self.float, Float::Rich(float) if !float.takes_keys()) {
             self.float = Float::None;
         }
-        self.marked = marked;
+        self.set_marked(marked);
         self.gutter_shown = false;
         self.caret_by_keys = true;
         self.set_selection(after, false, window, cx);
@@ -373,10 +373,11 @@ impl EditorView {
     }
 
     /// Keeps the marked text as it is, committed, and gives the section's end the break it may need now. The text was
-    /// provisional until here, so the commit counts as a change: saves wait for it, see `PersistView::flush`, and the
-    /// break may have gone into a neighbouring section alone.
-    pub(super) fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(marked) = self.marked.take() {
+    /// provisional until here, left out of saves, so the commit counts as a change, and the break may have gone into a
+    /// neighbouring section alone.
+    pub fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(marked) = self.marked.clone() {
+            self.set_marked(None);
             let splice = crate::source::buffer::Splice {
                 start: marked.start,
                 old_end: marked.end,

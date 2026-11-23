@@ -234,6 +234,43 @@ fn a_section_ending_without_a_line_break_keeps_the_next_heading_on_its_own_line(
 }
 
 #[test]
+fn a_save_leaves_out_marked_text_and_keeps_the_sections_apart_until_the_commit() {
+    let folder = Folder::new("marked");
+    let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nMore.\n");
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    session.set_active(one);
+    // An input method composes over the section's closing break, as over a selection reaching its end.
+    let caret = Caret::caret(12);
+    let edits = vec![Edit::new(12..14, "日本")];
+    let buffer = &mut session.known_mut(one).buffer;
+    buffer
+        .transact(EditKind::Composing, edits, caret, caret, Instant::now())
+        .expect("edit");
+    session.set_marked(Some(12..18));
+    let write = |session: &mut Session| {
+        for outgoing in session.outgoing() {
+            outgoing.write().expect("writes");
+            session.written(&outgoing);
+        }
+    };
+    write(&mut session);
+    assert_eq!(folder.read("whole.md"), "# One\n\nText.\n# Two\n\nMore.\n");
+    assert!(session.is_dirty(), "the marked text is still to be saved");
+
+    session.set_marked(None);
+    let splice = Splice {
+        start: 12,
+        old_end: 18,
+        new_end: 18,
+    };
+    session.keep_apart(one, splice);
+    write(&mut session);
+    assert_eq!(folder.read("whole.md"), "# One\n\nText.日本\n# Two\n\nMore.\n");
+    assert!(!session.is_dirty());
+}
+
+#[test]
 fn an_edit_to_the_files_text_lands_where_it_was_meant_after_a_section_ended_inside_a_line() {
     let folder = Folder::new("file-edit");
     let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nbody here\n");
