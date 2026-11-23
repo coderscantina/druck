@@ -74,6 +74,9 @@ pub mod statistics {
 
 /// Placeholders in the text: Write shows the value a render writes, from the same names, counts, and dates.
 pub mod placeholders {
+    use std::num::NonZeroUsize;
+
+    use crate::config::front_matter::{self, FrontMatter};
     use crate::config::theme::Lang;
 
     pub use crate::config::template::Placeholder;
@@ -91,14 +94,13 @@ pub mod placeholders {
         crate::layout::fields::grouped(n, lang(lang_code))
     }
 
-    /// `{reading-time}` in whole minutes, at the speed for `lang`.
-    pub fn reading_time(statistics: &Statistics, lang_code: &str) -> usize {
-        statistics.reading_time(crate::statistics::words_per_minute(lang(lang_code)))
-    }
-
-    /// The words a minute `{reading-time}` reads at in `lang`.
-    pub fn words_per_minute(lang_code: &str) -> usize {
-        crate::statistics::words_per_minute(lang(lang_code)).get()
+    /// The words a minute `{reading-time}` reads at: `meta.reading-speed` of `settings` where it is a whole number
+    /// above 0, as configuration checks it, else the speed for `lang`. A value configuration refuses fails the render,
+    /// so what Write shows for it then does not matter.
+    pub fn words_per_minute(settings: Option<&FrontMatter>, lang_code: &str) -> NonZeroUsize {
+        (settings.and_then(|settings| settings.meta.get(front_matter::READING_SPEED)))
+            .and_then(|value| front_matter::reading_speed(value).ok())
+            .unwrap_or_else(|| crate::statistics::words_per_minute(lang(lang_code)))
     }
 
     /// `{build-date}`: the day written out for `lang`.

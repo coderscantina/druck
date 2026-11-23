@@ -42,6 +42,25 @@ fn values_come_from_the_settings_and_the_engines_counts() {
 }
 
 #[test]
+fn a_reading_speed_in_meta_replaces_the_languages() {
+    let slow = values("meta:\n  reading-speed: 100\n", 1_000, "en");
+    assert_eq!(slow.lookup("reading-time"), Lookup::Value("10".into()));
+    assert_eq!(slow.reading_speed().get(), 100);
+    let refused = values("meta:\n  reading-speed: fast\n", 1_000, "en");
+    assert_eq!(refused.reading_speed(), values("", 1_000, "en").reading_speed());
+}
+
+#[test]
+fn a_page_placeholder_in_the_body_is_a_value_not_an_open_name() {
+    let book = values("title: T\n", 1, "en");
+    let text = "This book has {pages} pages.";
+    let spans = inline_spans(BlockKind::Paragraph, text);
+    let shown = chips(BlockKind::Paragraph, text, &spans, None, &book, Display::Chip);
+    assert_eq!((shown[0].text.as_str(), shown[0].look), ("{pages}", ChipLook::Value));
+    assert_eq!(hint(BlockKind::Paragraph, "pages", &book), crate::t!(Key::OnItsPage));
+}
+
+#[test]
 fn a_name_without_a_value_unknown_or_for_the_page_says_so() {
     let book = values("title: T\n", 1, "en");
     assert_eq!(book.lookup("subtitle"), Lookup::NoValue);
