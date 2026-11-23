@@ -608,8 +608,8 @@ impl Builder<'_> {
 /// text starts, so a ligature across a cut counts before it; the exact width comes from reshaping.
 fn span_width(word: &Word, from: (usize, usize), to: (usize, usize)) -> f64 {
     let mut width = 0.0;
-    for index in from.0..=to.0 {
-        let run = &word.fragments[index].run;
+    for (index, fragment) in word.fragments.iter().enumerate().take(to.0 + 1).skip(from.0) {
+        let run = &fragment.run;
         let low = if index == from.0 { from.1 } else { 0 };
         let high = if index == to.0 { to.1 } else { run.text.len() };
         width += run
