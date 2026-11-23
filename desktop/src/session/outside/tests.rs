@@ -18,11 +18,15 @@ struct Single {
 
 impl Single {
     fn new(name: &str) -> Self {
+        Self::with(name, TEXT)
+    }
+
+    fn with(name: &str, text: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("druck-outside-{name}-{}", std::process::id()));
         fs::remove_dir_all(&dir).ok();
         fs::create_dir_all(&dir).unwrap();
         let path = druck::resource::normalize(&dir.join("doc.md"));
-        fs::write(&path, TEXT).unwrap();
+        fs::write(&path, text).unwrap();
         let session = Session::open(&path).unwrap();
         Self { dir, path, session }
     }
@@ -227,4 +231,25 @@ fn undo_takes_typing_after_the_change_then_the_change_then_typing_before_it() {
     assert_eq!(single.text(), TEXT.replace("Third.", "Third, A."));
     single.undo();
     assert_eq!(single.text(), TEXT);
+}
+
+#[test]
+fn a_section_back_from_an_undo_stays_apart_from_typing_since_above_it() {
+    let mut single = Single::with("swap-apart", "# One\n\nFirst.\n\nTwo\n===\n\nSecond.\n");
+    single.outside("# One\n\nFirst.\n\n# Two\n\nSecond.\n");
+    let one = single.session.book()[0];
+    let end = single.session.buffer(one).len();
+    (single.session)
+        .edit_chapter(one, vec![Edit::new(end..end, "\nAdded.")], EditKind::Typing)
+        .unwrap();
+    assert_eq!(single.text(), "# One\n\nFirst.\n\n\nAdded.\n# Two\n\nSecond.\n");
+
+    let two = single.session.book()[1];
+    single.session.set_active(two);
+    single.undo();
+    assert_eq!(single.text(), "# One\n\nFirst.\n\n\nAdded.\n\nTwo\n===\n\nSecond.\n");
+    assert!(
+        !single.session.resplit(),
+        "the paragraph does not take the setext heading's words"
+    );
 }

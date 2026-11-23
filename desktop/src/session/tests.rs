@@ -307,6 +307,88 @@ fn typing_at_the_end_of_a_section_keeps_its_buffer_and_history_through_a_chapter
 }
 
 #[test]
+fn undo_in_the_section_before_leaves_the_break_the_next_one_needs() {
+    let folder = Folder::new("kept-break");
+    let path = folder.write("tight.md", "# One\n\nFirst.\n# Two\n\nMore.\n");
+    let mut session = Session::open(&path).expect("opens");
+    let (one, two) = (session.book()[0], session.book()[1]);
+    typing(&mut session, one, 7, "The ");
+    let edits = vec![Edit::new(0..6, "Two\n===\n")];
+    session.edit_chapter(two, edits, EditKind::Discrete).expect("edit");
+    assert_eq!(session.buffer(one).text(), "# One\n\nThe First.\n\n");
+
+    session.set_active(one);
+    session.active_buffer_mut().undo().expect("the typing to undo");
+    assert_eq!(
+        session.buffer(one).text(),
+        "# One\n\nFirst.\n\n",
+        "undo takes the typing, not the break"
+    );
+    assert!(session.active_buffer_mut().undo().is_none());
+    assert!(!session.resplit(), "the sections stay apart");
+    assert_eq!(
+        session.file_text(&path).expect("read"),
+        "# One\n\nFirst.\n\nTwo\n===\n\nMore.\n"
+    );
+}
+
+#[test]
+fn a_paste_that_runs_sections_together_stays_undoable_through_the_resplit() {
+    let folder = Folder::new("fence");
+    let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nMore.\n\n# Three\n\nLast.\n");
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    let end = session.buffer(one).len();
+    let pasted = vec![Edit::new(end..end, "```\ncode")];
+    session.edit_chapter(one, pasted, EditKind::Discrete).expect("paste");
+    assert!(session.resplit(), "the open fence takes in the sections below");
+    assert_eq!(session.book(), [one]);
+    assert_eq!(
+        session.buffer(one).text(),
+        "# One\n\nText.\n\n```\ncode\n# Two\n\nMore.\n\n# Three\n\nLast.\n"
+    );
+
+    session.set_active(one);
+    session.active_buffer_mut().undo().expect("the paste to undo");
+    assert_eq!(
+        session.file_text(&path).expect("read"),
+        "# One\n\nText.\n\n# Two\n\nMore.\n\n# Three\n\nLast.\n"
+    );
+    assert!(session.resplit());
+    assert_eq!(titles(&session.contents().book), ["One", "Two", "Three"]);
+}
+
+#[test]
+fn an_edit_and_the_break_after_it_are_reported_apart() {
+    let folder = Folder::new("apart");
+    let path = folder.write("whole.md", "# One\n\nword\n# Two\n\nMore.\n");
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    // Raw HTML runs to a blank line, so the heading below would join it.
+    let edits = vec![Edit::new(7..11, "<div>")];
+    let caret = Caret::caret(12);
+    let buffer = &mut session.known_mut(one).buffer;
+    let splice = (buffer.transact(EditKind::Discrete, edits, caret, caret, Instant::now())).expect("edit");
+    let apart = session.keep_apart(one, splice);
+    assert_eq!(session.buffer(one).text(), "# One\n\n<div>\n\n");
+    assert_eq!(
+        apart.edit,
+        Splice {
+            start: 7,
+            old_end: 11,
+            new_end: 12
+        },
+        "a mark after the edit moves by its length alone"
+    );
+    let gap = Splice {
+        start: 13,
+        old_end: 13,
+        new_end: 14,
+    };
+    assert_eq!(apart.gap, Some(gap));
+}
+
+#[test]
 fn a_change_to_a_single_file_names_the_section_it_is_in() {
     let folder = Folder::new("changed-section");
     let text = "---\ntitle: Whole\n---\n\n# One\n\nText.\n\n# Two\n\nMore.\n";

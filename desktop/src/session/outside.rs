@@ -163,6 +163,14 @@ impl Session {
             self.chapters.insert(id, chapter);
         }
         self.book = there;
+        // Sections that come back can stand next to ones typed in since, which need not keep apart from them yet.
+        for at in 1..self.book.len() {
+            let (previous, next) = (self.book[at - 1], self.book[at]);
+            let arrived = |id: ChapterId| !here.iter().any(|(kept, _)| *kept == id);
+            if arrived(previous) || arrived(next) {
+                self.keep_after(previous, next, at == 1);
+            }
+        }
         let back = Turn {
             here: self.close_steps(),
             leaving: (self.book.iter())

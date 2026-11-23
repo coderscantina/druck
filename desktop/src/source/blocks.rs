@@ -154,9 +154,32 @@ impl Blocks {
 /// What `text` needs at its end so that `next`, the text after it in the same file, still starts a block of its own:
 /// nothing, a line break when `text` ends inside a line, or a blank line when its last block would take in `next`'s
 /// first lines, as a paragraph takes a setext heading's words or a lazy continuation line. `text` starts a block, and
-/// the file when `starts_file`, where front matter can open. When no break keeps them apart, as after an unclosed code
-/// fence, it needs only what ends its last line. The line break is `next`'s own, `\r\n` or `\n`.
-pub fn break_before(text: &str, next: &str, starts_file: bool) -> &'static str {
+/// the file when `starts_file`, where front matter can open. `blocks` are `text`'s own, so only its last block is read
+/// again. When no break keeps them apart, as after an unclosed code fence, it needs only what ends its last line. The
+/// line break is `next`'s own, `\r\n` or `\n`.
+pub fn break_before(text: &str, blocks: &Blocks, next: &str, starts_file: bool) -> &'static str {
+    break_after_last(text, next, starts_file, || match blocks.list.first() {
+        // Front matter opens only at the start of the file, so a text that does not start it but whose own blocks
+        // open with some is read again whole, behind a blank line as the file has it.
+        Some(first) if first.kind == BlockKind::FrontMatter && !starts_file => last_block_start(text, false),
+        _ => (blocks.list.last()).map_or(0, |block| block.range.start),
+    })
+}
+
+/// Where the last block of `text` starts, read whole, as in a file that `text` starts when `starts_file`.
+fn last_block_start(text: &str, starts_file: bool) -> usize {
+    let lead = if starts_file { "" } else { "\n" };
+    let parsed = Blocks::parse(&format!("{lead}{text}"));
+    (parsed.list.last()).map_or(0, |block| block.range.start.saturating_sub(lead.len()))
+}
+
+/// Where `text`'s first lines end: the start of its first blank line, with or without spaces and `\r`, or its end.
+pub fn first_lines_end(text: &str) -> usize {
+    skip_nonblank(text, 0)
+}
+
+/// [`break_before`] with `last` giving where `text`'s last block starts, asked only when the break is not plain.
+fn break_after_last(text: &str, next: &str, starts_file: bool, last: impl FnOnce() -> usize) -> &'static str {
     if text.is_empty() || next.is_empty() {
         return "";
     }
@@ -177,10 +200,9 @@ pub fn break_before(text: &str, next: &str, starts_file: bool) -> &'static str {
     let lead = |from: usize| if starts_file && from == 0 { "" } else { "\n" };
     // Blocks before the last one ended inside `text`, and a block depends only on the text from its start, so only the
     // last one can take anything in.
-    let parsed = Blocks::parse(&format!("{}{text}", lead(0)));
-    let last = (parsed.list.last()).map_or(0, |block| block.range.start.saturating_sub(lead(0).len()));
+    let last = last();
     // A blank line ends every block but those no break ends, so the first lines up to one are all it could take in.
-    let head = &next[..skip_nonblank(next, 0)];
+    let head = &next[..first_lines_end(next)];
     let apart = |gap: &str| {
         let joined = format!("{}{}{gap}{head}", lead(last), &text[last..]);
         let boundary = joined.len() - head.len();
@@ -991,21 +1013,59 @@ mod tests {
         assert_eq!(change.start, 0);
     }
 
+    /// The break `text` needs before `next`, checked against reading the whole text again.
+    fn break_of(text: &str, next: &str, starts_file: bool) -> &'static str {
+        let gap = break_before(text, &Blocks::parse(text), next, starts_file);
+        let whole = break_after_last(text, next, starts_file, || last_block_start(text, starts_file));
+        assert_eq!(gap, whole, "{text:?} before {next:?}, starting the file: {starts_file}");
+        gap
+    }
+
     #[test]
     fn a_text_gets_the_break_that_keeps_the_next_block_apart() {
-        assert_eq!(break_before("Added.", "# Two\n", false), "\n");
-        assert_eq!(break_before("Added.", "# Two\r\n", false), "\r\n");
-        assert_eq!(break_before("Text.\n", "# Two\n", false), "");
-        assert_eq!(break_before("Text.\n\n", "Two\n===\n", false), "");
+        assert_eq!(break_of("Added.", "# Two\n", false), "\n");
+        assert_eq!(break_of("Added.", "# Two\r\n", false), "\r\n");
+        assert_eq!(break_of("Text.\n", "# Two\n", false), "");
+        assert_eq!(break_of("Text.\n\n", "Two\n===\n", false), "");
         // A paragraph takes a setext heading's words, and a table takes a line as a row.
-        assert_eq!(break_before("Added.", "Two\n===\n", false), "\n\n");
-        assert_eq!(break_before("Added.\n", "Two\n===\n", false), "\n");
-        assert_eq!(break_before("| a |\n|---|\n| 1 |\n", "Two\n===\n", false), "\n");
+        assert_eq!(break_of("Added.", "Two\n===\n", false), "\n\n");
+        assert_eq!(break_of("Added.\n", "Two\n===\n", false), "\n");
+        assert_eq!(break_of("| a |\n|---|\n| 1 |\n", "Two\n===\n", false), "\n");
         // Raw HTML runs to a blank line, over a heading too.
-        assert_eq!(break_before("<div>\n</div>\n", "# Two\n", false), "\n");
-        assert_eq!(break_before("# One\n", "Two\n===\n", false), "");
-        assert_eq!(break_before("---\ntitle: A\n---\n", "Text.\n", true), "");
+        assert_eq!(break_of("<div>\n</div>\n", "# Two\n", false), "\n");
+        assert_eq!(break_of("# One\n", "Two\n===\n", false), "");
+        assert_eq!(break_of("---\ntitle: A\n---\n", "Text.\n", true), "");
         // No break ends an unclosed fence, so it gets none.
-        assert_eq!(break_before("```\ncode\n", "# Two\n", false), "");
+        assert_eq!(break_of("```\ncode\n", "# Two\n", false), "");
+    }
+
+    #[test]
+    fn the_break_read_from_the_last_block_is_the_one_the_whole_text_gives() {
+        let nexts = [
+            "# Two\n",
+            "Two\n===\n",
+            "Two\r\n===\r\n",
+            "lazy\n\nMore.\n",
+            "- item\n",
+            "\nTwo\n",
+        ];
+        let texts = [
+            "# One\n\nText.\n\n```\nfenced\n\n# not a heading\n```\nAfter.",
+            "# One\n\n```\nopen fence\n\nstill code",
+            "# One\n\n<!-- a comment\n\nstill open -->\nText.\n",
+            "# One\n\n- a\n\n- b\n  more",
+            "# One\n\n[^1]: note\n\n    continued\n",
+            "# One\n\n    indented\n\n    code\n",
+            "# One\n\n> quote\nlazy",
+            "---\ntitle: A\n---\nText.",
+            "# One\r\n\r\nText.\r\n",
+        ];
+        for text in texts {
+            for next in nexts {
+                for starts_file in [true, false] {
+                    break_of(text, next, starts_file);
+                }
+            }
+        }
     }
 }

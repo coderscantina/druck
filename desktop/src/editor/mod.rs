@@ -48,7 +48,7 @@ use gpui::{
 use druck::editor::statistics::Statistics;
 
 use crate::preview::BookType;
-use crate::session::{ChapterId, ChapterView, Session};
+use crate::session::{Apart, ChapterId, ChapterView, Session};
 use crate::settings::{self, LineLength};
 use crate::source::blocks::BlockChange;
 use crate::source::inline::{inline_spans, line_markers};
@@ -960,8 +960,8 @@ impl EditorView {
             .transact(EditKind::Typing, edits, self.selection, after, started)
         {
             Ok(splice) => {
-                let splice = self.session.keep_apart(self.session.active(), splice);
-                self.resegment(splice);
+                let apart = self.session.keep_apart(self.session.active(), splice);
+                self.resegment(apart);
             }
             Err(error) => {
                 eprintln!("edit rejected: {error}");

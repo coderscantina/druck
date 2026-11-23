@@ -27,6 +27,7 @@ pub(crate) mod yaml;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -46,7 +47,7 @@ use self::strings::Key;
 pub use self::templates::{PAGES, Page, STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;
 use crate::shell::strings::Language;
-use crate::source::blocks::break_before;
+use crate::source::blocks::{break_before, first_lines_end};
 use crate::source::buffer::{EditError, Splice};
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -98,6 +99,21 @@ pub struct ChapterView {
     pub scroll: Option<(usize, f32)>,
 }
 
+/// What an edit to a section of a single file changed: the edit itself, and the break its end took so the next
+/// section stays apart, see [`Session::keep_apart`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Apart {
+    pub edit: Splice,
+    pub gap: Option<Splice>,
+}
+
+impl From<Splice> for Apart {
+    /// A change with no break after it, as an undo or redo restores one.
+    fn from(edit: Splice) -> Self {
+        Self { edit, gap: None }
+    }
+}
+
 /// What reading a chapter's file gave.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Read {
@@ -125,6 +141,9 @@ pub struct Chapter {
     /// What the text said about itself at the buffer's revision `outline_at`. Rows catch up on a pause.
     outline: Outline,
     outline_at: u64,
+    /// The text's blocks at a buffer revision, for keeping a single file's sections apart, see [`Session::keep_apart`].
+    /// Read again around the last change when one revision behind, and whole otherwise.
+    blocks: Option<(u64, Blocks)>,
 }
 
 impl Chapter {
@@ -142,7 +161,26 @@ impl Chapter {
             view: ChapterView::default(),
             outline,
             outline_at: saved,
+            blocks: None,
         }
+    }
+
+    /// Brings the kept blocks up to date with the text.
+    fn read_blocks(&mut self) -> &Blocks {
+        let revision = self.buffer.revision();
+        let (at, blocks) = self
+            .blocks
+            .get_or_insert_with(|| (revision, Blocks::parse(self.buffer.text())));
+        if *at != revision {
+            match self.buffer.last_splice() {
+                Some(splice) if *at + 1 == revision => {
+                    blocks.apply(self.buffer.text(), splice);
+                }
+                _ => *blocks = Blocks::parse(self.buffer.text()),
+            }
+            *at = revision;
+        }
+        blocks
     }
 
     /// Reads the outline again from the text, returning whether it changed.
@@ -1055,6 +1093,7 @@ impl Session {
             let chapter = self.known_mut(id);
             chapter.saved = buffer.revision();
             chapter.buffer = buffer;
+            chapter.blocks = None;
             chapter.read = read;
             chapter.read_outline();
             let synced = Synced::new(chapter.buffer.text(), chapter.read == Read::Done);
@@ -1082,39 +1121,49 @@ impl Session {
     /// apart. Where the section's text would run its last block into the next section's first, as `Added.# Two` or a
     /// paragraph over a setext heading, the break that keeps them apart goes at its end, in the same undo step, with
     /// the caret where it was. Where its own start now runs into the section before, as after its heading became a
-    /// setext one, that section gets the break as a step of its own. Returns the span of the change to `id`, the break
-    /// included. The buffers then join to the file by plain concatenation, and a resplit finds the same sections.
-    pub fn keep_apart(&mut self, id: ChapterId, mut splice: Splice) -> Splice {
+    /// setext one, that section gets the break outside its undo steps, so no undo there takes it away. Returns the
+    /// edit's span and the break's, apart, so marks in the text move by each. The buffers then join to the file by
+    /// plain concatenation, and a resplit finds the same sections.
+    pub fn keep_apart(&mut self, id: ChapterId, splice: Splice) -> Apart {
+        let mut apart = Apart {
+            edit: splice,
+            gap: None,
+        };
         if !matches!(self.kind, Kind::Single { .. }) {
-            return splice;
+            return apart;
         }
         let Some(at) = self.book.iter().position(|other| *other == id) else {
-            return splice;
+            return apart;
         };
-        let now = Instant::now();
-        if let Some(next) = self.book.get(at + 1) {
-            let gap = break_before(self.known(id).buffer.text(), self.known(*next).buffer.text(), at == 0);
+        if let Some(&next) = self.book.get(at + 1) {
+            let gap = self.break_between(id, next, at == 0);
             if !gap.is_empty() {
-                splice = splice.then(self.known_mut(id).buffer.append(gap, now));
+                apart.gap = Some(self.known_mut(id).buffer.append(gap, Instant::now()));
             }
         }
-        let text = self.known(id).buffer.text();
         // Only the section's first lines, up to a blank line, can run into the section before.
-        let head = text.find("\n\n").map_or(text.len(), |blank| blank + 1);
-        if at > 0 && splice.start <= head {
-            let previous = self.book[at - 1];
-            let gap = break_before(self.known(previous).buffer.text(), text, at == 1);
-            if !gap.is_empty() {
-                let chapter = self.known_mut(previous);
-                let end = chapter.buffer.len();
-                let caret = chapter.view.selection;
-                (chapter.buffer)
-                    .transact(EditKind::Discrete, vec![Edit::new(end..end, gap)], caret, caret, now)
-                    .expect("the end of the text is a place to edit");
-                chapter.read_outline();
-            }
+        if at > 0 && splice.start <= first_lines_end(self.known(id).buffer.text()) {
+            self.keep_after(self.book[at - 1], id, at == 1);
         }
-        splice
+        apart
+    }
+
+    /// Gives `id` the break it needs before `next`, outside its undo steps.
+    fn keep_after(&mut self, id: ChapterId, next: ChapterId, starts_file: bool) {
+        let gap = self.break_between(id, next, starts_file);
+        if !gap.is_empty() {
+            let chapter = self.known_mut(id);
+            chapter.buffer.extend(gap);
+            chapter.read_outline();
+        }
+    }
+
+    /// What section `id` needs at its end so that section `next` still starts a block, see [`break_before`].
+    fn break_between(&mut self, id: ChapterId, next: ChapterId, starts_file: bool) -> &'static str {
+        self.known_mut(id).read_blocks();
+        let (chapter, next) = (self.known(id), self.known(next));
+        let blocks = &chapter.blocks.as_ref().expect("read just now").1;
+        break_before(chapter.buffer.text(), blocks, next.buffer.text(), starts_file)
     }
 
     /// Reads a chapter's title and kind again after its text changed. Returns whether the sidebar should change.
@@ -1166,14 +1215,42 @@ impl Session {
             .map
             .to_joined(self.active, self.known(self.active).view.selection.head)
             .unwrap_or(0);
+        // Where each section stands in the file, which its buffers join by plain concatenation.
+        let mut spans = Vec::with_capacity(self.book.len());
+        for id in &self.book {
+            let start = spans.last().map_or(0, |(_, span): &(ChapterId, Range<usize>)| span.end);
+            spans.push((*id, start..start + self.known(*id).buffer.len()));
+        }
         let mut old = std::mem::take(&mut self.book);
         let mut changed = false;
         for range in ranges {
-            let piece = &joined.text[range];
+            let piece = &joined.text[range.clone()];
             let kept = old.iter().position(|id| self.known(*id).buffer.text() == piece);
-            let id = match kept {
-                Some(at) => old.remove(at),
-                None => {
+            // Sections that now run together, as below an unclosed code fence, become the first of them, which keeps its
+            // history so undo can take back what joined them.
+            let first = spans.iter().position(|(_, span)| span.start == range.start);
+            let last = spans.iter().position(|(_, span)| span.end == range.end);
+            let run = match (first, last) {
+                (Some(first), Some(last)) if first < last => Some(&spans[first..=last]),
+                _ => None,
+            }
+            .filter(|run| run.iter().all(|(id, _)| old.contains(id)));
+            let id = match (kept, run) {
+                (Some(at), _) => old.remove(at),
+                (None, Some(run)) => {
+                    changed = true;
+                    let (first, _) = run[0];
+                    for (id, _) in &run[1..] {
+                        let chapter = self.chapters.remove(id).expect("a section of the book");
+                        self.resplit_unsaved |= chapter.is_dirty();
+                        self.known_mut(first).buffer.extend(chapter.buffer.text());
+                        old.retain(|other| other != id);
+                    }
+                    self.known_mut(first).read_outline();
+                    old.retain(|other| *other != first);
+                    first
+                }
+                (None, None) => {
                     changed = true;
                     let path = self.location().to_owned();
                     self.add(Chapter::new(

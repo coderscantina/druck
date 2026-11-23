@@ -272,6 +272,21 @@ impl Buffer {
             .expect("the end of the text is a place to edit")
     }
 
+    /// Adds `text` at the end outside every undo step, so no undo takes it away. The steps before keep working, since
+    /// none of them reaches past the old end. For a break that another text after this one needs to stay apart.
+    pub fn extend(&mut self, text: &str) -> Splice {
+        let end = self.text.len();
+        self.text.push_str(text);
+        let splice = Splice {
+            start: end,
+            old_end: end,
+            new_end: self.text.len(),
+        };
+        self.revision += 1;
+        self.last_splice = Some(splice);
+        splice
+    }
+
     /// Ends the open undo step, so the next edit starts one of its own even if it would join it, as typing does.
     pub fn close_step(&mut self) {
         self.closed = true;

@@ -19,9 +19,11 @@ impl EditorView {
             .active_buffer_mut()
             .transact(kind, edits, self.selection, after, started)
         {
+            // Marked text is provisional, so the break a section's end needs waits for what the input method commits.
+            Ok(splice) if marked.is_some() => self.resegment(splice.into()),
             Ok(splice) => {
-                let splice = self.session.keep_apart(self.session.active(), splice);
-                self.resegment(splice);
+                let apart = self.session.keep_apart(self.session.active(), splice);
+                self.resegment(apart);
             }
             Err(error) => {
                 eprintln!("edit rejected: {error}");
@@ -43,7 +45,10 @@ impl EditorView {
         cx.emit(TextChanged);
     }
 
-    pub(super) fn resegment(&mut self, splice: crate::source::buffer::Splice) {
+    /// Reads the blocks around a change again and moves what marks the text: review passages and margin pins move by the
+    /// edit and by the break after it each, so a mark past the edit does not go to the section's end.
+    pub(super) fn resegment(&mut self, apart: Apart) {
+        let splice = apart.gap.map_or(apart.edit, |gap| apart.edit.then(gap));
         let delta = splice.new_end as isize - splice.old_end as isize;
         let anchor_start = self.blocks.as_slice()[self.scroll.block].range.start;
         let change = self.blocks.apply(self.session.active_buffer().text(), splice);
@@ -66,8 +71,10 @@ impl EditorView {
         self.hovered = None;
         self.rich.atoms = rich::atoms(self.session.active_buffer().text(), &self.blocks);
         self.read_directives();
-        review::shift(&mut self.review, &mut self.advice, &splice);
-        self.pins.shift(&splice);
+        for splice in [Some(apart.edit), apart.gap].into_iter().flatten() {
+            review::shift(&mut self.review, &mut self.advice, &splice);
+            self.pins.shift(&splice);
+        }
     }
 
     pub(super) fn replace_selection(
@@ -265,7 +272,7 @@ impl EditorView {
             return;
         };
         let started = self.trace.input();
-        self.resegment(restored.splice);
+        self.resegment(restored.splice.into());
         // History may hold a caret from before a region took its shape, on a line that is hidden now.
         let selection = if restored.selection.is_empty() {
             Selection::caret(self.skip_hidden(restored.selection.head, false))
@@ -399,7 +406,19 @@ impl EntityInputHandler for EditorView {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked = None;
+        // The marked text stays as it is, committed, so the section's end may need its break now.
+        if let Some(marked) = self.marked.take() {
+            let splice = crate::source::buffer::Splice {
+                start: marked.start,
+                old_end: marked.end,
+                new_end: marked.end,
+            };
+            if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
+                self.resegment(gap.into());
+                self.schedule_rich(window, cx);
+                cx.emit(TextChanged);
+            }
+        }
         window.notify_text_input_changed(&self.focus);
         cx.notify();
     }
