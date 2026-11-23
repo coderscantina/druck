@@ -1260,6 +1260,12 @@ fn render(
     let mut issues = Vec::new();
     for plan in plans {
         let only_floats = plan.lines.is_empty() && !plan.floats.is_empty();
+        // A callout going on past the page keeps half the gap above the footnotes clear.
+        let reach = if plan.notes.is_empty() {
+            f64::INFINITY
+        } else {
+            footnotes.gap.0 / 2.0
+        };
         if !only_floats && rectos.binary_search(&plan.lines.start).is_ok() && !(first + pages.len()).is_multiple_of(2) {
             blanks.push(first + pages.len());
             pages.push(super::blank_page(config));
@@ -1296,7 +1302,7 @@ fn render(
                     (left, shift),
                     y,
                     0.0,
-                    0,
+                    (0, f64::INFINITY),
                     &mut [],
                 );
                 y += spacing;
@@ -1319,7 +1325,7 @@ fn render(
                 (left, shift),
                 bottom + spacing,
                 0.0,
-                0,
+                (0, f64::INFINITY),
                 &mut [],
             );
         }
@@ -1345,7 +1351,7 @@ fn render(
                         x,
                         y,
                         plan.stretch,
-                        plan.lines.start,
+                        (plan.lines.start, reach),
                         &mut tops,
                     );
                     if let Some(split) = split {
@@ -1365,7 +1371,7 @@ fn render(
                             x,
                             floor - natural,
                             0.0,
-                            plan.lines.start,
+                            (plan.lines.start, reach),
                             &mut tops,
                         );
                     }
@@ -1396,7 +1402,7 @@ fn render(
                             x,
                             y,
                             ratio,
-                            plan.lines.start,
+                            (plan.lines.start, reach),
                             &mut tops,
                         );
                     }
@@ -1472,7 +1478,7 @@ fn render(
                     (column, 0.0),
                     top,
                     0.0,
-                    0,
+                    (0, f64::INFINITY),
                     &mut [],
                 );
                 asides.push(Aside {
@@ -1538,8 +1544,8 @@ fn stack_notes(wanted: &[(usize, f64)], notes: &[Note], area: (f64, f64), spacin
 /// Places body lines from `y` down, after the repeated header row if the first one has one, dropping
 /// the space above the first line and stretching the others by `ratio` of their bound. `x` is the left
 /// edge and how far prose lines move right from it. A line shown only at a page top is empty unless it is
-/// the page's first line, `top`. Records where each line's top lands in `tops`, if it has room for it.
-/// Returns the bottom of the last line.
+/// the page's first line, `top`. A callout box that goes on past the region reaches at most `reach` below it.
+/// Records where each line's top lands in `tops`, if it has room for it. Returns the bottom of the last line.
 #[allow(clippy::too_many_arguments, reason = "the region and where its page starts")]
 fn stack(
     items: &mut Vec<Item>,
@@ -1549,7 +1555,7 @@ fn stack(
     (x, shift): (f64, f64),
     mut y: f64,
     ratio: f64,
-    top: usize,
+    (top, reach): (usize, f64),
     tops: &mut [f64],
 ) -> f64 {
     let left = |line: &FlowLine| x + line.wide.map_or(shift, |room| shift.min(room));
@@ -1581,7 +1587,7 @@ fn stack(
         if let (Some(callout), Some((position, start, first, x))) = (line.callout, open)
             && (callout.last || index + 1 == lines.end)
         {
-            let behind = CalloutBox::items(&first, &callout, x, start, y);
+            let behind = CalloutBox::items(&first, &callout, x, (start, y), reach);
             items.splice(position..position, behind);
             open = None;
         }

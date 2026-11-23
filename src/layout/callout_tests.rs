@@ -16,6 +16,16 @@ fn source() -> InputSource {
 }
 
 fn config() -> Config {
+    themed(json!({}))
+}
+
+/// The test theme with the top-level keys of `extra`.
+fn themed(extra: serde_json::Value) -> Config {
+    let mut theme = json!({"version": 1, "pages": {"body": {"header": null, "footer": null}}});
+    theme
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
     let settings = |source| SettingsInput {
         source,
         settings: FrontMatter::default(),
@@ -23,7 +33,7 @@ fn config() -> Config {
     resolve(Inputs {
         theme: Some(ThemeInput {
             source: InputSource::Theme("/fake/theme.json".into()),
-            value: json!({"version": 1, "pages": {"body": {"header": null, "footer": null}}}),
+            value: theme,
         }),
         document: settings(source()),
         overrides: settings(InputSource::Overrides {
@@ -129,6 +139,31 @@ fn a_callout_split_across_pages_continues_its_box_and_never_strands_a_line() {
         }
     }
     assert!(split, "some count splits the callout");
+}
+
+#[test]
+fn a_split_callout_keeps_clear_of_the_footnotes_whatever_their_gap() {
+    let config = themed(json!({"footnotes": {"gap": "2pt"}}));
+    let separator = config.footnotes.separator_color;
+    let paragraphs: String = (1..=6).map(|n| format!(">\n> Para {n}.[^{n}]\n")).collect();
+    let notes: String = (1..=6).map(|n| format!("[^{n}]: Note {n}.\n\n")).collect();
+    let mut checked = false;
+    for filler in 20..60 {
+        let lines: String = (0..filler).map(|n| format!("Line {n}.\n\n")).collect();
+        let pages = render(&config, &format!("{lines}> [!NOTE]\n{paragraphs}\n{notes}"));
+        let boxes: Vec<_> = pages
+            .iter()
+            .filter(|page| !rects(page, BACKGROUND).is_empty())
+            .collect();
+        if let [continued, _] = boxes[..]
+            && let ([background], [rule]) = (&rects(continued, BACKGROUND)[..], &rects(continued, separator)[..])
+        {
+            checked = true;
+            let clear = rule.y.0 - (background.y.0 + background.height.0);
+            assert!(clear >= 1.0 - 1e-6, "{filler} lines before leave {clear}pt");
+        }
+    }
+    assert!(checked, "some count splits the callout above footnotes");
 }
 
 #[test]

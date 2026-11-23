@@ -484,7 +484,7 @@ Each kind starts with a label in the language of the document: "Note", "Tip", "I
 Some details:
 
 - There is no custom title. A marker with text after it, such as `> [!NOTE] Own title`, and an unknown kind, such as `> [!HINT]`, are plain quotations that show the marker as text, as on GitHub. To change a label for the whole document, set it in the theme.
-- A callout may break across pages. Its background and bar continue on the next page. A callout of fewer than four lines stays on one page, and a longer one leaves at least two lines on each page. The label stays with the first lines.
+- A callout may break across pages. Its background and bar continue on the next page. Above footnotes, the box reaches at most half of `footnotes.gap` below its last line, so it never touches the note rule. A callout of fewer than four lines stays on one page, and a longer one leaves at least two lines on each page. The label stays with the first lines.
 - In two columns a callout takes the column width.
 - In a footnote a callout is set as a plain quotation, without label or box.
 - In an EPUB a callout is an `aside` with the classes `callout` and the kind, for example `callout tip`.

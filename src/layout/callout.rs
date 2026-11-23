@@ -28,10 +28,14 @@ pub(super) struct CalloutBox {
 
 impl CalloutBox {
     /// The items of the box around lines placed from `top` to `bottom`, whose first line is at `left`.
-    /// Where a callout goes on beyond the page, the box reaches `padding` into the margin.
-    pub(super) fn items(first: &Self, last: &Self, left: f64, top: f64, bottom: f64) -> Vec<Item> {
+    /// Where a callout goes on beyond the page, the box reaches `padding` into the margin, below at most `reach`.
+    pub(super) fn items(first: &Self, last: &Self, left: f64, (top, bottom): (f64, f64), reach: f64) -> Vec<Item> {
         let top = if first.first { top } else { top - first.padding };
-        let bottom = if last.last { bottom } else { bottom + last.padding };
+        let bottom = if last.last {
+            bottom
+        } else {
+            bottom + last.padding.min(reach)
+        };
         let x = left + first.x;
         let rect = |width: f64| Rect {
             x: Pt(x),
