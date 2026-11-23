@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, EventEmitter, FocusHandle, FontWeight, KeyDownEvent, Pixels, RenderImage, SharedString, Task, Window, div,
-    img, px, svg,
+    Context, EventEmitter, FocusHandle, FontWeight, KeyDownEvent, Pixels, RenderImage, ScrollHandle, SharedString,
+    Task, Window, div, img, point, px, svg,
 };
 
 use crate::a11y::Control as _;
@@ -41,6 +41,10 @@ pub struct LaunchView {
     focus: FocusHandle,
     /// The offer's row, which gets the keys while it shows.
     offer_focus: FocusHandle,
+    /// Each starter's card, in the order of `STARTERS`.
+    starter_focus: Vec<FocusHandle>,
+    /// The window's scroll, for a card taller than the window.
+    scroll: ScrollHandle,
     /// Each starter's page by its slug, once painted, in the language of `painted`.
     pages: HashMap<&'static str, Arc<RenderImage>>,
     painted: Language,
@@ -64,6 +68,8 @@ impl LaunchView {
             offer: None,
             focus: cx.focus_handle(),
             offer_focus: cx.focus_handle().tab_stop(true),
+            starter_focus: STARTERS.iter().map(|_| cx.focus_handle().tab_stop(true)).collect(),
+            scroll: ScrollHandle::new(),
             pages: HashMap::new(),
             painted: language(),
             stale: Vec::new(),
@@ -113,6 +119,7 @@ impl LaunchView {
     fn starter_card(
         &self,
         tokens: &Tokens,
+        at: usize,
         starter: &'static Starter,
         width: Pixels,
         cx: &mut Context<Self>,
@@ -130,6 +137,7 @@ impl LaunchView {
         div()
             .id(starter.slug)
             .button(tokens, name)
+            .track_focus(&self.starter_focus[at])
             .w(width)
             .p(tokens::SPACE_2)
             .flex()
@@ -184,6 +192,18 @@ impl LaunchView {
                     .child(answer("agent-offer-yes", Key::AgentOfferYes, true).text_color(tokens.accent))
                     .child(answer("agent-offer-no", Key::AgentOfferNo, false)),
             )
+    }
+
+    /// Moves the keys and keeps their control in a window the card outgrows: the starters are its last row, so one of
+    /// them shows the card's foot, and anything else its head.
+    fn tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        crate::a11y::tab(forward, window, cx);
+        if self.starter_focus.iter().any(|focus| focus.is_focused(window)) {
+            self.scroll.scroll_to_bottom();
+        } else {
+            self.scroll.set_offset(point(px(0.), px(0.)));
+        }
+        cx.notify();
     }
 
     /// A folder that only lacks a manifest is no error: the offer's own line says what is missing.
@@ -269,18 +289,23 @@ impl Render for LaunchView {
         let offering = crate::settings::get(cx).offers_agent();
         let starters: Vec<_> = STARTERS
             .iter()
-            .map(|starter| self.starter_card(&tokens, starter, starter_width, cx))
+            .enumerate()
+            .map(|(at, starter)| {
+                self.starter_card(&tokens, at, starter, starter_width, cx)
+                    .into_any_element()
+            })
             .collect();
+        // The card stands in the middle while it fits, and the window scrolls when it does not.
         div()
+            .id("launch")
             .flex_1()
             .min_h_0()
-            .flex()
-            .items_center()
-            .justify_center()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .key_context("Workspace")
             .track_focus(&self.focus)
-            .on_action(|_: &crate::workspace::FocusNext, window, cx| crate::a11y::tab(true, window, cx))
-            .on_action(|_: &crate::workspace::FocusPrevious, window, cx| crate::a11y::tab(false, window, cx))
+            .on_action(cx.listener(|view, _: &crate::workspace::FocusNext, window, cx| view.tab(true, window, cx)))
+            .on_action(cx.listener(|view, _: &crate::workspace::FocusPrevious, window, cx| view.tab(false, window, cx)))
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     cx.emit(LaunchEvent::Dismiss);
@@ -289,75 +314,96 @@ impl Render for LaunchView {
             .bg(tokens.canvas)
             .child(
                 div()
-                    .w(width)
+                    .min_h_full()
+                    .py(tokens::SPACE_4)
                     .flex()
-                    .flex_col()
-                    .bg(tokens.canvas)
-                    .border_1()
+                    .items_center()
+                    .justify_center()
+                    .child(self.card(&tokens, width, offering, starters, cx)),
+            )
+    }
+}
+
+impl LaunchView {
+    fn card(
+        &self,
+        tokens: &Tokens,
+        width: Pixels,
+        offering: bool,
+        starters: Vec<gpui::AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let tokens = tokens.clone();
+        div()
+            .flex_none()
+            .w(width)
+            .flex()
+            .flex_col()
+            .bg(tokens.canvas)
+            .border_1()
+            .border_color(tokens.divider)
+            .rounded(tokens::RADIUS)
+            .child(
+                div()
+                    .px(tokens::SPACE_3)
+                    .py(tokens::SPACE_2)
+                    .border_b_1()
                     .border_color(tokens.divider)
-                    .rounded(tokens::RADIUS)
-                    .child(
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_quiet)
+                    .child("Druck"),
+            )
+            // The question comes before anything else, alone, so it cannot crowd the starters out of a small
+            // window.
+            .when(offering, |card| card.child(Self::agent_offer(&tokens)))
+            .when(!offering, |card| {
+                card.when_some(self.offer.clone(), |card, (dir, offer)| {
+                    card.child(
                         div()
                             .px(tokens::SPACE_3)
-                            .py(tokens::SPACE_2)
-                            .border_b_1()
-                            .border_color(tokens.divider)
+                            .pt(tokens::SPACE_2)
                             .text_size(tokens::TEXT_SMALL)
                             .text_color(tokens.text_quiet)
-                            .child("Druck"),
+                            .child(adopt::reason(&dir)),
                     )
-                    // The question comes before anything else, alone, so it cannot crowd the starters out of a small
-                    // window.
-                    .when(offering, |card| card.child(Self::agent_offer(&tokens)))
-                    .when(!offering, |card| {
-                        card.when_some(self.offer.clone(), |card, (dir, offer)| {
-                            card.child(
-                                div()
-                                    .px(tokens::SPACE_3)
-                                    .pt(tokens::SPACE_2)
-                                    .text_size(tokens::TEXT_SMALL)
-                                    .text_color(tokens.text_quiet)
-                                    .child(adopt::reason(&dir)),
-                            )
-                            .child(
-                                Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
-                                    .track_focus(&self.offer_focus)
-                                    .ring_while_focused(&tokens)
-                                    .border_b_1()
-                                    .border_color(tokens.divider)
-                                    .text_color(tokens.accent)
-                                    .on_click(cx.listener(move |_, _, _, cx| {
-                                        cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
-                                    })),
-                            )
-                        })
-                        .when_some(self.error.clone(), |card, error| {
-                            card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
-                        })
-                        .child(
-                            Self::row(
-                                &tokens,
-                                "open",
-                                "icons/file.svg",
-                                crate::t!(Key::Open),
-                                crate::t!(Key::OpenHint),
-                            )
+                    .child(
+                        Self::row(&tokens, "make-project", "icons/book.svg", adopt::label(), offer.hint())
+                            .track_focus(&self.offer_focus)
+                            .ring_while_focused(&tokens)
                             .border_b_1()
                             .border_color(tokens.divider)
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
-                        )
-                        .child(
-                            div()
-                                .px(tokens::SPACE_3)
-                                .pt(tokens::SPACE_3)
-                                .pb(tokens::SPACE_1)
-                                .text_size(tokens::TEXT_SMALL)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(tokens.text_quiet)
-                                .child(crate::t!(Key::NewProject)),
-                        )
-                        .child(div().px(tokens::SPACE_2).pb(tokens::SPACE_2).flex().children(starters))
-                    }),
-            )
+                            .text_color(tokens.accent)
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.emit(LaunchEvent::MakeProject(dir.clone(), offer.clone()));
+                            })),
+                    )
+                })
+                .when_some(self.error.clone(), |card, error| {
+                    card.child(div().p(tokens::SPACE_3).text_color(tokens.accent).child(error))
+                })
+                .child(
+                    Self::row(
+                        &tokens,
+                        "open",
+                        "icons/file.svg",
+                        crate::t!(Key::Open),
+                        crate::t!(Key::OpenHint),
+                    )
+                    .border_b_1()
+                    .border_color(tokens.divider)
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(LaunchEvent::Open))),
+                )
+                .child(
+                    div()
+                        .px(tokens::SPACE_3)
+                        .pt(tokens::SPACE_3)
+                        .pb(tokens::SPACE_1)
+                        .text_size(tokens::TEXT_SMALL)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(tokens.text_quiet)
+                        .child(crate::t!(Key::NewProject)),
+                )
+                .child(div().px(tokens::SPACE_2).pb(tokens::SPACE_2).flex().children(starters))
+            })
     }
 }
