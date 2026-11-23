@@ -108,8 +108,14 @@ fn the_projects_passes_are_a_group_of_their_own() {
         "---\nname: Titles\nreturns: notes\n---\nCheck the titles.\n",
     );
     assert!(session.discover_files());
+    folder.write("passes/consistency.md", "Check the names.\n");
+    assert!(session.discover_files());
     let contents = session.contents();
-    assert_eq!(titles(&contents.passes), ["titles"]);
+    assert_eq!(
+        titles(&contents.passes),
+        ["consistency", "titles"],
+        "by name, not by when they came"
+    );
     assert!(
         contents
             .not_in_book

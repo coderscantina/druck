@@ -708,6 +708,8 @@ impl Session {
                 Group::Manifest => contents.manifest.push(row),
             }
         }
+        // A pass made in the app comes after the ones read at opening; the Binder lists them by name all the same.
+        (contents.passes).sort_by_cached_key(|row| row.title.to_lowercase());
         contents
     }
 
