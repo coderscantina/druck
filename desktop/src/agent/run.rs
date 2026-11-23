@@ -142,12 +142,10 @@ impl AgentView {
         commands
     }
 
-    /// Copies a built-in pass into the project's `passes/` and opens the copy in the author's editor.
+    /// Copies a built-in pass into the project's `passes/` and opens the copy in the text.
     fn customize_pass(&mut self, slug: &str, cx: &mut Context<Self>) {
         match passes::customize(&self.base, slug) {
-            // A scripted run only wants the copy.
-            Ok(_) if crate::gate::measuring() => {}
-            Ok(file) => cx.open_with_system(&file),
+            Ok(file) => crate::workspace::open_file(file, cx),
             Err(error) => self.say(strings::pass_not_copied(&error.to_string()), cx),
         }
     }

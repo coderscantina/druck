@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use druck::input::MANIFEST;
 
-use super::{Chapter, ChapterId, Group, Kind, MANUSCRIPT, NOTES, RESEARCH, Read, Session};
+use super::{Chapter, ChapterId, Group, Kind, MANUSCRIPT, NOTES, PASSES, RESEARCH, Read, Session};
 use crate::persist::atomic::{self, Outcome, content_hash};
 use crate::persist::merge::{edits_between, map_offset};
 use crate::source::buffer::EditError;
@@ -416,7 +416,7 @@ impl Session {
                     self.bump_revision();
                 }
                 Group::Manifest => self.known_mut(id).read = Read::Missing,
-                Group::NotInBook | Group::Notes | Group::Research => self.forget_chapter(id),
+                Group::NotInBook | Group::Notes | Group::Research | Group::Passes => self.forget_chapter(id),
             }
         }
     }
@@ -470,6 +470,7 @@ impl Session {
         self.find_files(MANUSCRIPT, Group::NotInBook);
         self.find_files(NOTES, Group::Notes);
         self.find_files(RESEARCH, Group::Research);
+        self.find_files(PASSES, Group::Passes);
         self.chapters.len() != before
     }
 
@@ -487,6 +488,7 @@ impl Session {
             let group = match listed.split('/').next() {
                 Some(NOTES) => Group::Notes,
                 Some(RESEARCH) => Group::Research,
+                Some(PASSES) => Group::Passes,
                 _ => Group::NotInBook,
             };
             self.add(Chapter::new(

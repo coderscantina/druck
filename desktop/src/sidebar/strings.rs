@@ -6,6 +6,7 @@ crate::strings! {
         NotInBook => ("Not in book", "Nicht im Buch"),
         Notes => ("Notes", "Notizen"),
         Research => ("Research", "Recherche"),
+        Passes => ("Passes", "Durchgänge"),
 
         NewSection => ("New section", "Neuer Abschnitt"),
         Details => ("Details", "Angaben"),
