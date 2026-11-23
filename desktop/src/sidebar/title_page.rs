@@ -3,15 +3,18 @@
 //!
 //! It holds no document. The workspace gives it the details and the type, and hears [`TitlePageEvent`]s.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, EventEmitter, FocusHandle, Focusable, Font, FontFeatures, FontStyle, FontWeight, Pixels,
-    SharedString, Subscription, TextRun, Window, div, font, px, svg,
+    Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, Font, FontFeatures, FontStyle, FontWeight, Pixels,
+    SharedString, Subscription, TextRun, Window, canvas, div, font, px, svg,
 };
 
 use super::strings::Key;
+use crate::editor::Column;
 use crate::inspector::input::{Cancelled, Committed, Edited, Submitted, TextInput};
 use crate::preview::BookType;
 use crate::session::{Details, Field, Session};
@@ -81,6 +84,8 @@ pub struct TitlePageView {
     fields: Vec<(Line, Entity<TextInput>)>,
     book_type: Option<BookType>,
     zoom: f32,
+    /// The pane in the window, read as it is painted, so the page centres on the window as the text does.
+    pane: Rc<Cell<Bounds<Pixels>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -113,6 +118,7 @@ impl TitlePageView {
             fields,
             book_type: None,
             zoom: 1.,
+            pane: Rc::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -127,6 +133,13 @@ impl TitlePageView {
             }
         }
         cx.notify();
+    }
+
+    /// Where the pane stands until the page is first painted: the text's own pane, so the page opens in place.
+    pub fn set_pane(&mut self, pane: Bounds<Pixels>) {
+        if self.pane.get().size.width <= px(0.) {
+            self.pane.set(pane);
+        }
     }
 
     /// Sets the lines in the book's type at the text's zoom.
@@ -235,6 +248,13 @@ impl Render for TitlePageView {
             .book_type
             .as_ref()
             .map(|book| px(book.measure * tokens::POINT * self.zoom));
+        // Centred on the window as the text column is, so the page stands where the text stood.
+        let pane = self.pane.get();
+        let placed = (pane.size.width > px(0.)).then(|| {
+            let width = measure.unwrap_or(tokens::TEXT_MIN_WIDTH);
+            let column = Column::place(pane, width, false, window.viewport_size().width * 0.5);
+            (column.text_left - pane.left(), column.text_width)
+        });
         let space_before = |line: Line| match line {
             Line::Title => body * 3.,
             Line::Subtitle => body * 0.5,
@@ -281,13 +301,33 @@ impl Render for TitlePageView {
                     view.step(line, false, window, cx);
                 }
             }))
+            .child({
+                let pane = self.pane.clone();
+                let view = cx.entity().downgrade();
+                canvas(
+                    move |bounds, _, _| bounds,
+                    move |_, bounds: Bounds<Pixels>, _, cx| {
+                        let before = pane.get();
+                        if (before.left(), before.size.width) != (bounds.left(), bounds.size.width) {
+                            pane.set(bounds);
+                            view.update(cx, |_, cx| cx.notify()).ok();
+                        }
+                    },
+                )
+                .absolute()
+                .size_full()
+            })
             .child(
                 div()
-                    .mx_auto()
-                    .px(tokens::SPACE_4)
                     .pt(tokens::TEXT_MARGIN_Y)
                     .pb(tokens::TEXT_MARGIN_Y)
-                    .when_some(measure, |column, measure| column.w(measure).max_w_full())
+                    .map(|column| match placed {
+                        Some((left, width)) => column.ml(left).w(width),
+                        None => column
+                            .mx_auto()
+                            .px(tokens::SPACE_4)
+                            .when_some(measure, |column, measure| column.w(measure).max_w_full()),
+                    })
                     .flex()
                     .flex_col()
                     .child(caption)

@@ -68,7 +68,8 @@ pub(crate) use float::tooltip;
 use gutter::{BlockGrab, CommentMarker};
 pub use keys::*;
 use keys::{CONTEXT, MENU_CONTEXT};
-use layout::{BlockLayout, Column, GalleyStyle, ShapeRequest, shape_block};
+pub use layout::Column;
+use layout::{BlockLayout, GalleyStyle, ShapeRequest, shape_block};
 use margin::ChapterNotes;
 pub use margin::{PinCard, PinClicked, PinGroup, PinVerb, bind_pin_keys};
 use trace::Trace;
@@ -829,6 +830,11 @@ impl EditorView {
     }
 
     /// The text's zoom, where 1 is 100 percent.
+    /// The text's pane in the window, as last painted.
+    pub fn viewport(&self) -> Bounds<Pixels> {
+        self.column.viewport
+    }
+
     pub fn zoom(&self) -> f32 {
         self.style.zoom()
     }

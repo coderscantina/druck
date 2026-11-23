@@ -596,8 +596,10 @@ impl Workspace {
             .and_then(|settings| settings.title.clone())
             .unwrap_or_default();
         let zoom = self.parts.editor.read(cx).zoom();
+        let pane = self.parts.editor.read(cx).viewport();
         let book_type = self.book_type.clone();
         self.title_view.update(cx, |view, cx| {
+            view.set_pane(pane);
             view.set_type(book_type, zoom, cx);
             view.set_details(&details, &written_title, window, cx);
         });
