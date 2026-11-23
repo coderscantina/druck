@@ -19,7 +19,10 @@ impl EditorView {
             .active_buffer_mut()
             .transact(kind, edits, self.selection, after, started)
         {
-            Ok(splice) => self.resegment(splice),
+            Ok(splice) => {
+                let splice = self.session.keep_apart(self.session.active(), splice);
+                self.resegment(splice);
+            }
             Err(error) => {
                 eprintln!("edit rejected: {error}");
                 return;

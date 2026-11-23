@@ -166,10 +166,16 @@ impl Session {
     /// The chapter holding a place in a file's text, and the place in that chapter. A single file's sections each hold
     /// part of its text.
     pub fn place_in_file(&self, path: &Path, at: usize) -> Option<(ChapterId, usize)> {
-        if matches!(&self.kind, Kind::Single { path: file } if file == path) {
-            return self.locate(path, at);
+        let ids = self.ids_of(path);
+        let mut start = 0;
+        for (index, id) in ids.iter().enumerate() {
+            let length = self.known(*id).buffer.len();
+            if at < start + length || index + 1 == ids.len() {
+                return Some((*id, at - start));
+            }
+            start += length;
         }
-        Some((self.chapter_of_file(path)?, at))
+        None
     }
 
     /// The section of a file that holds the first place where `after`, the file's text as the buffers hold it now,

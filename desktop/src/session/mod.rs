@@ -27,7 +27,6 @@ pub(crate) mod yaml;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -47,7 +46,8 @@ use self::strings::Key;
 pub use self::templates::{PAGES, Page, STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;
 use crate::shell::strings::Language;
-use crate::source::buffer::EditError;
+use crate::source::blocks::break_before;
+use crate::source::buffer::{EditError, Splice};
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 
 const MANUSCRIPT: &str = "manuscript";
@@ -945,19 +945,6 @@ impl Session {
         Joined::join(chapters, matches!(self.kind, Kind::Project { .. }), self.revision())
     }
 
-    /// Each section of a single file with its part of the file's text, placed as [`Joined::join`] places them.
-    fn section_ranges(&self) -> impl Iterator<Item = (ChapterId, Range<usize>)> + '_ {
-        let mut end = 0;
-        let mut open = false;
-        self.book.iter().map(move |id| {
-            let text = self.known(*id).buffer.text();
-            let start = end + usize::from(open);
-            open = joined::ends_open(text);
-            end = start + text.len();
-            (*id, start..end)
-        })
-    }
-
     /// The chapter and its offset for a place in a file, as a source map's position says it.
     pub fn locate(&self, file: &Path, offset: usize) -> Option<(ChapterId, usize)> {
         match &self.kind {
@@ -965,11 +952,15 @@ impl Session {
                 if path != file {
                     return None;
                 }
-                let (id, range) = self
-                    .section_ranges()
-                    .take_while(|(_, range)| range.start <= offset)
-                    .last()?;
-                Some((id, (offset - range.start).min(range.len())))
+                let mut start = 0;
+                for id in &self.book {
+                    let length = self.known(*id).buffer.len();
+                    if offset < start + length || Some(id) == self.book.last() {
+                        return Some((*id, (offset - start).min(length)));
+                    }
+                    start += length;
+                }
+                None
             }
             Kind::Project { .. } => {
                 let id = self.book.iter().find(|id| self.known(**id).path == file)?;
@@ -982,7 +973,13 @@ impl Session {
     pub fn file_position(&self, id: ChapterId, offset: usize) -> Option<(PathBuf, usize)> {
         let chapter = self.chapters.get(&id).filter(|chapter| chapter.group == Group::Book)?;
         let before: usize = match self.kind {
-            Kind::Single { .. } => self.section_ranges().find(|(other, _)| *other == id)?.1.start,
+            Kind::Single { .. } => {
+                let at = self.book.iter().position(|other| *other == id)?;
+                self.book[..at]
+                    .iter()
+                    .map(|other| self.known(*other).buffer.len())
+                    .sum()
+            }
             Kind::Project { .. } => 0,
         };
         Some((chapter.path.clone(), before + offset))
@@ -1068,10 +1065,50 @@ impl Session {
             anchor: moved(before.anchor, &edits),
             head: moved(before.head, &edits),
         };
-        chapter.buffer.transact(kind, edits, before, after, Instant::now())?;
+        let splice = chapter.buffer.transact(kind, edits, before, after, Instant::now())?;
         chapter.view.selection = after;
-        chapter.read_outline();
+        self.keep_apart(id, splice);
+        self.known_mut(id).read_outline();
         Ok(())
+    }
+
+    /// Keeps a single file's sections apart after an edit to section `id` touched `splice`, as the editor shows them
+    /// apart. Where the section's text would run its last block into the next section's first, as `Added.# Two` or a
+    /// paragraph over a setext heading, the break that keeps them apart goes at its end, in the same undo step, with
+    /// the caret where it was. Where its own start now runs into the section before, as after its heading became a
+    /// setext one, that section gets the break as a step of its own. Returns the span of the change to `id`, the break
+    /// included. The buffers then join to the file by plain concatenation, and a resplit finds the same sections.
+    pub fn keep_apart(&mut self, id: ChapterId, mut splice: Splice) -> Splice {
+        if !matches!(self.kind, Kind::Single { .. }) {
+            return splice;
+        }
+        let Some(at) = self.book.iter().position(|other| *other == id) else {
+            return splice;
+        };
+        let now = Instant::now();
+        if let Some(next) = self.book.get(at + 1) {
+            let gap = break_before(self.known(id).buffer.text(), self.known(*next).buffer.text(), at == 0);
+            if !gap.is_empty() {
+                splice = splice.then(self.known_mut(id).buffer.append(gap, now));
+            }
+        }
+        let text = self.known(id).buffer.text();
+        // Only the section's first lines, up to a blank line, can run into the section before.
+        let head = text.find("\n\n").map_or(text.len(), |blank| blank + 1);
+        if at > 0 && splice.start <= head {
+            let previous = self.book[at - 1];
+            let gap = break_before(self.known(previous).buffer.text(), text, at == 1);
+            if !gap.is_empty() {
+                let chapter = self.known_mut(previous);
+                let end = chapter.buffer.len();
+                let caret = chapter.view.selection;
+                (chapter.buffer)
+                    .transact(EditKind::Discrete, vec![Edit::new(end..end, gap)], caret, caret, now)
+                    .expect("the end of the text is a place to edit");
+                chapter.read_outline();
+            }
+        }
+        splice
     }
 
     /// Reads a chapter's title and kind again after its text changed. Returns whether the sidebar should change.

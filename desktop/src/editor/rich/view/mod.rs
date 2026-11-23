@@ -628,6 +628,7 @@ impl EditorView {
                 let started = std::time::Instant::now();
                 match self.session.active_buffer_mut().amend(edits, after, started) {
                     Ok(splice) => {
+                        let splice = self.session.keep_apart(self.session.active(), splice);
                         self.resegment(splice);
                         self.selection = after;
                         self.reveal_at = after.head;

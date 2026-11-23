@@ -547,8 +547,10 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) -> Result<(), crate::source::buffer::EditError> {
         self.store_view();
+        let before = self.session.active_buffer().revision();
         self.session.edit_chapter(id, edits, kind)?;
-        if id == self.session.active() {
+        // The section before the edited one can take a break, see `Session::keep_apart`.
+        if before != self.session.active_buffer().revision() {
             self.adopt_active(window, cx);
         }
         cx.emit(TextChanged);
@@ -957,7 +959,10 @@ impl EditorView {
             .active_buffer_mut()
             .transact(EditKind::Typing, edits, self.selection, after, started)
         {
-            Ok(splice) => self.resegment(splice),
+            Ok(splice) => {
+                let splice = self.session.keep_apart(self.session.active(), splice);
+                self.resegment(splice);
+            }
             Err(error) => {
                 eprintln!("edit rejected: {error}");
                 return false;

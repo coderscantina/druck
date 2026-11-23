@@ -151,6 +151,44 @@ impl Blocks {
     }
 }
 
+/// What `text` needs at its end so that `next`, the text after it in the same file, still starts a block of its own:
+/// nothing, a line break when `text` ends inside a line, or a blank line when its last block would take in `next`'s
+/// first lines, as a paragraph takes a setext heading's words or a lazy continuation line. `text` starts a block, and
+/// the file when `starts_file`, where front matter can open. When no break keeps them apart, as after an unclosed code
+/// fence, it needs only what ends its last line. The line break is `next`'s own, `\r\n` or `\n`.
+pub fn break_before(text: &str, next: &str, starts_file: bool) -> &'static str {
+    if text.is_empty() || next.is_empty() {
+        return "";
+    }
+    let open = !text.ends_with('\n');
+    let last_line = text.trim_end_matches('\n').rsplit('\n').next().unwrap_or("");
+    if !open && (text.ends_with("\n\n") || is_blank(last_line.strip_suffix('\r').unwrap_or(last_line))) {
+        return "";
+    }
+    let (first, _) = line_at(next, 0);
+    let crlf = next[first.len()..].starts_with("\r\n");
+    let gaps: [&'static str; 2] = match (open, crlf) {
+        (true, false) => ["\n", "\n\n"],
+        (true, true) => ["\r\n", "\r\n\r\n"],
+        (false, false) => ["", "\n"],
+        (false, true) => ["", "\r\n"],
+    };
+    // A blank line above keeps a text that does not start the file from opening front matter.
+    let lead = |from: usize| if starts_file && from == 0 { "" } else { "\n" };
+    // Blocks before the last one ended inside `text`, and a block depends only on the text from its start, so only the
+    // last one can take anything in.
+    let parsed = Blocks::parse(&format!("{}{text}", lead(0)));
+    let last = (parsed.list.last()).map_or(0, |block| block.range.start.saturating_sub(lead(0).len()));
+    // A blank line ends every block but those no break ends, so the first lines up to one are all it could take in.
+    let head = &next[..skip_nonblank(next, 0)];
+    let apart = |gap: &str| {
+        let joined = format!("{}{}{gap}{head}", lead(last), &text[last..]);
+        let boundary = joined.len() - head.len();
+        (Blocks::parse(&joined).list.iter()).any(|block| block.range.start == boundary)
+    };
+    gaps.into_iter().find(|gap| apart(gap)).unwrap_or(gaps[0])
+}
+
 /// One line: its text without the line ending, and where the next line starts.
 fn line_at(text: &str, pos: usize) -> (&str, usize) {
     let rest = &text[pos..];
@@ -951,5 +989,23 @@ mod tests {
         assert_eq!(blocks.as_slice()[0].kind, BlockKind::Heading { level: 1 });
         assert_eq!(blocks, Blocks::parse(buffer.text()));
         assert_eq!(change.start, 0);
+    }
+
+    #[test]
+    fn a_text_gets_the_break_that_keeps_the_next_block_apart() {
+        assert_eq!(break_before("Added.", "# Two\n", false), "\n");
+        assert_eq!(break_before("Added.", "# Two\r\n", false), "\r\n");
+        assert_eq!(break_before("Text.\n", "# Two\n", false), "");
+        assert_eq!(break_before("Text.\n\n", "Two\n===\n", false), "");
+        // A paragraph takes a setext heading's words, and a table takes a line as a row.
+        assert_eq!(break_before("Added.", "Two\n===\n", false), "\n\n");
+        assert_eq!(break_before("Added.\n", "Two\n===\n", false), "\n");
+        assert_eq!(break_before("| a |\n|---|\n| 1 |\n", "Two\n===\n", false), "\n");
+        // Raw HTML runs to a blank line, over a heading too.
+        assert_eq!(break_before("<div>\n</div>\n", "# Two\n", false), "\n");
+        assert_eq!(break_before("# One\n", "Two\n===\n", false), "");
+        assert_eq!(break_before("---\ntitle: A\n---\n", "Text.\n", true), "");
+        // No break ends an unclosed fence, so it gets none.
+        assert_eq!(break_before("```\ncode\n", "# Two\n", false), "");
     }
 }

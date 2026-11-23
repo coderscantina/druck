@@ -234,6 +234,79 @@ fn a_section_ending_without_a_line_break_keeps_the_next_heading_on_its_own_line(
 }
 
 #[test]
+fn an_edit_to_the_files_text_lands_where_it_was_meant_after_a_section_ended_inside_a_line() {
+    let folder = Folder::new("file-edit");
+    let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nbody here\n");
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    let end = session.buffer(one).len();
+    typing(&mut session, one, end, "\nAdded.");
+    let text = session.file_text(&path).expect("read");
+    let edits = crate::persist::merge::edits_between(&text, &text.replace("body", "BODY"));
+    session
+        .apply_to_file(&path, &edits, EditKind::Discrete)
+        .expect("applies");
+    assert_eq!(
+        session.file_text(&path).expect("read"),
+        "# One\n\nText.\n\n\nAdded.\n# Two\n\nBODY here\n"
+    );
+}
+
+#[test]
+fn a_section_keeps_its_last_paragraph_off_a_setext_heading_below_it() {
+    let folder = Folder::new("setext");
+    let text = "# One\n\nText.\n\nTwo\n===\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    let end = session.buffer(one).len();
+    typing(&mut session, one, end, "\nAdded.");
+    assert_eq!(session.save(), Ok(1));
+    assert_eq!(
+        folder.read("whole.md"),
+        "# One\n\nText.\n\n\nAdded.\n\nTwo\n===\n\nMore.\n"
+    );
+    let reopened = Session::open(&path).expect("opens");
+    assert_eq!(titles(&reopened.contents().book), ["One", "Two"]);
+
+    // A heading turned into a setext one below a paragraph gives the section above the blank line.
+    let path = folder.write("tight.md", "# One\n\nText.\n# Two\n\nMore.\n");
+    let mut session = Session::open(&path).expect("opens");
+    let two = session.book()[1];
+    let edits = vec![Edit::new(0..6, "Two\n===\n")];
+    session.edit_chapter(two, edits, EditKind::Discrete).expect("edit");
+    assert_eq!(session.save(), Ok(1));
+    assert_eq!(folder.read("tight.md"), "# One\n\nText.\n\nTwo\n===\n\nMore.\n");
+}
+
+#[test]
+fn typing_at_the_end_of_a_section_keeps_its_buffer_and_history_through_a_chapter_switch() {
+    let folder = Folder::new("switch");
+    let text = "# One\n\nText.\n\n# Two\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let mut session = Session::open(&path).expect("opens");
+    let one = session.book()[0];
+    let end = session.buffer(one).len();
+    session.known_mut(one).view.selection = Caret::caret(end);
+    typing(&mut session, one, end, "\nAdded.");
+    assert_eq!(session.buffer(one).text(), "# One\n\nText.\n\n\nAdded.\n");
+    assert_eq!(
+        session.chapter(one).expect("open").view.selection,
+        Caret::caret(end + 7)
+    );
+
+    assert!(!session.resplit(), "the sections stay as they are");
+    assert_eq!(session.book()[0], one);
+    session.set_active(one);
+    session.active_buffer_mut().undo().expect("a step to undo");
+    assert_eq!(
+        session.buffer(one).text(),
+        "# One\n\nText.\n\n",
+        "the break goes with the typing"
+    );
+}
+
+#[test]
 fn a_change_to_a_single_file_names_the_section_it_is_in() {
     let folder = Folder::new("changed-section");
     let text = "---\ntitle: Whole\n---\n\n# One\n\nText.\n\n# Two\n\nMore.\n";
