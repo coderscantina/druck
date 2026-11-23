@@ -11,6 +11,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64};
+use std::ops::Range;
 
 use krilla::action::LinkAction;
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
@@ -117,7 +118,30 @@ pub fn write(
     let bytes = (document.finish()).map_err(|error| problems(error, output, fonts, &faces, settings))?;
     // Finishing cannot be stopped, so it may have run past a cancel.
     cancel.check(CheckPoint::Page)?;
-    Ok(bytes)
+    Ok(display_doc_title(bytes))
+}
+
+/// Asks viewers to show the document title rather than the file name, as krilla does only for PDF/UA. krilla
+/// writes the catalog as the last object before the cross-reference table, so the entry goes at the end of its
+/// dictionary and only the table's offset moves.
+fn display_doc_title(mut bytes: Vec<u8>) -> Vec<u8> {
+    const ENTRY: &[u8] = b"/ViewerPreferences<</DisplayDocTitle true>>";
+    let find = |bytes: &[u8], needle: &[u8]| bytes.windows(needle.len()).rposition(|window| window == needle);
+    let xref = find(&bytes, b"\nxref\n").expect("krilla writes a cross-reference table");
+    let end = find(&bytes[..xref], b">>\nendobj").expect("krilla writes the catalog last");
+    let catalog = find(&bytes[..end], b"endobj").map_or(0, |start| start + b"endobj".len());
+    if find(&bytes[catalog..end], b"/ViewerPreferences").is_some() {
+        return bytes;
+    }
+    let number = find(&bytes, b"startxref\n").expect("krilla writes the table's offset") + b"startxref\n".len();
+    let digits = bytes[number..].iter().take_while(|byte| byte.is_ascii_digit()).count();
+    let offset: usize = std::str::from_utf8(&bytes[number..number + digits])
+        .expect("ASCII digits")
+        .parse()
+        .expect("krilla writes the table's offset");
+    bytes.splice(number..number + digits, (offset + ENTRY.len()).to_string().into_bytes());
+    bytes.splice(end..end, ENTRY.iter().copied());
+    bytes
 }
 
 /// Why composing a document ended early.
@@ -707,29 +731,51 @@ fn draw_run(
         return;
     }
     let size = run.size.0 as f32;
-    let shift = usize::from(space.is_some());
-    let space = space.map(|id| KrillaGlyph::new(GlyphId::new(id.into()), 0.0, 0.0, 0.0, 0.0, 0..1, None));
+    let (text, mut ranges) = read_text(run, space.is_some());
+    let space = space.map(|id| KrillaGlyph::new(GlyphId::new(id.into()), 0.0, 0.0, 0.0, 0.0, ranges.remove(0), None));
     let glyphs: Vec<KrillaGlyph> = space
         .into_iter()
-        .chain(run.glyphs.iter().map(|glyph| {
+        .chain(run.glyphs.iter().zip(ranges).map(|(glyph, range)| {
             KrillaGlyph::new(
                 GlyphId::new(glyph.id.into()),
                 glyph.x_advance.0 as f32 / size,
                 glyph.x_offset.0 as f32 / size,
                 glyph.y_offset.0 as f32 / size,
                 0.0,
-                glyph.text.start + shift..glyph.text.end + shift,
+                range,
                 None,
             )
         }))
         .collect();
-    let text = if shift > 0 {
-        Cow::Owned(format!(" {}", run.text))
-    } else {
-        Cow::Borrowed(run.text.as_str())
-    };
     surface.set_fill(Some(fill(color)));
     surface.draw_glyphs(start, &glyphs, font.clone(), &text, size, false);
+}
+
+/// The text `run` reads as, after a word space when `space` is set, and the range of it each glyph stands for,
+/// the space first. A hyphen that a line break added reads as a soft hyphen.
+fn read_text(run: &ShapedRun, space: bool) -> (Cow<'_, str>, Vec<Range<usize>>) {
+    let shift = usize::from(space);
+    let length = run.text.len();
+    let range = |text: &Range<usize>| {
+        // The soft hyphen is one byte longer than the hyphen it stands for.
+        let longer = run.hyphenated && text.end == length && !text.is_empty();
+        text.start + shift..text.end + shift + usize::from(longer)
+    };
+    let ranges = space
+        .then_some(0..1)
+        .into_iter()
+        .chain(run.glyphs.iter().map(|glyph| range(&glyph.text)))
+        .collect();
+    let text = match (space, run.hyphenated) {
+        (false, false) => Cow::Borrowed(run.text.as_str()),
+        (space, hyphenated) => {
+            let word = if hyphenated { &run.text[..length - 1] } else { &run.text };
+            let space = if space { " " } else { "" };
+            let hyphen = if hyphenated { "\u{ad}" } else { "" };
+            Cow::Owned(format!("{space}{word}{hyphen}"))
+        }
+    };
+    (text, ranges)
 }
 
 /// Draws two marks at each corner of the `width` by `height` trim box, which starts `print.margin()` from
@@ -1004,6 +1050,37 @@ mod tests {
             "{dict}"
         );
         assert!(!dict.contains("/CreationDate"), "{dict}");
+    }
+
+    #[test]
+    fn every_pdf_asks_viewers_to_show_its_title() {
+        let bytes = write_plain(&output(Vec::new()), &fonts(), &Metadata::default(), Lang::En, PLAIN).expect("pdf");
+        let text = String::from_utf8_lossy(&bytes);
+        let catalog = &text[text.rfind("/Type/Catalog").expect("catalog")..];
+        assert!(
+            catalog.contains("/ViewerPreferences<</DisplayDocTitle true>>>>\nendobj"),
+            "{catalog}"
+        );
+        let offset: usize = text[text.rfind("startxref\n").expect("offset") + 10..]
+            .lines()
+            .next()
+            .and_then(|line| line.parse().ok())
+            .expect("number");
+        assert!(bytes[offset..].starts_with(b"xref\n"));
+    }
+
+    #[test]
+    fn a_hyphen_a_line_break_added_reads_as_a_soft_hyphen() {
+        let fonts = fonts();
+        let face = fonts.face("Serif", Weight::REGULAR, FontStyle::Normal);
+        let mut run = fonts.shape("Effi-", face, Pt(12.0), Lang::De);
+        assert_eq!(read_text(&run, true).0, " Effi-");
+        run.hyphenated = true;
+        let (text, ranges) = read_text(&run, true);
+        assert_eq!(text, " Effi\u{ad}");
+        assert_eq!(ranges.first(), Some(&(0..1)));
+        assert_eq!(&text[ranges.last().expect("hyphen").clone()], "\u{ad}");
+        assert_eq!(read_text(&run, false).0, "Effi\u{ad}");
     }
 
     #[test]

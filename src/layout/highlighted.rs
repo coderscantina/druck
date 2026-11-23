@@ -54,6 +54,7 @@ pub fn split(
                 .collect(),
             width: Pt(width),
             spacing: run.spacing,
+            hyphenated: false,
         };
         pieces.push((Pt(advanced), piece, color));
         advanced += width;

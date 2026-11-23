@@ -400,6 +400,7 @@ impl<'j> Fonts<'j> {
             glyphs,
             width: Pt(width),
             spacing: Pt(spacing),
+            hyphenated: false,
         }
     }
 }
@@ -496,6 +497,8 @@ pub struct ShapedRun {
     pub width: Pt,
     /// Tracking after each character, included in the advances.
     pub(crate) spacing: Pt,
+    /// Whether the text ends in a hyphen that a line break added, which tagged PDF text reads as a soft hyphen.
+    pub(crate) hyphenated: bool,
 }
 
 impl ShapedRun {

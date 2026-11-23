@@ -665,7 +665,7 @@ fn line_runs<'a>(words: &'a [Word], start: Cursor, end: Mark, fonts: &Fonts, lan
                     piece.push('-');
                 }
                 let run = &fragment.run;
-                fonts.shape_with(
+                let mut shaped = fonts.shape_with(
                     &piece,
                     run.face,
                     run.size,
@@ -673,7 +673,9 @@ fn line_runs<'a>(words: &'a [Word], start: Cursor, end: Mark, fonts: &Fonts, lan
                     fragment.tracking,
                     false,
                     fragment.figures,
-                )
+                );
+                shaped.hyphenated = hyphen;
+                shaped
             };
             let space = (first && index > start.word).then_some(index);
             runs.push(LineRun {

@@ -222,6 +222,13 @@ fn hyphenates_english_and_german_and_keeps_the_text() {
         );
         let ends: Vec<&str> = lines.iter().map(|line| line[line.len() - 1].1.text.as_str()).collect();
         assert!(ends.iter().any(|end| end.ends_with('-')), "{lang:?}: {ends:?}");
+        // The source has no hyphens, so each one ending a run was added and reads as a soft hyphen.
+        assert!(
+            lines
+                .iter()
+                .flatten()
+                .all(|(_, run)| run.hyphenated == run.text.ends_with('-'))
+        );
         assert_eq!(joined(&lines), source);
     }
 }
