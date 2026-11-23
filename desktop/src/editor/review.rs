@@ -321,7 +321,16 @@ impl EditorView {
                 }))
                 .child(label)
         });
+        // The whole note is read with its buttons, which alone would only say Apply or Dismiss.
+        let spoken = match note.suggestion.as_ref().filter(|_| !gone) {
+            Some(suggestion) => format!("{text} {suggestion}"),
+            None => text.clone(),
+        };
         div()
+            .id(("agent-note", id as usize))
+            .role(gpui::Role::Group)
+            .aria_label(note.title.clone())
+            .aria_description(spoken)
             .w(tokens::NOTE_WIDTH)
             .flex()
             .flex_col()
