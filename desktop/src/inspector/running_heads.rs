@@ -94,16 +94,10 @@ impl RunningHeads {
     pub fn new(model: Entity<ThemeModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut subscriptions = vec![cx.observe_in(&model, window, |panel, _, window, cx| panel.sync(window, cx))];
         let mut inputs = Vec::new();
-        for band in 0..BANDS.len() {
+        for (band, &(_, name)) in BANDS.iter().enumerate() {
             for group in 0..FIELDS_PER_BAND {
-                let label = Words::made(move || {
-                    format!(
-                        "{}, {} {}",
-                        crate::t!(BANDS[band].1),
-                        crate::t!(Key::SlotText),
-                        group + 1
-                    )
-                });
+                let label =
+                    Words::made(move || format!("{}, {} {}", crate::t!(name), crate::t!(Key::SlotText), group + 1));
                 let input = cx.new(|cx| TextInput::new(window, cx).with_label(label));
                 subscriptions.push(cx.subscribe(&input, move |panel, _, Committed(text), cx| {
                     panel.set_text(band, group, text, cx);
