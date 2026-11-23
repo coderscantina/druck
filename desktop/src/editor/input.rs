@@ -270,14 +270,20 @@ impl EditorView {
         }
     }
 
-    /// Redo from any surface of the open text, in the order of [`Self::undo_once`].
-    pub(super) fn redo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Redo from any surface of the open text, in the order of [`Self::undo_once`], returning the same.
+    pub(super) fn redo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         match self.session.redo() {
-            Some(Undone::File) => self.took_session_change(before, window, cx),
-            Some(Undone::Own(restored) | Undone::Outside(restored)) => self.restore(Some(restored), window, cx),
-            None => {}
+            Some(Undone::File) => {
+                self.took_session_change(before, window, cx);
+                false
+            }
+            Some(Undone::Own(restored) | Undone::Outside(restored)) => {
+                self.restore(Some(restored), window, cx);
+                true
+            }
+            None => false,
         }
     }
 
@@ -366,6 +372,26 @@ impl EditorView {
         self.notify_paste_refused(cx);
     }
 
+    /// Keeps the marked text as it is, committed, and gives the section's end the break it may need now. The text was
+    /// provisional until here, so the commit counts as a change: saves wait for it, see `PersistView::flush`, and the
+    /// break may have gone into a neighbouring section alone.
+    pub(super) fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(marked) = self.marked.take() {
+            let splice = crate::source::buffer::Splice {
+                start: marked.start,
+                old_end: marked.end,
+                new_end: marked.end,
+            };
+            if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
+                self.resegment(gap.into());
+                self.schedule_rich(window, cx);
+            }
+            cx.emit(TextChanged);
+        }
+        window.notify_text_input_changed(&self.focus);
+        cx.notify();
+    }
+
     pub(super) fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(SaveRequested);
     }
@@ -425,21 +451,7 @@ impl EntityInputHandler for EditorView {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // The marked text stays as it is, committed, so the section's end may need its break now.
-        if let Some(marked) = self.marked.take() {
-            let splice = crate::source::buffer::Splice {
-                start: marked.start,
-                old_end: marked.end,
-                new_end: marked.end,
-            };
-            if let Some(gap) = self.session.keep_apart(self.session.active(), splice).gap {
-                self.resegment(gap.into());
-                self.schedule_rich(window, cx);
-                cx.emit(TextChanged);
-            }
-        }
-        window.notify_text_input_changed(&self.focus);
-        cx.notify();
+        self.commit_marked(window, cx);
     }
 
     fn replace_text_in_range(
