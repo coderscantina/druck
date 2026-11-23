@@ -158,6 +158,11 @@ fn changes<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(Mark, &'a str)> {
     out
 }
 
+/// The text of each line as a diff shows it, cut as [`diff`] cuts them, for a list of a hunk's lines.
+pub fn cut(marks: &[(Mark, &str)]) -> Vec<String> {
+    shorten(marks).into_iter().map(|(_, text, _)| text).collect()
+}
+
 /// Cuts each line down to what a reader needs: a removed line and the added line that replaces it to the words
 /// around the difference, with that difference marked, and any other line to its start.
 fn shorten(marks: &[(Mark, &str)]) -> Vec<(Mark, String, Option<Range<usize>>)> {
@@ -412,6 +417,25 @@ mod tests {
     fn an_edit_of_text_the_file_lacks_shows_the_strings() {
         assert_eq!(rows(&edit(Some("x\n"), "gone", "here")), ["-1 gone", "+1 here"]);
         assert_eq!(rows(&edit(None, "a", "b")), ["-1 a", "+1 b"]);
+    }
+
+    #[test]
+    fn a_hunks_long_lines_are_cut_around_their_change() {
+        let old = format!("{} Amiga 500 {}", "x".repeat(90), "y".repeat(90));
+        let new = old.replace("Amiga 500", "Atari ST");
+        let marks = [
+            (Mark::Context, "Before."),
+            (Mark::Removed, old.as_str()),
+            (Mark::Added, new.as_str()),
+        ];
+        let cut = cut(&marks);
+        assert_eq!(cut[0], "Before.");
+        assert!(
+            cut[1].contains("Amiga 500") && cut[1].starts_with('\u{2026}'),
+            "{}",
+            cut[1]
+        );
+        assert!(cut[2].contains("Atari ST") && cut[2].len() < new.len(), "{}", cut[2]);
     }
 
     #[test]
