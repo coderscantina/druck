@@ -265,6 +265,9 @@ fn rect(bounds: Bounds<Pixels>) -> Rect {
     }
 }
 
+/// The mark at the end of a row that is the choice in force.
+const CHECK: &str = "\u{2713}";
+
 /// One row of a floating list as it shows.
 struct MenuRow {
     label: SharedString,
@@ -1042,6 +1045,12 @@ impl EditorView {
         cx.notify();
     }
 
+    /// Whether a table's menu is open, which belongs to a cell, not to the caret in the text.
+    pub(super) fn table_menu_open(&self) -> bool {
+        matches!(&self.float, Float::Menu(Menu { kind: MenuKind::Pick { rows, .. }, .. })
+            if matches!(rows.first().map(|row| &row.pick), Some(Pick::Table { .. })))
+    }
+
     fn menu_rows(&self, menu: &Menu) -> Vec<MenuRow> {
         match &menu.kind {
             MenuKind::Slash { items, .. } => {
@@ -1061,7 +1070,7 @@ impl EditorView {
             }
             MenuKind::Pick { rows, .. } => rows
                 .iter()
-                .map(|row| MenuRow::new(row.label.clone(), row.on.then(|| "\u{2713}".into()), row.icon))
+                .map(|row| MenuRow::new(row.label.clone(), row.on.then(|| CHECK.into()), row.icon))
                 .collect(),
             MenuKind::Convert {
                 targets,
@@ -1090,7 +1099,7 @@ impl EditorView {
                     let (label, icon) = page_row(*setting);
                     MenuRow {
                         divider: at == 0 && !(targets.is_empty() && wraps.is_empty() && extras.is_empty()),
-                        ..MenuRow::new(label, on.then(|| "\u{2713}".into()), icon)
+                        ..MenuRow::new(label, on.then(|| CHECK.into()), icon)
                     }
                 });
                 leading.chain(turned).chain(wrapped).chain(paged).collect()
@@ -1232,11 +1241,19 @@ impl EditorView {
                             .text_color(tokens.text_faint)
                             .child(description)
                     }));
+                // The check mark is the row's state; a quiet word at its end or a line under it is read after its name.
+                let checked = end.as_ref().is_some_and(|end| end.as_ref() == CHECK);
+                let spoken: Vec<&str> = (end.as_ref().filter(|_| !checked).map(SharedString::as_ref))
+                    .into_iter()
+                    .chain(description)
+                    .collect();
                 let item = div()
                     .id(("menu-row", index))
                     .role(gpui::Role::MenuItem)
                     .aria_label(label)
                     .aria_selected(chosen)
+                    .when(checked, |row| row.aria_toggled(gpui::Toggled::True))
+                    .when(!spoken.is_empty(), |row| row.aria_description(spoken.join(", ")))
                     .flex_none()
                     .h(height)
                     .px(tokens::SPACE_2)

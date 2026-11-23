@@ -709,7 +709,7 @@ impl EditorView {
         // rest, or in a page Druck makes that is the whole section: there is no place to stand in either.
         let region_selected = self.directives.selected.is_some();
         let on_mark = self.made_alone() || self.marker_at(self.blocks.index_at(self.selection.head)).is_some();
-        let caret = if self.selection.is_empty() && !region_selected && !on_mark {
+        let caret = if self.selection.is_empty() && !region_selected && !on_mark && !self.table_menu_open() {
             self.caret_bounds(window)
         } else {
             None
