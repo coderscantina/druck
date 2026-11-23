@@ -345,7 +345,7 @@ impl EditorView {
             structure.regions[before].kind.has_body().then_some(before)
         };
         let region = opening(index).or_else(inside)?;
-        (self.stands_as_marker(region) && !structure.regions[region].kind.is_part()).then_some(region)
+        (self.stands_as_marker(region) && !structure.is_no_mark(region)).then_some(region)
     }
 
     /// Whether `region` shows as one mark rather than as the text it holds.

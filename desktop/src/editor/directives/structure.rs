@@ -126,6 +126,8 @@ pub struct Structure {
     pub rejected: Vec<Rejected>,
     /// Each accepted directive line's block, with the region it opens or closes, sorted.
     fences: Vec<(usize, usize)>,
+    /// The text is a page Druck makes and nothing else, so a new page before it is the page's own edge.
+    made_page: bool,
 }
 
 /// One opening line still waiting for its closing line.
@@ -247,10 +249,19 @@ pub fn read(text: &str, blocks: &Blocks) -> Structure {
         .collect();
     fences.sort_unstable();
     fences.dedup();
+    let only_directives = (blocks.as_slice().iter()).all(|block| {
+        matches!(
+            block.kind,
+            BlockKind::Directive | BlockKind::Blank | BlockKind::Comment | BlockKind::FrontMatter
+        )
+    });
+    let made_page = only_directives
+        && (regions.iter()).any(|region| matches!(region.kind, Kind::Toc | Kind::Index | Kind::Bibliography));
     Structure {
         regions,
         rejected,
         fences,
+        made_page,
     }
 }
 
@@ -288,12 +299,24 @@ impl Structure {
     }
 
     /// Whether block `block` is a directive line that takes no room and no caret in Write: a fence line of a region
-    /// whose text shows, or a part's line, which the Binder shows instead. A table shows whole in its place.
+    /// whose text shows, or a line that is no mark. A table shows whole in its place.
     pub fn hides_line(&self, block: usize) -> bool {
         self.fence(block).is_some_and(|region| {
             let kind = self.regions[region].kind;
-            kind != Kind::Table && (kind.has_body() || kind.is_part())
+            kind != Kind::Table && (kind.has_body() || self.is_no_mark(region))
         })
+    }
+
+    /// Whether the text is a page Druck makes and nothing else, which then stands as the whole page.
+    pub fn is_made_page(&self) -> bool {
+        self.made_page
+    }
+
+    /// Whether `region` shows nothing in Write: a part's line, which the Binder keeps, or a new page before a page
+    /// Druck makes that stands as its own section, whose edge the Binder's row already is.
+    pub fn is_no_mark(&self, region: usize) -> bool {
+        let kind = self.regions[region].kind;
+        kind.is_part() || (kind == Kind::PageBreak && self.made_page)
     }
 
     /// The regions directly inside `region`.

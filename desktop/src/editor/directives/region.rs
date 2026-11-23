@@ -119,7 +119,10 @@ impl EditorView {
         }
         self.selection = Selection::caret(head);
         self.reveal_at = head;
-        self.select_marker_at_caret();
+        // A page Druck makes that is the whole section opens at rest, as the page it is.
+        if !self.made_alone() {
+            self.select_marker_at_caret();
+        }
     }
 
     /// Where a selection being extended stops at a mark: past all of it, on the side it is heading.

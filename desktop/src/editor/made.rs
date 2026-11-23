@@ -175,16 +175,6 @@ pub(super) fn contents(headings: &[Heading], printed: &[Printed]) -> Vec<Entry> 
     entries
 }
 
-/// Whether a section holds nothing but directives, so a made page in it stands as the whole page.
-pub(super) fn stands_alone(blocks: &Blocks) -> bool {
-    (blocks.as_slice().iter()).all(|block| {
-        matches!(
-            block.kind,
-            BlockKind::Directive | BlockKind::Blank | BlockKind::Comment | BlockKind::FrontMatter
-        )
-    })
-}
-
 /// The index's main entries in the order the page sorts them, each with the pages of its marks.
 fn index_entries(terms: impl Iterator<Item = String>, pages: &HashMap<String, Vec<String>>) -> Vec<Entry> {
     let mut words: Vec<String> = terms.collect();
@@ -335,7 +325,7 @@ impl EditorView {
 
     /// Whether the active section holds nothing but directives, so its made page shows as the whole page.
     pub(super) fn made_alone(&self) -> bool {
-        stands_alone(&self.blocks)
+        self.directives.structure.is_made_page()
     }
 
     fn made_metrics(&self, alone: bool) -> Metrics {
@@ -558,7 +548,7 @@ pub(in crate::editor) fn paint_made(shape: &MadeShape, origin: Point<Pixels>, wi
     window
         .paint_svg(
             Bounds::new(origin + shape.icon.origin, shape.icon.size),
-            "icons/page-made.svg".into(),
+            "icons/made.svg".into(),
             None,
             TransformationMatrix::unit(),
             shape.faint,

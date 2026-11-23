@@ -705,9 +705,11 @@ impl EditorView {
             .into_iter()
             .flat_map(|word| self.range_rectangles(word, &blocks, false))
             .collect();
-        // A selected region takes the keys: no caret, and no style name beside it.
+        // A selected region takes the keys: no caret, and no style name beside it. Nor is there one on a mark left at
+        // rest, or in a page Druck makes that is the whole section: there is no place to stand in either.
         let region_selected = self.directives.selected.is_some();
-        let caret = if self.selection.is_empty() && !region_selected {
+        let on_mark = self.made_alone() || self.marker_at(self.blocks.index_at(self.selection.head)).is_some();
+        let caret = if self.selection.is_empty() && !region_selected && !on_mark {
             self.caret_bounds(window)
         } else {
             None
