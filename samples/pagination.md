@@ -28,7 +28,7 @@ A heading announces what follows, so it belongs with the text it introduces. If 
 
 This paragraph and the ones around it are long enough that, depending on the page size and margins, one of the headings in this sample will fall near a page boundary. Render the sample with different margins to watch the heading move with its text instead of being left behind: try `--set margins=20mm` or `--set margins=35mm`.
 
-When a page runs short because a heading moved on, or because a long note took the room,[^long] the spaces between the blocks on that page may stretch a little to bring the last line closer to the bottom. They never stretch by more than half their natural height, so a short page stays visibly short rather than visibly distorted.
+When a page runs short because a heading moved on, or because a long note took the room, the spaces between the blocks on that page may stretch a little to bring the last line closer to the bottom. They never stretch by more than half their natural height, so a short page stays visibly short rather than visibly distorted.
 
 # Footnotes
 
@@ -38,7 +38,7 @@ Footnotes are numbered in the order of their references.[^order] Each note start
 
 [^space]: Notes are part of page composition from the start. They are not added after the breaks have been chosen, which would leave the choice of breaks blind to their height.
 
-A long note may not fit on the page of its reference at all. Then it begins there and continues at the foot of the next page, where a marker with its number repeats so that the reader can tell which note is being continued. Note 3 in this sample is such a note.
+A long note may not fit on the page of its reference at all.[^long] Then it begins there and continues at the foot of the next page, where a marker with its number repeats so that the reader can tell which note is being continued. The note on the first sentence of this paragraph is such a note.
 
 [^long]: This note is deliberately long, so that it cannot fit at the foot of the page that holds its reference. Long notes are common in scholarly writing, where a note may carry a digression, a quotation from a source, or a discussion of the literature that would interrupt the argument of the main text. Typesetters have always had to break such notes across pages. The usual convention is to start the note on the page of its reference, so that the reader finds it where expected, and to continue it at the foot of the following page.
 
