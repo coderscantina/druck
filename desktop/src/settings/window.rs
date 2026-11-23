@@ -16,6 +16,7 @@ use crate::shell::commands;
 use crate::shell::menus::CloseDocument;
 use crate::shell::strings::LanguageSetting;
 use crate::tokens::{self, ACCENTS, Tokens};
+use crate::workspace::{FocusNext, FocusPrevious};
 
 /// A category of the left list, in its order.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -198,17 +199,14 @@ struct Open(gpui::WindowHandle<SettingsWindow>);
 
 impl gpui::Global for Open {}
 
-/// Brings the settings window up, opening it if need be. `measuring` runs float it without taking focus.
+/// Brings the settings window up, opening it if need be. `measuring` runs float it without taking focus, and asking
+/// again gives it the keys: a measuring window is a panel that does not bring the app forward.
 pub fn open(category: Option<&str>, cx: &mut App) {
     let measuring = crate::gate::measuring();
     if let Some(open) = cx.try_global::<Open>().copied()
         && open
             .0
-            .update(cx, |_, window, _| {
-                if !measuring {
-                    window.activate_window();
-                }
-            })
+            .update(cx, |_, window, _| window.activate_window())
             .is_ok()
     {
         return;
@@ -685,7 +683,10 @@ impl Render for SettingsWindow {
         div()
             .id("settings-window")
             .size_full()
+            .key_context("Settings")
             .track_focus(&self.focus)
+            .on_action(|_: &FocusNext, window, cx| crate::a11y::tab(true, window, cx))
+            .on_action(|_: &FocusPrevious, window, cx| crate::a11y::tab(false, window, cx))
             .on_action(|_: &CloseDocument, window, _| window.remove_window())
             .flex()
             .flex_col()
