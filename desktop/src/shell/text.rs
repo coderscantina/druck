@@ -118,6 +118,7 @@ crate::strings! {
         WindowZoom => ("Zoom", "Zoomen"),
         HelpWeb => ("Druck documentation", "Druck-Dokumentation"),
         ReportProblem => ("Report a problem…", "Problem melden…"),
+        CheckForUpdates => ("Check for updates…", "Nach Updates suchen…"),
 
         // Footer
         WordsFooter => ("{chapter} of {book} words", "{chapter} von {book} Wörtern"),

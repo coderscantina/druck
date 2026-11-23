@@ -4,13 +4,12 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
-mod strings;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{App, MenuItem, actions};
 
-use strings::Key;
+use crate::shell::text::Key;
 
 actions!(update, [CheckForUpdates]);
 
@@ -29,9 +28,14 @@ pub fn install(cx: &mut App) {
     let _ = cx;
 }
 
+/// Whether the bundle's updater started, so the menu and the palette offer it.
+pub fn running() -> bool {
+    RUNNING.load(Ordering::Relaxed)
+}
+
 /// The app menu's "Check for updates…", while an updater runs.
 pub fn menu_item() -> Option<MenuItem> {
-    RUNNING.load(Ordering::Relaxed).then(item)
+    running().then(item)
 }
 
 fn item() -> MenuItem {

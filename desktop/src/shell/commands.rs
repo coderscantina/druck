@@ -58,7 +58,7 @@ fn command(label: Key, scope: Scope, action: impl Action) -> Command {
 /// Every command, roughly by how often it is wanted.
 pub fn all() -> Vec<Command> {
     use Scope::{Agent, Anywhere, Write};
-    vec![
+    let mut all = vec![
         command(Key::ViewWrite, Anywhere, ShowWrite),
         command(Key::ViewPublish, Anywhere, ShowPublish),
         command(Key::ToggleBinder, Anywhere, ToggleBinder),
@@ -144,7 +144,11 @@ pub fn all() -> Vec<Command> {
         command(Key::Minimize, Anywhere, MinimizeWindow),
         command(Key::WindowZoom, Anywhere, ZoomWindow),
         command(Key::Quit, Anywhere, Quit),
-    ]
+    ];
+    if crate::update::running() {
+        all.push(command(Key::CheckForUpdates, Anywhere, crate::update::CheckForUpdates));
+    }
+    all
 }
 
 /// The key that runs an action, in the platform's symbols, whatever has the focus now.
