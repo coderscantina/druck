@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use super::{Command, line_ending};
-use crate::source::blocks::Block;
+use crate::source::blocks::{Block, closes_fence};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
 /// The languages the list offers, by name and as a fence writes them. The engine knows about 200 more, which the
@@ -64,12 +64,7 @@ pub fn fences(block: &str) -> Option<Fences> {
         .unwrap_or(first.len() - word_start);
     let body = block.trim_end_matches(['\n', '\r']);
     let last_start = body.rfind('\n').map(|at| at + 1);
-    let close = last_start.filter(|start| {
-        let line = body[*start..].trim_start_matches(' ');
-        fence_length(line).is_some_and(|(found, found_length)| {
-            found == marker && found_length >= length && found_length == line.len()
-        })
-    });
+    let close = last_start.filter(|start| closes_fence(&body[*start..], marker, length));
     Some(Fences {
         open: 0..first.len(),
         close: close.map(|start| start..body.len()),
