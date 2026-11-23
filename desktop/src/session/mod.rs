@@ -43,6 +43,7 @@ use self::outline::{Outline, outline, sections, slug, title_from_file};
 use self::strings::Key;
 pub use self::templates::{PAGES, Page, STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;
+use crate::shell::strings::Language;
 use crate::source::buffer::EditError;
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 
@@ -1345,9 +1346,18 @@ impl Session {
         after: ChapterId,
     ) -> Result<ChapterId, String> {
         let name = name.map(str::trim).filter(|name| !name.is_empty());
-        let markdown = self.fill_missing(template.markdown(name));
+        let markdown = self.fill_missing(template.markdown(name, self.book_language()));
         let at = (self.book.iter().position(|other| *other == after)).map_or(self.book.len(), |at| at + 1);
         self.insert_page(&markdown, name.unwrap_or(template.slug), at)
+    }
+
+    /// The language the book is written in, by its `lang`, for the text a template writes into it.
+    fn book_language(&self) -> Language {
+        let lang = &self.details.language;
+        match lang.get(..2) {
+            Some(code) if code.eq_ignore_ascii_case("de") => Language::German,
+            _ => Language::English,
+        }
     }
 
     /// Whether the book has a page that it may have only once, such as its contents.
@@ -1369,7 +1379,7 @@ impl Session {
             return self.add_title_page();
         }
         let template = page.template();
-        let markdown = self.fill_missing(template.markdown(None));
+        let markdown = self.fill_missing(template.markdown(None, self.book_language()));
         let at = parts::place(page.place, &self.book_texts());
         self.insert_page(&markdown, template.slug, at)?;
         self.keep_parts()?;
@@ -1456,10 +1466,23 @@ impl Session {
         let Ok(settings) = &self.settings else {
             return markdown;
         };
+        let german = self.book_language() == Language::German;
         let values = [
-            ("{title}", "Title", settings.title.is_some()),
-            ("{subtitle}", "Subtitle", settings.subtitle.is_some()),
-            ("{author}", "Author", settings.author.is_some()),
+            (
+                "{title}",
+                if german { "Titel" } else { "Title" },
+                settings.title.is_some(),
+            ),
+            (
+                "{subtitle}",
+                if german { "Untertitel" } else { "Subtitle" },
+                settings.subtitle.is_some(),
+            ),
+            (
+                "{author}",
+                if german { "Autor" } else { "Author" },
+                settings.author.is_some(),
+            ),
         ];
         for (placeholder, words, set) in values {
             if !set {
