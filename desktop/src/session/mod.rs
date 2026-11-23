@@ -335,11 +335,17 @@ impl Moves {
 /// An order of the book with the part lines it had, and the part lines the move away from it left.
 struct Step {
     order: Vec<ChapterId>,
+    /// The part lines it had by the pages they open, for when they cannot stand exactly where they stood.
     lines: Vec<parts::Line<ChapterId>>,
-    /// Only while the book's part lines are still these does going back put `lines` back, so lines the author changed
-    /// since are theirs, and stay.
-    left: Vec<parts::Line<ChapterId>>,
+    /// The part lines it had, exactly as they stood.
+    placed: Placed,
+    /// Only while the book's part lines still stand exactly so does going back put them back, so lines the author
+    /// changed since, or moved among comments or blank lines, are theirs, and stay.
+    left: Placed,
 }
+
+/// Each book chapter's part lines exactly as they stand, for the chapters that have any.
+type Placed = BTreeMap<ChapterId, Vec<parts::Placed>>;
 
 impl Session {
     /// Opens a project folder, its `druck.yaml`, or a single Markdown file. A document with problems still opens, so
@@ -1206,6 +1212,7 @@ impl Session {
             return Ok(());
         }
         let parts = self.parts();
+        let placed = self.placed();
         let order = self.book.clone();
         self.book.remove(from);
         self.book.insert(target, id);
@@ -1215,14 +1222,15 @@ impl Session {
         self.moves.undo.push(Step {
             order,
             lines: parts.lines,
-            left: self.parts().lines,
+            placed,
+            left: self.placed(),
         });
         self.moves.redo.clear();
         kept
     }
 
     /// Puts the book back in its order before the last move, returning whether there was one to undo. The part lines
-    /// the move changed go back too while they are as the move left them.
+    /// the move changed go back too, exactly where they stood, while they stand exactly as the move left them.
     pub fn undo_move(&mut self) -> Result<bool, String> {
         self.step_move(true)
     }
@@ -1245,23 +1253,63 @@ impl Session {
             return Ok(false);
         }
         let parts = self.parts();
+        let placed = self.placed();
         let current = std::mem::replace(&mut self.book, step.order.clone());
         if let Err(error) = self.write_chapter_list() {
             self.book = current;
             self.moves.stack(undo).push(step);
             return Err(error);
         }
-        let kept = match parts.lines == step.left {
-            true => self.keep_parts(&step.lines, None),
+        let kept = match placed == step.left {
+            true => match self.place_parts(&step.placed) {
+                Ok(true) => Ok(()),
+                Ok(false) => self.keep_parts(&step.lines, None),
+                Err(error) => Err(error),
+            },
             false => Ok(()),
         };
         let back = Step {
             order: current,
             lines: parts.lines,
-            left: self.parts().lines,
+            placed,
+            left: self.placed(),
         };
         self.moves.stack(!undo).push(back);
         kept.map(|()| true)
+    }
+
+    /// Each book chapter's part lines exactly as they stand.
+    fn placed(&self) -> Placed {
+        (self.book.iter())
+            .map(|id| (*id, parts::placed(self.known(*id).page_text())))
+            .filter(|(_, placed)| !placed.is_empty())
+            .collect()
+    }
+
+    /// Puts the part lines back exactly as `wanted` has them, each chapter it changes as one undo step. Changes
+    /// nothing and returns false when one cannot stand where it stood, as the lines beside it changed or its file is
+    /// empty, missing, or unreadable.
+    fn place_parts(&mut self, wanted: &Placed) -> Result<bool, String> {
+        let now = self.placed();
+        let ids: std::collections::BTreeSet<ChapterId> = now.keys().chain(wanted.keys()).copied().collect();
+        let mut edits = Vec::new();
+        for id in ids {
+            let lines = wanted.get(&id).map_or(&[][..], Vec::as_slice);
+            let text = self.known(id).page_text();
+            if text.is_empty() && !lines.is_empty() {
+                return Ok(false);
+            }
+            match parts::place_exactly(text, lines) {
+                Some(Some(edit)) => edits.push((id, edit)),
+                Some(None) => {}
+                None => return Ok(false),
+            }
+        }
+        for (id, edit) in edits {
+            (self.edit_chapter(id, vec![edit], EditKind::Discrete)).map_err(|error| error.to_string())?;
+        }
+        self.resplit();
+        Ok(true)
     }
 
     /// Puts the part lines where `wanted` says after the app changed the book's structure, taking them out of `left`,

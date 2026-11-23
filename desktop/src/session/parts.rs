@@ -415,6 +415,91 @@ pub fn part_edits<Id: Copy + Eq>(book: &[(Id, &str)], left: &[(Id, &str)], wante
         .collect()
 }
 
+/// A part line exactly as it stands in a section: its text with the blank lines after it, the line it stands at in
+/// the section's text without part lines, and the lines on either side of it there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed {
+    piece: String,
+    line: usize,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+/// A section's part lines as they stand, and its text without them.
+fn placed_in(text: &str) -> (Vec<Placed>, String) {
+    let mut stripped = String::with_capacity(text.len());
+    let mut cut = Vec::new();
+    let mut from = 0;
+    for (_, range) in read(text).marks.into_iter().filter(|(part, _)| part.is_some()) {
+        let range = with_blank(text, &range);
+        stripped.push_str(&text[from..range.start]);
+        cut.push((stripped.len(), &text[range.clone()]));
+        from = range.end;
+    }
+    stripped.push_str(&text[from..]);
+    let lines: Vec<&str> = stripped.split_inclusive('\n').collect();
+    let placed = (cut.into_iter())
+        .map(|(offset, piece)| {
+            let line = stripped[..offset].matches('\n').count();
+            Placed {
+                piece: piece.to_owned(),
+                line,
+                before: line.checked_sub(1).map(|at| lines[at].to_owned()),
+                after: lines.get(line).map(|after| (*after).to_owned()),
+            }
+        })
+        .collect();
+    (placed, stripped)
+}
+
+/// A section's part lines exactly as they stand.
+pub fn placed(text: &str) -> Vec<Placed> {
+    placed_in(text).0
+}
+
+/// The edit that makes a section's part lines stand exactly as `wanted` has them, or `None` when the lines beside one
+/// are no longer there. A section whose lines already stand so needs no edit.
+pub fn place_exactly(text: &str, wanted: &[Placed]) -> Option<Option<Edit>> {
+    let (now, stripped) = placed_in(text);
+    if now == wanted {
+        return Some(None);
+    }
+    let lines: Vec<&str> = stripped.split_inclusive('\n').collect();
+    let fits = |placed: &Placed| {
+        let before = placed.line.checked_sub(1).and_then(|at| lines.get(at).copied());
+        before == placed.before.as_deref() && lines.get(placed.line).copied() == placed.after.as_deref()
+    };
+    if !wanted.iter().all(fits) {
+        return None;
+    }
+    let mut new = String::with_capacity(stripped.len() + wanted.iter().map(|placed| placed.piece.len()).sum::<usize>());
+    let mut pieces = wanted.iter().peekable();
+    for at in 0..=lines.len() {
+        while let Some(placed) = pieces.next_if(|placed| placed.line == at) {
+            new.push_str(&placed.piece);
+        }
+        new.push_str(lines.get(at).copied().unwrap_or(""));
+    }
+    Some(Some(replacing(text, &new)))
+}
+
+/// One edit that turns `old` into `new`, spanning what lies between their common start and end.
+fn replacing(old: &str, new: &str) -> Edit {
+    let mut start = (old.bytes().zip(new.bytes())).take_while(|(a, b)| a == b).count();
+    while !old.is_char_boundary(start) || !new.is_char_boundary(start) {
+        start -= 1;
+    }
+    let most = old.len().min(new.len()) - start;
+    let mut end = (old.bytes().rev().zip(new.bytes().rev()))
+        .take(most)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - end) || !new.is_char_boundary(new.len() - end) {
+        end -= 1;
+    }
+    Edit::new(start..old.len() - end, &new[start..new.len() - end])
+}
+
 /// Where a page added at `place` before section `at` of a single file goes, as a section and an offset, when part
 /// lines stand between the pages on either side, so each line keeps opening the page it opened: before the lines for
 /// an opening page, after front matter's for the contents, and after all of them for a page at the end.
