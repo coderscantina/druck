@@ -247,6 +247,23 @@ fn every_surface_undoes_the_files_outside_change_before_typing_from_before_it() 
 }
 
 #[test]
+fn an_outside_change_ends_the_step_an_offer_from_before_it_would_join() {
+    let mut single = Single::new("offer");
+    single.type_in(0, "First.", "First, mine.");
+    let one = single.session.book()[0];
+    let (revision, clock) = (
+        single.session.buffer(one).revision(),
+        single.session.buffer(one).clock(),
+    );
+    assert!(single.session.buffer(one).amends(clock));
+    let theirs = single.text().replace("Third.", "Third, theirs.");
+    single.outside(&theirs);
+    let buffer = single.session.buffer(one);
+    assert_eq!(buffer.revision(), revision, "the change left the section alone");
+    assert!(!buffer.amends(clock), "a removal accepted now is a step of its own");
+}
+
+#[test]
 fn a_section_back_from_an_undo_stays_apart_from_typing_since_above_it() {
     let mut single = Single::with("swap-apart", "# One\n\nFirst.\n\nTwo\n===\n\nSecond.\n");
     single.outside("# One\n\nFirst.\n\n# Two\n\nSecond.\n");

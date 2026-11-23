@@ -287,6 +287,12 @@ impl Buffer {
         splice
     }
 
+    /// Whether [`Self::amend`] would still join the step that was last when the clock read `clock`: no step was made,
+    /// undone, or redone since, and nothing closed it.
+    pub fn amends(&self, clock: u64) -> bool {
+        self.clock == clock && !self.closed && !self.undo.is_empty()
+    }
+
     /// Ends the open undo step, so the next edit starts one of its own even if it would join it, as typing does.
     pub fn close_step(&mut self) {
         self.closed = true;

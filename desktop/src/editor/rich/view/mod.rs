@@ -112,8 +112,10 @@ impl NoticeFloat {
 /// The offer after a reference went: its definition has no reference left.
 pub struct OfferFloat {
     labels: Vec<String>,
-    /// The buffer's revision when it was offered. If it still stands, removing joins the deletion's undo step.
+    /// The buffer's revision and step clock when it was offered. If both still stand and no outside change closed the
+    /// step since, removing joins the deletion's undo step.
     revision: u64,
+    clock: u64,
 }
 
 /// What the rich blocks float over the galley.
@@ -222,6 +224,7 @@ impl EditorView {
             self.float = Float::Rich(RichFloat::Offer(OfferFloat {
                 labels: orphaned,
                 revision: self.session.active_buffer().revision(),
+                clock: self.session.active_buffer().clock(),
             }));
         }
         // An undo brought the reference back.
@@ -609,8 +612,9 @@ impl EditorView {
             else {
                 continue;
             };
+            let buffer = self.session.active_buffer();
             let same_step =
-                chapter == self.session.active() && self.session.active_buffer().revision() == offer.revision;
+                chapter == self.session.active() && buffer.revision() == offer.revision && buffer.amends(offer.clock);
             let text = self.session.buffer(chapter).text();
             let blocks = crate::source::Blocks::parse(text);
             let facts = facts::scan(text);
