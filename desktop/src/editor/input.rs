@@ -151,6 +151,9 @@ impl EditorView {
 
     /// Backspace at the very start of a region's first block unwraps the region, and the next one joins lines.
     pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        if self.erase_menu_query(cx) {
+            return;
+        }
         if !self.source && self.selection.is_empty() {
             let text = self.session.active_buffer().text();
             let structure = &self.directives.structure;
@@ -226,10 +229,8 @@ impl EditorView {
             let buffer = self.session.active_buffer_mut();
             let outside = buffer.undo_is_outside_change();
             let restored = buffer.undo();
-            if outside {
-                cx.emit(ExternalUndo {
-                    done: restored.is_some(),
-                });
+            if outside && restored.is_some() {
+                cx.emit(ExternalUndo);
             }
             self.restore(restored, window, cx);
         }
@@ -400,6 +401,10 @@ impl EntityInputHandler for EditorView {
     ) {
         // The region's menu has the keys: what is typed does not reach the text behind it.
         if self.directives.menu.is_some() {
+            return;
+        }
+        // The block menu and the lists take what is typed as a query.
+        if self.marked.is_none() && self.type_into_menu(new_text, cx) {
             return;
         }
         let kind = if self.marked.is_some() {

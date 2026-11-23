@@ -47,10 +47,6 @@ crate::strings! {
             "Restored text not saved before the app stopped:",
             "Text wiederhergestellt, der beim Beenden nicht gesichert war:"
         ),
-        UndoStopped => (
-            "The next undo takes back the change from outside. Press again to do so.",
-            "Der nächste Widerruf nimmt die Änderung von außen zurück. Zum Bestätigen noch einmal drücken."
-        ),
         UndoDone => (
             "Took back the change from outside. Redo brings it back.",
             "Änderung von außen zurückgenommen. Wiederholen bringt sie zurück."

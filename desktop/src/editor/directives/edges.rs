@@ -1,15 +1,48 @@
-//! What an edit over a selection does at a region's edges. A region the selection holds whole goes whole. A selection
-//! holding only one of a region's two fence lines takes the text around that line and leaves the line, so no edit breaks
-//! a region the author cannot see the lines of. Holds no gpui types.
+//! What an edit over a selection does at a region's edges, and at a code block's hidden fences. A region or code block
+//! the selection holds whole goes whole. A selection holding only one of its two fence lines takes the text around that
+//! line and leaves the line, so no edit breaks a region or a code block the author cannot see the lines of. Holds no
+//! gpui types.
 
 use std::ops::Range;
 
 use super::structure::{self, Structure};
-use crate::editor::commands::{Command, applied, line_ending};
+use crate::editor::commands::{Command, applied, code, line_ending};
 use crate::source::{BlockKind, Blocks, Edit, Selection};
 
 fn touches(range: &Range<usize>, line: &Range<usize>) -> bool {
     line.start < range.end && range.start < line.end
+}
+
+/// The two lines that hold a region or a code block, with their line endings.
+struct Fence {
+    open: Range<usize>,
+    /// Missing for a code block left open to the end of the text.
+    close: Option<Range<usize>>,
+    /// A part's line, which always stays: the Binder writes it.
+    part: bool,
+}
+
+/// Every region's fence lines and every fenced code block's, which Write hides alike.
+fn fence_lines(text: &str, blocks: &Blocks, structure: &Structure) -> Vec<Fence> {
+    let list = blocks.as_slice();
+    let regions = structure.regions.iter().map(|region| Fence {
+        open: list[region.open].range.clone(),
+        close: Some(list[region.close].range.clone()),
+        part: region.kind.is_part(),
+    });
+    let with_ending = |start: usize, line: &Range<usize>| {
+        start + line.start..start + line.end + line_ending_at(text, start + line.end)
+    };
+    let code = (list.iter().filter(|block| block.kind == BlockKind::Code)).filter_map(|block| {
+        let start = block.range.start;
+        let found = code::fences(&text[block.range.clone()])?;
+        Some(Fence {
+            open: with_ending(start, &found.open),
+            close: found.close.map(|close| with_ending(start, &close)),
+            part: false,
+        })
+    });
+    regions.chain(code).collect()
 }
 
 /// The parts of `range` an edit may take, in order and never empty unless nothing can go. `hidden` is where the text
@@ -21,23 +54,27 @@ pub fn pieces(
     range: Range<usize>,
     hidden: usize,
 ) -> Vec<Range<usize>> {
-    let list = blocks.as_slice();
+    let fences = fence_lines(text, blocks, structure);
     let mut range = range.start.max(hidden)..range.end.max(hidden);
-    // A fence line goes whole or stays whole, so a line the selection only reaches into counts as held. A part's line
-    // always stays: the Binder writes it.
-    for region in structure.regions.iter().filter(|region| !region.kind.is_part()) {
-        let (open, close) = (&list[region.open].range, &list[region.close].range);
-        if touches(&range, open) && touches(&range, close) {
-            range = range.start.min(open.start)..range.end.max(close.end);
+    // A fence line goes whole or stays whole, so a line the selection only reaches into counts as held.
+    for fence in fences.iter().filter(|fence| !fence.part) {
+        if let Some(close) = &fence.close
+            && touches(&range, &fence.open)
+            && touches(&range, close)
+        {
+            range = range.start.min(fence.open.start)..range.end.max(close.end);
         }
     }
-    let mut kept: Vec<Range<usize>> = (structure.regions.iter())
-        .filter_map(|region| {
-            let (open, close) = (&list[region.open].range, &list[region.close].range);
-            match (touches(&range, open), touches(&range, close)) {
-                (true, _) if region.kind.is_part() => Some(open.clone()),
-                (true, false) => Some(open.clone()),
-                (false, true) => Some(close.clone()),
+    let mut kept: Vec<Range<usize>> = (fences.iter())
+        .filter_map(|fence| {
+            let close = fence.close.as_ref();
+            match (
+                touches(&range, &fence.open),
+                close.is_some_and(|close| touches(&range, close)),
+            ) {
+                (true, _) if fence.part => Some(fence.open.clone()),
+                (true, false) => Some(fence.open.clone()),
+                (false, true) => close.cloned(),
                 _ => None,
             }
         })
@@ -59,10 +96,8 @@ pub fn pieces(
         }
     }
     // A selection ending where a fence line starts leaves the line ending before it, or the line would join the text.
-    let fence_follows = (structure.regions.iter()).any(|region| {
-        [region.open, region.close]
-            .iter()
-            .any(|&line| list[line].range.start == range.end)
+    let fence_follows = (fences.iter()).any(|fence| {
+        fence.open.start == range.end || fence.close.as_ref().is_some_and(|close| close.start == range.end)
     });
     let end = if fence_follows {
         range.end - line_ending_before(text, range.end)
@@ -339,6 +374,20 @@ mod tests {
     fn a_directive_pasted_into_code_is_text() {
         let text = "```\ncode\n```\n";
         assert_eq!(pasted(text, 5, "::: toc\n"), Paste::Text);
+    }
+
+    #[test]
+    fn a_selection_over_one_hidden_code_fence_keeps_the_fence_whole() {
+        let text = "Ab cd\n\n```rust\nlet x;\n```\n\nEf\n";
+        assert_eq!(
+            over(text, between(text, "cd", " x;"), ""),
+            "Ab \n```rust\n x;\n```\n\nEf\n"
+        );
+        assert_eq!(
+            over(text, between(text, "x;", "f\n"), ""),
+            "Ab cd\n\n```rust\nlet \n```\n\nf\n"
+        );
+        assert_eq!(over(text, between(text, "b ", "f\n"), ""), "Af\n");
     }
 
     #[test]

@@ -122,6 +122,7 @@ pub fn read(text: &str, block: Range<usize>, directive: Option<Range<usize>>) ->
         rows,
         columns,
         aligns,
+        fills: vec![false; columns],
         caption: super::Caption::default(),
         caption_range: None,
         table_end,

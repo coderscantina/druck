@@ -224,6 +224,18 @@ fn a_book_opens_again_where_the_author_left_it() {
 }
 
 #[test]
+fn a_single_file_left_on_its_settings_opens_on_its_first_text() {
+    let folder = Folder::new("left-settings");
+    folder.write("book.md", "---\ntitle: A book\n---\n\n# One\n\nText.\n");
+    let file = folder.0.join("book.md");
+    let mut session = Session::open(&file).expect("opens");
+    let text = session.book()[1];
+    assert_eq!(session.active(), text);
+    session.start_at(&file, 0, None);
+    assert_eq!(session.active(), text);
+}
+
+#[test]
 fn the_joined_text_follows_the_engines_rule() {
     let (_folder, session) = project("joined");
     let joined = session.joined();
@@ -640,10 +652,37 @@ fn every_template_renders_in_the_bundled_theme() {
 #[test]
 fn a_named_template_takes_the_name_as_its_heading() {
     assert_eq!(
-        template("part").markdown(Some("Teil I")),
+        template("part").markdown(Some("Teil I"), Language::German),
         "# Teil I {-}\n\n::: page-break\n"
     );
-    assert_eq!(template("imprint").markdown(Some("Ignored")), template("imprint").text);
+    let imprint = template("imprint");
+    assert_eq!(
+        imprint.markdown(Some("Ignored"), Language::English),
+        imprint.text(Language::English)
+    );
+}
+
+#[test]
+fn a_section_in_a_german_book_has_german_text() {
+    let folder = Folder::new("german-section");
+    folder.write("druck.yaml", "title: Buch\nlang: de\nchapters:\n  - a.md\n");
+    folder.write("a.md", "# Eins\n\nText.\n");
+    let mut session = Session::open(&folder.0).expect("opens");
+    let first = session.book()[0];
+    let id = session.new_section(template("chapter"), None, first).expect("adds");
+    assert!(
+        session
+            .buffer(id)
+            .text()
+            .ends_with("# Kapiteltitel\n\nHier mit dem Schreiben beginnen.\n")
+    );
+    let id = session.new_section(template("title-page"), None, id).expect("adds");
+    assert!(
+        session
+            .buffer(id)
+            .text()
+            .ends_with("**{title}**\n\nUntertitel\n\nAutor\n")
+    );
 }
 
 #[test]
@@ -750,7 +789,7 @@ fn every_template_renders_in_every_starters_theme() {
             let dir = folder.0.join("project");
             starter.create(&dir, Language::English).expect("creates");
             let mut session = Session::open(&dir).expect("opens");
-            let has_own = session.joined().text.contains(template.text.trim());
+            let has_own = session.joined().text.contains(template.text(Language::English).trim());
             if has_own {
                 continue;
             }

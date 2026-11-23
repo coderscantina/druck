@@ -137,8 +137,6 @@ pub struct Buffer {
     revision: u64,
     /// What the change to this revision touched.
     last_splice: Option<Splice>,
-    /// The last undo stopped at a change from outside, so the next one takes it back.
-    undo_outside_armed: bool,
 }
 
 impl Buffer {
@@ -149,7 +147,6 @@ impl Buffer {
             redo: Vec::new(),
             revision: 0,
             last_splice: None,
-            undo_outside_armed: false,
         }
     }
 
@@ -195,7 +192,6 @@ impl Buffer {
         self.redo.clear();
         self.revision += 1;
         self.last_splice = Some(splice);
-        self.undo_outside_armed = false;
         match self.undo.last_mut() {
             Some(group) if group.after == before && kind.joins(group.kind, now - group.last_edit) => {
                 group.steps.push(step);
@@ -226,7 +222,6 @@ impl Buffer {
         self.redo.clear();
         self.revision += 1;
         self.last_splice = Some(splice);
-        self.undo_outside_armed = false;
         match self.undo.last_mut() {
             Some(group) => {
                 group.steps.push(step);
@@ -249,15 +244,8 @@ impl Buffer {
         self.undo.last().is_some_and(|group| group.kind == EditKind::External)
     }
 
-    /// Takes back the last undo step. A change from outside is one step too, but taking it back takes someone else's
-    /// text off the disk at the next save. So the first undo that reaches one stops there and does nothing, and only
-    /// the next one takes it back.
+    /// Takes back the last undo step. A change from outside is one step too, so the edits typed around it stay.
     pub fn undo(&mut self) -> Option<Restored> {
-        if self.undo_is_outside_change() && !self.undo_outside_armed {
-            self.undo_outside_armed = true;
-            return None;
-        }
-        self.undo_outside_armed = false;
         let group = self.undo.pop()?;
         let splice = self.replay(group.steps.iter().rev().map(|step| &step.backward));
         let selection = group.before;
@@ -266,7 +254,6 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> Option<Restored> {
-        self.undo_outside_armed = false;
         let group = self.redo.pop()?;
         let splice = self.replay(group.steps.iter().map(|step| &step.forward));
         let selection = group.after;
@@ -553,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn undo_stops_once_at_a_change_from_outside() {
+    fn a_change_from_outside_is_one_undo_step_between_the_typing_around_it() {
         let (mut buffer, now) = buffer("");
         insert(&mut buffer, 0, "typed ", EditKind::Typing, now);
         insert(&mut buffer, 6, "outside ", EditKind::External, now);
@@ -561,18 +548,13 @@ mod tests {
 
         buffer.undo();
         assert_eq!(buffer.text(), "typed outside ");
-        assert!(buffer.undo().is_none());
-        assert_eq!(buffer.text(), "typed outside ");
-
+        assert!(buffer.undo_is_outside_change());
         assert!(buffer.undo().is_some());
         assert_eq!(buffer.text(), "typed ");
         buffer.redo();
         assert_eq!(buffer.text(), "typed outside ");
-
-        assert!(buffer.undo().is_none(), "a new undo stops again");
-        buffer.undo();
-        buffer.undo();
-        assert_eq!(buffer.text(), "");
+        buffer.redo();
+        assert_eq!(buffer.text(), "typed outside more");
     }
 
     #[test]

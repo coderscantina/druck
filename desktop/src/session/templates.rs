@@ -10,9 +10,16 @@ use super::strings::Key;
 use super::yaml;
 use crate::shell::strings::Language;
 
+/// A template's text in English and in German, from the `de` folder for one with words to translate.
 macro_rules! text {
     ($name:literal) => {
-        include_str!(concat!("../../templates/sections/", $name, ".md"))
+        [include_str!(concat!("../../templates/sections/", $name, ".md")); 2]
+    };
+    ($name:literal, de) => {
+        [
+            include_str!(concat!("../../templates/sections/", $name, ".md")),
+            include_str!(concat!("../../templates/sections/de/", $name, ".md")),
+        ]
     };
 }
 
@@ -42,17 +49,22 @@ pub struct Template {
     pub description: Key,
     pub group: Group,
     pub icon: &'static str,
-    pub text: &'static str,
+    /// In English and in German.
+    texts: [&'static str; 2],
 }
 
 impl Template {
-    /// The template's Markdown, with `name` as its heading if it has one.
-    pub fn markdown(&self, name: Option<&str>) -> String {
-        match (name, outline::outline(self.text).heading) {
-            (Some(name), Some(heading)) => {
-                format!("{}{name}{}", &self.text[..heading.start], &self.text[heading.end..])
-            }
-            _ => self.text.to_owned(),
+    /// The template's text in the book's language.
+    pub fn text(&self, language: Language) -> &'static str {
+        self.texts[usize::from(language == Language::German)]
+    }
+
+    /// The template's Markdown in the book's language, with `name` as its heading if it has one.
+    pub fn markdown(&self, name: Option<&str>, language: Language) -> String {
+        let text = self.text(language);
+        match (name, outline::outline(text).heading) {
+            (Some(name), Some(heading)) => format!("{}{name}{}", &text[..heading.start], &text[heading.end..]),
+            _ => text.to_owned(),
         }
     }
 }
@@ -64,7 +76,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::HalfTitleDescription,
         group: Group::Front,
         icon: "icons/title.svg",
-        text: text!("half-title"),
+        texts: text!("half-title"),
     },
     Template {
         slug: "title-page",
@@ -72,7 +84,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::TitlePageDescription,
         group: Group::Front,
         icon: "icons/title.svg",
-        text: text!("title-page"),
+        texts: text!("title-page"),
     },
     Template {
         slug: "imprint",
@@ -80,7 +92,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::ImprintDescription,
         group: Group::Front,
         icon: "icons/copyright.svg",
-        text: text!("imprint"),
+        texts: text!("imprint", de),
     },
     Template {
         slug: "dedication",
@@ -88,7 +100,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::DedicationDescription,
         group: Group::Front,
         icon: "icons/dedication.svg",
-        text: text!("dedication"),
+        texts: text!("dedication", de),
     },
     Template {
         slug: "epigraph",
@@ -96,7 +108,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::EpigraphDescription,
         group: Group::Front,
         icon: "icons/file.svg",
-        text: text!("epigraph"),
+        texts: text!("epigraph", de),
     },
     Template {
         slug: "contents",
@@ -104,7 +116,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::ContentsDescription,
         group: Group::Front,
         icon: "icons/contents.svg",
-        text: text!("contents"),
+        texts: text!("contents"),
     },
     Template {
         slug: "abstract",
@@ -112,7 +124,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::AbstractDescription,
         group: Group::Front,
         icon: "icons/book.svg",
-        text: text!("abstract"),
+        texts: text!("abstract", de),
     },
     Template {
         slug: "chapter",
@@ -120,7 +132,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::ChapterDescription,
         group: Group::Body,
         icon: "icons/file.svg",
-        text: text!("chapter"),
+        texts: text!("chapter", de),
     },
     Template {
         slug: "part",
@@ -128,7 +140,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::PartDescription,
         group: Group::Body,
         icon: "icons/book.svg",
-        text: text!("part"),
+        texts: text!("part", de),
     },
     Template {
         slug: "section",
@@ -136,7 +148,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::SectionDescription,
         group: Group::Body,
         icon: "icons/file.svg",
-        text: text!("section"),
+        texts: text!("section", de),
     },
     Template {
         slug: "columns",
@@ -144,7 +156,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::ColumnsDescription,
         group: Group::Body,
         icon: "icons/directive-columns.svg",
-        text: text!("columns"),
+        texts: text!("columns", de),
     },
     Template {
         slug: "acknowledgments",
@@ -152,7 +164,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::AcknowledgmentsDescription,
         group: Group::Back,
         icon: "icons/book.svg",
-        text: text!("acknowledgments"),
+        texts: text!("acknowledgments", de),
     },
     Template {
         slug: "about-the-author",
@@ -160,7 +172,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::AboutAuthorDescription,
         group: Group::Back,
         icon: "icons/book.svg",
-        text: text!("about-the-author"),
+        texts: text!("about-the-author", de),
     },
     Template {
         slug: "bibliography",
@@ -168,7 +180,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::BibliographyDescription,
         group: Group::Back,
         icon: "icons/bibliography.svg",
-        text: text!("bibliography"),
+        texts: text!("bibliography"),
     },
     Template {
         slug: "index",
@@ -176,7 +188,7 @@ pub const TEMPLATES: &[Template] = &[
         description: Key::IndexDescription,
         group: Group::Back,
         icon: "icons/index.svg",
-        text: text!("index"),
+        texts: text!("index"),
     },
 ];
 

@@ -904,17 +904,7 @@ impl PersistView {
         cx.notify();
     }
 
-    fn external_undo(
-        &mut self,
-        _: &Entity<EditorView>,
-        event: &ExternalUndo,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.done {
-            self.show_note(crate::t!(Key::UndoStopped).to_owned(), window, cx);
-            return;
-        }
+    fn external_undo(&mut self, _: &Entity<EditorView>, _: &ExternalUndo, window: &mut Window, cx: &mut Context<Self>) {
         // The file still holds what the undo just took out of the buffer.
         let session = self.session(cx);
         let path = session.active_chapter().path().to_owned();

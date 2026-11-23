@@ -190,10 +190,16 @@ pub fn remove(start: usize, found: &Found) -> Vec<Edit> {
     edits
 }
 
-/// The quiet sign that stands for each mark of a block. A mark the caret is inside shows its source.
+/// Whether `range` of a block stands on the source line of `caret`.
+fn on_caret_line(text: &str, range: &Range<usize>, caret: Option<usize>) -> bool {
+    caret.is_some_and(|caret| !text[caret.min(range.start)..caret.max(range.end)].contains('\n'))
+}
+
+/// The quiet sign that stands for each mark on the caret's line. A mark the caret is inside shows its source.
 pub fn chips(text: &str, spans: &[InlineSpan], caret: Option<usize>) -> Vec<Chip> {
     marks(spans)
         .filter(|found| !text[found.braces.clone()].contains('\n'))
+        .filter(|found| on_caret_line(text, &found.braces, caret))
         .filter(|found| !caret.is_some_and(|caret| found.braces.start < caret && caret < found.braces.end))
         .map(|found| Chip {
             range: found.braces,
@@ -201,6 +207,15 @@ pub fn chips(text: &str, spans: &[InlineSpan], caret: Option<usize>) -> Vec<Chip
             look: ChipLook::Index,
             atomic: true,
         })
+        .collect()
+}
+
+/// The marks away from the caret's line, which take no room, so marks after many words do not crowd the text. With
+/// no caret, as in a table's cells and caption at rest, that is every mark.
+pub fn hidden(text: &str, spans: &[InlineSpan], caret: Option<usize>) -> Vec<Range<usize>> {
+    marks(spans)
+        .filter(|found| !on_caret_line(text, &found.braces, caret))
+        .map(|found| found.braces)
         .collect()
 }
 
@@ -302,5 +317,21 @@ mod tests {
         assert_eq!(shown.len(), 1);
         assert_eq!((shown[0].range.clone(), shown[0].text.as_str()), (3..7, SIGN));
         assert!(chips(text, &spans, Some(5)).is_empty());
+    }
+
+    #[test]
+    fn a_mark_takes_no_room_until_the_caret_is_on_its_line() {
+        let text = "One{^a} two\nthree [four]{^} five.\n";
+        let spans = inline_spans(BlockKind::Paragraph, text);
+        let first = text.find("{^a}").unwrap()..text.find(" two").unwrap();
+        let second = text.find("{^}").unwrap()..text.find(" five").unwrap();
+        assert_eq!(hidden(text, &spans, None), [first.clone(), second.clone()]);
+        assert!(chips(text, &spans, None).is_empty());
+
+        let on_first = Some(1);
+        assert_eq!(hidden(text, &spans, on_first), [second]);
+        let shown = chips(text, &spans, on_first);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].range, first);
     }
 }

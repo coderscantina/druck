@@ -58,6 +58,8 @@ pub struct Grid {
     pub rows: Vec<Vec<Cell>>,
     pub columns: usize,
     pub aligns: Vec<Align>,
+    /// Which columns take the width the others leave, `*` in a list table's `widths`. The others fit their content.
+    pub fills: Vec<bool>,
     pub caption: Caption,
     /// The caption's paragraph without its line endings, and the end of the block before it.
     caption_range: Option<Range<usize>>,
