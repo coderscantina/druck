@@ -210,6 +210,7 @@ impl SectionDialog {
         div()
             .id(page.slug)
             .button(tokens, name)
+            .aria_selected(chosen)
             .flex()
             .flex_col()
             .items_center()
@@ -492,6 +493,8 @@ impl Render for SectionDialog {
         };
         let card = div()
             .id("dialog")
+            .role(gpui::Role::Dialog)
+            .aria_label(heading.clone())
             .track_focus(&self.card)
             .on_key_down(cx.listener(Self::gallery_key))
             .occlude()
