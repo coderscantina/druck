@@ -110,6 +110,8 @@ pub struct Frame {
     images: Vec<AnyElement>,
     /// The directives' brackets, sheet gaps, and ghost.
     directives: Marks,
+    /// The scene breaks' rules.
+    rules: Vec<Bounds<Pixels>>,
     /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
     margin: Option<AnyElement>,
     /// A passage's buttons and the agent's notes, drawn inside the same bounds for the same reason.
@@ -341,6 +343,9 @@ impl Element for Galley {
             }
             for block in &frame.blocks {
                 paint_block_text(block, frame, window, cx);
+            }
+            for rule in &frame.rules {
+                window.paint_quad(fill(*rule, frame.rule));
             }
             paint_marks(&frame.directives, frame, window, cx);
             for word in &frame.misspelled {
@@ -699,6 +704,7 @@ impl EditorView {
         let hint = self.placeholder_hint(&blocks);
         let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
         let directives = self.directive_marks(&blocks, &indices, window, cx);
+        let rules = self.scene_rules(&blocks);
         // After the brackets, whose names on the same row the style's name ends before.
         // Only while the text has the keys, so it never stands beside a card that covers its block.
         let style_name = (self.style_name_at_caret(&blocks))
@@ -734,6 +740,7 @@ impl EditorView {
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             images: Vec::new(),
             directives,
+            rules,
             margin: None,
             review: Vec::new(),
             source: self.source,
