@@ -1018,12 +1018,12 @@
     "string": "#2d6a4f",
     "number": "#8a4b08",
     "constant": "#8a4b08",
-    "type": "#1b6b73",
+    "type": "#007c80",
     "function": "#5a3d8a",
     "operator": "$colors.text",
     "punctuation": "$colors.text",
     "tag": "$colors.accent",
-    "attribute": "#1b6b73"
+    "attribute": "#007c80"
   },
   "labels": {
     "en": {
