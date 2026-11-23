@@ -143,6 +143,10 @@ crate::strings! {
             "Local history followed this book from {from}.",
             "Der lokale Verlauf ist diesem Buch aus {from} gefolgt."
         ),
+        HistoryRenamed => (
+            "Local history followed {name} from {from}.",
+            "Der lokale Verlauf ist {name} von {from} gefolgt."
+        ),
         OneHistoryLeft => (
             "1 file here has no local history, but a file with its name does elsewhere. ⌘Y shows it.",
             "1 Datei hier hat keinen lokalen Verlauf, eine gleichnamige anderswo schon. ⌘Y zeigt sie."
