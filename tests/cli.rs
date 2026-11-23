@@ -922,9 +922,9 @@ impl Sandbox {
         self.root.join("book").to_str().unwrap().to_owned()
     }
 
-    /// A path in the project as diagnostics show it.
+    /// A path in the project as diagnostics show it, with the platform's separators.
     fn in_book(&self, path: &str) -> String {
-        format!("{}/{path}", self.book())
+        self.root.join("book").join(native(path)).to_str().unwrap().to_owned()
     }
 
     fn assert_rejected(&self, expected: &[String]) {
