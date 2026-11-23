@@ -50,7 +50,10 @@ impl EditorView {
             .filter(|block| block.layout.lines.iter().all(|line| line.height == px(0.)))
             .map(|block| {
                 let left = block.left + (block.width - width) * 0.5;
-                Bounds::new(point(left, block.top + block.layout.above), size(width, tokens::HAIRLINE))
+                Bounds::new(
+                    point(left, block.top + block.layout.above),
+                    size(width, tokens::HAIRLINE),
+                )
             })
             .collect()
     }

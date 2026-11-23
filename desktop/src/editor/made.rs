@@ -87,7 +87,15 @@ pub(super) struct Made {
     index: HashMap<String, Vec<String>>,
     /// Changes with each layout taken, so the entries are read again.
     generation: u64,
-    cache: RefCell<Vec<(Kind, u64, u64, Rc<Entries>)>>,
+    cache: RefCell<Vec<Cached>>,
+}
+
+/// A made page's entries as read for a revision of the book and a layout.
+struct Cached {
+    kind: Kind,
+    revision: u64,
+    generation: u64,
+    entries: Rc<Entries>,
 }
 
 /// The number printed on page `page`, from zero. A book without parts shows each page's place, and a page before the
@@ -135,7 +143,11 @@ pub(super) fn headings(text: &str) -> Vec<Heading> {
 
 /// The letters and digits of a title, so a typographic quote on the page still matches a straight one in the text.
 fn folded(title: &str) -> String {
-    title.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// The contents' entries: the listed headings down to [`CONTENTS_DEPTH`], each with the page the layout printed it on.
@@ -180,7 +192,10 @@ fn index_entries(terms: impl Iterator<Item = String>, pages: &HashMap<String, Ve
     words.dedup_by_key(|word| word.to_lowercase());
     (words.into_iter())
         .map(|words| Entry {
-            page: pages.get(&words).filter(|pages| !pages.is_empty()).map(|pages| pages.join(", ")),
+            page: pages
+                .get(&words)
+                .filter(|pages| !pages.is_empty())
+                .map(|pages| pages.join(", ")),
             words,
         })
         .collect()
@@ -263,10 +278,10 @@ impl EditorView {
     pub(super) fn made_entries(&self, kind: Kind) -> Rc<Entries> {
         let revision = self.session.revision();
         let generation = self.made.generation;
-        if let Some((_, _, _, entries)) = (self.made.cache.borrow().iter())
-            .find(|(seen, at, made, _)| *seen == kind && *at == revision && *made == generation)
+        if let Some(cached) = (self.made.cache.borrow().iter())
+            .find(|cached| cached.kind == kind && cached.revision == revision && cached.generation == generation)
         {
-            return entries.clone();
+            return cached.entries.clone();
         }
         let session = &self.session;
         let texts = || (session.book().iter()).filter_map(|id| session.chapter(*id).map(|chapter| chapter.text()));
@@ -283,8 +298,13 @@ impl EditorView {
         };
         let entries = Rc::new(Entries::capped(all));
         let mut cache = self.made.cache.borrow_mut();
-        cache.retain(|(seen, ..)| *seen != kind);
-        cache.push((kind, revision, generation, entries.clone()));
+        cache.retain(|cached| cached.kind != kind);
+        cache.push(Cached {
+            kind,
+            revision,
+            generation,
+            entries: entries.clone(),
+        });
         entries
     }
 
@@ -406,13 +426,21 @@ impl EditorView {
             let page = entry.page.as_deref().map(|page| shape(page, &figures, size_now, quiet));
             let page_width = page.as_ref().map_or(px(0.), |page| page.width);
             let room = width - page_width - tokens::SPACE_4 * 2.;
-            let words = shape(&fitted(&entry.words, room, |text| shape(text, &body, size_now, quiet).width), &body, size_now, quiet);
+            let words = shape(
+                &fitted(&entry.words, room, |text| shape(text, &body, size_now, quiet).width),
+                &body,
+                size_now,
+                quiet,
+            );
             let baseline = y + metrics.entry_line * 0.5 + size_now * 0.3;
             let (from, to) = (words.width + tokens::SPACE_2, width - page_width - tokens::SPACE_2);
             if page.is_some() {
                 let mut x = from + (DOT_STEP - (from % DOT_STEP));
                 while x + tokens::HAIRLINE <= to {
-                    dots.push(Bounds::new(point(x, baseline), size(tokens::HAIRLINE, tokens::HAIRLINE)));
+                    dots.push(Bounds::new(
+                        point(x, baseline),
+                        size(tokens::HAIRLINE, tokens::HAIRLINE),
+                    ));
                     x += DOT_STEP;
                 }
             }
@@ -425,7 +453,11 @@ impl EditorView {
         }
         if entries.more > 0 {
             let more = crate::t!(Key::MadeMore, count = entries.more);
-            texts.push((shape(&more, &body, size_now, faint), point(px(0.), y), metrics.entry_line));
+            texts.push((
+                shape(&more, &body, size_now, faint),
+                point(px(0.), y),
+                metrics.entry_line,
+            ));
             y += metrics.entry_line;
         }
         if !alone {
@@ -475,7 +507,10 @@ impl EditorView {
     fn remove_made(&mut self, line: usize, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.blocks.index_at(line);
         let structure = &self.directives.structure;
-        let Some(region) = structure.fence(index).filter(|&region| is_made(structure.regions[region].kind)) else {
+        let Some(region) = structure
+            .fence(index)
+            .filter(|&region| is_made(structure.regions[region].kind))
+        else {
             return;
         };
         let text = self.session.active_buffer().text();
@@ -518,10 +553,7 @@ fn fitted(words: &str, room: Pixels, width: impl Fn(&str) -> Pixels) -> String {
 /// Paints a made page with its top left at `origin`.
 pub(in crate::editor) fn paint_made(shape: &MadeShape, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
     for dot in &shape.dots {
-        window.paint_quad(fill(
-            Bounds::new(origin + dot.origin, dot.size),
-            shape.faint,
-        ));
+        window.paint_quad(fill(Bounds::new(origin + dot.origin, dot.size), shape.faint));
     }
     window
         .paint_svg(
@@ -534,7 +566,8 @@ pub(in crate::editor) fn paint_made(shape: &MadeShape, origin: Point<Pixels>, wi
         )
         .ok();
     for (line, at, height) in &shape.texts {
-        line.paint(origin + *at, *height, TextAlign::Left, None, window, cx).ok();
+        line.paint(origin + *at, *height, TextAlign::Left, None, window, cx)
+            .ok();
     }
 }
 
@@ -560,7 +593,11 @@ mod tests {
             .collect();
         assert_eq!(
             shown,
-            [("Preface", Some("i")), ("The arrival", Some("1")), ("It's over", Some("2"))]
+            [
+                ("Preface", Some("i")),
+                ("The arrival", Some("1")),
+                ("It's over", Some("2"))
+            ]
         );
     }
 

@@ -287,6 +287,86 @@ pub fn wraps_offered(text: &str, blocks: &Blocks, structure: &Structure, blocks_
         .collect()
 }
 
+/// What the block menu sets about how a block stands on the pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageSetting {
+    /// A `::: page-break` directly before it.
+    NewPage,
+    /// Inside `::: bottom`.
+    Foot,
+    /// Inside `::: keep`.
+    Keep,
+}
+
+impl PageSetting {
+    pub const ALL: [Self; 3] = [Self::NewPage, Self::Foot, Self::Keep];
+
+    /// The region that holds the setting.
+    fn kind(self) -> Kind {
+        match self {
+            Self::NewPage => Kind::PageBreak,
+            Self::Foot => Kind::Bottom,
+            Self::Keep => Kind::Keep,
+        }
+    }
+}
+
+/// The region that gives block `block` the setting, if it has it: the new page standing directly before it, past blank
+/// lines, or the innermost region of its kind around it.
+pub fn page_setting(blocks: &Blocks, structure: &Structure, block: usize, setting: PageSetting) -> Option<usize> {
+    let kind = setting.kind();
+    if setting == PageSetting::NewPage {
+        let list = blocks.as_slice();
+        let before = (0..block).rev().find(|&at| list[at].kind != BlockKind::Blank)?;
+        return structure
+            .fence(before)
+            .filter(|&region| structure.regions[region].kind == kind);
+    }
+    (structure.regions.iter().enumerate())
+        .filter(|(_, region)| region.kind == kind && region.open < block && block < region.close)
+        .max_by_key(|(_, region)| region.depth)
+        .map(|(at, _)| at)
+}
+
+/// Turns the setting on or off for block `block`, keeping the selection on its text. Nothing when the engine would not
+/// take it there.
+pub fn toggle_page_setting(
+    text: &str,
+    blocks: &Blocks,
+    structure: &Structure,
+    block: usize,
+    setting: PageSetting,
+    selection: Selection,
+) -> Option<Command> {
+    let kept = |command: Command| Command {
+        selection: selection_after(selection, &command.edits),
+        edits: command.edits,
+    };
+    match (page_setting(blocks, structure, block, setting), setting) {
+        (Some(region), PageSetting::NewPage) => delete_region(text, blocks, structure, region).map(kept),
+        (Some(region), _) => unwrap(text, blocks, structure, region).map(kept),
+        (None, PageSetting::NewPage) => {
+            let list = blocks.as_slice();
+            let eol = line_ending(text);
+            let start = list[block].range.start;
+            let lead = if block > 0 && needs_gap(blocks, block - 1) {
+                eol
+            } else {
+                ""
+            };
+            let edits = vec![Edit::new(start..start, format!("{lead}::: page-break{eol}{eol}"))];
+            let after = applied(text, &edits);
+            (structure::read(&after, &Blocks::parse(&after)).regions.len() == structure.regions.len() + 1).then(|| {
+                Command {
+                    selection: selection_after(selection, &edits),
+                    edits,
+                }
+            })
+        }
+        (None, _) => wrap(text, blocks, structure, block..block + 1, setting.kind(), selection),
+    }
+}
+
 /// Takes `region` away with all it holds, and the blank line that kept it from the next block. The caret goes where it
 /// stood.
 pub fn delete_region(text: &str, blocks: &Blocks, structure: &Structure, region: usize) -> Option<Command> {
@@ -569,6 +649,46 @@ mod tests {
         let b = blocks.index_at(text.find('b').unwrap());
         let c = blocks.index_at(text.find('c').unwrap());
         assert!(wraps_offered(text, &blocks, &structure, b..c + 1).is_empty());
+    }
+
+    fn toggled(text: &str, block_text: &str, setting: PageSetting) -> Option<String> {
+        let blocks = Blocks::parse(text);
+        let structure = structure::read(text, &blocks);
+        let block = blocks.index_at(text.find(block_text).expect("the block"));
+        let caret = Selection::caret(text.find(block_text).expect("the block") + 1);
+        let command = toggle_page_setting(text, &blocks, &structure, block, setting, caret)?;
+        let after = applied(text, &command.edits);
+        assert_eq!(
+            after[command.selection.head - 1..].chars().next(),
+            block_text.chars().next()
+        );
+        Some(after)
+    }
+
+    #[test]
+    fn start_on_a_new_page_writes_and_takes_the_line_before_the_block() {
+        let text = "One.\n\nTwo.\n";
+        let on = toggled(text, "Two", PageSetting::NewPage).expect("on");
+        assert_eq!(on, "One.\n\n::: page-break\n\nTwo.\n");
+        assert_eq!(toggled(&on, "Two", PageSetting::NewPage).as_deref(), Some(text));
+    }
+
+    #[test]
+    fn foot_and_keep_wrap_the_block_and_unwrap_it_again() {
+        let text = "One.\n\nTwo.\n";
+        let foot = toggled(text, "Two", PageSetting::Foot).expect("on");
+        assert_eq!(foot, "One.\n\n::: bottom\nTwo.\n:::\n");
+        assert_eq!(toggled(&foot, "Two", PageSetting::Foot).as_deref(), Some(text));
+        let kept = toggled(text, "One", PageSetting::Keep).expect("on");
+        assert_eq!(kept, "::: keep\nOne.\n:::\n\nTwo.\n");
+    }
+
+    #[test]
+    fn a_setting_the_engine_refuses_is_not_offered() {
+        // A new page cannot stand inside a kept region, nor a foot inside another region.
+        let text = "::: keep\nOne.\n:::\n";
+        assert_eq!(toggled(text, "One", PageSetting::NewPage), None);
+        assert_eq!(toggled(text, "One", PageSetting::Foot), None);
     }
 
     #[test]

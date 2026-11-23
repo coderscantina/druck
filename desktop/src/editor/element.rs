@@ -79,6 +79,8 @@ pub(super) struct FrameBlock {
     pub layout: Rc<BlockLayout>,
     pub hovered: bool,
     pub icon: Option<&'static str>,
+    /// It starts on a new page: a `::: page-break` stands directly before it.
+    pub new_page: bool,
 }
 
 pub struct Frame {
@@ -127,7 +129,7 @@ pub struct Frame {
     body_size: Pixels,
     body_font: gpui::Font,
     accent: Hsla,
-    faint: Hsla,
+    pub(super) faint: Hsla,
     /// How placeholders' values show.
     placeholders: Display,
     /// The value of the placeholder the caret is in, over where it stands.
@@ -655,6 +657,15 @@ impl EditorView {
                 layout,
                 hovered: self.hovered == Some(index),
                 icon,
+                new_page: !self.source
+                    && block.kind != BlockKind::Directive
+                    && super::directives::edits::page_setting(
+                        &self.blocks,
+                        &self.directives.structure,
+                        index,
+                        super::directives::edits::PageSetting::NewPage,
+                    )
+                    .is_some(),
             });
         }
         let selection = self.range_rectangles(self.selection.range(), &blocks, false);

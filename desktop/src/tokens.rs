@@ -60,6 +60,9 @@ pub const TOOLBAR_SEPARATOR: Pixels = px(9.);
 pub const MENU_WIDTH: Pixels = px(248.);
 pub const MENU_ROW_HEIGHT: Pixels = px(28.);
 pub const MENU_MAX_ROWS: usize = 10;
+/// The slash menu while its rows describe what they make, and such a row with its line of description.
+pub const MENU_DESCRIBED_WIDTH: Pixels = px(320.);
+pub const MENU_DESCRIBED_ROW_HEIGHT: Pixels = px(46.);
 pub const LINK_POPUP_WIDTH: Pixels = px(320.);
 /// Room kept between something floating and what it belongs to, or the window's edge.
 pub const FLOAT_GAP: Pixels = px(6.);

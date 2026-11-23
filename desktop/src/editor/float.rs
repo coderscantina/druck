@@ -17,6 +17,7 @@ use super::commands::links::{self, Reference};
 use super::commands::marks::{self, Mark, MarkState, MarkStates};
 use super::commands::notes;
 use super::commands::slash::{self, Action, Item, type_icon, type_label};
+use super::directives::edits::{self, PageSetting};
 use super::directives::{self, Kind};
 use super::picks::{Extra, Pick, Row};
 use super::place::{self, Rect};
@@ -82,6 +83,8 @@ enum MenuKind {
         wraps: Vec<Kind>,
         /// The rows that open a list: the blocks' style and a code block's language.
         extras: Vec<Extra>,
+        /// How the block stands on the pages, each with whether it is on, after a divider.
+        pages: Vec<(PageSetting, bool)>,
         blocks: Range<usize>,
         anchor: Option<Bounds<Pixels>>,
     },
@@ -102,8 +105,12 @@ impl Menu {
         match &self.kind {
             MenuKind::Slash { items, .. } => items.len(),
             MenuKind::Convert {
-                targets, wraps, extras, ..
-            } => targets.len() + wraps.len() + extras.len(),
+                targets,
+                wraps,
+                extras,
+                pages,
+                ..
+            } => targets.len() + wraps.len() + extras.len() + pages.len(),
             MenuKind::Pick { rows, .. } => rows.len(),
             MenuKind::Spelling { suggestions, .. } => suggestions.len() + 1,
         }
@@ -210,6 +217,57 @@ fn rect(bounds: Bounds<Pixels>) -> Rect {
         top: f32::from(bounds.top()),
         right: f32::from(bounds.right()),
         bottom: f32::from(bounds.bottom()),
+    }
+}
+
+/// One row of a floating list as it shows.
+struct MenuRow {
+    label: SharedString,
+    /// A quiet word at its right, or a check mark.
+    end: Option<SharedString>,
+    icon: &'static str,
+    /// A line under the label saying what it makes, in the faint small size.
+    description: Option<&'static str>,
+    /// A divider stands above it, and the name of the group it starts.
+    divider: bool,
+    section: Option<&'static str>,
+}
+
+impl MenuRow {
+    fn new(label: impl Into<SharedString>, end: Option<SharedString>, icon: &'static str) -> Self {
+        Self {
+            label: label.into(),
+            end,
+            icon,
+            description: None,
+            divider: false,
+            section: None,
+        }
+    }
+
+    /// Its height in the list, with the divider and group name above it.
+    fn height(&self) -> Pixels {
+        let own = if self.description.is_some() {
+            tokens::MENU_DESCRIBED_ROW_HEIGHT
+        } else {
+            tokens::MENU_ROW_HEIGHT
+        };
+        let divider = if self.divider {
+            tokens::HAIRLINE + tokens::SPACE_1 * 2.
+        } else {
+            px(0.)
+        };
+        let section = self.section.map_or(px(0.), |_| tokens::MENU_ROW_HEIGHT);
+        own + divider + section
+    }
+}
+
+/// A row that sets how a block stands on the pages: its label and icon.
+fn page_row(setting: PageSetting) -> (&'static str, &'static str) {
+    match setting {
+        PageSetting::NewPage => (crate::t!(Key::StartOnNewPage), "icons/page-new.svg"),
+        PageSetting::Foot => (crate::t!(Key::SetAtFoot), "icons/directive-bottom.svg"),
+        PageSetting::Keep => (crate::t!(Key::Keep), "icons/directive-keep.svg"),
     }
 }
 
@@ -725,6 +783,7 @@ impl EditorView {
                         targets,
                         wraps,
                         extras,
+                        pages,
                         blocks,
                         anchor,
                     },
@@ -738,12 +797,18 @@ impl EditorView {
                 }
                 let index = index - extras.len();
                 let text = self.session.active_buffer().text();
-                let command = match targets.get(index) {
-                    Some(target) => convert::convert(text, &self.blocks, block, *target, self.selection),
-                    None => wraps.get(index - targets.len()).and_then(|kind| {
-                        let structure = &self.directives.structure;
-                        directives::edits::wrap(text, &self.blocks, structure, blocks, *kind, self.selection)
-                    }),
+                let structure = &self.directives.structure;
+                let command = if let Some(target) = targets.get(index) {
+                    convert::convert(text, &self.blocks, block, *target, self.selection)
+                } else if let Some(kind) = wraps.get(index - targets.len()) {
+                    edits::wrap(text, &self.blocks, structure, blocks, *kind, self.selection)
+                } else {
+                    let setting = pages
+                        .get(index - targets.len() - wraps.len())
+                        .map(|(setting, _)| *setting);
+                    setting.and_then(|setting| {
+                        edits::toggle_page_setting(text, &self.blocks, structure, block, setting, self.selection)
+                    })
                 };
                 if let Some(command) = command {
                     self.run_command(command, window, cx);
@@ -875,10 +940,29 @@ impl EditorView {
                 .filter(|target| convert::convert(text, &self.blocks, block, *target, self.selection).is_some())
                 .collect(),
         };
+        let single = blocks.is_none();
         let blocks = blocks.unwrap_or(block..block + 1);
-        let wraps = directives::edits::wraps_offered(text, &self.blocks, &self.directives.structure, blocks.clone());
+        let structure = &self.directives.structure;
+        let mut wraps = directives::edits::wraps_offered(text, &self.blocks, structure, blocks.clone());
         let extras = self.extras_for(&blocks);
-        if targets.is_empty() && wraps.is_empty() && extras.is_empty() {
+        let pages: Vec<(PageSetting, bool)> = if single {
+            (PageSetting::ALL.into_iter())
+                .filter(|setting| {
+                    edits::toggle_page_setting(text, &self.blocks, structure, block, *setting, self.selection).is_some()
+                })
+                .map(|setting| {
+                    let on = edits::page_setting(&self.blocks, structure, block, setting).is_some();
+                    (setting, on)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // For one block, the rows that set how it stands on the pages wrap it in these.
+        if single {
+            wraps.retain(|kind| !matches!(kind, Kind::Keep | Kind::Bottom));
+        }
+        if targets.is_empty() && wraps.is_empty() && extras.is_empty() && pages.is_empty() {
             return false;
         }
         self.float = Float::Menu(Menu {
@@ -887,6 +971,7 @@ impl EditorView {
                 targets,
                 wraps,
                 extras,
+                pages,
                 blocks,
                 anchor,
             },
@@ -914,75 +999,134 @@ impl EditorView {
         cx.notify();
     }
 
-    fn menu_rows(&self, menu: &Menu) -> Vec<(SharedString, Option<SharedString>, &'static str)> {
+    fn menu_rows(&self, menu: &Menu) -> Vec<MenuRow> {
         match &menu.kind {
-            MenuKind::Slash { items, .. } => items
-                .iter()
-                .map(|item| (item.label.into(), item.group.map(SharedString::from), item.icon))
-                .collect(),
+            MenuKind::Slash { items, .. } => {
+                let mut before: Option<slash::Section> = None;
+                (items.iter().enumerate())
+                    .map(|(at, item)| {
+                        let starts = at > 0 && item.section != before;
+                        before = item.section;
+                        MenuRow {
+                            description: item.description,
+                            divider: starts,
+                            section: item.section.filter(|_| at == 0 || starts).map(slash::Section::label),
+                            ..MenuRow::new(item.label, item.group.map(SharedString::from), item.icon)
+                        }
+                    })
+                    .collect()
+            }
             MenuKind::Pick { rows, .. } => rows
                 .iter()
-                .map(|row| (row.label.clone(), row.on.then(|| "\u{2713}".into()), row.icon))
+                .map(|row| MenuRow::new(row.label.clone(), row.on.then(|| "\u{2713}".into()), row.icon))
                 .collect(),
             MenuKind::Convert {
                 targets,
                 wraps,
                 extras,
+                pages,
                 blocks,
                 ..
             } => {
                 let wrap_in: SharedString = directives::wrap_in_label().into();
                 let turned = targets.iter().map(|target| {
-                    (
-                        type_label(*target, crate::shell::strings::language()).into(),
+                    MenuRow::new(
+                        type_label(*target, crate::shell::strings::language()),
                         None,
                         type_icon(*target),
                     )
                 });
                 let wrapped = wraps
                     .iter()
-                    .map(|kind| (kind.label().into(), Some(wrap_in.clone()), kind.icon()));
-                let leading = extras.iter().map(|extra| self.extra_row(*extra, blocks));
-                leading.chain(turned).chain(wrapped).collect()
+                    .map(|kind| MenuRow::new(kind.label(), Some(wrap_in.clone()), kind.icon()));
+                let leading = extras.iter().map(|extra| {
+                    let (label, end, icon) = self.extra_row(*extra, blocks);
+                    MenuRow::new(label, end, icon)
+                });
+                let paged = pages.iter().enumerate().map(|(at, (setting, on))| {
+                    let (label, icon) = page_row(*setting);
+                    MenuRow {
+                        divider: at == 0 && !(targets.is_empty() && wraps.is_empty() && extras.is_empty()),
+                        ..MenuRow::new(label, on.then(|| "\u{2713}".into()), icon)
+                    }
+                });
+                leading.chain(turned).chain(wrapped).chain(paged).collect()
             }
             MenuKind::Spelling { suggestions, .. } => {
                 let suggested = suggestions
                     .iter()
-                    .map(|suggestion| (suggestion.clone().into(), None, "icons/block-text.svg"));
-                let add = (crate::t!(Key::AddToWords).into(), None, "icons/plus.svg");
+                    .map(|suggestion| MenuRow::new(suggestion.clone(), None, "icons/block-text.svg"));
+                let add = MenuRow::new(crate::t!(Key::AddToWords), None, "icons/plus.svg");
                 suggested.chain(std::iter::once(add)).collect()
             }
         }
     }
 
-    fn menu_size(count: usize) -> Size<Pixels> {
-        let rows = count.min(tokens::MENU_MAX_ROWS) as f32;
+    /// The list's size: its rows' heights up to ten plain rows, which it scrolls past, and wider while rows describe
+    /// what they make.
+    fn menu_size(rows: &[MenuRow]) -> Size<Pixels> {
+        let most = tokens::MENU_ROW_HEIGHT * tokens::MENU_MAX_ROWS as f32;
+        let height = rows.iter().fold(px(0.), |sum, row| sum + row.height()).min(most);
+        let described = rows.iter().any(|row| row.description.is_some());
         size(
-            tokens::MENU_WIDTH,
-            tokens::MENU_ROW_HEIGHT * rows + tokens::SPACE_1 * 2. + tokens::CARD_BORDERS,
+            if described {
+                tokens::MENU_DESCRIBED_WIDTH
+            } else {
+                tokens::MENU_WIDTH
+            },
+            height + tokens::SPACE_1 * 2. + tokens::CARD_BORDERS,
         )
     }
 
     fn menu_element(&self, menu: &Menu, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx).clone();
-        let wanted = Self::menu_size(menu.len());
+        let rows = self.menu_rows(menu);
+        let wanted = Self::menu_size(&rows);
         let selected = menu.selected;
-        let rows: Vec<_> = self
-            .menu_rows(menu)
+        let rows: Vec<_> = rows
             .into_iter()
             .enumerate()
-            .map(|(index, (label, group, icon))| {
+            .map(|(index, row)| {
                 let chosen = index == selected;
-                div()
+                let MenuRow {
+                    label,
+                    end,
+                    icon,
+                    description,
+                    divider,
+                    section,
+                } = row;
+                let height = if description.is_some() {
+                    tokens::MENU_DESCRIBED_ROW_HEIGHT
+                } else {
+                    tokens::MENU_ROW_HEIGHT
+                };
+                let words = div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().truncate().child(label.clone()))
+                    .children(description.map(|description| {
+                        div()
+                            .truncate()
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_faint)
+                            .child(description)
+                    }));
+                let item = div()
                     .id(("menu-row", index))
                     .role(gpui::Role::MenuItem)
-                    .aria_label(label.clone())
+                    .aria_label(label)
                     .aria_selected(chosen)
                     .flex_none()
-                    .h(tokens::MENU_ROW_HEIGHT)
+                    .h(height)
                     .px(tokens::SPACE_2)
                     .flex()
-                    .items_center()
+                    .when(description.is_some(), |row| {
+                        row.items_start().pt(tokens::SPACE_1 + tokens::HAIRLINE)
+                    })
+                    .when(description.is_none(), |row| row.items_center())
                     .gap(tokens::SPACE_2)
                     .rounded(tokens::RADIUS)
                     .cursor_pointer()
@@ -995,18 +1139,44 @@ impl EditorView {
                     .child(
                         svg()
                             .flex_none()
+                            .when(description.is_some(), |icon| icon.mt(tokens::HAIRLINE * 2.))
                             .path(icon)
                             .size(tokens::ICON_SIZE)
                             .text_color(if chosen { tokens.text } else { tokens.text_faint }),
                     )
-                    .child(div().flex_1().min_w_0().truncate().child(label))
-                    .children(group.map(|group| {
+                    .child(words)
+                    .children(end.map(|end| {
                         div()
                             .flex_none()
                             .text_size(tokens::TEXT_SMALL)
                             .text_color(tokens.text_faint)
-                            .child(group)
+                            .child(end)
+                    }));
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .when(divider, |group| {
+                        group.child(
+                            div()
+                                .flex_none()
+                                .my(tokens::SPACE_1)
+                                .h(tokens::HAIRLINE)
+                                .bg(tokens.divider),
+                        )
+                    })
+                    .children(section.map(|section| {
+                        div()
+                            .flex_none()
+                            .h(tokens::MENU_ROW_HEIGHT)
+                            .px(tokens::SPACE_2)
+                            .flex()
+                            .items_center()
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_faint)
+                            .child(section)
                     }))
+                    .child(item)
             })
             .collect();
         div()
@@ -1258,7 +1428,7 @@ impl EditorView {
                             .iter()
                             .any(|item| super::directives::ghost_kind(&item.action).is_some()) =>
                     {
-                        let wanted = Self::menu_size(menu.len());
+                        let wanted = Self::menu_size(&self.menu_rows(menu));
                         let (width, height) = (f32::from(wanted.width), f32::from(wanted.height));
                         let gap = f32::from(tokens::FLOAT_GAP);
                         let (x, _) = place::at_caret(rect(target), width, height, area, gap);

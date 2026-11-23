@@ -372,7 +372,13 @@ mod tests {
             .collect();
         assert_eq!(
             hidden,
-            ["::: front-matter", "::: main-matter", "::: keep", ":::", "::: back-matter"]
+            [
+                "::: front-matter",
+                "::: main-matter",
+                "::: keep",
+                ":::",
+                "::: back-matter"
+            ]
         );
     }
 
