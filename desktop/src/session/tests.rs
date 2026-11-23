@@ -1095,18 +1095,67 @@ fn an_added_page_goes_where_books_have_it_and_the_parts_follow() {
 }
 
 #[test]
-fn a_page_added_after_the_last_chapter_opens_the_back_matter() {
+fn a_page_added_after_the_last_chapter_writes_no_back_matter_the_book_lacks() {
     let folder = Folder::new("add-back");
     let dir = folder.0.join("project");
     STARTERS[0].create(&dir, Language::English).expect("creates");
     let mut session = Session::open(&dir).expect("opens");
+    let texts: Vec<String> = (session.book().iter())
+        .map(|id| session.buffer(*id).text().to_owned())
+        .collect();
     let id = session.add_page(page("about-the-author")).expect("adds");
     assert_eq!(session.book().last(), Some(&id));
-    assert!(
-        session
-            .buffer(id)
-            .text()
-            .starts_with("::: back-matter\n\n# About the author {-}")
-    );
-    assert_eq!(session.contents().matter.last(), Some(&parts::Matter::Back));
+    assert!(session.buffer(id).text().starts_with("# About the author {-}"));
+    let after: Vec<String> = (session.book().iter())
+        .map(|id| session.buffer(*id).text().to_owned())
+        .collect();
+    assert_eq!(after[..texts.len()], texts[..]);
+    assert_eq!(session.contents().matter.last(), Some(&parts::Matter::Main));
+}
+
+/// A project whose book is `files`, each a path under `manuscript/` and its text.
+fn book_of(name: &str, files: &[(&str, &str)]) -> (Folder, Session) {
+    let folder = Folder::new(name);
+    let chapters: String = files
+        .iter()
+        .map(|(file, _)| format!("  - manuscript/{file}\n"))
+        .collect();
+    folder.write("druck.yaml", &format!("title: T\nlang: en\nchapters:\n{chapters}"));
+    for (file, text) in files {
+        folder.write(&format!("manuscript/{file}"), text);
+    }
+    let session = Session::open(&folder.0).expect("opens");
+    (folder, session)
+}
+
+#[test]
+fn a_moved_chapter_passes_its_part_line_on_and_undo_brings_it_back() {
+    let files = [
+        ("preface.md", "::: front-matter\n\n# Preface {-}\n"),
+        ("one.md", "::: main-matter\n\n# One\n"),
+        ("two.md", "# Two\n"),
+    ];
+    let (_folder, mut session) = book_of("move-parts", &files);
+    let [_, one, two] = session.book()[..] else {
+        panic!("three chapters")
+    };
+    session.move_chapter(one, 3).expect("moves");
+    assert_eq!(session.buffer(one).text(), "# One\n");
+    assert_eq!(session.buffer(two).text(), "::: main-matter\n\n# Two\n");
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(session.buffer(one).text(), files[1].1);
+    assert_eq!(session.buffer(two).text(), files[2].1);
+}
+
+#[test]
+fn a_page_added_before_a_file_of_several_pages_keeps_its_part_line() {
+    let files = [
+        ("opening.md", "# Preface {-}\n\nText\n\n::: main-matter\n\n# One\n"),
+        ("two.md", "# Two\n"),
+    ];
+    let (_folder, mut session) = book_of("add-parts", &files);
+    let opening = session.book()[0];
+    session.add_page(page("dedication")).expect("adds");
+    assert_eq!(session.book()[1], opening);
+    assert_eq!(session.buffer(opening).text(), files[0].1);
 }
