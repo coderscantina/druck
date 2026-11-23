@@ -207,6 +207,33 @@ fn a_single_file_splits_in_view_and_joins_to_the_same_bytes() {
 }
 
 #[test]
+fn a_section_ending_without_a_line_break_keeps_the_next_heading_on_its_own_line() {
+    let folder = Folder::new("section-end");
+    let text = "# One\n\nText.\n\n# Two\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let mut session = Session::open(&path).expect("opens");
+    let (one, two) = (session.book()[0], session.book()[1]);
+    let end = session.buffer(one).len();
+    typing(&mut session, one, end, "\nAdded.");
+    assert_eq!(session.save(), Ok(1));
+    assert_eq!(folder.read("whole.md"), "# One\n\nText.\n\n\nAdded.\n# Two\n\nMore.\n");
+    assert_eq!(titles(&session.contents().book), ["One", "Two"]);
+
+    let at = folder.read("whole.md").find("# Two").expect("in the file");
+    assert_eq!(session.locate(&path, at), Some((two, 0)));
+    assert_eq!(session.file_position(two, 0), Some((path.clone(), at)));
+    assert_eq!(session.place_in_file(&path, at), Some((two, 0)));
+
+    let one = session.book()[0];
+    let end = session.buffer(one).len();
+    session
+        .edit_chapter(one, vec![Edit::new(end - 1..end, "")], EditKind::Deleting)
+        .expect("edit");
+    session.save().expect("saves");
+    assert_eq!(folder.read("whole.md"), "# One\n\nText.\n\n\nAdded.\n# Two\n\nMore.\n");
+}
+
+#[test]
 fn a_change_to_a_single_file_names_the_section_it_is_in() {
     let folder = Folder::new("changed-section");
     let text = "---\ntitle: Whole\n---\n\n# One\n\nText.\n\n# Two\n\nMore.\n";

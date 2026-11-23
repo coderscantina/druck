@@ -84,6 +84,13 @@ impl Joined {
     }
 }
 
+/// Whether a single file's section ends inside a line, as after typing past its last line break or deleting it. The
+/// join puts a line break between it and the next section, so that section's first line, often its heading, stays a
+/// line of its own.
+pub(super) fn ends_open(section: &str) -> bool {
+    !section.is_empty() && !section.ends_with('\n')
+}
+
 /// An unchanging copy of the document for a layout on another thread. A single file's text is the file. A project's is
 /// its chapters with a blank line between them, the same rule as the engine's, with a chapter's byte order mark left
 /// in. Its pages' source positions name a chapter file.
@@ -97,7 +104,8 @@ pub struct Joined {
 
 impl Joined {
     /// Chapters in the book's order, each with its file's path and text. A project's go one after another with a blank
-    /// line between them, the engine's rule; a single file's sections go one after another as they are.
+    /// line between them, the engine's rule; a single file's sections go one after another as they are, with a line
+    /// break after one that ends without one, see [`ends_open`].
     pub(super) fn join<'a>(
         chapters: impl IntoIterator<Item = (ChapterId, &'a Path, &'a str)>,
         project: bool,
@@ -105,7 +113,12 @@ impl Joined {
     ) -> Self {
         let mut text = String::new();
         let mut map = ChapterMap::default();
+        let mut open = false;
         for (id, path, chapter) in chapters {
+            if open {
+                text.push('\n');
+            }
+            open = !project && ends_open(chapter);
             let start = text.len();
             text.push_str(chapter);
             map.push(id, path.to_owned(), start..text.len());

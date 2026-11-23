@@ -27,6 +27,7 @@ pub(crate) mod yaml;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -944,6 +945,19 @@ impl Session {
         Joined::join(chapters, matches!(self.kind, Kind::Project { .. }), self.revision())
     }
 
+    /// Each section of a single file with its part of the file's text, placed as [`Joined::join`] places them.
+    fn section_ranges(&self) -> impl Iterator<Item = (ChapterId, Range<usize>)> + '_ {
+        let mut end = 0;
+        let mut open = false;
+        self.book.iter().map(move |id| {
+            let text = self.known(*id).buffer.text();
+            let start = end + usize::from(open);
+            open = joined::ends_open(text);
+            end = start + text.len();
+            (*id, start..end)
+        })
+    }
+
     /// The chapter and its offset for a place in a file, as a source map's position says it.
     pub fn locate(&self, file: &Path, offset: usize) -> Option<(ChapterId, usize)> {
         match &self.kind {
@@ -951,15 +965,11 @@ impl Session {
                 if path != file {
                     return None;
                 }
-                let mut start = 0;
-                for id in &self.book {
-                    let length = self.known(*id).buffer.len();
-                    if offset < start + length || Some(id) == self.book.last() {
-                        return Some((*id, (offset - start).min(length)));
-                    }
-                    start += length;
-                }
-                None
+                let (id, range) = self
+                    .section_ranges()
+                    .take_while(|(_, range)| range.start <= offset)
+                    .last()?;
+                Some((id, (offset - range.start).min(range.len())))
             }
             Kind::Project { .. } => {
                 let id = self.book.iter().find(|id| self.known(**id).path == file)?;
@@ -972,13 +982,7 @@ impl Session {
     pub fn file_position(&self, id: ChapterId, offset: usize) -> Option<(PathBuf, usize)> {
         let chapter = self.chapters.get(&id).filter(|chapter| chapter.group == Group::Book)?;
         let before: usize = match self.kind {
-            Kind::Single { .. } => {
-                let at = self.book.iter().position(|other| *other == id)?;
-                self.book[..at]
-                    .iter()
-                    .map(|other| self.known(*other).buffer.len())
-                    .sum()
-            }
+            Kind::Single { .. } => self.section_ranges().find(|(other, _)| *other == id)?.1.start,
             Kind::Project { .. } => 0,
         };
         Some((chapter.path.clone(), before + offset))
