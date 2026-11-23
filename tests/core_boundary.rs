@@ -29,7 +29,11 @@ fn the_core_neither_touches_the_filesystem_nor_prints() {
             }
         }
     }
-    assert!(found.is_empty(), "the core must go through the resolver and must not print:\n{}", found.join("\n"));
+    assert!(
+        found.is_empty(),
+        "the core must go through the resolver and must not print:\n{}",
+        found.join("\n")
+    );
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -48,7 +52,11 @@ fn test_modules(file: &Path) -> Vec<PathBuf> {
     let text = fs::read_to_string(file).expect("source file");
     let stem = file.file_stem().and_then(|stem| stem.to_str()).expect("file name");
     let parent = file.parent().expect("parent");
-    let dir = if matches!(stem, "lib" | "main" | "mod") { parent.to_path_buf() } else { parent.join(stem) };
+    let dir = if matches!(stem, "lib" | "main" | "mod") {
+        parent.to_path_buf()
+    } else {
+        parent.join(stem)
+    };
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
     lines
         .windows(2)

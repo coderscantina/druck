@@ -128,9 +128,19 @@ fn a_hundred_pages_render_within_the_time_and_memory_limits() {
     });
     times.sort();
     let median = times[RUNS / 2];
-    eprintln!("{pages} pages: median {median:?} of {times:?}, peak heap {} MB", peak / (1024 * 1024));
+    eprintln!(
+        "{pages} pages: median {median:?} of {times:?}, peak heap {} MB",
+        peak / (1024 * 1024)
+    );
 
-    assert!(pages >= MIN_PAGES, "the input has {pages} pages, fewer than {MIN_PAGES}");
+    assert!(
+        pages >= MIN_PAGES,
+        "the input has {pages} pages, fewer than {MIN_PAGES}"
+    );
     assert!(median < MAX_TIME, "{pages} pages took {median:?}, over {MAX_TIME:?}");
-    assert!(peak < MAX_HEAP, "{pages} pages used {} MB of heap, over 150 MB", peak / (1024 * 1024));
+    assert!(
+        peak < MAX_HEAP,
+        "{pages} pages used {} MB of heap, over 150 MB",
+        peak / (1024 * 1024)
+    );
 }
