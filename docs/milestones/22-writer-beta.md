@@ -2,7 +2,7 @@
 
 ## Goal and prerequisites
 
-The gate for the first public release, on macOS. Requires milestones 18 to 21 and 24 to 27, though a release may follow any of 24 to 27 if the owner says so. Publishing needs a separate request.
+The gate for the first public release, on macOS. Requires milestones 18 to 21 and 24 to 28, though a release may follow any of 24 to 27 if the owner says so. Since [the beta polish decision](../DECISIONS.md#2026-11-23-beta-polish) the first beta is for the owner only, and the open checks of 25 and 26 are part of this gate. Publishing needs a separate request.
 
 ## Deliverables
 

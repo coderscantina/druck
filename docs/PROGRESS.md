@@ -52,7 +52,8 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
 - [x] 27: Typesetter. Built and checked with real turns on both CLIs on `agentic-beta`, on a copy of the owner's book with the list cut to 20 of its 243 warnings, see the [note](#milestone-27-note).
-- [ ] 22: Writer beta, the gate for a first public release, after 24 to 27.
+- [ ] 28: Beta polish, in three waves. Wave 1, the defects, in progress.
+- [ ] 22: Writer beta, the gate for a first public release, after 24 to 28.
 - [ ] 23: Desktop 1.0, replacing 17.
 
 ### Milestone 16 criteria
@@ -98,6 +99,10 @@ Everything only a person can do or decide, most important first. Run the app wit
 14. [ ] **Smaller decisions:** whether to migrate the book to a `druck.yaml`, and whether `API_VERSION` and a CalVer package version are enough once an outside client exists.
 
 ## Resume note
+
+### Beta polish note
+
+On 2026-11-23 the owner settled the beta in an interview, see [the decision](DECISIONS.md#2026-11-23-beta-polish), and milestone [28](milestones/28-beta-polish.md) holds the work. Wave 1, every listed defect, runs in four worktrees: engine, writing surface, agent and typesetter, shell. Next: merge wave 1, push `main` so CI runs, then wave 2.
 
 ### Special pages note
 

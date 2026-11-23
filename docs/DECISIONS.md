@@ -2103,3 +2103,30 @@ The owner found the special blocks too obtrusive for a minimal writing experienc
 - **A title page added from the gallery writes book details,** a title and `title-page: true` where the theme sets none, never template text, so there is one title page, the engine's.
 
 Source: [made pages](../desktop/src/editor/made.rs), [scene breaks](../desktop/src/editor/scene.rs), [the part rule and placement](../desktop/src/session/parts.rs), [the title page](../desktop/src/sidebar/title_page.rs), [splitting](../desktop/src/session/outline.rs). Verified on 2026-11-23: `cargo test -p druck-desktop` (922 passed), `cargo clippy -p druck-desktop --all-targets --no-deps -- -D warnings`, and `cargo fmt --all --check`. In debug builds on copies of `samples/book.md` and the novel starter, by keys sent to the process: the Binder's ten rows with roles, icons, and printed numbers; the title page typed into and written to the details; the contents page alone and in the text with live numbers; the new page line; the block menu's three rows; the grouped slash menu; the scene break's rule; the gallery adding an epigraph; a move in the novel project rewriting `::: main-matter` and `::: back-matter`. Dark and light, English and German, and 720 by 480 were captured by the two passes. Not verified: a real mouse and a drag in the Binder, the bibliography page on screen (no sample cites works), and the made-page gutter icon in a real pointer path.
+
+## 2026-11-23: Beta polish
+
+Settled with the owner in an interview on what a finished, polished beta needs. The work is milestone [28](milestones/28-beta-polish.md), run in three waves before the gate of [22](milestones/22-writer-beta.md).
+
+- **The beta is for the owner only,** on macOS, with everything built in 18 to 27. The open checks of 25 and 26 move into gate 22. Invitations come later.
+- **Milestone 10 runs in the same push.** The owner runs the Windows offline checks, veraPDF, and epubcheck by hand, and reviews the samples.
+- **Every listed defect is fixed,** the engine follow-ups included, features too. Cutting to the main writing path was recommended and declined.
+- **A full updater, Sparkle 2,** chosen over a notice that reads GitHub releases and over an updater of our own. It checks once a day and asks before it installs. The feed is the GitHub releases of `coderscantina/druck`, and CI signs, notarizes, and signs the appcast from repository secrets.
+- **The agent uses whatever CLI login the owner has.** The docs name only an API key until Anthropic and OpenAI answer in writing.
+- **Errors stay local:** a log in the app folder and a Help item that opens a prefilled issue. A crash reporting service was declined.
+- **Outside changes are undoable:** `Cmd+Z` after an agent's or another app's change undoes it as one step. This replaces the no-op with a note in the footer.
+- **Theme values in the typesetter** are offered when they clear more warnings than they cause, with both counts on the entry. Other fixes keep the strict rule.
+- **Editing passes keep edits approved in advance,** since the author started the pass and every edit is a hunk to review.
+- **Consistency reads the whole book first** in one read-only turn, then applies the rules chapter by chapter. It costs one long turn per pass.
+- **The crate exposes the contents depth and made pages' titles** additively, and unifies its errors on `Failure`, breaking but free before publishing.
+- **Codex stays** with its gaps fixed and a warning outside the tested CLI versions.
+- **Local history follows moves** made in the app, and a file that appears with a vanished file's last text takes over its history. A hidden id in each file was declined.
+- **Index marks hide** until the caret is on their line.
+- **German:** infinitives for commands and labels, "du" where the app speaks to the author.
+- **Spelling per paragraph language,** with `druck-words.txt` kept.
+- **Margin notes in two columns** go to the margin nearest their column.
+- **`{build-date}` uses local time,** and `meta.reading-speed` overrides the language's reading speed.
+- **The icon stays the placeholder** while the beta is the owner's.
+- **The soak runs on a migrated copy** of the owner's book with a `druck.yaml`. The original is the owner's call.
+
+Unresolved: the vendors' answers on subscription logins. The repository secrets for signing, which only the owner can add.
