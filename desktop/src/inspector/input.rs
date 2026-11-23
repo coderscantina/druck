@@ -361,6 +361,11 @@ impl TextInput {
         cx.notify();
     }
 
+    /// Whether the field's own history has a step to undo, or to redo.
+    pub fn has_history(&self, undo: bool) -> bool {
+        self.buffer.has_step(undo)
+    }
+
     /// Whether an input method has text in progress.
     pub fn is_composing(&self) -> bool {
         self.marked.is_some()

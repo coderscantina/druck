@@ -309,6 +309,15 @@ impl Buffer {
         stack.last().is_some_and(|group| group.moved > clock)
     }
 
+    /// Whether there is a step to undo, or to redo.
+    pub fn has_step(&self, undo: bool) -> bool {
+        if undo {
+            !self.undo.is_empty()
+        } else {
+            !self.redo.is_empty()
+        }
+    }
+
     /// Whether the next undo meets a change from outside.
     pub fn undo_is_outside_change(&self) -> bool {
         self.undo.last().is_some_and(|group| group.kind == EditKind::External)

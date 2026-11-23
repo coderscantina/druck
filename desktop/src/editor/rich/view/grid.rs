@@ -556,14 +556,18 @@ impl EditorView {
         }
     }
 
-    /// Cmd+Z in the field undoes its own typing first, and then, with nothing typed, the last change to the table, in
-    /// the session's order. Cmd+Shift+Z redoes the same way.
+    /// Cmd+Z and Cmd+Shift+Z in the field go through its own history first, and then, with nothing left there and the
+    /// cell as the table has it, to the table's changes in the session's order.
     fn grid_history(&mut self, undo: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(float) = self.grid_float() else {
             return;
         };
         let (start, place) = (float.start, float.place);
-        let typed = float.input.read(cx).text().to_owned();
+        let field = float.input.read(cx);
+        if field.has_history(undo) {
+            return;
+        }
+        let typed = field.text().to_owned();
         let unchanged = self.grid_at(start).is_some_and(|grid| match place {
             Place::Caption => grid.caption.text == typed,
             Place::Cell(row, cell) => (grid.rows.get(row))
