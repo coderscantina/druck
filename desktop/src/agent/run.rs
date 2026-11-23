@@ -167,12 +167,17 @@ impl AgentView {
     }
 
     /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended. A run of the
-    /// typesetter is left to the Proof panel while Publish shows it, so the run shows once.
+    /// typesetter the Proof panel shows is left to it.
     pub(super) fn pass_line(&self, cx: &App) -> Option<String> {
-        let in_panel = self.mode == Mode::Publish && self.inspector.read(cx).active() == Tab::Proof;
         (self.pass_run.as_ref().map(PassRun::progress))
-            .or_else(|| self.fix_line().filter(|_| !in_panel))
+            .or_else(|| self.fix_line().filter(|_| !self.fix_in_panel(cx)))
             .or_else(|| self.pass_result.clone())
+    }
+
+    /// Whether a typesetter run shows in the Proof panel, with its Stop, because Publish has that tab open. The window's
+    /// foot then says nothing of it, so the run shows once.
+    pub(super) fn fix_in_panel(&self, cx: &App) -> bool {
+        self.fixing.is_running() && self.mode == Mode::Publish && self.inspector.read(cx).active() == Tab::Proof
     }
 
     /// Starts a pass, once the CLI has been looked for. Nothing else starts one.
