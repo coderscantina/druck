@@ -236,29 +236,48 @@ impl EditorView {
 
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
-            if self.session.undo_is_outside_file_change() {
-                self.update_session(Session::undo_outside_file_change, window, cx);
-                cx.emit(ExternalUndo);
-                return;
-            }
-            let buffer = self.session.active_buffer_mut();
-            let outside = buffer.undo_is_outside_change();
-            let restored = buffer.undo();
-            if outside && restored.is_some() {
-                cx.emit(ExternalUndo);
-            }
-            self.restore(restored, window, cx);
+            self.undo_once(window, cx);
         }
     }
 
     pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
-            if self.session.redo_is_outside_file_change() {
-                self.update_session(Session::redo_outside_file_change, window, cx);
-                return;
+            self.redo_once(window, cx);
+        }
+    }
+
+    /// Undo from any surface of the open text, in the session's order, see [`Session::undo`]. Returns whether it was
+    /// a step of the open chapter's own, which leaves the galley on the same text.
+    pub(super) fn undo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.store_view();
+        let before = (self.session.active(), self.session.active_buffer().revision());
+        match self.session.undo() {
+            Some(Undone::File) => {
+                self.took_session_change(before, window, cx);
+                cx.emit(ExternalUndo);
+                false
             }
-            let restored = self.session.active_buffer_mut().redo();
-            self.restore(restored, window, cx);
+            Some(Undone::Outside(restored)) => {
+                cx.emit(ExternalUndo);
+                self.restore(Some(restored), window, cx);
+                true
+            }
+            Some(Undone::Own(restored)) => {
+                self.restore(Some(restored), window, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Redo from any surface of the open text, in the order of [`Self::undo_once`].
+    pub(super) fn redo_once(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.store_view();
+        let before = (self.session.active(), self.session.active_buffer().revision());
+        match self.session.redo() {
+            Some(Undone::File) => self.took_session_change(before, window, cx),
+            Some(Undone::Own(restored) | Undone::Outside(restored)) => self.restore(Some(restored), window, cx),
+            None => {}
         }
     }
 

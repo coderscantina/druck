@@ -570,10 +570,14 @@ impl EditorView {
                 .is_some_and(|old| old.text == typed),
         });
         if unchanged {
-            let restored = self.session.active_buffer_mut().undo();
-            self.restore(restored, window, cx);
-            self.autoscroll = false;
-            self.open_table_place(start, place, window, cx);
+            if self.undo_once(window, cx) {
+                self.autoscroll = false;
+                self.open_table_place(start, place, window, cx);
+            } else {
+                // An outside change taken back can move the table, so the caret goes back to the text.
+                self.float = Float::None;
+                window.focus(&self.focus, cx);
+            }
             cx.stop_propagation();
         }
     }

@@ -11,7 +11,7 @@ use std::time::Instant;
 use super::joined::ChapterMap;
 use super::{Chapter, ChapterId, Group, Read, Session};
 use crate::persist::merge::{edits_between, map_offset};
-use crate::source::buffer::EditError;
+use crate::source::buffer::{EditError, Restored};
 use crate::source::{Blocks, Buffer, Edit, EditKind, Selection};
 
 /// How many outside changes to a single file stay undoable. Each holds the text of the sections it replaced.
@@ -28,6 +28,17 @@ pub(super) struct Turn {
     there: Vec<ChapterId>,
     /// The sections of `there` that are not in `here`, kept whole with their histories.
     away: Vec<(ChapterId, Chapter)>,
+}
+
+/// What one undo or redo changed.
+#[derive(Debug)]
+pub enum Undone {
+    /// A change from outside to a single file, across its sections. The caret's section may be another one now.
+    File,
+    /// A step of the caret's section.
+    Own(Restored),
+    /// A change from outside to the caret's chapter, its own step.
+    Outside(Restored),
 }
 
 /// The outside changes of a single file that undo and redo can reach.
@@ -99,6 +110,30 @@ impl Session {
         self.set_revision_above(before);
         self.refresh_details();
         Ok(())
+    }
+
+    /// Undo as every surface of the caret's text does it, the galley, its notes, and a table's cells: a change from
+    /// outside to a single file first, unless the caret section's own step moved after it, and that step otherwise.
+    pub fn undo(&mut self) -> Option<Undone> {
+        if self.undo_outside_file_change() {
+            return Some(Undone::File);
+        }
+        let buffer = self.active_buffer_mut();
+        let outside = buffer.undo_is_outside_change();
+        let restored = buffer.undo()?;
+        Some(if outside {
+            Undone::Outside(restored)
+        } else {
+            Undone::Own(restored)
+        })
+    }
+
+    /// Redo in the same order as [`Self::undo`]. A redone change from outside to one buffer is [`Undone::Own`].
+    pub fn redo(&mut self) -> Option<Undone> {
+        if self.redo_outside_file_change() {
+            return Some(Undone::File);
+        }
+        self.active_buffer_mut().redo().map(Undone::Own)
     }
 
     /// Whether the next undo takes back a change from outside to a single file: nothing typed since in its sections,

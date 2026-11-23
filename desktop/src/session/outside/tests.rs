@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::persist::merge::edits_between;
-use crate::session::Session;
+use crate::session::{Session, Undone};
 use crate::source::{Edit, EditKind};
 
 const TEXT: &str = "# One\n\nFirst.\n\n# Two\n\nSecond.\n\n# Three\n\nThird.\n";
@@ -52,17 +52,13 @@ impl Single {
             .unwrap();
     }
 
-    /// Undo as the galley does it.
+    /// Undo as the galley, its notes, and a table's cells do it.
     fn undo(&mut self) {
-        if !self.session.undo_outside_file_change() {
-            self.session.active_buffer_mut().undo();
-        }
+        self.session.undo();
     }
 
     fn redo(&mut self) {
-        if !self.session.redo_outside_file_change() {
-            self.session.active_buffer_mut().redo();
-        }
+        self.session.redo();
     }
 }
 
@@ -231,6 +227,23 @@ fn undo_takes_typing_after_the_change_then_the_change_then_typing_before_it() {
     assert_eq!(single.text(), TEXT.replace("Third.", "Third, A."));
     single.undo();
     assert_eq!(single.text(), TEXT);
+}
+
+#[test]
+fn every_surface_undoes_the_files_outside_change_before_typing_from_before_it() {
+    let mut single = Single::new("surfaces");
+    single.type_in(0, "First.", "First, mine.");
+    let mine = single.text();
+    let theirs = mine.replace("Third.", "Third, theirs.");
+    single.outside(&theirs);
+
+    assert!(matches!(single.session.undo(), Some(Undone::File)));
+    assert_eq!(single.text(), mine);
+    assert!(matches!(single.session.undo(), Some(Undone::Own(_))));
+    assert_eq!(single.text(), TEXT);
+    assert!(matches!(single.session.redo(), Some(Undone::Own(_))));
+    assert!(matches!(single.session.redo(), Some(Undone::File)));
+    assert_eq!(single.text(), theirs);
 }
 
 #[test]

@@ -43,6 +43,7 @@ pub use self::joined::{Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
 pub use self::outline::heading_text;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
+pub use self::outside::Undone;
 use self::strings::Key;
 pub use self::templates::{PAGES, Page, STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;

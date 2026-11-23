@@ -48,7 +48,7 @@ use gpui::{
 use druck::editor::statistics::Statistics;
 
 use crate::preview::BookType;
-use crate::session::{Apart, ChapterId, ChapterView, Session};
+use crate::session::{Apart, ChapterId, ChapterView, Session, Undone};
 use crate::settings::{self, LineLength};
 use crate::source::blocks::BlockChange;
 use crate::source::inline::{inline_spans, line_markers};
@@ -527,13 +527,19 @@ impl EditorView {
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         let result = change(&mut self.session);
+        self.took_session_change(before, window, cx);
+        result
+    }
+
+    /// Shows what a change to the session did, after [`Self::store_view`], given the active chapter and its revision
+    /// before the change.
+    fn took_session_change(&mut self, before: (ChapterId, u64), window: &mut Window, cx: &mut Context<Self>) {
         if before != (self.session.active(), self.session.active_buffer().revision()) {
             self.adopt_active(window, cx);
         }
         self.refresh_placeholder_values(cx);
         cx.emit(SessionChanged);
         cx.notify();
-        result
     }
 
     /// Edits a chapter from a field outside the text, such as a proof slip, as typing does: [`TextChanged`] goes out, so the
@@ -979,13 +985,11 @@ impl EditorView {
     }
 
     fn undo_from_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let restored = self.session.active_buffer_mut().undo();
-        self.restore(restored, window, cx);
+        self.undo_once(window, cx);
     }
 
     fn redo_from_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let restored = self.session.active_buffer_mut().redo();
-        self.restore(restored, window, cx);
+        self.redo_once(window, cx);
     }
 
     #[cfg(any(debug_assertions, feature = "measure"))]
