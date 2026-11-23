@@ -154,14 +154,21 @@ impl PageGeometry {
         }
     }
 
-    /// The left edge of the margin note column on the page at `index`: `gap` beyond the outer edge of
-    /// the prose, which is on the right unless margins mirror on this page.
-    pub fn note_column(&self, index: usize, notes: &MarginNotes) -> f64 {
-        let left = self.left_margin(index).0;
+    /// The side of the outer margin on the page at `index`: the right unless margins mirror on this page.
+    pub fn outer_side(&self, index: usize) -> Side {
         if index.is_multiple_of(2) || !self.mirror {
-            left + self.prose_width.0 + notes.gap.0
+            Side::Right
         } else {
-            left + self.prose_shift(index) - notes.gap.0 - notes.width.0
+            Side::Left
+        }
+    }
+
+    /// The left edge of the margin note column on `side` of the page at `index`, `gap` beyond the prose.
+    pub fn note_column(&self, index: usize, notes: &MarginNotes, side: Side) -> f64 {
+        let prose = self.left_margin(index).0 + self.prose_shift(index);
+        match side {
+            Side::Left => prose - notes.gap.0 - notes.width.0,
+            Side::Right => prose + self.prose_width.0 + notes.gap.0,
         }
     }
 
@@ -399,6 +406,13 @@ pub struct Footnotes {
     pub separator_thickness: Pt,
     pub separator_color: Color,
     pub spacing: Pt,
+}
+
+/// A side of the prose on a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
 }
 
 /// The note column beside the prose, see [`PageGeometry::note_column`].

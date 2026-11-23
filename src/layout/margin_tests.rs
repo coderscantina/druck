@@ -295,7 +295,7 @@ fn the_note_column_is_on_the_outer_side_and_fixed_without_mirroring() {
 }
 
 #[test]
-fn notes_from_both_columns_go_to_the_outer_margin_beside_their_lines() {
+fn notes_from_each_column_go_to_the_margin_beside_it() {
     let config = default_config();
     let body = format!(
         "::: columns\nLeft.[^a] {PROSE} {PROSE}\n\nRight.[^b] {PROSE} {PROSE}\n:::\n\n[^a]: {{-}} From the first.\n\n\
@@ -306,13 +306,34 @@ fn notes_from_both_columns_go_to_the_outer_margin_beside_their_lines() {
     let [first, second] = output.asides.as_slice() else {
         panic!("two notes")
     };
-    assert!(close(first.rect.x.0, second.rect.x.0));
+    let geometry = &config.page;
+    let notes = &config.margin_notes;
+    // On a right-hand page the inner margin is on the left.
+    assert!(close(
+        first.rect.x.0,
+        geometry.margin_inner.0 - notes.gap.0 - notes.width.0
+    ));
+    assert!(close(
+        second.rect.x.0,
+        geometry.margin_inner.0 + geometry.prose_width.0 + notes.gap.0
+    ));
+    // In separate margins neither note pushes the other from its line.
     assert!(close(first_baseline(page, first), baseline_of(page, "Left.")));
-    // The second note is beside its line unless the first pushes it down.
-    let wanted = baseline_of(page, "Right.");
-    let below = first.rect.y.0 + first.rect.height.0 + config.margin_notes.spacing.0;
-    let offset = first_baseline(page, first) - first.rect.y.0;
-    assert!(close(first_baseline(page, second), wanted.max(below + offset)));
+    assert!(close(first_baseline(page, second), baseline_of(page, "Right.")));
+}
+
+#[test]
+fn notes_beside_columns_need_room_in_the_inner_margin() {
+    let config = config(json!({"version": 1, "page": {"margins": {"inner": "15mm"}}}));
+    let columns = "::: columns\nText.[^a]\n:::\n\n[^a]: {-} Note.\n";
+    let errors = try_render(&config, columns, &[]).expect_err("no inner room");
+    assert!(
+        errors[0].message.contains("page.margins.inner"),
+        "{}",
+        errors[0].message
+    );
+    // Without a columns section the notes stay in the outer margin.
+    assert!(try_render(&config, "Text.[^a]\n\n[^a]: {-} Note.\n", &[]).is_ok());
 }
 
 #[test]

@@ -35,7 +35,7 @@ use std::ops::{Bound, Range};
 use super::callout::CalloutBox;
 use super::{Break, Flaw, FlowLine, Line, translate};
 use crate::cancel::{Cancel, CheckPoint};
-use crate::config::resolved::{Config, PageGeometry};
+use crate::config::resolved::{Config, PageGeometry, Side};
 use crate::config::source::InputSource;
 use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
@@ -1225,6 +1225,9 @@ fn render(
     let mut asides = Vec::with_capacity(margin.notes.len());
     // Where each body line's top lands on its page, for the notes beside it.
     let mut tops = vec![0.0; if margin.notes.is_empty() { 0 } else { body.len() }];
+    // The column each body line is set in, whose notes stand in the margin beside it; `None` across the prose,
+    // whose notes stand in the outer margin.
+    let mut sides = vec![None; tops.len()];
     let mut referenced = margin.references.iter().enumerate().peekable();
     let mut issues = Vec::new();
     for plan in plans {
@@ -1351,6 +1354,12 @@ fn render(
                             0.0
                         };
                         let x = (left + index as f64 * second_column, shift);
+                        let side = if index == 0 { Side::Left } else { Side::Right };
+                        for line in lines.clone() {
+                            if let Some(slot) = sides.get_mut(line) {
+                                *slot = Some(side);
+                            }
+                        }
                         stack(
                             &mut items,
                             body,
@@ -1405,44 +1414,57 @@ fn render(
         // The notes beside this page's lines, each wanting its first baseline on its reference's.
         let mut wanted = Vec::new();
         while let Some((note, &(line, offset))) = referenced.next_if(|(_, (line, _))| plan.lines.contains(line)) {
-            wanted.push((note, tops[line] + offset));
+            let side = sides[line].unwrap_or_else(|| geometry.outer_side(index));
+            wanted.push((note, tops[line] + offset, side));
         }
-        let column = geometry.note_column(index, &config.margin_notes);
-        for (note, top, baseline) in stack_notes(
-            &wanted,
-            &margin.notes,
-            (top, top + height),
-            config.margin_notes.spacing.0,
-        ) {
-            let placed = &mut margin.notes[note];
-            let lines = 0..placed.lines.len();
-            stack(
-                &mut items,
-                &mut placed.lines,
-                &[],
-                lines,
-                (column, 0.0),
-                top,
-                0.0,
-                0,
-                &mut [],
-            );
-            asides.push(Aside {
-                page: index,
-                rect: Rect {
-                    x: Pt(column),
-                    y: Pt(top),
-                    width: config.margin_notes.width,
-                    height: Pt(placed.height),
-                },
-                note: placed.kind,
-                reference: Position {
+        let first_aside = asides.len();
+        for side in [Side::Left, Side::Right] {
+            let beside: Vec<(usize, f64)> = wanted
+                .iter()
+                .filter(|wanted| wanted.2 == side)
+                .map(|&(note, baseline, _)| (note, baseline))
+                .collect();
+            if beside.is_empty() {
+                continue;
+            }
+            let column = geometry.note_column(index, &config.margin_notes, side);
+            for (note, top, baseline) in stack_notes(
+                &beside,
+                &margin.notes,
+                (top, top + height),
+                config.margin_notes.spacing.0,
+            ) {
+                let placed = &mut margin.notes[note];
+                let lines = 0..placed.lines.len();
+                stack(
+                    &mut items,
+                    &mut placed.lines,
+                    &[],
+                    lines,
+                    (column, 0.0),
+                    top,
+                    0.0,
+                    0,
+                    &mut [],
+                );
+                asides.push(Aside {
                     page: index,
-                    x: Pt(left + shift),
-                    y: Pt(baseline),
-                },
-            });
+                    rect: Rect {
+                        x: Pt(column),
+                        y: Pt(top),
+                        width: config.margin_notes.width,
+                        height: Pt(placed.height),
+                    },
+                    note: placed.kind,
+                    reference: Position {
+                        page: index,
+                        x: Pt(left + shift),
+                        y: Pt(baseline),
+                    },
+                });
+            }
         }
+        asides[first_aside..].sort_by(|a, b| a.rect.y.0.total_cmp(&b.rect.y.0));
         pages.push(Page {
             width: geometry.width,
             height: geometry.height,

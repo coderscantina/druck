@@ -402,14 +402,14 @@ A note that continues on the next page starts there with its number and the `con
 | `margin-notes.align` | The alignment of note text, instead of the style's: `left`, `right`, `center`, or `justify`. Default `left`, since narrow columns justify poorly. |
 | `margin-notes.sidenotes` | `true` sets numbered footnotes in the column instead of at the foot of the page. Default `false`. |
 
-The column is measured from the outer edge of the prose: on the right of odd pages and on the left of even pages, or always on the right with `page.margins.mirror: false`. With `page.text-width` narrower than the frame, the column falls into the free part of the frame, which gives a layout in the style of Tufte's books:
+The column is measured from the outer edge of the prose: on the right of odd pages and on the left of even pages, or always on the right with `page.margins.mirror: false`. In a two-column section, notes from the column next to the inner margin stand in that margin, measured the same way from the inner edge of the prose. With `page.text-width` narrower than the frame, the column falls into the free part of the frame, which gives a layout in the style of Tufte's books:
 
 ```json
 "page": { "margins": { "inner": "22mm", "outer": "16mm" }, "text-width": "112mm", "wide": [] },
 "margin-notes": { "width": "46mm", "gap": "6mm", "sidenotes": true }
 ```
 
-Two configurations are errors, reported only for documents that have margin notes, or footnotes with `sidenotes`: a column that runs off the page, and a column that reaches into the frame while `page.wide` lists block kinds, since wide blocks would run under the notes. The default theme sets a 20mm column 3mm from the prose, which fits the default margins. Sidenotes start with their raised number, as footnotes do. Lists, quotations, and code in notes are scaled like those in footnotes.
+Three configurations are errors, reported only for documents that have margin notes, or footnotes with `sidenotes`: a column that runs off the page, a column and its gap wider than `page.margins.inner` in a document with a columns section, and a column that reaches into the frame while `page.wide` lists block kinds, since wide blocks would run under the notes. The default theme sets a 20mm column 3mm from the prose, which fits the default margins. Sidenotes start with their raised number, as footnotes do. Lists, quotations, and code in notes are scaled like those in footnotes.
 
 ## Placement
 
