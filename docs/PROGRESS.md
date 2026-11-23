@@ -52,7 +52,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
 - [x] 27: Typesetter. Built and checked with real turns on both CLIs on `agentic-beta`, on a copy of the owner's book with the list cut to 20 of its 243 warnings, see the [note](#milestone-27-note).
-- [ ] 28: Beta polish, in three waves. Waves 1 and 2 built on `beta-polish`; wave 3, the gates, waits on the owner's secrets and hand checks.
+- [ ] 28: Beta polish. All three waves built on `beta-polish` and reviewed; waits on the soak and the owner's hand tests.
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 28.
 - [ ] 23: Desktop 1.0, replacing 17.
 
@@ -102,19 +102,24 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ### Beta polish note
 
-On 2026-11-23 the owner settled the beta in an interview, see [the decision](DECISIONS.md#2026-11-23-beta-polish), and milestone [28](milestones/28-beta-polish.md) holds the work. Wave 1, every listed defect, is built on branch `beta-polish` from five worktrees (engine layout, engine pipeline, writing surface, agent and typesetter, shell), merged, with the choices in the four "Beta polish" decisions of 2026-11-23. Not merged into `main`.
+On 2026-11-23 the owner settled the beta in an interview, see [the decision](DECISIONS.md#2026-11-23-beta-polish), and milestone [28](milestones/28-beta-polish.md) holds the work. All three waves are built on branch `beta-polish`, pushed, not merged into `main`. The choices are in the "Beta polish" decisions of 2026-11-23: engine layout, engine pipeline, writing surface, agent and typesetter, shell, updates, error log, wave 2 follow-ups, release acceptance, and accessibility and surfaces.
 
-Checks on the merged branch: `cargo test -p druck` (467 lib tests and all integration suites passed), `cargo test -p druck-desktop` (944 passed), `cargo clippy --workspace --all-targets --no-deps -- -D warnings` and `cargo fmt --all --check` clean. Real turns: consistency over a demo book and Fix the proof with `claude` 2.1.330 on `haiku` (about $0.06 together), one Codex 0.166.0 chat. Captures are in `.captures/milestone-28`, untracked.
+- **Wave 1:** every listed defect, engine and desktop, in five worktrees.
+- **Wave 2:** Sparkle 2.10.1 fetched and pinned by the packaging script and loaded by path, with "Check for updates…" in the app menu and the palette; `CFBundleVersion` is the commit count; `release.yml` signs, notarizes, and publishes the DMG, and replaces a signed `appcast.xml` on the fixed `appcast` release. Panics and shown errors go to `druck.log`; "Report a problem…" opens an issue with the versions only and shows the log in the Finder. The app reads the layout's contents depth and page titles, and a table's placement is a typesetter fix.
+- **Wave 3:** milestone 10's automated gaps closed (a continuing footnote in `samples/pagination.md`, pages before a tall block fill up, which changed `report`, `report-de`, and `images`, enforced performance limits, a core boundary test, a Windows offline branch, complete desktop notices), see [acceptance](ACCEPTANCE.md#gaps). Every surface of milestone 22 has an accessibility tree with labels in both languages and was captured in dark and light, English and German. Everything only the owner can do is in [hand tests](HAND_TESTS.md).
+- **Final review:** a council of Claude Opus and GPT Sol; Grok 4.7 could not run, its usage balance was used up. Scores by round: Opus 7, 8, 6, 8.5, 8.5; Sol 4, 5, 6, 6, 6. Five fix rounds closed every finding that could lose text or change the file on disk: held text on quit, undo of outside changes as one step, part markers kept with their pages, the single file's section join kept in the sections' own text, saves waiting for an input method's commit, the typesetter's trials on a snapshot alone, history takeover, the report address, and the update feed.
 
-For the owner: in two columns a note from the inner column falls back to the outer margin when the inner margin is too narrow for the note column, which kept the `margins` sample valid; confirm or change. Wave 1 also put tables under the figure order rule, since they number on their own.
+Checks on 2026-11-23 at `525caca`: `cargo test -p druck` and its integration suites, `cargo test -p druck-desktop` (1005 passed), `cargo clippy --workspace --all-targets --no-deps -- -D warnings`, `cargo fmt --all --check`, and `actionlint`, all clean. CI passed on Linux, Windows, and macOS from `8c06671` on.
 
-Not verified: veraPDF on the patched catalog (not installed), the Linux memory measure, the block menu filter on screen (synthetic `Ctrl+Return` does not reach the window), German and light captures for the writing surface, trackpad scrolling of the launch card. Once, three letters typed during an undo run did not appear and did not repeat in three tries: worth a hand test.
+Known limits kept on purpose, none of which loses text, in a single Markdown file split into sections: undo can stop short of an older outside change when the app has since added a break to a section that change made; a resplit that merges sections after a heading is removed keeps the first section's history, so the removal is not on it; undo and redo move a review passage between an edit and its added break to the section's end. A proof copy of a project whose folder is named `druck.yaml` looks for its chapters one folder up.
 
-Follow-ups left after wave 2: page placeholders are not offered in completion, and bibliography entries in Write are read from the text without the engine's formatting. The issue body after a panic is mostly backtrace.
+For the owner: the inner-column margin note falls back to the outer margin when the inner margin is too narrow; confirm or change. Create the Sparkle EdDSA key, put its public half in `SPARKLE_PUBLIC_KEY` in `scripts/package-desktop.py`, and add the six repository secrets in [release](RELEASE.md): until then a tag releases the CLI and the desktop job fails. `fseventsd` on this Mac had been at 100% CPU for 47 days and delivered file events up to 23 s late, so the soak waits for a reboot.
 
-Wave 2 built these follow-ups on its own branch, see [the decision](DECISIONS.md#2026-11-23-beta-polish-wave-2-follow-ups). The `{pages}` case did not occur in about 7,000 generated documents, so the loop is unchanged. Not verified on screen: the turn summary's cut rows and a table placement in a real agent turn (unit tests only), and Rust colors in a rendered PDF.
+Not verified: notarization and the release workflow on GitHub, an update installed end to end, a real input method (saves waiting for its commit rest on code reading), veraPDF and epubcheck, the Linux memory measure, VoiceOver, a real mouse and trackpad. Rows of floating menus may not be spoken while arrowing.
 
-Next: CI on the pushed branch, then the rest of wave 2.
+Follow-ups: page placeholders are not offered in completion; bibliography entries in Write are read from the text; the footnote popover and region menu stand 8 px from the window edge; typing a character at a section's end and deleting it leaves the added line break.
+
+Next: the hour soak on a migrated copy of the owner's book after a reboot, then the owner's hand tests and the merge into `main`.
 
 ### Special pages note
 
