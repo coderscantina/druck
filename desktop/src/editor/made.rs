@@ -1,7 +1,8 @@
 //! The pages Druck makes, contents, index, and bibliography, shown in Write as the page they make and quieter than the
 //! writing: the page's title, its live entries, and a caption saying Druck writes it. The page numbers come from the
-//! last Publish layout. Before the first one the entries show without numbers, so nothing pops in empty, and a new
-//! layout only changes numbers: how many rows show follows the text alone, so the text around never moves.
+//! last Publish layout, and so do the page's title and the contents' depth, as the theme sets them. Before the first one
+//! the entries show without numbers and the title in the app's words, so nothing pops in empty, and a new layout only
+//! changes numbers: how many rows show follows the text and the depth alone, so the text around never moves.
 //!
 //! A section that holds nothing but such a page shows it larger, with the caption at the top and Remove beside it.
 
@@ -20,14 +21,15 @@ use gpui::{
 use super::EditorView;
 use super::directives::Kind;
 use super::strings::Key;
+use crate::session::RowKind;
 use crate::session::outline::heading_text;
 use crate::source::{BlockKind, Blocks};
 use crate::tokens::{self, Tokens};
 
 /// The most entries a made page shows. The rest are counted on one more row.
 const MAX_ENTRIES: usize = 12;
-/// The heading levels the contents list.
-const CONTENTS_DEPTH: u8 = 1;
+/// The heading levels the contents list before a layout says the theme's: the default theme's `toc-depth`.
+const DEPTH_BEFORE_LAYOUT: u8 = 2;
 /// An entry's row, in body lines.
 const ENTRY_LINES: f32 = 1.2;
 /// The room between the title, the entries, and the caption, in body sizes.
@@ -85,6 +87,8 @@ pub(super) struct Made {
     headings: Vec<Printed>,
     /// By index entry, the pages its marks are printed on, in page order.
     index: HashMap<String, Vec<String>>,
+    /// The deepest heading level the contents list, once a layout says.
+    depth: Option<u8>,
     /// Changes with each layout taken, so the entries are read again.
     generation: u64,
     cache: RefCell<Vec<Cached>>,
@@ -150,10 +154,10 @@ fn folded(title: &str) -> String {
         .collect()
 }
 
-/// The contents' entries: the listed headings down to [`CONTENTS_DEPTH`], each with the page the layout printed it on.
+/// The contents' entries: the listed headings down to `depth`, each with the page the layout printed it on.
 /// A heading is matched to the next printed one of its level whose title ends with its own, since the layout's has its
 /// number before it, so one the layout lacks keeps no number and the rest stay in step.
-pub(super) fn contents(headings: &[Heading], printed: &[Printed]) -> Vec<Entry> {
+pub(super) fn contents(headings: &[Heading], printed: &[Printed], depth: u8) -> Vec<Entry> {
     let mut next = 0;
     let mut entries = Vec::new();
     for heading in headings {
@@ -165,7 +169,7 @@ pub(super) fn contents(headings: &[Heading], printed: &[Printed]) -> Vec<Entry> 
         if let Some(at) = found {
             next = at + 1;
         }
-        if heading.listed && heading.level <= CONTENTS_DEPTH {
+        if heading.listed && heading.level <= depth {
             entries.push(Entry {
                 words: heading.title.clone(),
                 page,
@@ -210,16 +214,34 @@ struct Metrics {
 }
 
 impl EditorView {
-    /// Takes what a fresh layout printed: the headings' and index marks' page numbers.
+    /// Takes what a fresh layout printed: the headings' and index marks' page numbers, the contents' depth, and the
+    /// made pages' titles. New titles rename the made pages' rows, which the session says to every view.
     pub fn take_layout(&mut self, layout: &Layout, cx: &mut Context<Self>) {
         let headings = printed_headings(layout);
         let index = self.printed_index(layout);
-        if headings != self.made.headings || index != self.made.index {
+        let depth = Some(layout.contents_depth());
+        let renamed = self.session.set_page_titles(layout.page_titles());
+        if headings != self.made.headings || index != self.made.index || depth != self.made.depth {
             self.made.headings = headings;
             self.made.index = index;
+            self.made.depth = depth;
             self.made.generation += 1;
             cx.notify();
         }
+        if renamed {
+            cx.emit(super::SessionChanged);
+            cx.notify();
+        }
+    }
+
+    /// The title of the made page of `kind`: the theme's from the last layout, else the app's words.
+    fn made_title(&self, kind: Kind) -> &str {
+        let row = match kind {
+            Kind::Toc => RowKind::Contents,
+            Kind::Index => RowKind::Index,
+            _ => RowKind::Bibliography,
+        };
+        self.session.page_title(row).unwrap_or_else(|| kind.label())
     }
 
     /// The pages each index entry's marks are printed on, found from where the marks are written.
@@ -278,7 +300,8 @@ impl EditorView {
         let all = match kind {
             Kind::Toc => {
                 let headings: Vec<Heading> = texts().flat_map(headings).collect();
-                contents(&headings, &self.made.headings)
+                let depth = self.made.depth.unwrap_or(DEPTH_BEFORE_LAYOUT);
+                contents(&headings, &self.made.headings, depth)
             }
             Kind::Index => index_entries(
                 texts().flat_map(|text| super::rich::index::entries(text).into_iter().map(|(_, entry)| entry)),
@@ -408,7 +431,7 @@ impl EditorView {
             texts.push((caption.clone(), words, tokens::TEXT_SMALL * 1.5));
             y += metrics.caption + metrics.gap;
         }
-        let title = shape(kind.label(), &metrics.title, metrics.title_size, quiet);
+        let title = shape(self.made_title(kind), &metrics.title, metrics.title_size, quiet);
         texts.push((title, point(px(0.), y), metrics.title_line));
         y += metrics.title_line + metrics.gap;
         let size_now = self.style.body_size;
@@ -570,14 +593,15 @@ mod tests {
     use crate::session::{Joined, Kind as SessionKind};
 
     #[test]
-    fn contents_take_the_printed_numbers_of_listed_chapter_titles() {
+    fn contents_take_the_printed_numbers_of_listed_headings_to_the_layouts_depth() {
         let text = "::: front-matter\n\n# Preface {-}\n\nWords.\n\n::: toc\n\n::: main-matter\n\n# The arrival\n\nText.\n\n## A part of it\n\nMore.\n\n::: page-break\n\n# The relief {.unlisted}\n\nText.\n\n# It's over\n\nEnd.\n";
         let path = std::env::temp_dir().join("druck-made-probe.md");
         let laid = Typesetter::new(SessionKind::Single { path }, None)
             .run(Joined::single(text.to_owned(), 0), &Cancel::default())
             .unwrap_or_else(|_| panic!("the text typesets"))
             .laid;
-        let entries = contents(&headings(text), &printed_headings(&laid));
+        assert_eq!(laid.contents_depth(), 2, "the default theme's");
+        let entries = contents(&headings(text), &printed_headings(&laid), laid.contents_depth());
         let shown: Vec<(&str, Option<&str>)> = (entries.iter())
             .map(|entry| (entry.words.as_str(), entry.page.as_deref()))
             .collect();
@@ -586,6 +610,7 @@ mod tests {
             [
                 ("Preface", Some("i")),
                 ("The arrival", Some("1")),
+                ("A part of it", Some("1")),
                 ("It's over", Some("2"))
             ]
         );
@@ -594,7 +619,7 @@ mod tests {
     #[test]
     fn before_a_layout_the_entries_have_no_numbers_and_the_same_rows() {
         let headings = headings("# One\n\n# Two {.unlisted}\n\n# Three\n");
-        let entries = contents(&headings, &[]);
+        let entries = contents(&headings, &[], 1);
         assert_eq!(
             entries,
             [

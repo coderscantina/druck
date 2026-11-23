@@ -218,6 +218,28 @@ fn a_change_to_a_single_file_names_the_section_it_is_in() {
 }
 
 #[test]
+fn a_made_pages_row_takes_the_title_the_layout_gives_it() {
+    let folder = Folder::new("page-titles");
+    let path = folder.write("whole.md", "---\nlang: de\n---\n\n::: toc\n\n# One\n\nText.\n");
+    let mut session = Session::open(&path).expect("opens");
+    assert!(
+        titles(&session.contents().book).contains(&"Contents"),
+        "the app's words before a layout"
+    );
+    let laid = layout(&session);
+    assert!(session.set_page_titles(laid.page_titles()));
+    assert!(
+        !session.set_page_titles(laid.page_titles()),
+        "the same titles change nothing"
+    );
+    assert!(
+        titles(&session.contents().book).contains(&"Inhalt"),
+        "{:?}",
+        titles(&session.contents().book)
+    );
+}
+
+#[test]
 fn offsets_in_a_single_file_map_through_its_sections() {
     let folder = Folder::new("offsets");
     let text = "Intro.\n\n# One\n\nText.\n\n# Two\n\nMore.\n";
