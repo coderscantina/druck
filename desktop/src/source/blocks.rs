@@ -104,7 +104,9 @@ impl Blocks {
         let mut next = start;
         let mut scanned = Vec::new();
         while pos < text.len() {
+            // The block at the start of the text is read again, as front matter can open only there.
             if pos >= splice.new_end
+                && pos > 0
                 && let Some(old) = self.old_boundary(&mut next, pos, splice.old_end, delta)
             {
                 next = old;
@@ -886,6 +888,23 @@ mod tests {
             },
         );
         assert_eq!(blocks.as_slice(), Blocks::parse(&text).as_slice());
+    }
+
+    #[test]
+    fn text_moved_to_the_start_is_read_again_as_front_matter_can_open_there() {
+        let mut text = "# A\n---\n===\n".to_owned();
+        let mut blocks = Blocks::parse(&text);
+        text.replace_range(0..4, "");
+        blocks.apply(
+            &text,
+            Splice {
+                start: 0,
+                old_end: 4,
+                new_end: 0,
+            },
+        );
+        assert_eq!(blocks, Blocks::parse(&text));
+        assert_eq!(break_before(&text, &blocks, "# Two\n", true), "\n");
     }
 
     #[test]
