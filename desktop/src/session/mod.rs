@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use druck::editor::engine;
-use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter};
+use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter, StyleKind};
 use druck::input::{MANIFEST, ThemeDirs};
 use druck::output::PageTitles;
 use druck::resource::{FileResolver, Origin, Resolver, normalize};
@@ -1557,9 +1557,14 @@ impl Session {
                 markdown = markdown.replace(placeholder, words);
             }
         }
-        // A paragraph whose style the theme lacks is set in italics instead, since the engine rejects the style.
-        let theme = self.theme_json();
-        let styles = theme.as_ref().and_then(|theme| theme.get("custom-styles")?.as_object());
+        // A paragraph whose style the theme, resolved over the bundled default as the engine resolves it, has not as a
+        // paragraph style is set in italics instead, since the engine rejects the style.
+        let config = (self.theme_file().zip(self.theme_json()))
+            .and_then(|(path, theme)| crate::theme_file::resolved(&path, &theme));
+        let styled = |class: &str| {
+            (config.as_ref().and_then(|config| config.custom_styles.get(class)))
+                .is_some_and(|style| style.kind() == StyleKind::Paragraph)
+        };
         let lines: Vec<String> = (markdown.lines())
             .map(|line| {
                 match line

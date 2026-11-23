@@ -911,6 +911,30 @@ fn a_manifest_edited_on_disk_is_not_overwritten_by_the_next_change() {
 }
 
 #[test]
+fn a_template_style_is_kept_only_where_the_resolved_theme_has_it_for_paragraphs() {
+    let folder = Folder::new("template-styles");
+    let dir = folder.0.join("project");
+    STARTERS[0].create(&dir, Language::English).expect("creates");
+    let mut session = Session::open(&dir).expect("opens");
+    let id = session.add_page(page("dedication")).expect("adds");
+    assert!(session.buffer(id).text().contains("{.dedication}"));
+
+    let theme = dir.join("themes/novel/theme.json");
+    let text = fs::read_to_string(&theme).expect("reads");
+    let heading = text.replace(
+        "\"dedication\": { \"based-on\": \"body\"",
+        "\"dedication\": { \"based-on\": \"heading-1\"",
+    );
+    assert_ne!(heading, text);
+    fs::write(&theme, heading).expect("writes");
+    let id = session.add_page(page("dedication")).expect("adds");
+    assert!(
+        !session.buffer(id).text().contains("{.dedication}"),
+        "a heading style cannot set a paragraph"
+    );
+}
+
+#[test]
 fn front_matter_details_change_only_the_front_matter() {
     let folder = Folder::new("front-matter");
     let body = "# One\n\nText   with  odd   spacing.\n\n# Two\n\nMore.\n";
