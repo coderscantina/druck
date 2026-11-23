@@ -176,14 +176,16 @@ impl TextColumn {
     }
 
     /// The left edge and width of a card over the text: at least `least` wide, and in Write as wide as the text with a
-    /// little more on each side so no line end shows beside it, centred on the text.
+    /// little more on each side so no line end shows beside it, centred on the text. Where the text is narrower than the
+    /// card, as beside the Binder in a small window, the card moves left rather than past the column's right edge.
     pub fn over_text(cx: &App, least: Pixels) -> (Pixels, Pixels) {
         let column = cx.try_global::<Self>().copied().unwrap_or_default();
         let Some((text_left, text_width)) = column.text else {
             return (Self::centred(cx, least), least);
         };
         let width = (text_width + tokens::CARD_OVERHANG * 2.).max(least);
-        ((text_left + (text_width - width) / 2.).max(Pixels::ZERO), width)
+        let centred = text_left + (text_width - width) / 2.;
+        (centred.min(column.left + column.width - width).max(Pixels::ZERO), width)
     }
 
     /// The top of a card over the text, the palette and the commit card alike: level with the text's top margin.
