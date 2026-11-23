@@ -410,18 +410,20 @@ impl Navigator {
     }
 }
 
-/// A group's or shelf's name at `index`, counting shelves after the groups. A group of chapters outside any part has
-/// none in the path, since it names nothing; `listed` gives it one for a list.
+/// A group's or shelf's name at `index`, counting shelves after the groups. In the path only a named part has one,
+/// since the front and back matter are the Binder's to keep and a group outside any part names nothing; `listed` gives
+/// every group one for a list.
 fn group_label(book: &Book, index: usize, listed: bool) -> Option<String> {
     use self::book::{Kind, Shelf};
     use self::strings::Key;
     if let Some(group) = book.groups.get(index) {
         let has_parts = book.groups.iter().any(|group| group.kind == Kind::Part);
         return match group.kind {
+            // The path names pages, never the parts the Binder keeps by itself.
+            Kind::FrontMatter | Kind::BackMatter | Kind::Chapters if !listed => None,
             Kind::FrontMatter => Some(crate::t!(Key::FrontMatter).to_owned()),
             Kind::BackMatter => Some(crate::t!(Key::BackMatter).to_owned()),
             Kind::Part => group.title().map(str::to_owned),
-            Kind::Chapters if !listed => None,
             Kind::Chapters if has_parts => Some(crate::t!(Key::BeforeParts).to_owned()),
             Kind::Chapters => Some(crate::t!(Key::Chapters).to_owned()),
         };
