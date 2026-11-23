@@ -320,14 +320,14 @@ mod tests {
         };
         assert_eq!(
             refused(Code::OpenPlaceholder { text: "Jahr".into() }),
-            "Export \"print\" ist final, aber dieser Platzhalter ist offen: Jahr"
+            "Export \u{201e}print\u{201c} ist final, aber dieser Platzhalter ist offen: Jahr"
         );
         assert_eq!(
             refused(Code::MissingCitation {
                 file: Path::new("/books/literatur.bib").to_owned(),
                 key: "x".into(),
             }),
-            "Export \"print\" ist final, aber kein Eintrag in ../literatur.bib hat den Schlüssel `x`"
+            "Export \u{201e}print\u{201c} ist final, aber kein Eintrag in ../literatur.bib hat den Schlüssel `x`"
         );
         let mut isbn = with_code(Code::InvalidIsbn);
         isbn.property = Some("meta.isbn".into());
