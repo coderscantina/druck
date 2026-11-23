@@ -276,8 +276,11 @@ impl MemoryResolver {
     }
 }
 
+/// A file's name in memory: normalized, with `/` between its parts on every platform, so a listing reads the same
+/// on Windows as elsewhere. A `\` in a name counts as a separator too.
 fn memory_key(path: &str) -> String {
-    normalize(Path::new(path)).to_string_lossy().into_owned()
+    let slashed = path.replace('\\', "/");
+    normalize(Path::new(&slashed)).to_string_lossy().replace('\\', "/")
 }
 
 impl Resolver for MemoryResolver {
@@ -385,6 +388,12 @@ mod tests {
             Err(ResolveError::NotFound(_))
         ));
         assert_eq!(resolver.list(&origin, "manuscript").unwrap(), ["manuscript/one.md"]);
+    }
+
+    #[test]
+    fn a_memory_name_keeps_forward_slashes_however_it_is_written() {
+        assert_eq!(memory_key(r".\manuscript\sub/../one.md"), "manuscript/one.md");
+        assert_eq!(memory_key("manuscript/one.md"), "manuscript/one.md");
     }
 
     #[test]
