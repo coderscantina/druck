@@ -404,6 +404,24 @@ mod tests {
         assert_eq!(waiting.take(now + GRACE, plain).paths.len(), 2);
     }
 
+    /// FSEvents promises no delivery time. A busy `fseventsd` was measured handing over a rename-over after 23 s, so
+    /// this only keeps a lost event from hanging the test.
+    const DELIVERY: Duration = Duration::from_secs(60);
+
+    /// Waits for `expected`, failing on any signal for `.git`.
+    fn wait_for(receive: &mpsc::Receiver<Signal>, expected: &Signal, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        while let Ok(signal) = receive.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            if let Signal::Path(path) = &signal {
+                assert!(!path.iter().any(|part| part == ".git"), "noise passed");
+            }
+            if &signal == expected {
+                return true;
+            }
+        }
+        false
+    }
+
     #[test]
     fn the_real_watcher_survives_a_rename_over_and_ignores_the_rest() {
         let dir = std::env::temp_dir().join(format!("druck-watch-{}", std::process::id()));
@@ -417,23 +435,25 @@ mod tests {
             send.send(signal).ok();
         })
         .unwrap();
-        std::thread::sleep(Duration::from_millis(100));
+        // The stream is live once a write comes back. Until then a write may fall before it, so repeat it.
+        let probe = dir.join("manuscript/probe.md");
+        let deadline = Instant::now() + DELIVERY;
+        loop {
+            fs::write(&probe, "probe").unwrap();
+            if wait_for(&receive, &Signal::Path(probe.clone()), Duration::from_secs(1)) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the watcher never started");
+        }
         for round in 0..2 {
             let temporary = dir.join(format!("manuscript/.a.md.{round}.tmp"));
             fs::write(&temporary, format!("round {round}")).unwrap();
             fs::rename(&temporary, &chapter).unwrap();
             fs::write(dir.join(".git/index"), "noise").unwrap();
-            let expected = Signal::Path(dir.join("manuscript/a.md"));
-            let deadline = Instant::now() + Duration::from_secs(10);
-            loop {
-                let left = deadline.saturating_duration_since(Instant::now());
-                match receive.recv_timeout(left) {
-                    Ok(signal) if signal == expected => break,
-                    Ok(Signal::Path(other)) => assert!(!other.ends_with(".git/index"), "noise passed"),
-                    Ok(Signal::Everything | Signal::Resource) => {}
-                    Err(_) => panic!("no event in round {round}"),
-                }
-            }
+            assert!(
+                wait_for(&receive, &Signal::Path(chapter.clone()), DELIVERY),
+                "no event in round {round}"
+            );
             while receive.recv_timeout(Duration::from_millis(100)).is_ok() {}
         }
         drop(watcher);
