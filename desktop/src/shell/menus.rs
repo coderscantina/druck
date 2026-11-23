@@ -172,9 +172,10 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         recent.push(MenuItem::separator());
     }
     recent.push(item(Key::ClearRecent, ClearRecent).disabled(state.recent.is_empty()));
+    let mut about = vec![item(Key::About, About)];
+    about.extend(crate::update::menu_item());
     vec![
-        Menu::new("Druck").items([
-            item(Key::About, About),
+        Menu::new("Druck").items(about.into_iter().chain([
             MenuItem::separator(),
             item(Key::Settings, ShowSettings),
             MenuItem::separator(),
@@ -184,7 +185,7 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
             item(Key::HideOthers, HideOthers),
             MenuItem::separator(),
             item(Key::Quit, Quit),
-        ]),
+        ])),
         Menu::new(crate::t!(Key::MenuFile)).items([
             item(Key::NewBook, NewBook),
             item(Key::Open, Open),

@@ -99,6 +99,8 @@ pub fn open(
     ]);
     crate::editor::bind_keys(cx);
     crate::persist::bind_keys(cx);
+    // Before the shell builds the menus, which show the updater's item when it runs.
+    crate::update::install(cx);
     shell::install(cx);
     crate::palette::install(cx);
     crate::versions::install(cx);

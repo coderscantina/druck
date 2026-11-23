@@ -46,6 +46,7 @@ mod spell;
 mod theme_file;
 mod tokens;
 mod typesetter;
+mod update;
 mod versions;
 mod workspace;
 
