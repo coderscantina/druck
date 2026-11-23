@@ -261,14 +261,23 @@ impl History {
         found
     }
 
-    /// Starts the history of each of `files` that has none with what it holds now. For files the app made, such as a
-    /// new page from a template or a starter's chapters: they are new, so [`Self::follow`] must never give them the
-    /// history of a gone file that ended with the same text.
+    /// Starts a new history for each of `files` with what it holds now. For files the app made, such as a new page from
+    /// a template or a starter's chapters: they are new, so [`Self::follow`] must never give them the history of a gone
+    /// file that ended with the same text. A log already at such a path is a gone file's, as after a page was deleted
+    /// and made again at its path, so it is set aside under a name of its own, where the new file's timeline never
+    /// shows it and thinning clears it with age.
     pub fn begin(&self, files: &[PathBuf], time: i64) -> io::Result<()> {
         for file in files {
-            if !self.log_of(file).exists() {
-                self.snapshot(file, &fs::read_to_string(file)?, None, time)?;
+            let text = fs::read_to_string(file)?;
+            {
+                let _writing = self.lock();
+                let log = self.log_of(file);
+                if log.exists() {
+                    let id = blob_id(file.as_os_str().as_encoded_bytes());
+                    fs::rename(&log, self.files().join(format!("{id}-{time}.jsonl")))?;
+                }
             }
+            self.snapshot(file, &text, None, time)?;
         }
         Ok(())
     }
@@ -806,6 +815,22 @@ mod tests {
         assert_eq!(history.follow(&live, &live).files, 0);
         assert_eq!(history.versions(&made).len(), 1);
         assert_eq!(history.versions(&gone).len(), 2);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_page_made_again_at_a_deleted_pages_path_starts_a_new_history() {
+        let (dir, history) = store("made-again");
+        let page = dir.join("dedication.md");
+        history.snapshot(&page, "For someone.\n", None, 1).unwrap();
+        history.snapshot(&page, "For someone dear.\n", None, 2).unwrap();
+        fs::write(&page, "For someone.\n").unwrap();
+        history.begin(std::slice::from_ref(&page), 3).unwrap();
+        let versions = history.versions(&page);
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].time, 3);
+        let logs = fs::read_dir(history.files()).unwrap().count();
+        assert_eq!(logs, 2, "the deleted page's log is set aside, not removed");
         fs::remove_dir_all(dir).ok();
     }
 

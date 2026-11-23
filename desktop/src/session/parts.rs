@@ -327,16 +327,6 @@ impl<Id: Copy + Eq> Parts<Id> {
             })
             .collect()
     }
-
-    /// Whether `lines` start the same parts as these, so lines kept from an earlier state of the book still apply.
-    pub fn same_parts(&self, lines: &[Line<Id>]) -> bool {
-        let parts = |lines: &[Line<Id>]| {
-            let mut parts: Vec<usize> = lines.iter().map(|line| line.part).collect();
-            parts.sort_unstable();
-            parts
-        };
-        parts(&self.lines) == parts(lines)
-    }
 }
 
 /// The edits, by section, that make the book's part lines open the pages `wanted` names. A line already where it is

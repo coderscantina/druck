@@ -120,13 +120,13 @@ impl Versions {
         self.tell_followed(work, window, cx);
     }
 
-    /// Says at the foot what following history did, once `work` is done, and offers what it could not place.
-    /// Whether the open book is one the app just made from a starter.
-    fn just_made(&self, cx: &App) -> bool {
+    /// Whether the open book is one the app just made from a starter, and opens now for the first time.
+    pub(super) fn just_made(&self, cx: &App) -> bool {
         cx.try_global::<super::NewProject>()
             .is_some_and(|new| self.book(cx).as_ref() == Some(&new.0))
     }
 
+    /// Says at the foot what following history did, once `work` is done, and offers what it could not place.
     fn tell_followed(&mut self, work: gpui::Task<Followed>, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |view, cx| {
             let followed = work.await;

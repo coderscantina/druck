@@ -96,6 +96,37 @@ pub struct Joined {
 }
 
 impl Joined {
+    /// Chapters in the book's order, each with its file's path and text. A project's go one after another with a blank
+    /// line between them, the engine's rule; a single file's sections go one after another as they are.
+    pub(super) fn join<'a>(
+        chapters: impl IntoIterator<Item = (ChapterId, &'a Path, &'a str)>,
+        project: bool,
+        revision: u64,
+    ) -> Self {
+        let mut text = String::new();
+        let mut map = ChapterMap::default();
+        for (id, path, chapter) in chapters {
+            let start = text.len();
+            text.push_str(chapter);
+            map.push(id, path.to_owned(), start..text.len());
+            if project {
+                if !text.ends_with('\n') && text.len() > start {
+                    text.push('\n');
+                }
+                text.push('\n');
+            }
+        }
+        Self { text, map, revision }
+    }
+
+    /// A project's chapter files with their texts, in the book's order, apart from any session, as for a copy of the
+    /// book. Their ids are their places.
+    pub fn of_files(files: &[(PathBuf, String)], revision: u64) -> Self {
+        let chapters =
+            (files.iter().enumerate()).map(|(at, (path, text))| (ChapterId(at as u32), path.as_path(), text.as_str()));
+        Self::join(chapters, true, revision)
+    }
+
     /// Text with no chapters: one file, a measurement's edit of it, or a test's.
     pub fn single(text: String, revision: u64) -> Self {
         Self {

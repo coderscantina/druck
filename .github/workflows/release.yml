@@ -171,7 +171,18 @@ jobs:
             gh release create appcast --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title "Desktop update feed" --notes "The feed the desktop app checks for updates. Each release replaces appcast.xml."
           fi
-          gh release upload appcast --repo "$GITHUB_REPOSITORY" --clobber appcast.xml
+          # --clobber deletes the old appcast.xml before the new one is up, so a failed upload would leave installed
+          # apps with no feed. Installed apps fetch this fixed address, so a new name cannot stand in: try again, and
+          # fail the job where the owner sees it, as running it again puts the feed back.
+          for attempt in 1 2 3 4 5; do
+            if gh release upload appcast --repo "$GITHUB_REPOSITORY" --clobber appcast.xml; then
+              exit 0
+            fi
+            echo "the appcast upload failed (attempt $attempt of 5)" >&2
+            sleep $((attempt * 5))
+          done
+          echo "::error::appcast.xml is not on the appcast release; installed apps find no updates until this job runs again"
+          exit 1
 
   publish:
     name: GitHub release

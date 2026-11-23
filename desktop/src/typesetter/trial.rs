@@ -63,41 +63,46 @@ impl Book {
     }
 
     /// Writes the texts of the chapters, the theme, and the manifest to `file`, for the trial tool in the CLI's process
-    /// to try fixes on what the app has, which typing or a Binder move during a run makes differ from what is on disk.
+    /// to try fixes on what the app has, which typing or a Binder action during a run makes differ from what is on disk.
+    /// The chapters are listed in the book's order, each as its path and text.
     pub fn write_copy(&self, file: &Path) -> std::io::Result<()> {
-        let files: serde_json::Map<String, serde_json::Value> = match &self.kind {
-            Kind::Single { path } => {
-                std::iter::once((path.display().to_string(), self.joined.text.clone().into())).collect()
-            }
+        let chapters: Vec<serde_json::Value> = match &self.kind {
+            Kind::Single { path } => vec![serde_json::json!([path, self.joined.text])],
             Kind::Project { .. } => (self.joined.map.files())
-                .map(|(path, range)| (path.display().to_string(), self.joined.text[range].into()))
+                .map(|(path, range)| serde_json::json!([path, &self.joined.text[range]]))
                 .collect(),
         };
         let pair = |file: &Option<(PathBuf, String)>| file.as_ref().map(|(path, text)| serde_json::json!([path, text]));
-        let copy = serde_json::json!({"files": files, "theme": pair(&self.theme), "manifest": pair(&self.manifest)});
+        let copy =
+            serde_json::json!({"chapters": chapters, "theme": pair(&self.theme), "manifest": pair(&self.manifest)});
         crate::persist::atomic::write(file, copy.to_string().as_bytes())
     }
 
-    /// The book at `path` with the texts of a copy [`Book::write_copy`] wrote. A file the copy lacks is read from disk.
+    /// The book at `path` with the texts of a copy [`Book::write_copy`] wrote. A project's chapters are the copy's
+    /// alone, so a chapter that left the book during the run, or changed on disk, is still the text the run began
+    /// with. A theme or manifest the copy lacks is read from disk.
     pub fn open_copy(path: &Path, copy: &Path) -> Result<Self, String> {
         let unreadable = |error: String| format!("the app's copy of the book cannot be read: {error}");
         let text = std::fs::read_to_string(copy).map_err(|error| unreadable(error.to_string()))?;
         let copy: serde_json::Value = serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))?;
-        let text_of = |path: &Path| copy["files"][path.display().to_string()].as_str().map(str::to_owned);
-        let mut book = Self::open(path)?;
-        book.joined = match &book.kind {
-            Kind::Single { path } => Joined {
-                text: text_of(path).unwrap_or(book.joined.text),
-                ..book.joined
-            },
-            Kind::Project { .. } => book.joined.with_files(|path, _| text_of(path)),
-        };
-        let pair = |key: &str| match copy[key].as_array().map(Vec::as_slice).unwrap_or_default() {
+        let pair = |value: &serde_json::Value| match value.as_array().map(Vec::as_slice).unwrap_or_default() {
             [path, text] => Some((PathBuf::from(path.as_str()?), text.as_str()?.to_owned())),
             _ => None,
         };
-        book.theme = pair("theme").or(book.theme);
-        book.manifest = pair("manifest").or(book.manifest);
+        let chapters: Option<Vec<(PathBuf, String)>> =
+            (copy["chapters"].as_array()).and_then(|chapters| chapters.iter().map(pair).collect());
+        let chapters = chapters.ok_or_else(|| unreadable("it lists no chapters".to_owned()))?;
+        let mut book = Self::open(path)?;
+        book.joined = match (&book.kind, &chapters[..]) {
+            (Kind::Single { .. }, [(_, text)]) => Joined {
+                text: text.clone(),
+                ..book.joined
+            },
+            (Kind::Single { .. }, _) => return Err(unreadable("a single file is one chapter".to_owned())),
+            (Kind::Project { .. }, _) => Joined::of_files(&chapters, book.joined.revision),
+        };
+        book.theme = pair(&copy["theme"]).or(book.theme);
+        book.manifest = pair(&copy["manifest"]).or(book.manifest);
         Ok(book)
     }
 
@@ -814,6 +819,26 @@ mod tests {
         assert_eq!(first_page(at_start), first, "the app's trials");
         let opened = Book::open_copy(&dir, &copy).expect("the copy opens");
         assert_eq!(first_page(opened), first, "the tool's trials");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_chapter_that_leaves_the_book_during_a_run_keeps_its_text_in_the_tools_trials() {
+        let dir = std::env::temp_dir().join(format!("druck-trial-removed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("a.md"), "# A\n\nFirst.\n").expect("chapter");
+        std::fs::write(dir.join("b.md"), "# B\n\nSecond.\n").expect("chapter");
+        std::fs::write(dir.join("druck.yaml"), "chapters:\n  - a.md\n  - b.md\n").expect("manifest");
+        let copy = dir.join("copy.json");
+        Book::open(&dir)
+            .expect("the book opens")
+            .write_copy(&copy)
+            .expect("the copy is written");
+        std::fs::write(dir.join("druck.yaml"), "chapters:\n  - a.md\n").expect("the Binder removes b");
+        std::fs::write(dir.join("b.md"), "# B\n\nEdited outside the book.\n").expect("edited under Not in book");
+        let opened = Book::open_copy(&dir, &copy).expect("the copy opens");
+        assert_eq!(opened.file("b.md").map(|(_, text)| text), Some("# B\n\nSecond.\n"));
+        Bench::new(opened).lay_out(&[], &Cancel::default()).expect("it sets");
         std::fs::remove_dir_all(&dir).ok();
     }
 

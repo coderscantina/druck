@@ -345,6 +345,10 @@ impl Versions {
         view.history.paths = view.chapter_paths(cx);
         view.look_after_history(window, cx);
         view.warn_about_cloud(window, cx);
+        if view.just_made(cx) {
+            // The book is new only this once: opened again later, it is a book with history like any other.
+            cx.remove_global::<NewProject>();
+        }
         view.say_what_opening_did(window, cx);
         view.refresh(cx);
         view
