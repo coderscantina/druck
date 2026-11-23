@@ -376,8 +376,13 @@ impl Session {
     /// Applies edits to a file's text, moving carets and scroll places with the text. The edits refer to the file's text
     /// before them. In a project they are one undo step. In a single file each section takes the part in its range, as
     /// one step in that section's history, which is the limit of per-section undo. A change from outside to a single
-    /// file is one step over all its sections instead: see [`super::outside`].
+    /// file is one step over all its sections instead: see [`super::outside`]. No input method may be composing: its
+    /// commit can add a break and move the text the edits were made against, so callers commit before reading it.
     pub fn apply_to_file(&mut self, path: &Path, edits: &[Edit], kind: EditKind) -> Result<(), EditError> {
+        debug_assert!(
+            self.composing.is_none(),
+            "file edits made against text under a composition"
+        );
         if kind == EditKind::External && matches!(&self.kind, Kind::Single { path: file } if file == path) {
             return self.apply_outside(edits);
         }

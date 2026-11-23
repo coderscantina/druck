@@ -640,8 +640,8 @@ impl PersistView {
         self.writing = None;
         let mut failed = false;
         let mut changed = Vec::new();
-        // A write that only records its result changes nothing on screen. Anything else goes through the session's front
-        // door, to reach the galley and the panels.
+        // A write that only records its result changes nothing on screen. A write of `druck.yaml` reads the book again,
+        // which the galley and the panels follow. Neither changes text, so an input method's marked text stays open.
         let manifest = self.session(cx).manifest_path();
         let quiet = (results.iter()).all(|(outgoing, _)| manifest.as_ref() != Some(&outgoing.path));
         let sync = &mut self.sync;
@@ -657,7 +657,7 @@ impl PersistView {
             self.editor.update(cx, |editor, _| record(editor.session_quietly()));
         } else {
             self.editor
-                .update(cx, |editor, cx| editor.update_session(record, window, cx));
+                .update(cx, |editor, cx| editor.refresh_session(record, window, cx));
         }
         let now = Instant::now();
         if failed {

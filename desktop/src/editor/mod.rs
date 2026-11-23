@@ -391,8 +391,10 @@ impl EditorView {
                 view.restart_blink(window, cx);
                 cx.notify();
             }),
-            cx.on_blur(&focus, window, |view, _, cx| {
+            // An input method composes only where the keys go, so its marked text is committed when they leave.
+            cx.on_blur(&focus, window, |view, window, cx| {
                 view.blink = Task::ready(());
+                view.commit_marked(window, cx);
                 cx.notify();
             }),
             cx.observe_window_activation(window, |view, window, cx| view.restart_blink(window, cx)),
@@ -526,6 +528,18 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) -> R {
         self.commit_marked(window, cx);
+        self.refresh_session(change, window, cx)
+    }
+
+    /// Changes the session in a way that changes no text, as recording a finished save, which reads `druck.yaml` again
+    /// after writing it. Everyone hears of it as from [`Self::update_session`], but an input method's marked text stays
+    /// open: a commit here would leave the input method composing on over text no longer marked.
+    pub fn refresh_session<R>(
+        &mut self,
+        change: impl FnOnce(&mut Session) -> R,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> R {
         self.store_view();
         let before = (self.session.active(), self.session.active_buffer().revision());
         let result = change(&mut self.session);
@@ -951,12 +965,15 @@ impl EditorView {
     }
 
     /// Writes a change from the notes panel: `range` of note `index`'s shown text becomes `new`. Returns whether it was
-    /// allowed. The caret in the text stays where it is, on the same text.
+    /// allowed. The caret in the text stays where it is, on the same text. With `marked`, `new` is an input method's
+    /// marked text, which is the galley's marked text too, so saves and other changes treat it as the galley's: see
+    /// [`Self::commit_marked`]. Other marked text is committed first.
     fn edit_note(
         &mut self,
         index: usize,
         range: Range<usize>,
         new: &str,
+        marked: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -964,9 +981,18 @@ impl EditorView {
         let Some(note) = notes::leading_notes(text, &self.blocks).into_iter().nth(index) else {
             return false;
         };
-        let Some(edit) = notes::note_edit(text, &note, range, new) else {
+        let Some(edit) = notes::note_edit(text, &note, range.clone(), new) else {
             return false;
         };
+        // Marked text this edit does not replace is another composition's.
+        if self.marked.as_ref().is_some_and(|open| *open != edit.range) {
+            self.commit_marked(window, cx);
+            return self.edit_note(index, range, new, marked, window, cx);
+        }
+        let marked = (marked && !new.is_empty()).then(|| edit.range.start..edit.range.start + new.len());
+        if marked.is_some() {
+            self.session.start_composing();
+        }
         let edits = vec![edit];
         let moved = |offset| commands::moved(offset, &edits, commands::Bias::After);
         let after = Selection {
@@ -974,20 +1000,31 @@ impl EditorView {
             head: moved(self.selection.head),
         };
         let started = self.trace.input();
+        let kind = if marked.is_some() || self.marked.is_some() {
+            EditKind::Composing
+        } else {
+            EditKind::Typing
+        };
         match self
             .session
             .active_buffer_mut()
-            .transact(EditKind::Typing, edits, self.selection, after, started)
+            .transact(kind, edits, self.selection, after, started)
         {
+            // As in the galley, marked text gets the break a section's end needs once it is committed.
+            Ok(splice) if marked.is_some() => self.resegment(splice.into()),
             Ok(splice) => {
                 let apart = self.session.keep_apart(self.session.active(), splice);
                 self.resegment(apart);
             }
             Err(error) => {
                 eprintln!("edit rejected: {error}");
+                if self.marked.is_none() {
+                    self.session.stop_composing();
+                }
                 return false;
             }
         }
+        self.set_marked(marked);
         self.selection = after;
         self.reveal_at = after.head;
         window.notify_text_input_changed(&self.focus);

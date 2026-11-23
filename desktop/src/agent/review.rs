@@ -247,6 +247,7 @@ impl AgentView {
 
     /// Takes a hunk back as one undo step in the editor: a merge with the author's text, so nothing else in it moves.
     pub(super) fn reject(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let session = self.editor.read(cx).session();
         let session_text = |path: &Path| current_text(session, path);
         let Some(file) = self.file_of(id) else {
@@ -278,6 +279,7 @@ impl AgentView {
     /// Takes every change under review back. With nothing typed since, each file returns to its exact bytes, and a file
     /// the agent made goes away.
     pub(super) fn reject_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let mut gone = Vec::new();
         for turn in (0..=self.conversation.current_turn().unwrap_or(0)).rev() {
             let files = self.conversation.changes(turn).map_or(0, |changes| changes.files.len());
@@ -536,6 +538,7 @@ impl AgentView {
             return;
         };
         let path = self.base.join(&note.chapter);
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let session = self.editor.read(cx).session();
         let path = file_in_session(session, &path).unwrap_or(path);
         let Some(text) = session.file_text(&path) else {

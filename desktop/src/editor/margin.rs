@@ -78,7 +78,11 @@ impl ChapterNotes {
             cx.subscribe(&editor, |notes, _, _: &SessionChanged, cx| notes.sync(cx)),
             cx.subscribe(&editor, |notes, _, _: &CaretMoved, cx| notes.hold_for_selection(cx)),
             cx.on_focus_in(&focus, window, |notes, window, cx| notes.unfold(window, cx)),
-            cx.on_focus_out(&focus, window, |notes, _, _, cx| notes.set_unfolded(false, cx)),
+            // A note's marked text is the galley's too, see `EditorView::edit_note`: it is committed as the keys leave.
+            cx.on_focus_out(&focus, window, |notes, _, window, cx| {
+                notes.set_unfolded(false, cx);
+                notes.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
+            }),
         ];
         let mut notes = Self {
             editor,
@@ -475,12 +479,20 @@ impl NoteField {
         cx.notify();
     }
 
-    /// Writes a change of `range` to the buffer. Text that would close the comment is refused and shown as such.
-    fn replace(&mut self, range: Range<usize>, new: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// Writes a change of `range` to the buffer, `marked` when it is an input method's marked text. Text that would close
+    /// the comment is refused and shown as such.
+    fn replace(
+        &mut self,
+        range: Range<usize>,
+        new: &str,
+        marked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let index = self.index;
-        let written = self
-            .editor
-            .update(cx, |editor, cx| editor.edit_note(index, range.clone(), new, window, cx));
+        let written = self.editor.update(cx, |editor, cx| {
+            editor.edit_note(index, range.clone(), new, marked, window, cx)
+        });
         self.refused = !written;
         if written {
             self.selection = Selection::caret(range.start + new.len());
@@ -490,7 +502,7 @@ impl NoteField {
     }
 
     fn insert(&mut self, new: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.replace(self.selection.range(), new, window, cx);
+        self.replace(self.selection.range(), new, false, window, cx);
     }
 
     fn delete_to(&mut self, target: impl Fn(&str, usize) -> usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -502,7 +514,7 @@ impl NoteField {
             self.selection.range()
         };
         if !range.is_empty() {
-            self.replace(range, "", window, cx);
+            self.replace(range, "", false, window, cx);
         }
     }
 
@@ -847,8 +859,9 @@ impl EntityInputHandler for NoteField {
         self.marked.as_ref().map(|range| to_utf16(&text, range))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.marked = None;
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         cx.notify();
     }
 
@@ -865,7 +878,7 @@ impl EntityInputHandler for NoteField {
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range());
         self.marked = None;
-        self.replace(range, new_text, window, cx);
+        self.replace(range, new_text, false, window, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -882,7 +895,7 @@ impl EntityInputHandler for NoteField {
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.range());
         let start = range.start;
-        if self.replace(range, new_text, window, cx) {
+        if self.replace(range, new_text, true, window, cx) {
             self.marked = (!new_text.is_empty()).then(|| start..start + new_text.len());
         }
     }

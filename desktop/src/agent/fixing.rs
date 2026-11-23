@@ -595,6 +595,7 @@ impl AgentView {
             return true;
         };
         let path = self.base.join(&place.file);
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let session = self.editor.read(cx).session();
         let path = file_in_session(session, &path).unwrap_or(path);
         let edits = session.file_text(&path).and_then(|text| {

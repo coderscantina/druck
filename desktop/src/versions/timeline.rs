@@ -405,6 +405,8 @@ impl Timeline {
 
     /// One undoable step, labelled in local history first, on the text the differences were shown against.
     fn restore(&mut self, edits: Option<Vec<Edit>>, window: &mut Window, cx: &mut Context<Self>) {
+        // A commit can add a break to the text the differences were shown against, which the check below then sees.
+        self.editor.update(cx, |editor, cx| editor.commit_marked(window, cx));
         let (Some(edits), Some(point)) = (edits, &self.point) else {
             return;
         };

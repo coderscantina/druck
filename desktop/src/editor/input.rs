@@ -383,7 +383,8 @@ impl EditorView {
     /// Keeps the marked text as it is, committed, and gives the section's end the break it may need now. Until here
     /// saves wrote the chapter's text from before the composition, so the commit counts as a change, also when the break
     /// went into a neighbouring section alone. Anything else that changes the text or the sections commits first, so no
-    /// change lands under a composition. Does nothing without marked text.
+    /// change lands under a composition. Edits made against a file's text for [`Session::apply_to_file`] call this before
+    /// reading that text, since the break moves what comes after it. Does nothing without marked text.
     pub fn commit_marked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(marked) = self.marked.clone() else {
             return;

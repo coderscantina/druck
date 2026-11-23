@@ -325,6 +325,50 @@ fn a_composition_in_a_missing_chapter_is_not_written_nor_marked_saved() {
 }
 
 #[test]
+fn a_fixed_manifest_written_while_composing_keeps_its_editor_and_the_composition() {
+    let folder = Folder::new("compose-manifest");
+    folder.write("druck.yaml", "title: [unclosed\n");
+    folder.write("manuscript/a.md", "Text.\n");
+    let mut session = Session::open(&folder.0).expect("opens");
+    let manifest = session.active();
+    let end = session.buffer(manifest).len();
+    let fix = "chapters:\n  - manuscript/a.md\n# \n";
+    session
+        .edit_chapter(manifest, vec![Edit::new(0..end, fix)], EditKind::Discrete)
+        .expect("edit");
+    let at = fix.len() - 1;
+    compose(&mut session, at..at, "日本");
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("druck.yaml"), fix);
+    assert_eq!(titles(&session.contents().book), ["A"], "the written manifest is read");
+    assert_eq!(session.active(), manifest, "the editor stays with the newer text");
+    assert_eq!(
+        session.buffer(manifest).text(),
+        "chapters:\n  - manuscript/a.md\n# 日本\n"
+    );
+    assert!(session.is_dirty());
+
+    session.stop_composing();
+    write_outgoing(&mut session);
+    assert_eq!(folder.read("druck.yaml"), "chapters:\n  - manuscript/a.md\n# 日本\n");
+    assert!(session.chapter(manifest).is_none(), "saved, the editor closes");
+    assert_eq!(session.active(), session.book()[0]);
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "under a composition")]
+fn file_edits_are_refused_while_composing_since_the_commit_can_move_their_text() {
+    let folder = Folder::new("compose-file-edit");
+    let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nMore.\n");
+    let mut session = Session::open(&path).expect("opens");
+    compose(&mut session, 12..14, "日本");
+    let text = session.file_text(&path).expect("read");
+    let edits = crate::persist::merge::edits_between(&text, &text.replace("More", "MORE"));
+    session.apply_to_file(&path, &edits, EditKind::Discrete).ok();
+}
+
+#[test]
 fn an_edit_to_the_files_text_lands_where_it_was_meant_after_a_section_ended_inside_a_line() {
     let folder = Folder::new("file-edit");
     let path = folder.write("whole.md", "# One\n\nText.\n\n# Two\n\nbody here\n");

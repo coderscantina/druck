@@ -613,13 +613,19 @@ impl Session {
         }
     }
 
-    /// While the book cannot be read from the manifest, the manifest is what opens, so it can be fixed here.
+    /// While the book cannot be read from the manifest, the manifest is what opens, so it can be fixed here. Once the book
+    /// reads, it closes, unless it holds changes the file does not, as after a save of the text from before a composition:
+    /// it stays open with them, and goes at a reading after they are saved.
     fn show_manifest_if_needed(&mut self, manifest: &Path) {
         let existing = self
             .chapters
             .iter()
             .find(|(_, chapter)| chapter.group == Group::Manifest);
         let existing = existing.map(|(id, _)| *id);
+        let unsaved = existing.is_some_and(|id| self.known(id).is_dirty());
+        if !self.book.is_empty() && unsaved {
+            return;
+        }
         if !self.book.is_empty() {
             if self.chapters.contains_key(&self.active) && Some(self.active) != existing {
                 if let Some(id) = existing {
