@@ -129,8 +129,12 @@ pub fn commit_floats(window: &mut Window, cx: &mut App) {
     editor.update(cx, |editor, cx| editor.commit_floats(window, cx));
 }
 
-/// Clears what is kept for a document's unsaved text, when a person chose to discard it.
-pub fn forget_unsaved(location: &Path) {
+/// Clears what is kept for a document's unsaved text, when a person chose to discard it. Nothing more of it is
+/// written, not even by the save on quit.
+pub fn forget_unsaved(location: &Path, cx: &mut App) {
+    if let Some(view) = Current::<PersistView>::view(cx) {
+        view.update(cx, |view, _| view.discarded = true);
+    }
     if let Some(data) = data_dir() {
         Copies::new(&data, location).clear_all();
     }
@@ -175,6 +179,8 @@ pub struct PersistView {
     passage: Option<ConflictPassage>,
     /// Recovery copies wait for [`Self::restore`], so none is written over before it is read.
     restored: bool,
+    /// The author discarded the unsaved text before the document went, so the save on quit leaves it alone.
+    discarded: bool,
     /// Where Versions sends the merge Git stopped on, which restoring waits for, until it has.
     stopped_merge: Option<futures::channel::oneshot::Sender<StoppedMerge>>,
     _restoring: Task<()>,
@@ -299,6 +305,7 @@ impl PersistView {
             merging: None,
             passage: None,
             restored: false,
+            discarded: false,
             stopped_merge: Some(stopped_merge),
             _restoring: restoring,
             _incoming: incoming,
@@ -694,9 +701,11 @@ impl PersistView {
         }
         let lock = self.write_lock.clone();
         let _writing = lock.lock();
-        let sync = &mut self.sync;
-        self.editor
-            .update(cx, |editor, _| sync.write_all(editor.session_quietly()));
+        if !self.discarded {
+            let sync = &mut self.sync;
+            self.editor
+                .update(cx, |editor, _| sync.write_all(editor.session_quietly()));
+        }
         // Theme edits are written on a thread of their own, which a quitting app would not wait for.
         self.inspector.read(cx).model().read(cx).flush();
     }

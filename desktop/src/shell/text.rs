@@ -14,6 +14,10 @@ crate::strings! {
             "Your changes could not be saved. Close the document anyway?",
             "Die Änderungen konnten nicht gesichert werden. Das Dokument trotzdem schließen?"
         ),
+        CannotSaveBeforeQuitting => (
+            "Your changes could not be saved. Quit anyway?",
+            "Die Änderungen konnten nicht gesichert werden. Trotzdem beenden?"
+        ),
         TryAgain => ("Try again", "Erneut versuchen"),
         Discard => ("Discard changes", "Änderungen verwerfen"),
         Cancel => ("Cancel", "Abbrechen"),

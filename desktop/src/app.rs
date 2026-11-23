@@ -88,7 +88,8 @@ pub fn open(
     cx: &mut App,
 ) {
     shell::init(scheme, cx);
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    // The action may run inside the window's update, which `quit` enters.
+    cx.on_action(|_: &Quit, cx| cx.defer(quit));
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-n", NewBook, None),
@@ -175,6 +176,15 @@ pub fn open(
     crate::gate::at_launch(cx);
 }
 
+/// Quits once the open document's text is safe, and asks first when it cannot be.
+fn quit(cx: &mut App) {
+    let shell = cx.windows().into_iter().find_map(|window| window.downcast::<Shell>());
+    let asked = shell.is_some_and(|shell| shell.update(cx, |shell, window, cx| shell.quit(window, cx)).is_ok());
+    if !asked {
+        cx.quit();
+    }
+}
+
 /// Where a document opens.
 enum Opening {
     /// Where its chapters' places say, the start of the first chapter for a document just opened.
@@ -209,7 +219,19 @@ impl Shell {
         // Cached panes hold colors of the old appearance, so this repaints them too.
         cx.observe_window_appearance(window, |_, _, cx| shell::apply_appearance(cx))
             .detach();
-        window.on_window_should_close(cx, |_, cx| {
+        // Closing the window quits the app, so it asks as Quit does.
+        let this = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            let asked = this.update(cx, |shell, cx| {
+                let open = shell.workspace.is_some();
+                if open {
+                    shell.quit(window, cx);
+                }
+                open
+            });
+            if asked.unwrap_or(false) {
+                return false;
+            }
             shell::save_at_exit(cx);
             true
         });
@@ -380,9 +402,19 @@ impl Shell {
         );
     }
 
+    /// Quits once the document's text is on disk or the author lets it go.
+    fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.after_saving(
+            Key::CannotSaveBeforeQuitting,
+            window,
+            cx,
+            Box::new(|_, _, cx| cx.quit()),
+        );
+    }
+
     /// Runs `then` once the document's text is on disk. A conflict that the footer holds does not stop it: the text
-    /// stays in a recovery copy, and the file keeps the other version. Only text that could not be written asks
-    /// whether to go on, with `message`. Cancel runs nothing.
+    /// stays in a recovery copy, and the file keeps the other version. Only text that could not be written, to its file
+    /// or, while a conflict holds it, to its recovery copy, asks whether to go on, with `message`. Cancel runs nothing.
     fn after_saving(&mut self, message: Key, window: &mut Window, cx: &mut Context<Self>, then: After) {
         crate::persist::commit_floats(window, cx);
         let dirty = self
@@ -441,7 +473,8 @@ impl Shell {
                     0 => shell.after_saving(message, window, cx, then),
                     1 => {
                         if let Some(workspace) = &shell.workspace {
-                            crate::persist::forget_unsaved(&workspace.read(cx).location(cx));
+                            let location = workspace.read(cx).location(cx);
+                            crate::persist::forget_unsaved(&location, cx);
                         }
                         then(shell, window, cx);
                     }

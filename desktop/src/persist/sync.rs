@@ -248,7 +248,7 @@ pub enum Closing {
     /// Text waits for a decision about a conflict, which the footer holds, and a recovery copy keeps it with the file's
     /// other version still on disk. Nothing is lost by going on.
     Held,
-    /// Text could not be written, so going on would lose it.
+    /// Text could not be written to its file, or held text to its recovery copy, so going on would lose it.
     Failed { file: PathBuf, reason: String },
 }
 
@@ -679,11 +679,15 @@ impl FileSync {
             }
         }
         let unsaved = session.unsaved();
+        let mut uncopied = Vec::new();
         if let Some(copies) = self.copies.clone() {
             for file in &unsaved {
                 match copies.store(&file.path, &file.base, &file.text) {
                     Ok(()) => self.clear(&file.path, Problem::Copy),
-                    Err(error) => self.report(&file.path, Problem::Copy(error.to_string())),
+                    Err(error) => {
+                        self.report(&file.path, Problem::Copy(error.to_string()));
+                        uncopied.push(file.path.clone());
+                    }
                 }
             }
             if unsaved.is_empty() {
@@ -691,14 +695,18 @@ impl FileSync {
                 copies.clear_all();
                 self.stored.clear();
             }
+        } else {
+            uncopied.extend(unsaved.iter().map(|file| file.path.clone()));
         }
-        match unsaved.iter().find(|file| !self.pending.contains_key(&file.path)) {
+        // Held text is safe only in its recovery copy, since the file keeps the other version.
+        let lost = |path: &PathBuf| !self.pending.contains_key(path) || uncopied.contains(path);
+        match unsaved.iter().find(|file| lost(&file.path)) {
             None if unsaved.is_empty() => Closing::Saved,
             None => Closing::Held,
             Some(file) => Closing::Failed {
                 file: file.path.clone(),
                 reason: match self.problems.get(&file.path) {
-                    Some(Problem::Save(reason) | Problem::Unreadable(reason)) => reason.clone(),
+                    Some(Problem::Save(reason) | Problem::Unreadable(reason) | Problem::Copy(reason)) => reason.clone(),
                     _ => crate::t!(Key::NotAsSeen).to_owned(),
                 },
             },

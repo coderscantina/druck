@@ -772,6 +772,22 @@ fn closing_with_a_conflict_the_footer_holds_asks_nothing_and_keeps_both_versions
     );
 }
 
+/// Held text that cannot reach its recovery copy lives only in the buffer, so going on would lose it.
+#[test]
+fn closing_with_a_conflict_asks_when_the_recovery_copy_cannot_be_written() {
+    let mut fixture = Fixture::new();
+    fixture.type_in(ONE, "First line.", "Mine.");
+    fixture.outside(ONE, "# One\n\nTheirs.\n\nSecond line.\n");
+    // A file where the data folder should be makes every copy fail.
+    fs::write(&fixture.data, "").unwrap();
+    let closing = fixture.sync.write_all(&mut fixture.session);
+    assert!(
+        matches!(&closing, Closing::Failed { file, .. } if *file == fixture.one()),
+        "{closing:?}"
+    );
+    assert!(fixture.text(ONE).contains("Mine."));
+}
+
 #[test]
 fn closing_merges_a_change_that_arrived_between_the_last_look_and_the_write() {
     let mut fixture = Fixture::new();
