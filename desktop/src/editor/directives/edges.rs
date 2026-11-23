@@ -23,8 +23,9 @@ pub fn pieces(
 ) -> Vec<Range<usize>> {
     let list = blocks.as_slice();
     let mut range = range.start.max(hidden)..range.end.max(hidden);
-    // A fence line goes whole or stays whole, so a line the selection only reaches into counts as held.
-    for region in &structure.regions {
+    // A fence line goes whole or stays whole, so a line the selection only reaches into counts as held. A part's line
+    // always stays: the Binder writes it.
+    for region in structure.regions.iter().filter(|region| !region.kind.is_part()) {
         let (open, close) = (&list[region.open].range, &list[region.close].range);
         if touches(&range, open) && touches(&range, close) {
             range = range.start.min(open.start)..range.end.max(close.end);
@@ -34,6 +35,7 @@ pub fn pieces(
         .filter_map(|region| {
             let (open, close) = (&list[region.open].range, &list[region.close].range);
             match (touches(&range, open), touches(&range, close)) {
+                (true, _) if region.kind.is_part() => Some(open.clone()),
                 (true, false) => Some(open.clone()),
                 (false, true) => Some(close.clone()),
                 _ => None,
@@ -267,6 +269,12 @@ mod tests {
     fn a_marker_the_selection_reaches_into_goes_whole() {
         let text = "Ab\n\n::: toc\n\nCd\n";
         assert_eq!(over(text, 1..text.find("toc").unwrap(), ""), "A\nCd\n");
+    }
+
+    #[test]
+    fn a_part_line_inside_the_selection_stays() {
+        let text = "Ab\n\n::: main-matter\n\nCd\n";
+        assert_eq!(over(text, between(text, "b\n", "d"), ""), "A\n::: main-matter\n\nd\n");
     }
 
     #[test]

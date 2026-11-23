@@ -137,8 +137,8 @@ impl Kind {
         crate::t!(match self {
             Self::Columns => Key::TwoColumns,
             Self::FullWidth => Key::FullWidth,
-            Self::Keep => Key::KeptTogether,
-            Self::Bottom => Key::BottomOfPage,
+            Self::Keep => Key::KeepOnOnePage,
+            Self::Bottom => Key::FootOfThePage,
             Self::Table => Key::Table,
             Self::PageBreak => Key::NewPage,
             Self::Toc => Key::Contents,
@@ -345,7 +345,7 @@ impl EditorView {
             structure.regions[before].kind.has_body().then_some(before)
         };
         let region = opening(index).or_else(inside)?;
-        self.stands_as_marker(region).then_some(region)
+        (self.stands_as_marker(region) && !structure.regions[region].kind.is_part()).then_some(region)
     }
 
     /// Whether `region` shows as one mark rather than as the text it holds.
@@ -410,9 +410,10 @@ impl EditorView {
         (region.kind != Kind::Table).then_some(region)
     }
 
-    /// Whether block `index` is a fence line of a directive with text, which takes no room and no caret in Write.
+    /// Whether block `index` is a fence line of a directive with text, or a part's line, which take no room and no
+    /// caret in Write.
     pub(super) fn fence_at_rest(&self, index: usize) -> bool {
-        self.drawn_fence(index).is_some_and(|region| region.kind.has_body()) && self.marker_at(index).is_none()
+        !self.source && self.directives.structure.hides_line(index) && self.marker_at(index).is_none()
     }
 
     /// Whether block `index` is a line where two columns start or end, while they show.
@@ -428,7 +429,7 @@ impl EditorView {
     pub(super) fn opens_at_rest(&self, index: usize) -> bool {
         let opens = self
             .drawn_fence(index)
-            .is_some_and(|region| region.kind.has_body() && region.open == index);
+            .is_some_and(|region| region.open == index && self.directives.structure.hides_line(index));
         (opens && self.fence_at_rest(index)) || self.standalone_at_rest(index).is_some()
     }
 

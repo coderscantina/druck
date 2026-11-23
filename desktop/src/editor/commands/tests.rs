@@ -419,11 +419,6 @@ fn context_for(text: &str, blocks: &Blocks, slash_at: usize) -> Context {
         has_labels: true,
         block: Some(blocks.as_slice()[blocks.index_at(slash_at)].kind),
         theme: None,
-        parts: slash::parts_offered(
-            &(slash::parts_in(text).into_iter())
-                .map(|(part, start)| (part, start < slash_at))
-                .collect::<Vec<_>>(),
-        ),
     }
 }
 

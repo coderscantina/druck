@@ -50,39 +50,8 @@ pub enum Standalone {
     Index,
     /// A `::: table` of rows from a list.
     ListTable,
-    /// A part of a book by its directive's name, such as `front-matter`.
-    Part(&'static str),
     /// A comment, which the pages leave out.
     Comment,
-}
-
-/// The parts of a book, in the order the engine wants them.
-pub const PARTS: [&str; 3] = ["front-matter", "main-matter", "back-matter"];
-
-/// The parts a text starts, each with where its line begins.
-pub fn parts_in(text: &str) -> Vec<(&'static str, usize)> {
-    let blocks = Blocks::parse(text);
-    (blocks.as_slice().iter())
-        .filter(|block| block.kind == BlockKind::Directive)
-        .filter_map(|block| {
-            let name = text[block.range.clone()].trim_start_matches(':').trim();
-            let part = PARTS.iter().find(|part| **part == name)?;
-            Some((*part, block.range.start))
-        })
-        .collect()
-}
-
-/// The parts that may start at the caret. `placed` is every part the book has, with whether it stands before the
-/// caret: each part appears once, and they keep their order.
-pub fn parts_offered(placed: &[(&str, bool)]) -> Vec<&'static str> {
-    let order = |name: &str| PARTS.iter().position(|part| *part == name);
-    (PARTS.iter().enumerate())
-        .filter(|(at, _)| {
-            (placed.iter())
-                .all(|(other, before)| order(other).is_none_or(|other| other != *at && (other < *at) == *before))
-        })
-        .map(|(_, name)| *name)
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -115,8 +84,6 @@ pub struct Context {
     pub block: Option<BlockKind>,
     /// The theme the book's manifest names, which decides the new sections offered.
     pub theme: Option<String>,
-    /// The parts of a book that may start here, see [`parts_offered`].
-    pub parts: Vec<&'static str>,
 }
 
 /// Where a slash opens the menu: in running text, at the start of a word.
@@ -295,16 +262,6 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             Action::OpenReference,
         ));
     }
-    if open.is_empty() {
-        for part in &context.parts {
-            let key = match *part {
-                "front-matter" => Key::PartFront,
-                "main-matter" => Key::PartMain,
-                _ => Key::PartBack,
-            };
-            items.push(label(key, "icons/book.svg", Action::Insert(Standalone::Part(part))));
-        }
-    }
     if !in_heading {
         items.push(label(Key::Todo, "icons/pencil.svg", Action::Todo));
     }
@@ -360,9 +317,6 @@ pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'
                 .then_some(Key::IndexTaken)
                 .or(held.then_some(Key::IndexHeld)),
         ),
-        (Key::PartFront, part_refused(context, "front-matter")),
-        (Key::PartMain, part_refused(context, "main-matter")),
-        (Key::PartBack, part_refused(context, "back-matter")),
     ];
     let query = query.trim().to_lowercase();
     let named = |key: Key| {
@@ -378,10 +332,6 @@ pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'
         })
         .flatten()
         .map(|why| why.text(language))
-}
-
-fn part_refused(context: &Context, part: &str) -> Option<Key> {
-    (!context.open_directives.is_empty() || !context.parts.contains(&part)).then_some(Key::PartRefused)
 }
 
 /// The entries matching a query: all its words in either language's label or the group, the ones starting with it first.
@@ -515,11 +465,6 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
         }
         Action::Insert(Standalone::Index) => {
             let text = "::: index".to_owned();
-            let end = text.len();
-            (text, end..end)
-        }
-        Action::Insert(Standalone::Part(name)) => {
-            let text = format!("::: {name}");
             let end = text.len();
             (text, end..end)
         }
@@ -759,7 +704,6 @@ mod tests {
             (Action::Wrap("keep"), "::: keep\nText\n:::\n", "Text"),
             (Action::Insert(Standalone::SceneBreak), "***\n", ""),
             (Action::Insert(Standalone::PageBreak), "::: page-break\n", ""),
-            (Action::Insert(Standalone::Part("back-matter")), "::: back-matter\n", ""),
             (Action::Insert(Standalone::Comment), "<!-- Comment -->\n", "Comment"),
             (Action::Insert(Standalone::Toc), "::: toc\n", ""),
             (
@@ -832,8 +776,8 @@ mod tests {
         for absent in [
             "Table of contents",
             "Two columns",
-            "Keep together",
-            "Bottom of page",
+            "Keep on one page",
+            "Foot of the page",
             "Page break",
         ] {
             assert!(!inside.contains(&absent), "{absent}");
@@ -853,23 +797,6 @@ mod tests {
             ..Context::default()
         };
         assert!(!labels(&note).contains(&"Footnote"));
-    }
-
-    #[test]
-    fn a_part_is_offered_once_and_in_its_order() {
-        assert_eq!(parts_offered(&[]), PARTS);
-        assert_eq!(parts_offered(&[("front-matter", true)]), ["main-matter", "back-matter"]);
-        assert_eq!(parts_offered(&[("main-matter", true)]), ["back-matter"]);
-        assert_eq!(parts_offered(&[("main-matter", false)]), ["front-matter"]);
-        assert!(parts_offered(&[("front-matter", true), ("back-matter", true)]).is_empty());
-        let context = Context {
-            parts: vec!["back-matter"],
-            ..Context::default()
-        };
-        let labels: Vec<_> = (items(&context, Language::English).into_iter())
-            .map(|item| item.label)
-            .collect();
-        assert!(labels.contains(&"Back matter") && !labels.contains(&"Front matter"));
     }
 
     #[test]

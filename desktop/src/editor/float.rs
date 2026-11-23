@@ -614,29 +614,7 @@ impl EditorView {
             has_labels: !self.rich.book.labels.is_empty(),
             block: Some(self.blocks.as_slice()[self.blocks.index_at(at)].kind),
             theme: session.theme_setting(),
-            parts: slash::parts_offered(&self.parts_placed(at)),
         }
-    }
-
-    /// Every part the book starts, with whether it stands before `at` in the active chapter.
-    fn parts_placed(&self, at: usize) -> Vec<(&'static str, bool)> {
-        let session = &self.session;
-        let active = session.active();
-        let mut reached = false;
-        let mut placed = Vec::new();
-        for id in session.book() {
-            let here = *id == active;
-            let Some(chapter) = session.chapter(*id) else {
-                continue;
-            };
-            placed.extend(
-                slash::parts_in(chapter.text())
-                    .into_iter()
-                    .map(|(part, start)| (part, if here { start < at } else { !reached })),
-            );
-            reached |= here;
-        }
-        placed
     }
 
     /// Follows the text and caret while the slash menu is open: the query filters it, and a caret that leaves the query,

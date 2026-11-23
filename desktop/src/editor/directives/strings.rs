@@ -4,8 +4,8 @@ crate::strings! {
     pub enum Key {
         TwoColumns => ("Two columns", "Zwei Spalten"),
         FullWidth => ("Full width", "Volle Breite"),
-        KeptTogether => ("Kept together", "Zusammen"),
-        BottomOfPage => ("Bottom of page", "Seitenende"),
+        KeepOnOnePage => ("Keep on one page", "Auf einer Seite"),
+        FootOfThePage => ("Foot of the page", "Seitenfuß"),
         NewPage => ("New page", "Neue Seite"),
         Table => ("Table", "Tabelle"),
         Contents => ("Contents", "Inhalt"),
