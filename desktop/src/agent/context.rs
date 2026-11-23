@@ -2,6 +2,9 @@
 //! sees each as a chip and removes the ones they do not want sent. Nothing here sends anything.
 
 use std::collections::HashSet;
+use std::ops::Range;
+
+use crate::session::{ChapterId, Kind, Session};
 
 /// The most of a selection that goes into a prompt.
 const SELECTION_LIMIT: usize = 6_000;
@@ -21,6 +24,43 @@ pub struct Selected {
     /// First and last line, counting from 1.
     pub lines: (usize, usize),
     pub text: String,
+}
+
+impl Selected {
+    /// The text in `range` of a chapter, with its lines counted in the chapter's file, which is what the agent reads:
+    /// a later section of a single file starts below the sections before it.
+    pub fn in_file(session: &Session, id: ChapterId, range: Range<usize>) -> Self {
+        let buffer = session.buffer(id);
+        let text = buffer.text();
+        let last = range.end - usize::from(text[..range.end].ends_with('\n'));
+        let before = lines_before(session, id);
+        Self {
+            lines: (
+                before + buffer.line_of(range.start),
+                before + buffer.line_of(last.max(range.start)),
+            ),
+            text: text[range].to_owned(),
+        }
+    }
+}
+
+/// The lines of a chapter's file above its text: in a single file, those of the sections before it.
+fn lines_before(session: &Session, id: ChapterId) -> usize {
+    let Kind::Single { .. } = session.kind() else {
+        return 0;
+    };
+    let book = session.book();
+    let at = book.iter().position(|other| *other == id).unwrap_or(0);
+    (book[..at].iter())
+        .map(|other| {
+            session
+                .buffer(*other)
+                .text()
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+        })
+        .sum()
 }
 
 /// The state of the document when the author began writing a prompt.
@@ -144,5 +184,19 @@ mod tests {
         let sent = sent.expect("sent");
         assert!(sent.contains("(the selection continues)"));
         assert!(sent.len() < 7_000);
+    }
+
+    #[test]
+    fn a_selection_in_a_later_section_of_a_single_file_counts_the_files_lines() {
+        let file = std::env::temp_dir().join(format!("druck-selected-{}.md", std::process::id()));
+        std::fs::write(&file, "# One\n\nThe same line.\n\n# Two\n\nThe same line.\n").expect("file");
+        let session = Session::open(&file).expect("opens");
+        std::fs::remove_file(&file).ok();
+        let second = *session.book().last().expect("a second section");
+        let text = session.buffer(second).text();
+        let start = text.find("The same").expect("the line");
+        let selected = Selected::in_file(&session, second, start..text.len());
+        assert_eq!(selected.lines, (7, 7));
+        assert_eq!(selected.text, "The same line.\n");
     }
 }
