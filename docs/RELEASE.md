@@ -186,7 +186,8 @@ then replaces `appcast.xml` on the `appcast` release (`gh release upload --clobb
 time. From then on, each running Druck offers the new version at its next daily check. A release whose desktop job
 fails, or a CLI-only release, leaves the feed as it was, naming the last DMG there is, so the updater keeps working.
 Every tag the workflow publishes moves the feed, so marking a versioned release a pre-release afterwards does not hold
-its update back. Do not delete the `appcast` release or its tag: installed apps read the feed from it.
+its update back. Do not delete the `appcast` release or its tag: installed apps read the feed from it. If the job fails
+with "appcast.xml is not on the appcast release", the feed is gone until you run `publish-desktop` again.
 
 `python3 scripts/package-desktop.py --appcast NOTES.md` writes the appcast locally as well, with the private key in
 `DRUCK_SPARKLE_KEY`.
