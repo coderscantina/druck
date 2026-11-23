@@ -2130,3 +2130,19 @@ Settled with the owner in an interview on what a finished, polished beta needs. 
 - **The soak runs on a migrated copy** of the owner's book with a `druck.yaml`. The original is the owner's call.
 
 Unresolved: the vendors' answers on subscription logins. The repository secrets for signing, which only the owner can add.
+
+## 2026-11-23: Beta polish, writing surface
+
+Wave 1 of [milestone 28](milestones/28-beta-polish.md), the writing surface. The rules on screen are in [the design](DESIGN.md).
+
+- **`Cmd+Z` takes an outside change back at once.** This reverses the stop of [the beta slice](#2026-11-04-desktop-beta-slice-1-the-document-session): the first undo that reached an outside change did nothing but say so. The change stays one step, `EditKind::External`, which never joins typing, so typing before and after it keeps its own steps and nothing typed is lost. A copy of what the file held is still kept, and the foot still says so. The note that asked for a second press is gone.
+- **An index mark shows only on the caret's source line,** not its visual row. A row depends on what shows, so a mark that came and went with the row would move the wrap under the caret. A paragraph is usually one source line, so in practice the caret's paragraph shows its marks. In a table's cells and caption, which take no caret of the galley, marks never show at rest.
+- **Write's columns follow `widths` as the engine reads it:** `auto` fits its widest cell on one line, measured from the shaped text, and `*` takes the rest. Where only `auto` columns are too wide together, the narrow ones keep their width and the wide ones share what is left, as the engine's fitting does. A table without a `*` column still spans the text, the room left shared by content width, since Write has no centred narrow table. A pipe table has no `widths` and counts as all `auto`.
+- **A code block's fences count as a region's for edits over a selection.** `edges::pieces` takes both from one list of fence lines, so deleting, typing, cutting, pasting, and Return keep a lone code fence as they keep a lone region fence.
+- **Down out of a code block that ends the text leaves it as `Cmd+Return` does,** writing the empty line when there is none. It applies only when nothing but blank lines follows, so Down elsewhere moves as before.
+- **A single file left on its settings opens on its first text.** Opening already skipped the settings section; the place remembered for the next start did not, and the title page leaves the caret in that section. A project's empty chapter is still a place to open.
+- **The block menu and the lists filter by the typed words in their labels,** in the menu's own order, not by prefix first as the slash menu ranks. The slash menu reads its query from the text and keeps doing so. A query that matches nothing is refused rather than shown as an empty list, which would need words of its own.
+- **Arrow keys move between starters with focus handles the launch card owns,** one per starter, and stop at the ends rather than wrap, as the row has a first and a last.
+- **Section templates have German text in `templates/sections/de/`,** chosen by the book's `lang`, not the app's language, since the text goes into the book. A template without words to translate, such as `::: toc`, has one file. The placeholder fill words for a missing title, subtitle, and author follow too.
+
+Source: [the buffer](../desktop/src/source/buffer.rs), [index marks](../desktop/src/editor/rich/index.rs), [table shapes](../desktop/src/editor/rich/view/shapes.rs), [region and code edges](../desktop/src/editor/directives/edges.rs), [code blocks](../desktop/src/editor/commands/code.rs), [the menus](../desktop/src/editor/float.rs), [the launch card](../desktop/src/launch.rs), [templates](../desktop/src/session/templates.rs).
