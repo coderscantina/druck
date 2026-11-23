@@ -37,6 +37,7 @@ mod open_urls;
 mod palette;
 mod persist;
 mod preview;
+mod report;
 mod session;
 mod settings;
 mod shell;
@@ -93,6 +94,7 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         };
     }
+    report::install();
     let cli = Cli::parse();
     if let Some(path) = cli.open.as_deref().filter(|path| !path.exists()) {
         eprintln!("cannot open {}: no such file or folder", path.display());

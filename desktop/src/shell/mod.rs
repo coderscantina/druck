@@ -331,6 +331,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::MinimizeWindow, cx| with_window(cx, |window, _| window.minimize_window()));
     cx.on_action(|_: &menus::ZoomWindow, cx| with_window(cx, |window, _| window.zoom_window()));
     cx.on_action(|_: &menus::OpenHelp, cx| cx.open_url("https://github.com/coderscantina/druck"));
+    crate::report::install_actions(cx);
     cx.on_action(|_: &menus::ClearRecent, cx| {
         cx.global_mut::<Prefs>().state.forget_recent();
         save_prefs(cx);

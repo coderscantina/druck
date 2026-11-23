@@ -12,6 +12,7 @@ use crate::editor::{
     SelectAll, ShowSpelling, ToggleSource, Undo,
 };
 use crate::material::{JumpToMaterial, ShowLibrary, ToggleMaterial};
+use crate::report::ReportProblem;
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{FocusNext, FocusPrevious, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
@@ -255,7 +256,8 @@ pub fn build(state: &MenuState) -> Vec<Menu> {
         ]),
         Menu::new(crate::t!(Key::MenuWindow))
             .items([item(Key::Minimize, MinimizeWindow), item(Key::WindowZoom, ZoomWindow)]),
-        Menu::new(crate::t!(Key::MenuHelp)).items([item(Key::HelpWeb, OpenHelp)]),
+        Menu::new(crate::t!(Key::MenuHelp))
+            .items([item(Key::HelpWeb, OpenHelp), item(Key::ReportProblem, ReportProblem)]),
     ]
 }
 

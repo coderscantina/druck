@@ -321,6 +321,11 @@ impl FileSync {
 
     /// Records a problem with a file that the view or another part of the app ran into.
     pub fn report(&mut self, path: &Path, problem: Problem) {
+        // A save that keeps failing is retried, and the log has it once.
+        if self.problems.get(path) != Some(&problem) {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            crate::report::error(&format!("{name}: {problem:?}"));
+        }
         self.problems.insert(path.to_owned(), problem);
     }
 
@@ -449,7 +454,7 @@ impl FileSync {
         let Ok(theirs) = String::from_utf8(bytes) else {
             let problem = crate::t!(Key::NotUtf8, file = path.display());
             session.mark_unreadable(path, problem.clone());
-            self.problems.insert(path.to_owned(), Problem::Unreadable(problem));
+            self.report(path, Problem::Unreadable(problem));
             return None;
         };
         if matches!(self.problems.get(path), Some(Problem::Unreadable(_))) {
@@ -646,8 +651,7 @@ impl FileSync {
                 true
             }
             Err(error) => {
-                self.problems
-                    .insert(outgoing.path.clone(), Problem::Save(error.to_string()));
+                self.report(&outgoing.path, Problem::Save(error.to_string()));
                 false
             }
         }
