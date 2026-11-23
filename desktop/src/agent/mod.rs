@@ -486,12 +486,19 @@ impl AgentView {
                 if view.cli_kind != kind {
                     return view.ensure_checked(window, cx);
                 }
-                view.cli = Some(found.unwrap_or(Cli {
+                let cli = found.unwrap_or(Cli {
                     program: PathBuf::new(),
                     path: OsString::new(),
                     state: CliState::Missing,
                     login: Login::Unknown,
-                }));
+                });
+                // Said once, as a passing note, since a pass or the typesetter may run without the card ever opening.
+                if let CliState::Untested(version) = &cli.state {
+                    let note = strings::cli_untested(view.backend().name(), version);
+                    view.persist
+                        .update(cx, |persist, cx| persist.show_note(note, window, cx));
+                }
+                view.cli = Some(cli);
                 if let Some((slug, scope)) = view.pass_asked.take() {
                     view.run_pass(&slug, scope, window, cx);
                 }

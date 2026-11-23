@@ -14,7 +14,8 @@ use super::cli::{CliState, Login};
 use super::session::{Access, Event, PermissionRequest, SessionConfig};
 use super::tools;
 
-/// The CLI line this protocol code was captured and tested against.
+/// The tested range: 2.1.317 and every later 2.1 release, tested through 2.1.330. Claude Code ships a patch several
+/// times a week and its stream protocol has held within the line, so an upper bound would warn about every update.
 const TESTED: (u32, u32) = (2, 1);
 const TESTED_MIN_PATCH: u32 = 317;
 
@@ -129,7 +130,7 @@ impl Backend for Claude {
         vec![json!({"type": "user", "message": {"role": "user", "content": text}})]
     }
 
-    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Value {
+    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Vec<Value> {
         let response = match verdict {
             Verdict::Allow => {
                 json!({"behavior": "allow", "updatedInput": request.input, "toolUseID": request.tool_use_id})
@@ -145,10 +146,10 @@ impl Backend for Claude {
                 json!({"behavior": "deny", "message": message, "toolUseID": request.tool_use_id})
             }
         };
-        json!({
+        vec![json!({
             "type": "control_response",
             "response": {"subtype": "success", "request_id": request.request_id, "response": response},
-        })
+        })]
     }
 
     fn interrupt(&mut self) -> Vec<Value> {

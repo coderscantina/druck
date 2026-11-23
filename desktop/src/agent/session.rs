@@ -35,7 +35,8 @@ pub enum Event {
     TextDelta(String),
     /// The assistant asked to run a tool. The input is complete.
     ToolUse { id: String, name: String, input: Value },
-    /// A tool finished, with its output flattened to text.
+    /// A tool finished, with its output flattened to text. `details` is what it changed, in Claude's shape: a file with
+    /// its `structuredPatch`, or a list of them.
     ToolResult {
         tool_use_id: String,
         content: String,
@@ -190,8 +191,8 @@ impl Session {
     /// Answers a waiting tool call.
     pub fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> io::Result<()> {
         let mut wire = lock(&self.wire);
-        let message = wire.backend.answer(request, verdict);
-        wire.write(&[message])
+        let messages = wire.backend.answer(request, verdict);
+        wire.write(&messages)
     }
 
     /// Stops the current turn. The session stays usable.

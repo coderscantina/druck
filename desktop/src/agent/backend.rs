@@ -62,7 +62,8 @@ pub trait Backend: Send {
     fn open(&mut self, config: &SessionConfig) -> Vec<Value>;
     /// The author's prompt. Empty while it has to wait for the CLI, and then a later [`Backend::read`] replies with it.
     fn prompt(&mut self, text: &str) -> Vec<Value>;
-    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Value;
+    /// The lines that answer a waiting tool call, the answer first.
+    fn answer(&mut self, request: &PermissionRequest, verdict: Verdict) -> Vec<Value>;
     /// Stops the running turn and keeps the session.
     fn interrupt(&mut self) -> Vec<Value>;
     /// Takes one stdout line. What it does not know becomes [`Event::Raw`], so a CLI update does not break the stream.

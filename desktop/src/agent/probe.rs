@@ -4,7 +4,7 @@
 //!
 //! Actions: `ask`, `prompt <text>` (into the card or the selection prompt that is open), `send`, `select <text>`, `show <text>`,
 //! `type <text>`, `accept <n>`, `reject <n>`, `again <n>`, `accept-all`, `reject-all`, `next`, `note-apply <n>`,
-//! `note-reply <n>`, `note-dismiss <n>`, `allow`, `deny`, `chapter <n>`, `mode write|publish`, `state`,
+//! `note-reply <n>`, `note-dismiss <n>`, `allow`, `deny [reason]`, `chapter <n>`, `mode write|publish`, `state`,
 //! `pass <name> book|chapter|selection`, `customize <name>`, `stop`, `fix`, `fix-accept <n>`, `fix-reject <n>`,
 //! `fix-accept-all`, `fix-reject-all`, `undo`.
 
@@ -142,7 +142,7 @@ impl AgentView {
             }
             "deny" => {
                 if let Some(id) = self.first_waiting() {
-                    self.deny(&id, "", cx);
+                    self.deny(&id, rest, cx);
                 }
             }
             "chapter" => {
