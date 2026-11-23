@@ -2,8 +2,11 @@ name: Release
 
 # Builds and packages binaries for five targets. A manual run keeps them as
 # workflow artifacts. A tag push from scripts/release.sh also creates the GitHub
-# release with the newest CHANGELOG.md section. The desktop job builds the macOS app and keeps it as a workflow
-# artifact only: it is ad-hoc signed, and the publish job takes only the `druck-*` artifacts. See docs/RELEASE.md.
+# release with the newest CHANGELOG.md section. The desktop job builds the macOS app. On a manual run it is ad-hoc
+# signed and kept as a workflow artifact. On a tag it is signed with the Developer ID, notarized, and stapled, the
+# update and the appcast are signed with the EdDSA key, and the publish-desktop job adds the DMG, its checksum, and
+# appcast.xml to the release, where the app's updater finds them. The CLI release does not wait for the desktop app.
+# The secrets are listed in docs/RELEASE.md.
 on:
   workflow_dispatch:
   push:
@@ -60,8 +63,15 @@ jobs:
   desktop:
     name: macOS desktop app
     runs-on: macos-latest
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # Not a secret: every signature names it.
+      TEAM_ID: 3XA3ND2F7P
     steps:
       - uses: actions/checkout@v4
+        with:
+          # CFBundleVersion is the commit count, which needs the whole history.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -69,19 +79,92 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # No signing variables are set here, so the bundle is signed ad hoc. The owner signs and notarizes a release by
-      # hand, see docs/RELEASE.md.
+      # A keychain of this job's own holds the certificate and the notary credentials, and goes with the runner.
+      - name: Import the signing identity and the notary key
+        if: env.RELEASE == 'true'
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          keychain="$RUNNER_TEMP/druck-signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk -v team="($TEAM_ID)\"" '/"Developer ID Application: / && index($0, team) { print $2; exit }')
+          if [[ -z "$identity" ]]; then
+            echo "the certificate holds no Developer ID Application identity of team $TEAM_ID" >&2
+            exit 1
+          fi
+          printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool store-credentials druck-notary --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" --keychain "$keychain" > /dev/null
+          rm "$RUNNER_TEMP/notary.p8"
+          {
+            echo "DRUCK_SIGN_IDENTITY=$identity"
+            echo "DRUCK_NOTARY_PROFILE=druck-notary"
+            echo "DRUCK_NOTARY_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
+      # Without the signing variables, on a manual run, the bundle is signed ad hoc.
       - name: Package Druck.app and the DMG
+        if: env.RELEASE != 'true'
         run: python3 scripts/package-desktop.py --outdir dist-desktop
+      - name: Package, sign, notarize, and write the appcast
+        if: env.RELEASE == 'true'
+        env:
+          DRUCK_SPARKLE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          awk '/^## /{n++; next} n==1' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          python3 scripts/package-desktop.py --outdir dist-desktop --appcast "$RUNNER_TEMP/notes.md"
       - name: Check the bundle and the image
         run: |
           codesign --verify --deep --strict --verbose=2 dist-desktop/Druck.app
           hdiutil verify dist-desktop/*.dmg
+      - name: Check Gatekeeper accepts the release
+        if: env.RELEASE == 'true'
+        run: |
+          spctl --assess --type execute --verbose dist-desktop/Druck.app
+          xcrun stapler validate dist-desktop/*.dmg
+      - name: Remove the signing keychain
+        if: always() && env.DRUCK_NOTARY_KEYCHAIN != ''
+        run: security delete-keychain "$DRUCK_NOTARY_KEYCHAIN"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-aarch64-apple-darwin
-          path: dist-desktop/*.dmg*
+          path: |
+            dist-desktop/*.dmg*
+            dist-desktop/appcast.xml
           if-no-files-found: error
+
+  publish-desktop:
+    name: Desktop app on the GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-aarch64-apple-darwin
+          path: dist-desktop
+      # The appcast goes last, so the feed never names a DMG that is not there yet.
+      - name: Add the DMG and the appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist-desktop
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" ./*.dmg ./*.dmg.sha256
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" appcast.xml
 
   publish:
     name: GitHub release
