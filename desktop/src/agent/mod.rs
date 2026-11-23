@@ -88,7 +88,7 @@ use session::{Event, Session as Child, SessionConfig};
 use store::{Remembered, Store};
 use strings::Key;
 
-pub use fixing::fix_proof;
+pub use fixing::{fix_proof, sweep_book_copies};
 pub use run::{PassAction, pass_commands, run_pass_command};
 pub use tools::FLAG as NOTE_TOOL_FLAG;
 
