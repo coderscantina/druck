@@ -107,7 +107,7 @@ pub enum DocumentText {
     /// A project: joined chapters without front matter, settings from the manifest.
     Project(Box<Project>),
 }
-impl DocumentText { pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Vec<Diagnostic>>; }
+impl DocumentText { pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Failure>; }
 
 pub enum ThemeSelection {
     Document { dirs: ThemeDirs },                                  // the document's own `theme` setting
@@ -120,15 +120,15 @@ impl ThemeSelection { pub fn asked(selection: &Path, base: &Path, dirs: ThemeDir
 pub struct ThemeDirs { pub project: Option<PathBuf>, pub shared: Option<PathBuf> }   // no environment is read
 
 impl Overrides {
-    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Vec<Diagnostic>>;          // --set syntax
-    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Vec<Diagnostic>>;
+    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Failure>;          // --set syntax
+    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Failure>;
 }
 
 impl Project {
-    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Vec<Diagnostic>>;
+    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Failure>;
     pub fn warnings(&self) -> &[Diagnostic];                                    // chapters not in the book
     pub fn exports(&self) -> impl Iterator<Item = (&str, &Export)>;
-    pub fn export(self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Vec<Diagnostic>>;
+    pub fn export(self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Failure>;
 }
 pub struct ExportSettings { pub pdf: PdfOptions, pub is_final: bool, pub output: Option<PathBuf>, pub print_conflict: Option<Diagnostic> }
 ```
@@ -257,7 +257,7 @@ impl Diagnostic {
 }
 ```
 
-`Failure::Errors` carries every error of the stage that failed, in reading order. Warnings sit beside success: `Configured::warnings`, `Project::warnings`, `Layout::warnings`, and `Rendered::warnings`. The engine never prints and never exits. The CLI prints exactly what it printed before; the byte guard and a command matrix check that.
+`Failure::Errors` carries every error of the stage that failed, in reading order. Every fallible public function returns `Failure`, reading inputs too (`DocumentText::read`, `Overrides::parse` and `from_json`, `Project::open` and `export`), so `?` goes into a `Failure` or a `Box<dyn Error>` alike. They returned `Vec<Diagnostic>` until 2026-11-23, which raised `API_VERSION` to 2. Warnings sit beside success: `Configured::warnings`, `Project::warnings`, `Layout::warnings`, and `Rendered::warnings`. The engine never prints and never exits. The CLI prints exactly what it printed before; the byte guard and a command matrix check that.
 
 ## 8. Cancellation
 
@@ -265,7 +265,7 @@ impl Diagnostic {
 
 ## 9. Compatibility and versioning
 
-The package version stays CalVer, so it says nothing about compatibility. `druck::API_VERSION` (1) is raised on any breaking change to the public modules, and a release that keeps it keeps every public signature. `druck::THEME_SCHEMA_VERSIONS` (`[1]`) lists the theme `version` values this release reads; any other fails in `configure` with a diagnostic at the `version` property. The two change independently. `druck.yaml` has no version. Private and free to change: everything not listed in section 1, the hash algorithm of `Bytes`, the cache eviction rule, the shape plan key, layout scoring, the tag tree, and the `editor` module.
+The package version stays CalVer, so it says nothing about compatibility. `druck::API_VERSION` (2) is raised on any breaking change to the public modules, and a release that keeps it keeps every public signature. `druck::THEME_SCHEMA_VERSIONS` (`[1]`) lists the theme `version` values this release reads; any other fails in `configure` with a diagnostic at the `version` property. The two change independently. `druck.yaml` has no version. Private and free to change: everything not listed in section 1, the hash algorithm of `Bytes`, the cache eviction rule, the shape plan key, layout scoring, the tag tree, and the `editor` module.
 
 ## 10. Migration, as it ran
 

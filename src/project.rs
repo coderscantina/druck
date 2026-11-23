@@ -15,7 +15,7 @@ use crate::diagnostic::{Code, Diagnostic};
 use crate::document;
 use crate::input::{DocumentText, ExportSettings, Input};
 use crate::pipeline::{self, DocumentFile};
-use crate::renderer::PdfOptions;
+use crate::renderer::{Failure, PdfOptions};
 use crate::resource::{Bytes, ResolveError, Resolver};
 
 pub const MANIFEST: &str = "druck.yaml";
@@ -37,7 +37,7 @@ pub struct Project {
 
 impl Project {
     /// Reads the manifest in `dir`, which is absolute, and joins the chapters it lists.
-    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Vec<Diagnostic>> {
+    pub fn open(resolver: &dyn Resolver, dir: &Path) -> Result<Self, Failure> {
         let manifest = dir.join(MANIFEST);
         let source = InputSource::Document(manifest.clone());
         let origin = Origin::Document(dir.to_owned());
@@ -48,9 +48,10 @@ impl Project {
                 return Err(vec![Diagnostic::new(
                     Some(source),
                     "not found: a project folder needs a druck.yaml",
-                )]);
+                )]
+                .into());
             }
-            Err(e) => return Err(vec![Diagnostic::new(Some(source), format!("cannot read file: {e}"))]),
+            Err(e) => return Err(vec![Diagnostic::new(Some(source), format!("cannot read file: {e}"))].into()),
         };
         let mut settings = pipeline::parse_settings(&text, 1, &source)?;
         let chapters = settings.chapters.take().unwrap_or_default();
@@ -93,7 +94,7 @@ impl Project {
     }
 
     /// The document with the export's theme and draft applied, with its print and final settings beside it.
-    pub fn export(mut self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Vec<Diagnostic>> {
+    pub fn export(mut self, name: Option<&str>) -> Result<(DocumentText, ExportSettings), Failure> {
         let mut settings = ExportSettings {
             pdf: PdfOptions::default(),
             is_final: false,
@@ -104,7 +105,7 @@ impl Project {
             let manifest = InputSource::Document(self.manifest.clone());
             let Some(export) = self.exports.get(name) else {
                 let message = format!("no export named \"{name}\"");
-                return Err(vec![Diagnostic::new(Some(manifest), message)]);
+                return Err(vec![Diagnostic::new(Some(manifest), message)].into());
             };
             let has_print = export.value.bleed.is_some() || export.value.crop_marks;
             settings.print_conflict = has_print.then(|| {

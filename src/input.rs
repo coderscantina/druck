@@ -7,7 +7,7 @@ use crate::config::resolve::SettingsInput;
 use crate::config::source::{InputSource, Origin};
 use crate::diagnostic::Diagnostic;
 use crate::pipeline;
-use crate::renderer::PdfOptions;
+use crate::renderer::{Failure, PdfOptions};
 use crate::resource::Resolver;
 use crate::theme_path;
 
@@ -35,7 +35,7 @@ pub enum DocumentText {
 
 impl DocumentText {
     /// Reads the Markdown file at `path`, which is absolute.
-    pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Vec<Diagnostic>> {
+    pub fn read(resolver: &dyn Resolver, path: &Path) -> Result<Self, Failure> {
         let origin = Origin::Document(path.parent().unwrap_or(path).to_owned());
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
         let name = name.unwrap_or_default();
@@ -96,7 +96,7 @@ pub struct Overrides {
 
 impl Overrides {
     /// Parses `KEY=VALUE` pairs in `druck render --set` syntax. Values use YAML; dots nest keys.
-    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Vec<Diagnostic>> {
+    pub fn parse(pairs: &[String], working_dir: &Path) -> Result<Self, Failure> {
         let source = source(working_dir);
         Ok(Self {
             settings: pipeline::parse_overrides(pairs, &source)?,
@@ -105,7 +105,7 @@ impl Overrides {
     }
 
     /// Takes settings from a JSON object.
-    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Vec<Diagnostic>> {
+    pub fn from_json(value: serde_json::Value, working_dir: &Path) -> Result<Self, Failure> {
         let source = source(working_dir);
         Ok(Self {
             settings: pipeline::overrides_from_value(value, &source)?,

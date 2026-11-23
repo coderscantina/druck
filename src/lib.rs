@@ -129,7 +129,7 @@ pub mod resource;
 pub use renderer::*;
 
 /// Bumped on any breaking change to the public modules.
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// The theme schema versions this release accepts.
 pub const THEME_SCHEMA_VERSIONS: &[u64] = &[config::theme::THEME_VERSION];

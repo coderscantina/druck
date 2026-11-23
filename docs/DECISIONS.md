@@ -2130,3 +2130,9 @@ Settled with the owner in an interview on what a finished, polished beta needs. 
 - **The soak runs on a migrated copy** of the owner's book with a `druck.yaml`. The original is the owner's call.
 
 Unresolved: the vendors' answers on subscription logins. The repository secrets for signing, which only the owner can add.
+
+## 2026-11-23: Beta polish, engine pipeline
+
+The engine and crate items of wave 1 of [milestone 28](milestones/28-beta-polish.md).
+
+- **Reading inputs fails with `Failure`.** `DocumentText::read`, `Overrides::parse`, `Project::open`, and, for the same reason, `Overrides::from_json` and `Project::export` return `Failure` instead of `Vec<Diagnostic>`, so every fallible public function has one error type and `?` goes into a `Box<dyn Error>` without `map_err`. These never return `Failure::Cancelled`; a client that matches on it pays one arm. `API_VERSION` is 2, since the signatures break.
