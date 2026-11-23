@@ -76,6 +76,9 @@ pub(super) const ONE_LINER: f64 = 16.0 * SHORT;
 pub(super) const HEADING_LINE: f64 = SHORT;
 /// Cost of each page a placed block waits after the page its anchor falls on.
 const WAIT: f64 = 10_000.0;
+/// Cost of a page that sets a figure or table where it stands before a placed one of its kind anchored before it,
+/// so numbers run out of order only where no other layout exists.
+const OUT_OF_ORDER: f64 = 1_000_000.0;
 /// Cost of a page that holds only placed blocks amid the text, so that is a last resort for blocks
 /// that cannot share a page with text. Before a forced break or the end such pages cost nothing more
 /// than the waiting.
@@ -238,6 +241,8 @@ pub(super) struct Content {
     pub continued: Vec<Vec<FlowLine>>,
     /// Figures and tables placed at the top or bottom of a page, in document order.
     pub floats: Vec<Float>,
+    /// The first line of each figure and table set where it stands, with its kind, in order.
+    pub unplaced: Vec<(usize, &'static str)>,
     pub margin: Margin,
 }
 
@@ -312,6 +317,7 @@ pub(super) fn compose(
         notes,
         continued,
         mut floats,
+        unplaced,
         margin,
     } = content;
     let footnotes = &config.footnotes;
@@ -335,7 +341,7 @@ pub(super) fn compose(
         &rectos,
         config.typesetting.chapter_last_lines.get(),
     );
-    composer.place(&floats, config.styles.caption.space_after.0);
+    composer.place(&floats, &unplaced, config.styles.caption.space_after.0);
     composer.annotate(&margin, config.margin_notes.spacing.0);
     composer.check(&keeps, &bottoms, &tables, source)?;
     let plans = composer.search(cancel)?.ok_or_else(|| {
@@ -558,6 +564,9 @@ struct Composer<'a> {
     float_top: Vec<f64>,
     /// The number of bottom blocks followed by a top block before each placed block.
     switches: Vec<usize>,
+    /// For each body line, how many placed blocks must be set before it: through the last one of the kind of
+    /// the figure or table the line starts that is anchored before it. Empty without placed blocks.
+    precede: Vec<usize>,
     float_spacing: f64,
     /// The number of margin notes referenced before each body line and at the end, empty without any.
     note_first: Vec<usize>,
@@ -612,6 +621,7 @@ impl<'a> Composer<'a> {
             floats: &[],
             float_top: vec![0.0],
             switches: vec![0],
+            precede: Vec::new(),
             float_spacing: 0.0,
             note_first: Vec::new(),
             note_top: vec![0.0],
@@ -637,10 +647,21 @@ impl<'a> Composer<'a> {
         state.verso && (only_floats || self.rectos.binary_search(&start).is_err())
     }
 
-    /// Adds the placed blocks, `spacing` apart from the text and each other.
-    fn place(&mut self, floats: &'a [Float], spacing: f64) {
+    /// Adds the placed blocks, `spacing` apart from the text and each other, and the first lines of the
+    /// `unplaced` blocks with their kinds, which no placed block of their kind anchored before them may follow.
+    fn place(&mut self, floats: &'a [Float], unplaced: &[(usize, &str)], spacing: f64) {
         self.floats = floats;
         self.float_spacing = spacing;
+        if !floats.is_empty() {
+            self.precede = vec![0; self.body.len()];
+            for &(line, what) in unplaced {
+                let anchored = floats.partition_point(|float| float.key() <= 2 * line);
+                self.precede[line] = floats[..anchored]
+                    .iter()
+                    .rposition(|float| float.what == what)
+                    .map_or(0, |last| last + 1);
+            }
+        }
         for (index, float) in floats.iter().enumerate() {
             let top = self.float_top[index];
             self.float_top.push(top + float.height + spacing);
@@ -947,9 +968,12 @@ impl<'a> Composer<'a> {
         let verso = self.is_verso(state, start, false);
         // The first page of a chapter may be its last too.
         let continues = start > 0 && self.body[start - 1].after != Break::Forced;
+        // How many placed blocks must be set before the figures and tables of the page that stand where they are.
+        let mut precede = 0;
         'lines: for (index, line) in self.body.iter().enumerate().skip(start) {
             let end = index + 1;
             let last = end == self.body.len();
+            precede = precede.max(self.precede.get(index).copied().unwrap_or(0));
             // Notes beside the text may move up as far as needed, so they fit if their heights do.
             if self.note_height(start, end) > self.height {
                 break;
@@ -1024,6 +1048,10 @@ impl<'a> Composer<'a> {
                     break;
                 };
                 let wait = WAIT * eligible.saturating_sub(floats) as f64;
+                // Blocks set on this page come before its text only at the top.
+                let disorder =
+                    precede > done && (precede > floats || self.floats[done..precede].iter().any(|float| !float.top));
+                let wait = wait + if disorder { OUT_OF_ORDER } else { 0.0 };
                 // A continued note may also stop a line earlier, so it strands no line.
                 let earlier = (fitted < max && fitted > min).then(|| fitted - 1);
                 for placed in std::iter::once(fitted).chain(earlier) {

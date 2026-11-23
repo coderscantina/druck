@@ -502,6 +502,7 @@ impl Pass<'_> {
             in_notes: false,
             table_lines: Vec::new(),
             floats: Vec::new(),
+            unplaced: Vec::new(),
             lines: Vec::new(),
             space: 0.0,
             after_paragraph: false,
@@ -546,6 +547,7 @@ impl Pass<'_> {
         let columns = std::mem::take(&mut flow.columns);
         let tables = std::mem::take(&mut flow.table_lines);
         let floats = std::mem::take(&mut flow.floats);
+        let unplaced = std::mem::take(&mut flow.unplaced);
         flow.in_notes = true;
         let mut notes = Vec::with_capacity(self.document.footnotes.len());
         let mut continued = Vec::with_capacity(self.document.footnotes.len());
@@ -580,9 +582,19 @@ impl Pass<'_> {
             notes,
             continued,
             floats,
+            unplaced,
             margin,
         };
         Ok((content, matters, flow.tags, flow.texts))
+    }
+}
+
+/// "figure" or "table": the kind of a block that may be placed, which numbers on its own.
+fn float_kind(block: &Block) -> &'static str {
+    if matches!(block, Block::Table { .. }) {
+        "table"
+    } else {
+        "figure"
     }
 }
 
@@ -761,6 +773,8 @@ struct Flow<'a> {
     table_lines: Vec<pages::Table>,
     /// The figures and tables placed at the top or bottom of a page, in document order.
     floats: Vec<pages::Float>,
+    /// The first line of each figure and table set where it stands, with its kind, in order.
+    unplaced: Vec<(usize, &'static str)>,
     lines: Vec<FlowLine>,
     /// Space requested before the next line. Adjacent spaces collapse to the larger one.
     space: f64,
@@ -1072,7 +1086,13 @@ impl<'a> Flow<'a> {
                     self.code(*at, *first_line, language.as_deref(), lines, frame);
                     self.close(scope);
                 }
-                Block::Image { .. } | Block::Table { .. } => self.figure_or_table(block, frame),
+                Block::Image { .. } | Block::Table { .. } => {
+                    let start = self.lines.len();
+                    self.figure_or_table(block, frame);
+                    if !self.in_notes && self.lines.len() > start {
+                        self.unplaced.push((start, float_kind(block)));
+                    }
+                }
                 Block::Keep { at, blocks } => {
                     self.opening = opening;
                     self.keep(*at, blocks, frame);
@@ -1176,11 +1196,6 @@ impl<'a> Flow<'a> {
         first.space_before = 0.0;
         let height = placed.iter().skip(1).map(|line| line.space_before).sum::<f64>()
             + placed.iter().map(|line| line.line.height).sum::<f64>();
-        let what = if matches!(block, Block::Table { .. }) {
-            "table"
-        } else {
-            "figure"
-        };
         self.floats.push(pages::Float {
             lines: placed,
             height,
@@ -1188,7 +1203,7 @@ impl<'a> Flow<'a> {
             after_break: self.lines.last().is_some_and(|line| line.after == Break::Forced),
             top,
             at: block.at(),
-            what,
+            what: float_kind(block),
         });
     }
 

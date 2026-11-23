@@ -433,6 +433,28 @@ fn placed_blocks_keep_their_order() {
 }
 
 #[test]
+fn a_figure_in_the_text_never_comes_before_a_waiting_placed_one() {
+    let config = default_config();
+    let body = format!(
+        "{}![Waits.](a.svg){{placement=top}}\n\n{}![Here.](b.svg)\n\n{}",
+        paragraphs(7),
+        paragraphs(1).replace('P', "Q"),
+        paragraphs(8).replace('P', "R")
+    );
+    let output = render(&config, &body, &[svg(300.0, 500.0), svg(200.0, 50.0)]);
+    let placed = images(&output);
+    let position = |width: f64| {
+        let (page, rect) = placed
+            .iter()
+            .find(|(_, rect)| close(rect.width.0, width))
+            .expect("image");
+        (*page, rect.y.0)
+    };
+    // The small figure would fit on the first page, below the text the tall one waits behind.
+    assert!(position(300.0) < position(200.0), "{placed:?}");
+}
+
+#[test]
 fn a_waiting_block_is_set_before_the_next_page_break() {
     let config = default_config();
     let body = format!(
