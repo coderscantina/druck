@@ -52,7 +52,7 @@ Variable font weights and italics were added on 2026-10-07 at the owner's reques
 - [ ] 25: No syntax to learn. Built and checked on `agentic-beta`. Stays unchecked until the book details are driven by keys on a single file, see the [note](#milestone-25-note).
 - [ ] 26: Editing passes, with Codex. Built and checked with real turns on both CLIs on `agentic-beta`. Stays unchecked until a whole-book run on the owner's book, which was held to a demo book for cost, see the [note](#milestone-26-note).
 - [x] 27: Typesetter. Built and checked with real turns on both CLIs on `agentic-beta`, on a copy of the owner's book with the list cut to 20 of its 243 warnings, see the [note](#milestone-27-note).
-- [ ] 28: Beta polish, in three waves. Wave 1, the defects, in progress.
+- [ ] 28: Beta polish, in three waves. Wave 1, the defects, built on `beta-polish`.
 - [ ] 22: Writer beta, the gate for a first public release, after 24 to 28.
 - [ ] 23: Desktop 1.0, replacing 17.
 
@@ -102,13 +102,23 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ### Beta polish note
 
-On 2026-11-23 the owner settled the beta in an interview, see [the decision](DECISIONS.md#2026-11-23-beta-polish), and milestone [28](milestones/28-beta-polish.md) holds the work. Wave 1, every listed defect, runs in four worktrees: engine, writing surface, agent and typesetter, shell. Next: merge wave 1, push `main` so CI runs, then wave 2.
+On 2026-11-23 the owner settled the beta in an interview, see [the decision](DECISIONS.md#2026-11-23-beta-polish), and milestone [28](milestones/28-beta-polish.md) holds the work. Wave 1, every listed defect, is built on branch `beta-polish` from five worktrees (engine layout, engine pipeline, writing surface, agent and typesetter, shell), merged, with the choices in the four "Beta polish" decisions of 2026-11-23. Not merged into `main`.
+
+Checks on the merged branch: `cargo test -p druck` (467 lib tests and all integration suites passed), `cargo test -p druck-desktop` (944 passed), `cargo clippy --workspace --all-targets --no-deps -- -D warnings` and `cargo fmt --all --check` clean. Real turns: consistency over a demo book and Fix the proof with `claude` 2.1.330 on `haiku` (about $0.06 together), one Codex 0.166.0 chat. Captures are in `.captures/milestone-28`, untracked.
+
+For the owner: in two columns a note from the inner column falls back to the outer margin when the inner margin is too narrow for the note column, which kept the `margins` sample valid; confirm or change. Wave 1 also put tables under the figure order rule, since they number on their own.
+
+Not verified: veraPDF on the patched catalog (not installed), the Linux memory measure, the block menu filter on screen (synthetic `Ctrl+Return` does not reach the window), German and light captures for the writing surface, trackpad scrolling of the launch card. Once, three letters typed during an undo run did not appear and did not repeat in three tries: worth a hand test.
+
+Follow-ups from wave 1: the app's placeholder chips still treat page placeholders as open and ignore `meta.reading-speed`; the app should read `Layout::contents_depth` and `Layout::page_titles` (wave 2). A `{pages}` near a page boundary may not settle in 5 passes. After an outside change to a single file the foot named the title page instead of the chapter. The turn summary's diff rows cut long lines from the start. The palette may run past the window's right edge with the Binder open. New pass files list after older ones, not by name. `AUTHORING.md` has no typesetter section, and a table's placement is no fix kind. `f64` and `Self` highlight as keywords in Rust.
+
+Next: CI on the pushed branch, then wave 2.
 
 ### Special pages note
 
 On 2026-11-23, on branch `special-pages`, the book's structure moved out of the text and into the Binder, from the owner's [ratings](DESIGN.md#special-page-ratings-2026-11-23), see [the decision](DECISIONS.md#2026-11-23-pages-in-the-binder-writing-in-the-text). Checks: `cargo test -p druck-desktop` (922 passed), clippy and fmt clean. Not merged into `main`.
 
-Open: a real mouse and drag in the Binder, a bibliography page on screen, and moves in single files. The starters keep the copyright, dedication, and contents in one front file, so a new novel shows one "Front" row where the sample shows three. Index marks (‸) after many words crowd running text. The engine does not expose the contents depth or the made pages' titles to the app.
+Open: a real mouse and drag in the Binder, a bibliography page on screen, and moves in single files. The starters keep the copyright, dedication, and contents in one front file, so a new novel shows one "Front" row where the sample shows three.
 
 ### Region editing note
 
@@ -120,32 +130,12 @@ Not verified: a real mouse on a mark's grip, Remove line, and the second column'
 
 Milestones 24 to 27 were merged into `main` on 2026-11-11. Open across them, most important first. Each milestone's own note below has the detail.
 
-Waiting on the owner:
+The defects listed here were fixed in milestone 28's wave 1, see the beta polish note. Left for the gate of milestone 22:
 
-- Theme values never pass the typesetter's keep rule on the real book: `typesetting.hyphen-fragments: [2, 2]` cleared 111 warnings and caused 21. Decide whether a theme value may be kept when it clears more than it causes, with both counts on the entry.
-- Change passes run with edits approved in advance. Decide whether they should ask as chat turns do.
 - Milestone 25's box: change a single file's title through Details by hand.
 - Milestone 26's box: a pass over the whole 45,000-word book.
 - Milestone 27 is checked on 20 of the book's 243 warnings. A full run has not been made.
 - By hand: a real mouse on the gallery, table cells and their handle, the offer's buttons, and the queue; an input method in a table cell; a new project through the system save panel.
-
-Defects and gaps:
-
-- The typesetter's tool reads the book from disk while the app tries fixes on the open text, so unsaved typing during a run can make the two disagree. A pass does not wait for unsaved text either.
-- An entry's pages in the queue are not repainted after another entry is accepted or rejected, and "Clears 1 warning" leaves out warnings a page break excuses.
-- Consistency sees one chapter at a time, so a variant across chapters is caught only if an earlier chapter recorded the rule. A first read-only turn over the whole book would help.
-- Shift-selecting across a hidden code fence and deleting can break the fence. Down on a code block's last line at the end of a file does nothing.
-- Table column widths in Write follow content length, not `widths`. Index marks in table cells and captions show as written.
-- A single file opens on its raw front matter part instead of the first text.
-- The block menu and the new lists do not filter by typing. Arrow keys do not move between starters.
-- Section template text is English in a German book.
-- The launch card does not scroll if it outgrows a small window.
-- `passes/` files are not in the Binder and open in the system editor.
-- Codex: a deny reason does not reach it, a change to a file that is not open is missing from the turn summary, and its approval card shows a long line whole. Only 0.166.0 with a ChatGPT login was tried, through `codex app-server`, which the CLI marks experimental.
-- In Publish a run shows twice, in the panel and at the foot. The Proof panel is 21 Tab presses from the title bar. The selection toolbar stays over the palette.
-- A table's placement is not a typesetter fix kind, and a figure's placement was not seen in a real run.
-- `docs/AUTHORING.md` has no section on the typesetter.
-- Two tests fail now and then in a parallel run and pass alone: `source::tests::an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame` and `spell::macos::tests::the_documents_language_decides_not_the_texts`.
 
 Not run: release builds of the new surfaces, the typing gate on the book, Linux, and Windows. The `claude` and `codex` CLIs keep their own session records of the test runs outside the repo, with excerpts of the book.
 
@@ -606,11 +596,6 @@ Not yet run: the CI workflow on Linux and Windows, since nothing has been pushed
 - Phase 2: a long-lived process holds about five times the memory of one job on macOS (the allocator keeps freed memory; the program's own heap is flat). Measure it on Linux, and consider a note for service authors or an allocator choice. Not measured in milestone 28 wave 1 (2026-11-23): no Linux machine, and OrbStack's Docker daemon was not running.
 - Phase 2: only `druck-desktop` draws from a `Layout`, and the core's "no printing, no filesystem" rule has no automated check.
 - Desktop: CI now builds `druck-desktop` on macOS (not yet run). The galley uses Georgia until the first successful layout, and takes only the body's font, size, and line height from the theme.
-- Typesetting amendment: krilla writes `DisplayDocTitle` only for PDF/UA files; line-end hyphens are hard hyphens in tagged text; margin notes in two-column sections all go to the outer margin, and placement inside a single column is not supported; an unplaced figure can precede a waiting placed one; a split callout's box may touch the footnote area when `footnotes.gap` is smaller than `callouts.padding`; the bibliography heading does not open a chapter like the index heading does; index page numbers use the link color; the default palette's keyword blue and type teal are close.
-
-- Reference matching: title blocks drop leading slot space at the page top, and cover metadata cannot use a different top margin from the body. See [reference decisions](DECISIONS.md#2026-10-07-named-user-themes-and-pdf-reference-themes).
-- A URL without a single slash that is wider than its column is still an error.
-
 ## Updating this file
 
 Replace the resume note with the latest completed work and next action. Record exact verification commands and results, remaining criteria, and blockers. Check a milestone only after its completion gate passes. Preserve useful follow-ups without copying the product requirements or decision history here.
