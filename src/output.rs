@@ -70,6 +70,17 @@ pub struct Layout {
     pub(crate) conformance: Conformance,
     pub(crate) today: Date,
     pub(crate) source: InputSource,
+    pub(crate) contents_depth: u8,
+    pub(crate) page_titles: PageTitles,
+}
+
+/// The headings of the pages the engine makes, as the theme words them in the document's language. They are the
+/// theme's whether or not the document has such a page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageTitles {
+    pub contents: String,
+    pub index: String,
+    pub bibliography: String,
 }
 
 /// Where a point falls in the text of a page.
@@ -129,6 +140,16 @@ impl Layout {
     /// and `None` for a page before the first part.
     pub fn page_numbers(&self) -> &[Option<PageNumber>] {
         &self.laid.page_numbers
+    }
+
+    /// The deepest heading level the table of contents lists, from 1 to 6, whether or not the document has one.
+    pub fn contents_depth(&self) -> u8 {
+        self.contents_depth
+    }
+
+    /// The headings of the table of contents, the index, and the bibliography.
+    pub fn page_titles(&self) -> &PageTitles {
+        &self.page_titles
     }
 
     /// The typesetting rules the layout breaks, since no better layout was found, and what stands in for a missing

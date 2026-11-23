@@ -190,6 +190,30 @@ fn only_the_listed_theme_schema_versions_are_read_and_others_fail_at_the_version
 }
 
 #[test]
+fn a_layout_tells_the_contents_depth_and_the_titles_of_made_pages_in_the_documents_language() {
+    let text = "---\nlang: de\ntoc-depth: 2\n---\n\nText.\n";
+    let input = input(text, PathBuf::from("/memory"), no_theme(), Overrides::default());
+    let layout = on_big_stack(|| {
+        let (renderer, resolver, cancel) = (Renderer::new(), MemoryResolver::new(), Cancel::default());
+        let configured = renderer
+            .job(&resolver, &input, &cancel)
+            .configure()
+            .expect("configures");
+        configured.layout(&LayoutOptions::default()).expect("lays out")
+    });
+    assert_eq!(layout.contents_depth(), 2);
+    let titles = layout.page_titles();
+    assert_eq!(
+        [
+            titles.contents.as_str(),
+            titles.index.as_str(),
+            titles.bibliography.as_str()
+        ],
+        ["Inhalt", "Register", "Literatur"]
+    );
+}
+
+#[test]
 fn reading_inputs_fails_with_a_failure_that_any_error_takes() -> Result<(), Box<dyn std::error::Error>> {
     let resolver = MemoryResolver::new();
     let working = Path::new("/memory");

@@ -28,7 +28,7 @@ The public modules, as `cargo doc --no-deps` lists them:
 | root | `Renderer`, `Job`, `Configured`, `Rendered`, `Failure`, `LayoutOptions`, `PdfOptions`, `EpubOptions`, `API_VERSION`, `THEME_SCHEMA_VERSIONS` |
 | `input` | `Input`, `DocumentText`, `ThemeSelection`, `ThemeDirs`, `Overrides`, `Project`, `ExportSettings`, `Export`, `Date`, `MANIFEST` |
 | `resource` | `Resolver`, `FileResolver`, `MemoryResolver`, `Bytes`, `ResolveError`, `InstalledFace`, `Origin`, `Resource`, `normalize`, `source_date`, `clock_date` |
-| `output` | `Layout` and everything it returns: `Page`, `Item`, `Run`, `Glyph`, `Face`, `FaceId`, `Picture`, `Pixels`, `Link`, `Structure`, `Rect`, `Position`, `Bookmark`, `PageNumber`, `Hit`, `Located`, `Color`, `Pt`, and the source map types |
+| `output` | `Layout` and everything it returns: `Page`, `Item`, `Run`, `Glyph`, `Face`, `FaceId`, `Picture`, `Pixels`, `Link`, `Structure`, `Rect`, `Position`, `Bookmark`, `PageNumber`, `PageTitles`, `Hit`, `Located`, `Color`, `Pt`, and the source map types |
 | `diagnostic` | `Diagnostic`, `Severity`, `Code`, `PageName`, `Source`, `Location`, `Origin`, `Resource`, `path_from` |
 | `cancel` | `Cancel` |
 
@@ -179,6 +179,8 @@ impl Layout {
     pub fn anchor(&self, id: AnchorId) -> Position;
     pub fn outline(&self) -> &[Bookmark];
     pub fn page_numbers(&self) -> &[Option<PageNumber>];
+    pub fn contents_depth(&self) -> u8;                                   // the deepest level the contents list, 1 to 6
+    pub fn page_titles(&self) -> &PageTitles;                             // the headings of made pages, see below
     pub fn warnings(&self) -> &[Diagnostic];                              // typesetting rules the layout breaks
     pub fn source_map(&self) -> Option<&SourceMap>;
     pub fn hit(&self, page: usize, x: Pt, y: Pt) -> Option<Hit>;          // the text nearest a point
@@ -188,6 +190,7 @@ impl Layout {
 }
 
 pub struct Page { pub width: Pt, pub height: Pt, pub items: Vec<Item> }
+pub struct PageTitles { pub contents: String, pub index: String, pub bibliography: String }
 
 pub enum Item {
     Text { x: Pt, y: Pt, run: Run, color: Color, source: Option<TextId> },
@@ -210,6 +213,8 @@ pub enum Link { Url(String), Anchor(AnchorId) }
 Documented in `output.rs`, which is the reference for painters: points, origin at the top left of the page, y growing down. `Page::width` and `height` are the trim size; bleed and crop marks exist only in `PdfOptions`. Items draw in order, later over earlier. A run draws from `(x, y)` on the baseline: for each glyph, the outline of `id` in `face.data()` at `face.index()` with `face.coordinates()`, scaled by `size / units_per_em`, at `(pen + x_offset, y - y_offset)`, then `pen += x_advance`. `TurnedText` turns the run `angle` degrees counterclockwise about `(x, y)`. `Glyph::text` is the byte range of `Run::text` the glyph covers, empty for the second and later glyphs of a cluster. An image fills `rect`. `Link` rectangles and `Anchor` points are not drawn.
 
 PDF export is the old `pdf::write` with the faces taken from the layout. It paginates nothing, shapes nothing, and resolves nothing: `Face::space` is a cmap lookup done once when a face is built. `Picture::pixels` gives the size of a raster and the tree of an SVG, not RGBA samples, because the engine keeps krilla's decoded image and holding a second copy would double the memory of every image; `Picture::source` is the file, which painters decode themselves. `Structure` is the engine's tag mark, re-exported, with an opaque `StructureId`.
+
+`contents_depth` and `page_titles` were added on 2026-11-23 so a client shows what the PDF shows without resolving the theme: the `toc-depth` in effect, and the headings the theme gives the contents, the index, and the bibliography in the document's language (`labels.contents`, `labels.index`, `labels.references`). Both are the theme's whether or not the document has such a page. Adding them keeps `API_VERSION`.
 
 ## 6. Source mapping
 
