@@ -238,7 +238,10 @@ impl EditorView {
             spans: inline_spans(kind, text),
             markers: Vec::new(),
         };
-        let hidden = hidden_ranges(kind, text, &syntax, None, false, false);
+        let mut hidden = hidden_ranges(kind, text, &syntax, None, false, false);
+        // Index marks take no room at rest, as off the caret's line in the text.
+        hidden.extend(crate::editor::rich::index::hidden(text, &syntax.spans, None));
+        hidden.sort_by_key(|range| range.start);
         let chips = self.rich.chips(text, &syntax.spans, None);
         let mut lines = display_lines(kind, text, &syntax, &hidden, None, false, &chips);
         for line in &mut lines {

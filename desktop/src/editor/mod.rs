@@ -1412,6 +1412,9 @@ impl EditorView {
                 );
                 hidden.sort_by_key(|range| range.start);
             }
+            // Index marks show only on the caret's line.
+            hidden.extend(rich::index::hidden(block_text, &syntax.spans, caret));
+            hidden.sort_by_key(|range| range.start);
             // A heading's `#` goes with the caret while the keys are elsewhere.
             if matches!(block.kind, BlockKind::Heading { .. }) && !self.focus.is_focused(window) {
                 hidden.extend(syntax.markers.iter().map(|marker| marker.range.clone()));
