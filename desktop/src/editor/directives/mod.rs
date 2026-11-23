@@ -449,14 +449,9 @@ impl EditorView {
         (region.open == index).then_some(region.kind)
     }
 
-    /// The room a directive standing alone takes at rest: a new page's gap, or one line for the rest.
-    pub(super) fn standalone_room(&self, kind: Kind) -> Pixels {
-        let line = self.style.body_size * self.style.leading;
-        if kind.starts_page() {
-            line * tokens::PAGE_GAP_LINES
-        } else {
-            line
-        }
+    /// The room a directive standing alone takes at rest: one body line for a new page's line.
+    pub(super) fn standalone_room(&self, _kind: Kind) -> Pixels {
+        self.style.body_size * self.style.leading
     }
 
     /// The height two columns of `run` take, from what each block has been shaped or estimated at.

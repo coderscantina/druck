@@ -67,14 +67,6 @@ impl Kind {
         )
     }
 
-    /// Whether the pages start a new one here.
-    pub fn starts_page(self) -> bool {
-        matches!(
-            self,
-            Self::PageBreak | Self::FrontMatter | Self::MainMatter | Self::BackMatter
-        )
-    }
-
     /// Whether it opens a part of the book. The Binder writes these, and Write never shows them.
     pub fn is_part(self) -> bool {
         self.matter().is_some()
