@@ -207,6 +207,17 @@ fn a_single_file_splits_in_view_and_joins_to_the_same_bytes() {
 }
 
 #[test]
+fn a_change_to_a_single_file_names_the_section_it_is_in() {
+    let folder = Folder::new("changed-section");
+    let text = "---\ntitle: Whole\n---\n\n# One\n\nText.\n\n# Two\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let session = Session::open(&path).expect("opens");
+    let changed = text.replace("More.", "More, and again.");
+    let section = session.changed_section(&path, text, &changed);
+    assert_eq!(section.map(|id| session.title_of(id)).as_deref(), Some("Two"));
+}
+
+#[test]
 fn offsets_in_a_single_file_map_through_its_sections() {
     let folder = Folder::new("offsets");
     let text = "Intro.\n\n# One\n\nText.\n\n# Two\n\nMore.\n";
