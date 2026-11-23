@@ -7,7 +7,7 @@ You keep this book consistent with itself. A reader should never meet the same t
 
 Work in three steps.
 
-1. Read the style sheet you were given, if there is one. It holds the decisions made so far, by the author or by earlier runs. They are settled: follow them, and do not reopen them.
+1. Read the style sheet you were given, if there is one. It holds the decisions made so far: by the author, by earlier runs, and by a reading of the whole book before this chapter's turn. They are settled: follow them, and do not reopen them.
 
 2. Read the text and look for things written in more than one way, or against the style sheet:
 

@@ -1,6 +1,7 @@
 //! Running an editing pass: one turn per chapter, each in a CLI process of its own, so a chapter that fails costs only
 //! itself and no chapter's turn carries the ones before it. Results come in as any turn's do, as changes under review
-//! and margin notes.
+//! and margin notes. Consistency over the whole book starts with one read-only turn that reads every chapter and
+//! records the book's rules in the style sheet, which each chapter's turn is then handed.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -63,6 +64,10 @@ struct Step {
 /// A pass under way.
 pub(super) struct PassRun {
     pass: Pass,
+    /// The book's files for the turn that reads them all, before the first chapter's. Taken when that turn starts.
+    survey: Option<Vec<String>>,
+    /// That turn is the one running.
+    surveying: bool,
     steps: VecDeque<Step>,
     total: usize,
     /// The title of the chapter being worked on.
@@ -78,6 +83,7 @@ pub(super) struct PassRun {
 impl PassRun {
     pub(super) fn access(&self) -> Access {
         match self.pass.returns {
+            _ if self.surveying => Access::ReadOnly,
             Returns::Changes => Access::Edits,
             Returns::Notes => Access::ReadOnly,
         }
@@ -85,6 +91,9 @@ impl PassRun {
 
     /// The quiet line at the window's foot.
     pub(super) fn progress(&self) -> String {
+        if self.surveying {
+            return strings::pass_surveying(&self.pass.name);
+        }
         let at = self.total - self.steps.len();
         strings::pass_progress(&self.pass.name, at, self.total, &self.current)
     }
@@ -174,7 +183,8 @@ impl AgentView {
             .or_else(|| self.pass_result.clone())
     }
 
-    /// Starts a pass, once the CLI has been looked for. Nothing else starts one.
+    /// Starts a pass, once the CLI has been looked for and unsaved text is written, so the agent reads what is on
+    /// screen. Nothing else starts one.
     pub(super) fn run_pass(&mut self, slug: &str, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
         if !self.enabled {
             return;
@@ -193,6 +203,19 @@ impl AgentView {
             self.say(strings::turn_busy(self.backend().name()), cx);
             return;
         }
+        // Where the selection is goes with the pass, since the save changes no text.
+        self.snapshot_context(cx);
+        let slug = slug.to_owned();
+        self.after_saving(window, cx, move |view, window, cx| {
+            view.start_pass(&slug, scope, window, cx)
+        });
+    }
+
+    fn start_pass(&mut self, slug: &str, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
+        // The save may have waited, and something else started meanwhile.
+        if !self.conversation.is_idle() || self.pass_run.is_some() || self.fixing.is_running() {
+            return;
+        }
         let Some(listed) = passes::find(&self.base, slug) else {
             return;
         };
@@ -207,11 +230,12 @@ impl AgentView {
                 return;
             }
         };
-        self.snapshot_context(cx);
         let steps = self.steps(scope, cx);
         if steps.is_empty() {
             return;
         }
+        let survey = (scope == Scope::Book && slug == passes::SURVEYS_BOOK)
+            .then(|| steps.iter().map(|step| step.target.file.clone()).collect());
         if scope == Scope::Selection {
             // The text under the selection is about to change, and a key must not type over it.
             let end = self.editor.read(cx).selection_range().end;
@@ -222,6 +246,8 @@ impl AgentView {
         self.pass_result = None;
         self.pass_run = Some(PassRun {
             pass,
+            survey,
+            surveying: false,
             total: steps.len(),
             steps: steps.into(),
             current: String::new(),
@@ -263,8 +289,28 @@ impl AgentView {
         steps
     }
 
-    /// Starts the next chapter's turn in a new process, or ends the run.
+    /// Starts the next chapter's turn in a new process, or ends the run. The turn that reads the whole book comes first.
     fn next_step(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let survey = (self.pass_run.as_mut())
+            .filter(|run| !run.stopped)
+            .and_then(|run| Some((run.survey.take()?, run.pass.clone())));
+        if let Some((files, pass)) = survey {
+            if let Some(run) = &mut self.pass_run {
+                run.surveying = true;
+            }
+            self.running = None;
+            self.conversation.set_session_id(None);
+            let sheet = style_sheet::read(&self.base);
+            let message = passes::survey_prompt(&pass, &self.base, &files, sheet.as_deref());
+            if self.start_turn(strings::pass_survey_row(&pass.name), message, None, window, cx) {
+                return;
+            }
+            // The chapters' turns still follow the style sheet as it is.
+            if let Some(run) = &mut self.pass_run {
+                run.surveying = false;
+                run.failed.push(crate::t!(Key::PassSurveyFailed).to_owned());
+            }
+        }
         loop {
             let next = (self.pass_run.as_mut())
                 .filter(|run| !run.stopped)
@@ -295,8 +341,11 @@ impl AgentView {
         let Some(run) = &mut self.pass_run else {
             return;
         };
+        let surveyed = std::mem::take(&mut run.surveying);
         match outcome {
+            Outcome::Done if surveyed => {}
             Outcome::Done => run.done += 1,
+            Outcome::Failed if surveyed => run.failed.push(crate::t!(Key::PassSurveyFailed).to_owned()),
             Outcome::Failed => run.failed.push(run.current.clone()),
             Outcome::Stopped => run.stopped = true,
         }

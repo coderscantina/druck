@@ -159,6 +159,9 @@ crate::strings! {
             "{pass} wurde nach {done} von {total} Kapiteln angehalten."
         ),
         PassFailed => ("Not done: {chapters}.", "Nicht erledigt: {chapters}."),
+        PassSurveying => ("{pass} \u{b7} reading the whole book", "{pass} \u{b7} das ganze Buch wird gelesen"),
+        PassSurveyRow => ("{pass}: reading the whole book", "{pass}: das ganze Buch lesen"),
+        PassSurveyFailed => ("reading the whole book", "das ganze Buch lesen"),
         PassUnusable => ("{file} cannot run: {problem}.", "{file} lässt sich nicht starten: {problem}."),
         PassNotCopied => ("The pass could not be copied: {error}", "Der Durchgang ließ sich nicht kopieren: {error}"),
         BeforePass => ("Before {pass}", "Vor {pass}"),
@@ -358,6 +361,15 @@ pub fn turn_busy(cli: &str) -> String {
 /// A pass's row in the conversation.
 pub fn pass_row(pass: &str, chapter: &str) -> String {
     crate::t!(Key::PassRow, pass = pass, chapter = chapter)
+}
+
+/// The line at the window's foot while the turn that reads the whole book runs.
+pub fn pass_surveying(pass: &str) -> String {
+    crate::t!(Key::PassSurveying, pass = pass)
+}
+
+pub fn pass_survey_row(pass: &str) -> String {
+    crate::t!(Key::PassSurveyRow, pass = pass)
 }
 
 /// The line at the window's foot while a pass runs. No cost shows, as on the chat card.
