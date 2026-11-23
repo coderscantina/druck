@@ -611,7 +611,7 @@ The page number is right aligned at the edge of the text area, in a column at le
 
 ## Bibliography
 
-A document that cites sets a bibliography: the `references` label as an unnumbered heading in the `heading-1` style, then one entry per cited work in the `bibliography` style. `document.citation-style` chooses `author-date` or `numeric`; front matter can override it.
+A document that cites sets a bibliography: the `references` label as an unnumbered heading in the `heading-1` style, which opens a chapter as `chapters` sets, then one entry per cited work in the `bibliography` style. `document.citation-style` chooses `author-date` or `numeric`; front matter can override it.
 
 | Key | Effect |
 | --- | --- |

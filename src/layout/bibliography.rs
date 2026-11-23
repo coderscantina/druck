@@ -1,5 +1,5 @@
-//! The bibliography: the `references` label as an unnumbered level 1 heading, then one entry per cited
-//! work in the `bibliography` style.
+//! The bibliography: the `references` label as an unnumbered level 1 heading, which opens a chapter as other
+//! level 1 headings do, then one entry per cited work in the `bibliography` style.
 //!
 //! An author-date entry is set like a paragraph with a hanging indent of `bibliography.hanging-indent`: its
 //! first line starts at the left edge and later lines are indented. A numeric entry has its label in a
@@ -7,7 +7,10 @@
 //! `thebibliography`. Entries are at least `bibliography.entry-spacing` apart and break across pages and columns
 //! like paragraphs. The first line of each entry is where citations of it link to.
 
+use std::borrow::Cow;
+
 use super::{Flow, Frame, Role, anchor_item, heading_style, pages, text_item, translate_line};
+use crate::config::values::Pt;
 use crate::diagnostic::Diagnostic;
 use crate::document::{Inline, InlineStyle, Location};
 use crate::source_map::Spans;
@@ -28,6 +31,10 @@ impl<'a> Flow<'a> {
             source: Spans::default(),
         }];
         let role = Role::Heading(Some(heading.anchor));
+        let mut heading_style = Cow::Borrowed(heading_style(config, 1));
+        if self.open_chapter(at) {
+            heading_style.to_mut().space_before = Pt(0.0);
+        }
         let scope = self.open(
             Kind::Heading {
                 level: 1,
@@ -35,8 +42,9 @@ impl<'a> Flow<'a> {
             },
             true,
         );
-        self.text_block(at, &title, heading_style(config, 1), frame, 0.0, role);
+        self.text_block(at, &title, &heading_style, frame, 0.0, role);
         self.close(scope);
+        self.ornament(at, &heading_style, frame);
 
         let style = &config.styles.bibliography;
         let face = self.fonts.face(&style.font, style.weight, style.style);

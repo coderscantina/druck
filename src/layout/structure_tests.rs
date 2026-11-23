@@ -666,6 +666,16 @@ fn the_bibliography_lists_each_cited_entry_once_in_style_order_with_a_hanging_in
 }
 
 #[test]
+fn the_bibliography_heading_opens_a_chapter() {
+    let theme = json!({"version": 1, "chapters": {"break-before": "page", "sink": "100pt"}});
+    let config = config("toc: false", theme);
+    let output = render_cited(&config, "# Text\n\nCited [@knuth1984].\n", Some(BIB), &[]).expect("layout");
+    let anchor = output.anchors[output.outline.last().expect("bookmarks").anchor];
+    assert_eq!(anchor.page, 1, "the bibliography starts a page");
+    assert!(close(anchor.y.0, config.page.margin_top.0 + 100.0), "sunk: {anchor:?}");
+}
+
+#[test]
 fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the_bib_file() {
     let citations: Vec<&str> = BIB
         .lines()

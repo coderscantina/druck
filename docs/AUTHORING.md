@@ -950,7 +950,7 @@ calls the result rhythm.
 
 ### The bibliography
 
-A document that cites gets a bibliography: an unnumbered top-level heading with the theme's `references` label ("References", "Literatur" in German), then one entry for each work cited, each listed once. Works in the BibTeX file that are not cited are left out. The heading is in the table of contents, the PDF bookmarks, and running headers like any other top-level heading.
+A document that cites gets a bibliography: an unnumbered top-level heading with the theme's `references` label ("References", "Literatur" in German), then one entry for each work cited, each listed once. Works in the BibTeX file that are not cited are left out. The heading is in the table of contents, the PDF bookmarks, and running headers, and opens a chapter, like any other top-level heading.
 
 The bibliography goes at the end of the document. `::: bibliography` on a line of its own places it there instead, for example before an appendix, or inside `::: columns` to set it in two columns. Without citations there is no bibliography, even with the directive.
 
