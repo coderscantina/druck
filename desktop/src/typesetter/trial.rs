@@ -4,6 +4,7 @@
 //! call it as it is.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -482,7 +483,10 @@ impl Bench {
             None => outcome.cleared.iter().find_map(|warning| warning.at.clone())?,
         };
         let (path, text) = self.book.file(&file)?;
-        let block = fix::block_at(text, line).ok()?;
+        let block = match fix.place() {
+            Some(_) => fix::block_of(text, fix).ok()?,
+            None => fix::block_at(text, line).ok()?,
+        };
         // The same block in the copy, found by its first line, which no fix changes.
         let words = text[block.clone()].lines().next()?;
         let (_, copied) = copy.file(&file)?;
@@ -496,14 +500,13 @@ impl Bench {
                 mark: Some(mark.rect),
             })
         };
-        Some((on(before, self.standing_start(&file, line)?)?, on(after, moved)?))
+        Some((on(before, self.standing_start(&file, &block)?)?, on(after, moved)?))
     }
 
-    /// Where the block at a line of the book starts in the copy with every kept fix.
-    fn standing_start(&self, file: &str, line: usize) -> Option<usize> {
+    /// Where a block of the book starts in the copy with every kept fix.
+    fn standing_start(&self, file: &str, block: &Range<usize>) -> Option<usize> {
         let (standing, _) = self.book.with(&self.kept).ok()?;
         let (_, text) = self.book.file(file)?;
-        let block = fix::block_at(text, line).ok()?;
         let words = text[block.clone()].lines().next()?;
         let (_, copied) = standing.file(file)?;
         nearest(copied, words, block.start)

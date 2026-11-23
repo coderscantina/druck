@@ -6,6 +6,7 @@ use std::ops::Range;
 use serde_json::Value;
 
 use crate::editor::rich::images::{Figure, Placement};
+use crate::editor::rich::table;
 use crate::preview::directives;
 use crate::source::{BlockKind, Blocks, Edit};
 
@@ -29,6 +30,8 @@ pub enum Fix {
     Keep(Place),
     /// Where the figure at the block goes on its page.
     Placement(Place, Placement),
+    /// Where the table at the block goes on its page, written in its caption or its `::: table` line.
+    TablePlacement(Place, Placement),
     /// One value of the theme, by its dotted property.
     Theme { property: String, value: Value },
 }
@@ -54,17 +57,19 @@ impl Fix {
             file: file.to_owned(),
             line: line as usize,
         };
+        let placement = || match input["value"].as_str() {
+            Some("top") => Ok(Placement::Top),
+            Some("bottom") => Ok(Placement::Bottom),
+            Some("here") => Ok(Placement::Here),
+            _ => Err("a placement is top, bottom, or here.".to_owned()),
+        };
         match kind {
             "page-break" => Ok(Self::PageBreak(place)),
             "keep" => Ok(Self::Keep(place)),
-            "placement" => match input["value"].as_str() {
-                Some("top") => Ok(Self::Placement(place, Placement::Top)),
-                Some("bottom") => Ok(Self::Placement(place, Placement::Bottom)),
-                Some("here") => Ok(Self::Placement(place, Placement::Here)),
-                _ => Err("a placement is top, bottom, or here.".to_owned()),
-            },
+            "placement" => Ok(Self::Placement(place, placement()?)),
+            "table-placement" => Ok(Self::TablePlacement(place, placement()?)),
             other => Err(format!(
-                "{other} is no kind of fix. The kinds are page-break, keep, placement, and theme."
+                "{other} is no kind of fix. The kinds are page-break, keep, placement, table-placement, and theme."
             )),
         }
     }
@@ -72,16 +77,30 @@ impl Fix {
     /// The block the fix is written at. A theme value has none.
     pub fn place(&self) -> Option<&Place> {
         match self {
-            Self::PageBreak(place) | Self::Keep(place) | Self::Placement(place, _) => Some(place),
+            Self::PageBreak(place) | Self::Keep(place) | Self::Placement(place, _) | Self::TablePlacement(place, _) => {
+                Some(place)
+            }
             Self::Theme { .. } => None,
         }
     }
 
-    /// Among edits at one place, which goes first: a page break stands before a keep's opening line, and a figure's
-    /// attributes before a keep's closing line.
+    /// The same fix at another line of its file.
+    pub fn at_line(&self, line: usize) -> Self {
+        let mut moved = self.clone();
+        match &mut moved {
+            Self::PageBreak(place) | Self::Keep(place) | Self::Placement(place, _) | Self::TablePlacement(place, _) => {
+                place.line = line
+            }
+            Self::Theme { .. } => {}
+        }
+        moved
+    }
+
+    /// Among edits at one place, which goes first: a page break stands before a keep's opening line, and a figure's or
+    /// table's attributes before a keep's closing line.
     fn rank(&self) -> u8 {
         match self {
-            Self::PageBreak(_) | Self::Placement(..) => 0,
+            Self::PageBreak(_) | Self::Placement(..) | Self::TablePlacement(..) => 0,
             Self::Keep(_) | Self::Theme { .. } => 1,
         }
     }
@@ -126,6 +145,33 @@ pub fn block_at(text: &str, line: usize) -> Result<Range<usize>, String> {
     Ok(block.range.start..block.range.start + written.len())
 }
 
+/// The table that holds `line`, with the block of its rows, which its placement does not change: a pipe table, or the
+/// list or pipe table inside a `::: table`. The line may be any of the table's, its directive's or caption's too.
+fn table_at(text: &str, line: usize) -> Result<(table::Grid, Range<usize>), String> {
+    let start = line_start(text, line).ok_or_else(|| format!("the file has no line {line}."))?;
+    let blocks = Blocks::parse(text);
+    let index = blocks.index_at(start);
+    let no_table = || format!("line {line} is in no table.");
+    let region = (table::regions(text, &blocks).into_iter())
+        .find(|region| region.first <= index && index <= region.last)
+        .ok_or_else(no_table)?;
+    let grid = region.grid.map_err(|_| no_table())?;
+    let rows = (blocks.as_slice()[region.first..=region.last].iter())
+        .find(|block| matches!(block.kind, BlockKind::Table | BlockKind::List))
+        .ok_or_else(no_table)?;
+    let written = text[rows.range.clone()].trim_end_matches(['\n', '\r']);
+    Ok((grid, rows.range.start..rows.range.start + written.len()))
+}
+
+/// The block a fix stands at: for a table's placement the block of its rows, for any other the block at its line.
+pub fn block_of(text: &str, fix: &Fix) -> Result<Range<usize>, String> {
+    match fix {
+        Fix::TablePlacement(place, _) => table_at(text, place.line).map(|(_, rows)| rows),
+        Fix::PageBreak(place) | Fix::Keep(place) | Fix::Placement(place, _) => block_at(text, place.line),
+        Fix::Theme { .. } => Err("a theme value stands at no block.".to_owned()),
+    }
+}
+
 fn line_start(text: &str, line: usize) -> Option<usize> {
     let mut start = 0;
     for _ in 1..line {
@@ -159,6 +205,19 @@ fn edits_of(text: &str, fix: &Fix, block: &Range<usize>) -> Result<Vec<Edit>, St
                 .map(|edit| vec![edit])
                 .ok_or_else(|| "the figure is placed there already.".to_owned())
         }
+        Fix::TablePlacement(place, placement) => {
+            let (grid, _) = table_at(text, place.line)?;
+            let word = match placement {
+                Placement::Top => "top",
+                Placement::Bottom => "bottom",
+                Placement::Here => "",
+            };
+            if grid.placement(text) == word {
+                return Err("the table is placed there already.".to_owned());
+            }
+            grid.set_placement(text, word)
+                .map_err(|_| "a table needs a caption for a placement, or must be a ::: table.".to_owned())
+        }
         Fix::Theme { .. } => Ok(Vec::new()),
     }
 }
@@ -168,10 +227,10 @@ fn edits_of(text: &str, fix: &Fix, block: &Range<usize>) -> Result<Vec<Edit>, St
 pub fn edits(text: &str, fixes: &[&Fix]) -> Result<Vec<Edit>, String> {
     let mut all: Vec<(u8, Edit)> = Vec::new();
     for fix in fixes {
-        let Some(place) = fix.place() else {
+        if fix.place().is_none() {
             continue;
-        };
-        let block = block_at(text, place.line)?;
+        }
+        let block = block_of(text, fix)?;
         all.extend(edits_of(text, fix, &block)?.into_iter().map(|edit| (fix.rank(), edit)));
     }
     all.sort_by_key(|(rank, edit)| (edit.range.start, *rank));
@@ -255,6 +314,35 @@ mod tests {
         assert!(written(&[top]).contains("![A chart](chart.svg){placement=top}\n"));
         let on_text = fix(json!({"kind": "placement", "file": "a.md", "line": 3, "value": "top"}));
         assert!(edits(TEXT, &[&on_text]).is_err());
+    }
+
+    #[test]
+    fn a_tables_placement_goes_in_its_caption_or_its_table_line() {
+        let pipe = "Text.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n: Sizes {#tbl:sizes}\n\nMore.\n";
+        let bottom = fix(json!({"kind": "table-placement", "file": "a.md", "line": 4, "value": "bottom"}));
+        let placed = apply(
+            pipe,
+            &edits(pipe, &[&bottom]).expect("a captioned table takes a placement"),
+        );
+        assert!(placed.contains(": Sizes {#tbl:sizes placement=bottom}\n"), "{placed}");
+        assert_eq!(
+            block_of(pipe, &bottom).map(|block| &pipe[block]),
+            Ok("| A | B |\n|---|---|\n| 1 | 2 |")
+        );
+        assert!(edits(&placed, &[&bottom]).is_err(), "placed there already");
+
+        let list = "::: table\n- - a\n  - b\n:::\n";
+        let top = fix(json!({"kind": "table-placement", "file": "a.md", "line": 1, "value": "top"}));
+        let placed = apply(list, &edits(list, &[&top]).expect("a list table needs no caption"));
+        assert!(placed.starts_with("::: table {placement=\"top\"}\n"), "{placed}");
+
+        let bare = "| A |\n|---|\n| 1 |\n";
+        let on_bare = fix(json!({"kind": "table-placement", "file": "a.md", "line": 1, "value": "top"}));
+        assert!(
+            edits(bare, &[&on_bare]).is_err(),
+            "a pipe table without a caption has no place for it"
+        );
+        assert!(edits(TEXT, &[&on_bare]).is_err(), "no table there");
     }
 
     #[test]

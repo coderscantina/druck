@@ -293,6 +293,32 @@ impl Grid {
         }
     }
 
+    /// Where the table is placed now: `top`, `bottom`, or empty. A caption's placement wins over the directive's.
+    pub fn placement(&self, text: &str) -> String {
+        if self.caption.placement.is_empty() {
+            self.directive_placement(text).unwrap_or("").to_owned()
+        } else {
+            self.caption.placement.clone()
+        }
+    }
+
+    /// The edits that place the table: `top`, `bottom`, or empty for where it is written. A list table's placement is
+    /// an option of its directive, so it needs no caption. A caption that already holds the placement keeps it, since
+    /// the engine takes one placement for a table.
+    pub fn set_placement(&self, text: &str, placement: &str) -> Result<Vec<Edit>, Refused> {
+        if self.is_list() && self.caption.placement.is_empty() {
+            return Ok(self.set_directive_placement(text, placement).into_iter().collect());
+        }
+        if self.caption.text.is_empty() {
+            return Err(Key::PlacementNeedsCaption);
+        }
+        let caption = Caption {
+            placement: placement.to_owned(),
+            ..self.caption.clone()
+        };
+        Ok(self.set_caption(text, &caption).into_iter().collect())
+    }
+
     /// Whether a column of a list table fills the width the others leave. A pipe table has no such option.
     pub fn fills(&self, text: &str, column: usize) -> Option<bool> {
         match &self.source {
