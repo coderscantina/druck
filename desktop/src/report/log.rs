@@ -6,7 +6,7 @@
 //! that start this executable again leave no file.
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -58,25 +58,6 @@ fn append(path: &Path, text: &str, max: u64) -> io::Result<()> {
     writeln!(file, "{text}")
 }
 
-/// The last `bytes` bytes of the log, from the start of a line, for the report. Empty when there is no log.
-pub fn tail(path: &Path, bytes: u64) -> String {
-    let Ok(mut file) = fs::File::open(path) else {
-        return String::new();
-    };
-    let length = file.metadata().map_or(0, |meta| meta.len());
-    let start = length.saturating_sub(bytes);
-    let mut text = Vec::new();
-    if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut text).is_err() {
-        return String::new();
-    }
-    let text = String::from_utf8_lossy(&text);
-    if start == 0 {
-        return text.into_owned();
-    }
-    text.split_once('\n')
-        .map_or_else(String::new, |(_, rest)| rest.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,19 +88,6 @@ mod tests {
             fs::read_to_string(folder.join(OLD_FILE)).unwrap(),
             "third line\nfourth line that is long\n"
         );
-        fs::remove_dir_all(&folder).ok();
-    }
-
-    #[test]
-    fn the_tail_starts_at_a_line_and_the_whole_log_comes_when_it_fits() {
-        let folder = scratch("tail");
-        let path = folder.join(FILE);
-        append(&path, "one", MAX_BYTES).unwrap();
-        append(&path, "two", MAX_BYTES).unwrap();
-        append(&path, "three", MAX_BYTES).unwrap();
-        assert_eq!(tail(&path, 100), "one\ntwo\nthree\n");
-        assert_eq!(tail(&path, 10), "three\n");
-        assert_eq!(tail(&folder.join("none"), 10), "");
         fs::remove_dir_all(&folder).ok();
     }
 }
