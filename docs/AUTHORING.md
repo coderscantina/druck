@@ -869,7 +869,7 @@ The statistics count the text you wrote in the body and the footnotes: paragraph
 
 ### Build date
 
-`{build-date}` and `{year}` use the date in UTC when Druck runs. For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Druck then uses that day.
+`{build-date}` and `{year}` use the date when Druck runs, in the computer's time zone (in UTC where the system names none). For a reproducible build, set the environment variable `SOURCE_DATE_EPOCH` to a Unix time; Druck then uses that day in UTC, whatever the time zone.
 
 ### Drafts
 

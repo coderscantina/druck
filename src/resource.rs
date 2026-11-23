@@ -11,7 +11,7 @@ use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 pub use crate::config::source::{Origin, Resource, normalize};
 use crate::date::Date;
@@ -337,13 +337,11 @@ pub fn source_date() -> Result<Option<Date>, String> {
     Ok(Some(Date::from_unix(seconds)))
 }
 
-/// The UTC day of the system clock.
+/// The day of the system clock in the local time zone, or in UTC where the system names none.
 pub fn clock_date() -> Result<Date, String> {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| "the system clock is set before 1970".to_owned())?;
-    let seconds = i64::try_from(elapsed.as_secs()).map_err(|_| "the system clock is out of range".to_owned())?;
-    Ok(Date::from_unix(seconds))
+    let now =
+        jiff::Timestamp::try_from(SystemTime::now()).map_err(|_| "the system clock is out of range".to_owned())?;
+    Ok(Date::of(now, &jiff::tz::TimeZone::system()))
 }
 
 #[cfg(test)]

@@ -1318,6 +1318,7 @@ dependencies = [
  "flate2",
  "fontdb",
  "hypher",
+ "jiff",
  "jsonschema",
  "krilla",
  "krilla-svg",

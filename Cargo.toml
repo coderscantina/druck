@@ -41,6 +41,7 @@ clap = { version = "4.6.7", features = ["derive"], optional = true }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 fontdb = "0.23.0"
 hypher = { version = "0.1.8", default-features = false, features = ["alloc", "english", "german"] }
+jiff = "0.2.39"
 krilla = "0.8.2"
 krilla-svg = "0.8.1"
 png = "0.18.1"

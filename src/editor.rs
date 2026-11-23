@@ -113,7 +113,7 @@ pub mod placeholders {
         theme["labels"][code]["draft"].as_str().unwrap_or_default().to_owned()
     }
 
-    /// The day a render run now would use: `SOURCE_DATE_EPOCH`'s, or the clock's in UTC.
+    /// The day a render run now would use: `SOURCE_DATE_EPOCH`'s, or the clock's in the local time zone.
     pub fn today() -> Option<Date> {
         match crate::resource::source_date() {
             Ok(Some(date)) => Some(date),
