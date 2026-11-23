@@ -20,27 +20,41 @@ use crate::session::{Joined, Kind, Session};
 use crate::source::{BlockKind, Blocks, Edit};
 use crate::theme_file::patch;
 
-/// The book a trial works on: its text and its theme file's text, as they were when the trial began.
+/// The book a trial works on: its text, its theme file's text, and its manifest, as they were when the trial began.
+/// Every trial of a run lays out this one snapshot, so the baseline and each fix see the same book.
 #[derive(Clone)]
 pub struct Book {
     pub kind: Kind,
     pub joined: Joined,
     /// The theme file the book names, with its text. `None` for the built-in theme, which has no value to change.
     pub theme: Option<(PathBuf, String)>,
+    /// A project's `druck.yaml` with its text, which orders the chapters, so a Binder move during a run changes no
+    /// trial of it. `None` for a single file, whose settings are in its text.
+    pub manifest: Option<(PathBuf, String)>,
 }
 
 impl Book {
     /// The book as the session has it, unsaved text included.
     pub fn of(session: &Session) -> Self {
-        let theme = session.theme_file().and_then(|file| {
+        let read = |file: PathBuf| {
             let text = std::fs::read_to_string(&file).ok()?;
             Some((file, text))
-        });
+        };
+        let manifest = match session.kind() {
+            Kind::Project { dir } => read(dir.join(druck::input::MANIFEST)),
+            Kind::Single { .. } => None,
+        };
         Self {
             kind: session.kind().clone(),
             joined: session.joined(),
-            theme,
+            theme: session.theme_file().and_then(read),
+            manifest,
         }
+    }
+
+    /// The files a layout of this book reads from it rather than from disk, besides the chapters.
+    fn stand_ins(&self) -> impl Iterator<Item = (PathBuf, String)> {
+        self.theme.clone().into_iter().chain(self.manifest.clone())
     }
 
     /// The book as it is on disk, at a project folder or a single file.
@@ -48,8 +62,8 @@ impl Book {
         Session::open(path).map(|session| Self::of(&session))
     }
 
-    /// Writes the texts of the chapters and the theme to `file`, for the trial tool in the CLI's process to try fixes
-    /// on what the app has, which typing during a run makes differ from what is on disk.
+    /// Writes the texts of the chapters, the theme, and the manifest to `file`, for the trial tool in the CLI's process
+    /// to try fixes on what the app has, which typing or a Binder move during a run makes differ from what is on disk.
     pub fn write_copy(&self, file: &Path) -> std::io::Result<()> {
         let files: serde_json::Map<String, serde_json::Value> = match &self.kind {
             Kind::Single { path } => {
@@ -59,8 +73,8 @@ impl Book {
                 .map(|(path, range)| (path.display().to_string(), self.joined.text[range].into()))
                 .collect(),
         };
-        let theme = self.theme.as_ref().map(|(path, text)| serde_json::json!([path, text]));
-        let copy = serde_json::json!({"files": files, "theme": theme});
+        let pair = |file: &Option<(PathBuf, String)>| file.as_ref().map(|(path, text)| serde_json::json!([path, text]));
+        let copy = serde_json::json!({"files": files, "theme": pair(&self.theme), "manifest": pair(&self.manifest)});
         crate::persist::atomic::write(file, copy.to_string().as_bytes())
     }
 
@@ -78,11 +92,12 @@ impl Book {
             },
             Kind::Project { .. } => book.joined.with_files(|path, _| text_of(path)),
         };
-        if let [theme, text] = copy["theme"].as_array().map(Vec::as_slice).unwrap_or_default()
-            && let (Some(theme), Some(text)) = (theme.as_str(), text.as_str())
-        {
-            book.theme = Some((PathBuf::from(theme), text.to_owned()));
-        }
+        let pair = |key: &str| match copy[key].as_array().map(Vec::as_slice).unwrap_or_default() {
+            [path, text] => Some((PathBuf::from(path.as_str()?), text.as_str()?.to_owned())),
+            _ => None,
+        };
+        book.theme = pair("theme").or(book.theme);
+        book.manifest = pair("manifest").or(book.manifest);
         Ok(book)
     }
 
@@ -151,6 +166,7 @@ impl Book {
             kind: self.kind.clone(),
             joined,
             theme,
+            manifest: self.manifest.clone(),
         };
         Ok((book, written))
     }
@@ -401,7 +417,7 @@ impl Bench {
 
     fn lay_out(&mut self, fixes: &[Fix], cancel: &Cancel) -> Result<(Laid, Book), String> {
         let (copy, written) = self.book.with(fixes)?;
-        self.typesetter.set_theme_text(copy.theme.clone());
+        self.typesetter.set_stand_ins(copy.stand_ins());
         let layout = self
             .typesetter
             .run(copy.joined.clone(), cancel)
@@ -776,6 +792,28 @@ mod tests {
         assert!(opened.joined.text.contains("Typed words."));
         assert_eq!(opened.theme, on_screen.theme);
         assert!(std::fs::read_to_string(&file).expect("file").contains("Saved words."));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_binder_move_during_a_run_leaves_the_trials_chapter_order() {
+        let dir = std::env::temp_dir().join(format!("druck-trial-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("a.md"), "# A\n\nFirst.\n").expect("chapter");
+        std::fs::write(dir.join("b.md"), "# B\n\nSecond.\n").expect("chapter");
+        std::fs::write(dir.join("druck.yaml"), "chapters:\n  - a.md\n  - b.md\n").expect("manifest");
+        let at_start = Book::open(&dir).expect("the book opens");
+        let copy = dir.join("copy.json");
+        at_start.write_copy(&copy).expect("the copy is written");
+        std::fs::write(dir.join("druck.yaml"), "chapters:\n  - b.md\n  - a.md\n").expect("the Binder moves");
+        let first_page = |book: Book| {
+            let (laid, _) = Bench::new(book).lay_out(&[], &Cancel::default()).expect("it sets");
+            proof::first_place(&laid.layout.laid, 0).map(|(path, _)| path)
+        };
+        let first = Some(normalize(&dir.join("a.md")));
+        assert_eq!(first_page(at_start), first, "the app's trials");
+        let opened = Book::open_copy(&dir, &copy).expect("the copy opens");
+        assert_eq!(first_page(opened), first, "the tool's trials");
         std::fs::remove_dir_all(&dir).ok();
     }
 
