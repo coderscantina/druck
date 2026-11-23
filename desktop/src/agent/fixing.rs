@@ -157,16 +157,20 @@ pub fn sweep_book_copies() {
 
 fn sweep_copies_in(dir: &Path, running: impl Fn(u32) -> bool) {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let name = entry.file_name();
-        let pid = (name.to_str())
-            .and_then(|name| name.strip_prefix(COPY_PREFIX)?.strip_suffix(".json"))
-            .and_then(|rest| rest.split('-').next()?.parse().ok());
-        if let Some(pid) = pid
+        if let Some(pid) = entry.file_name().to_str().and_then(copy_pid)
             && !running(pid)
         {
             std::fs::remove_file(entry.path()).ok();
         }
     }
+}
+
+/// The process id in a book copy's name, for exactly the names [`BookCopy::write`] gives: a number for the process and
+/// a number for the time, and nothing else.
+fn copy_pid(name: &str) -> Option<u32> {
+    let (pid, made) = name.strip_prefix(COPY_PREFIX)?.strip_suffix(".json")?.split_once('-')?;
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    (digits(pid) && digits(made)).then(|| pid.parse().ok()).flatten()
 }
 
 /// Whether the process `pid` runs and is Druck, by its executable's name: `Druck` in the bundle, `druck-desktop` from
@@ -771,13 +775,21 @@ mod tests {
     fn a_copy_whose_app_is_gone_is_swept_and_a_running_ones_stays() {
         let dir = std::env::temp_dir().join(format!("druck-sweep-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("dir");
-        let names = ["druck-book-11-5.json", "druck-book-22-5.json", "notes.json"];
+        let names = [
+            "druck-book-11-5.json",
+            "druck-book-22-5.json",
+            "notes.json",
+            "druck-book-11-draft.json",
+            "druck-book-11-5-6.json",
+            "druck-book-+11-5.json",
+            "druck-book-11-.json",
+        ];
         for name in names {
             std::fs::write(dir.join(name), "{}").expect("file");
         }
         sweep_copies_in(&dir, |pid| pid == 22);
         let left: Vec<bool> = names.iter().map(|name| dir.join(name).exists()).collect();
-        assert_eq!(left, [false, true, true]);
+        assert_eq!(left, [false, true, true, true, true, true, true]);
         assert!(runs_as_druck(std::process::id()), "the test binary is druck_desktop");
         std::fs::remove_dir_all(&dir).ok();
     }
