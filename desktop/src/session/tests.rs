@@ -938,6 +938,24 @@ fn a_template_style_is_kept_only_where_the_resolved_theme_has_it_for_paragraphs(
 }
 
 #[test]
+fn a_template_style_is_checked_against_the_theme_the_pages_use() {
+    let folder = Folder::new("template-override");
+    let dir = folder.0.join("project");
+    STARTERS[0].create(&dir, Language::English).expect("creates");
+    let mut session = Session::open(&dir).expect("opens");
+    let text = fs::read_to_string(dir.join("themes/novel/theme.json")).expect("reads");
+    let heading = text.replace(
+        "\"dedication\": { \"based-on\": \"body\"",
+        "\"dedication\": { \"based-on\": \"heading-1\"",
+    );
+    let other = dir.join("themes/novel/other.json");
+    fs::write(&other, heading).expect("writes");
+    session.set_theme_override(Some(other));
+    let id = session.add_page(page("dedication")).expect("adds");
+    assert!(!session.buffer(id).text().contains("{.dedication}"));
+}
+
+#[test]
 fn front_matter_details_change_only_the_front_matter() {
     let folder = Folder::new("front-matter");
     let body = "# One\n\nText   with  odd   spacing.\n\n# Two\n\nMore.\n";
@@ -1172,6 +1190,70 @@ fn a_moved_chapter_passes_its_part_line_on_and_undo_brings_it_back() {
     assert!(session.undo_move().expect("undoes"));
     assert_eq!(session.buffer(one).text(), files[1].1);
     assert_eq!(session.buffer(two).text(), files[2].1);
+}
+
+#[test]
+fn undoing_a_move_brings_back_a_part_line_the_move_dropped() {
+    let files = [
+        ("preface.md", "::: front-matter\n\n# Preface {-}\n"),
+        ("one.md", "::: main-matter\n\n# One\n"),
+        ("two.md", "# Two\n"),
+        ("three.md", "::: back-matter\n\n# Three\n"),
+    ];
+    let (_folder, mut session) = book_of("move-drops-part", &files);
+    let order = session.book().to_vec();
+    session.move_chapter(order[3], 1).expect("moves");
+    assert!(!session.buffer(order[3]).text().contains("back-matter"));
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(session.book(), order);
+    for (id, (_, text)) in order.iter().zip(files) {
+        assert_eq!(session.buffer(*id).text(), text);
+    }
+}
+
+#[test]
+fn undoing_a_move_leaves_a_part_line_the_author_moved_since() {
+    let files = [
+        ("preface.md", "::: front-matter\n\n# Preface {-}\n"),
+        ("one.md", "::: main-matter\n\n# One\n"),
+        ("two.md", "# Two\n"),
+        ("three.md", "# Three\n"),
+    ];
+    let (_folder, mut session) = book_of("move-author-part", &files);
+    let [_, one, two, three] = session.book()[..] else {
+        panic!("four chapters")
+    };
+    session.move_chapter(one, 4).expect("moves");
+    assert_eq!(session.buffer(two).text(), "::: main-matter\n\n# Two\n");
+    let marker = "::: main-matter\n\n";
+    (session.edit_chapter(two, vec![Edit::new(0..marker.len(), "")], EditKind::Typing)).expect("valid");
+    (session.edit_chapter(three, vec![Edit::new(0..0, marker)], EditKind::Typing)).expect("valid");
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(session.book()[1], one);
+    assert_eq!(session.buffer(one).text(), "# One\n");
+    assert_eq!(session.buffer(two).text(), "# Two\n");
+    assert_eq!(session.buffer(three).text(), "::: main-matter\n\n# Three\n");
+}
+
+#[test]
+fn a_part_line_never_goes_into_a_chapter_gone_from_disk() {
+    let files = [
+        ("one.md", "::: main-matter\n\n# One\n"),
+        ("two.md", "# Two\n"),
+        ("three.md", "# Three\n"),
+    ];
+    let (folder, mut session) = book_of("part-gone-file", &files);
+    let [one, two, three] = session.book()[..] else {
+        panic!("three chapters")
+    };
+    let gone = folder.0.join("manuscript/two.md");
+    fs::remove_file(&gone).expect("removes");
+    session.file_removed(&gone);
+    session.remove_from_book(one).expect("removes");
+    assert_eq!(session.buffer(two).text(), "# Two\n");
+    assert_eq!(session.buffer(three).text(), "::: main-matter\n\n# Three\n");
+    session.save().expect("saves");
+    assert!(!gone.exists());
 }
 
 #[test]

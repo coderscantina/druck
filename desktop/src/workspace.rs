@@ -260,9 +260,10 @@ pub struct Workspace {
 
 impl Workspace {
     /// `theme` is the file the preview typesets with and the inspector edits, if not the document's.
-    pub fn new(session: Session, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(mut session: Session, theme: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let kind = session.kind().clone();
         let asked = theme.clone();
+        session.set_theme_override(asked.clone());
         let theme = theme.or_else(|| session.theme_file());
         let dirs = session.theme_dirs();
         let dirs = crate::theme_file::editor::Dirs {
@@ -683,7 +684,8 @@ impl Workspace {
         if setting != self.theme_setting {
             // The author chose a theme in the document, which ends an override from the command line.
             self.theme_setting = setting;
-            if self.explicit.take().is_some() {
+            if self.explicit.is_some() {
+                self.set_explicit(None, cx);
                 self.parts.preview.update(cx, |preview, cx| preview.set_theme(None, cx));
             }
         }
@@ -707,9 +709,16 @@ impl Workspace {
             .clone()
             .or_else(|| self.parts.editor.read(cx).session().theme_file());
         if open != wanted {
-            self.explicit.clone_from(&open);
+            self.set_explicit(open.clone(), cx);
             self.parts.preview.update(cx, |preview, cx| preview.set_theme(open, cx));
         }
+    }
+
+    /// The theme the pages use instead of the document's, which the session needs too, for the styles a template may
+    /// use.
+    fn set_explicit(&mut self, theme: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.explicit.clone_from(&theme);
+        (self.parts.editor).update(cx, |editor, _| editor.session_quietly().set_theme_override(theme));
     }
 
     /// The theme file changed: typeset again, and show a block in the style that changed.

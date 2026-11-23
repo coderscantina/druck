@@ -38,7 +38,7 @@ use druck::resource::{FileResolver, Origin, Resolver, normalize};
 
 pub use self::details::{Details, Field, LANGUAGES, MetaRow};
 use self::disk::Synced;
-pub use self::joined::{ChapterMap, Joined, LiveResolver};
+pub use self::joined::{Joined, LiveResolver};
 pub use self::outline::Kind as RowKind;
 pub use self::outline::heading_text;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
@@ -179,6 +179,15 @@ impl Chapter {
         self.buffer.text()
     }
 
+    /// The text the Binder's part lines read and write: none for a file missing or unreadable on disk, so no part line
+    /// goes into it or comes out of it, whatever the buffer still holds.
+    fn page_text(&self) -> &str {
+        match self.read {
+            Read::Missing | Read::Failed(_) => "",
+            Read::Later | Read::Done => self.buffer.text(),
+        }
+    }
+
     /// What the page is, as its row shows it.
     pub fn kind(&self) -> RowKind {
         self.outline.kind
@@ -305,13 +314,30 @@ pub struct Session {
     /// Files the app wrote as new pages while the book is open. Local history starts their own logs, so a gone file's
     /// history never goes to them.
     made: HashSet<PathBuf>,
+    /// The theme file the pages use instead of the one the document names: from the command line or a fork.
+    theme_override: Option<PathBuf>,
 }
 
-/// Orders of the book to go back or forward to, each with the part lines it had.
+/// Orders of the book to go back or forward to.
 #[derive(Default)]
 struct Moves {
-    undo: Vec<(Vec<ChapterId>, Vec<parts::Line<ChapterId>>)>,
-    redo: Vec<(Vec<ChapterId>, Vec<parts::Line<ChapterId>>)>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
+}
+
+impl Moves {
+    fn stack(&mut self, undo: bool) -> &mut Vec<Step> {
+        if undo { &mut self.undo } else { &mut self.redo }
+    }
+}
+
+/// An order of the book with the part lines it had, and the part lines the move away from it left.
+struct Step {
+    order: Vec<ChapterId>,
+    lines: Vec<parts::Line<ChapterId>>,
+    /// Only while the book's part lines are still these does going back put `lines` back, so lines the author changed
+    /// since are theirs, and stay.
+    left: Vec<parts::Line<ChapterId>>,
 }
 
 impl Session {
@@ -353,6 +379,7 @@ impl Session {
             outside: outside::Outside::default(),
             page_titles: None,
             made: HashSet::new(),
+            theme_override: None,
         }
     }
 
@@ -741,7 +768,9 @@ impl Session {
 
     /// The book's part lines and the order of its pages, before a structural action changes them.
     fn parts(&self) -> parts::Parts<ChapterId> {
-        let book: Vec<(ChapterId, &str)> = (self.book.iter()).map(|id| (*id, self.known(*id).text())).collect();
+        let book: Vec<(ChapterId, &str)> = (self.book.iter())
+            .map(|id| (*id, self.known(*id).page_text()))
+            .collect();
         parts::Parts::read(&book)
     }
 
@@ -759,7 +788,12 @@ impl Session {
 
     /// The theme file the document names, read as JSON.
     fn theme_json(&self) -> Option<serde_json::Value> {
-        serde_json::from_str(&fs::read_to_string(self.theme_file()?).ok()?).ok()
+        read_json(&self.theme_file()?)
+    }
+
+    /// Sets the theme file the pages use instead of the one the document names, or `None` for the document's.
+    pub fn set_theme_override(&mut self, theme: Option<PathBuf>) {
+        self.theme_override = theme;
     }
 
     /// Whether the book has a directive at the top level of its text, such as a `::: toc`.
@@ -902,30 +936,12 @@ impl Session {
 
     /// The whole document as one text, with what the preview needs to read it.
     pub fn joined(&self) -> Joined {
-        let project = matches!(self.kind, Kind::Project { .. });
-        let size: usize = self.book.iter().map(|id| self.known(*id).buffer.len() + 2).sum();
-        let mut text = String::with_capacity(size);
-        let mut map = ChapterMap::default();
-        for id in &self.book {
-            let chapter = self.known(*id);
-            if chapter.read != Read::Done {
-                continue; // The engine reports a missing or unreadable file.
-            }
-            let start = text.len();
-            text.push_str(chapter.buffer.text());
-            map.push(*id, chapter.path.clone(), start..text.len());
-            if project {
-                if !text.ends_with('\n') && text.len() > start {
-                    text.push('\n');
-                }
-                text.push('\n');
-            }
-        }
-        Joined {
-            text,
-            map,
-            revision: self.revision(),
-        }
+        let chapters = (self.book.iter())
+            .map(|id| (*id, self.known(*id)))
+            // The engine reports a missing or unreadable file.
+            .filter(|(_, chapter)| chapter.read == Read::Done)
+            .map(|(id, chapter)| (id, chapter.path.as_path(), chapter.buffer.text()));
+        Joined::join(chapters, matches!(self.kind, Kind::Project { .. }), self.revision())
     }
 
     /// The chapter and its offset for a place in a file, as a source map's position says it.
@@ -1190,14 +1206,19 @@ impl Session {
         self.book.remove(from);
         self.book.insert(target, id);
         self.write_chapter_list().inspect_err(|_| self.book = order.clone())?;
-        self.moves.undo.push((order, parts.lines.clone()));
-        self.moves.redo.clear();
         let before = self.book.get(target + 1).copied();
-        self.keep_parts(&parts.moved(id, before), None)
+        let kept = self.keep_parts(&parts.moved(id, before), None);
+        self.moves.undo.push(Step {
+            order,
+            lines: parts.lines,
+            left: self.parts().lines,
+        });
+        self.moves.redo.clear();
+        kept
     }
 
-    /// Puts the book back in its order before the last move, with its part lines, returning whether there was one to
-    /// undo.
+    /// Puts the book back in its order before the last move, returning whether there was one to undo. The part lines
+    /// the move changed go back too while they are as the move left them.
     pub fn undo_move(&mut self) -> Result<bool, String> {
         self.step_move(true)
     }
@@ -1208,15 +1229,10 @@ impl Session {
     }
 
     fn step_move(&mut self, undo: bool) -> Result<bool, String> {
-        let popped = if undo {
-            self.moves.undo.pop()
-        } else {
-            self.moves.redo.pop()
-        };
-        let Some((order, lines)) = popped else {
+        let Some(step) = self.moves.stack(undo).pop() else {
             return Ok(false);
         };
-        let (mut wanted, mut book) = (order.clone(), self.book.clone());
+        let (mut wanted, mut book) = (step.order.clone(), self.book.clone());
         wanted.sort();
         book.sort();
         if wanted != book {
@@ -1225,38 +1241,30 @@ impl Session {
             return Ok(false);
         }
         let parts = self.parts();
-        let current = std::mem::replace(&mut self.book, order);
-        let (back, forth) = match self.write_chapter_list() {
-            Ok(()) => (current, true),
-            Err(error) => {
-                let order = std::mem::replace(&mut self.book, current);
-                let stack = if undo {
-                    &mut self.moves.undo
-                } else {
-                    &mut self.moves.redo
-                };
-                stack.push((order, lines));
-                return Err(error);
-            }
-        };
-        let stack = if undo {
-            &mut self.moves.redo
-        } else {
-            &mut self.moves.undo
-        };
-        stack.push((back, parts.lines.clone()));
-        // Part lines the author changed since are theirs, and stay.
-        if parts.same_parts(&lines) {
-            self.keep_parts(&lines, None)?;
+        let current = std::mem::replace(&mut self.book, step.order.clone());
+        if let Err(error) = self.write_chapter_list() {
+            self.book = current;
+            self.moves.stack(undo).push(step);
+            return Err(error);
         }
-        Ok(forth)
+        let kept = match parts.lines == step.left {
+            true => self.keep_parts(&step.lines, None),
+            false => Ok(()),
+        };
+        let back = Step {
+            order: current,
+            lines: parts.lines,
+            left: self.parts().lines,
+        };
+        self.moves.stack(!undo).push(back);
+        kept.map(|()| true)
     }
 
     /// Puts the part lines where `wanted` says after the app changed the book's structure, taking them out of `left`,
     /// a chapter that left the book, see [`parts::part_edits`]. Each chapter it changes takes the change as one undo
     /// step. Never run on typing.
     fn keep_parts(&mut self, wanted: &[parts::Line<ChapterId>], left: Option<ChapterId>) -> Result<(), String> {
-        let text = |id: &ChapterId| (*id, self.known(*id).text());
+        let text = |id: &ChapterId| (*id, self.known(*id).page_text());
         let book: Vec<(ChapterId, &str)> = self.book.iter().map(text).collect();
         let left: Vec<(ChapterId, &str)> = left.iter().map(text).collect();
         let edits = parts::part_edits(&book, &left, wanted);
@@ -1571,10 +1579,10 @@ impl Session {
                 markdown = markdown.replace(placeholder, words);
             }
         }
-        // A paragraph whose style the theme, resolved over the bundled default as the engine resolves it, has not as a
-        // paragraph style is set in italics instead, since the engine rejects the style.
-        let config = (self.theme_file().zip(self.theme_json()))
-            .and_then(|(path, theme)| crate::theme_file::resolved(&path, &theme));
+        // A paragraph whose style the theme the pages use, resolved over the bundled default as the engine resolves it,
+        // has not as a paragraph style is set in italics instead, since the engine rejects the style.
+        let config = (self.theme_override.clone().or_else(|| self.theme_file()))
+            .and_then(|path| crate::theme_file::resolved(&path, &read_json(&path)?));
         let styled = |class: &str| {
             (config.as_ref().and_then(|config| config.custom_styles.get(class)))
                 .is_some_and(|style| style.kind() == StyleKind::Paragraph)
@@ -1628,6 +1636,10 @@ impl Session {
         self.resplit();
         Ok(self.active)
     }
+}
+
+fn read_json(path: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
 /// An offset after edits sorted by position, whose ranges refer to the text before them.
