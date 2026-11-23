@@ -20,6 +20,10 @@ use crate::session::{Joined, Kind, Session};
 use crate::source::{BlockKind, Blocks, Edit};
 use crate::theme_file::patch;
 
+/// The kinds of book a copy for the trial tool names, see [`Book::write_copy`].
+const COPY_SINGLE: &str = "single";
+const COPY_PROJECT: &str = "project";
+
 /// The book a trial works on: its text, its theme file's text, and its manifest, as they were when the trial began.
 /// Every trial of a run lays out this one snapshot, so the baseline and each fix see the same book.
 #[derive(Clone)]
@@ -64,17 +68,25 @@ impl Book {
 
     /// Writes the texts of the chapters, the theme, and the manifest to `file`, for the trial tool in the CLI's process
     /// to try fixes on what the app has, which typing or a Binder action during a run makes differ from what is on disk.
-    /// The chapters are listed in the book's order, each as its path and text.
+    /// The chapters are listed in the book's order, each as its path and text, beside the book's kind, which a folder
+    /// renamed during the run would no longer tell.
     pub fn write_copy(&self, file: &Path) -> std::io::Result<()> {
-        let chapters: Vec<serde_json::Value> = match &self.kind {
-            Kind::Single { path } => vec![serde_json::json!([path, self.joined.text])],
-            Kind::Project { .. } => (self.joined.map.files())
-                .map(|(path, range)| serde_json::json!([path, &self.joined.text[range]]))
-                .collect(),
+        let (kind, chapters): (_, Vec<serde_json::Value>) = match &self.kind {
+            Kind::Single { path } => (COPY_SINGLE, vec![serde_json::json!([path, self.joined.text])]),
+            Kind::Project { .. } => (
+                COPY_PROJECT,
+                (self.joined.map.files())
+                    .map(|(path, range)| serde_json::json!([path, &self.joined.text[range]]))
+                    .collect(),
+            ),
         };
         let pair = |file: &Option<(PathBuf, String)>| file.as_ref().map(|(path, text)| serde_json::json!([path, text]));
-        let copy =
-            serde_json::json!({"chapters": chapters, "theme": pair(&self.theme), "manifest": pair(&self.manifest)});
+        let copy = serde_json::json!({
+            "kind": kind,
+            "chapters": chapters,
+            "theme": pair(&self.theme),
+            "manifest": pair(&self.manifest),
+        });
         crate::persist::atomic::write(file, copy.to_string().as_bytes())
     }
 
@@ -95,12 +107,15 @@ impl Book {
         let chapters = chapters.ok_or_else(|| unreadable("it lists no chapters".to_owned()))?;
         let working_dir = std::env::current_dir().map_err(|error| error.to_string())?;
         let path = normalize(&working_dir.join(path));
-        let kind = match path.parent() {
-            _ if path.is_dir() => Kind::Project { dir: path },
-            Some(dir) if path.file_name().is_some_and(|name| name == druck::input::MANIFEST) => {
-                Kind::Project { dir: dir.to_owned() }
-            }
-            _ => Kind::Single { path },
+        let kind = match copy["kind"].as_str() {
+            Some(COPY_SINGLE) => Kind::Single { path },
+            Some(COPY_PROJECT) => match path.parent() {
+                Some(dir) if path.file_name().is_some_and(|name| name == druck::input::MANIFEST) => {
+                    Kind::Project { dir: dir.to_owned() }
+                }
+                _ => Kind::Project { dir: path },
+            },
+            _ => return Err(unreadable("it names no kind of book".to_owned())),
         };
         let (joined, manifest) = match (&kind, &chapters[..]) {
             (Kind::Single { .. }, [(_, text)]) => (Joined::single(text.clone(), 0), None),
@@ -872,6 +887,25 @@ mod tests {
         assert_eq!(opened.file("b.md").map(|(_, text)| text), Some("# B\n\nSecond.\n"));
         Bench::new(opened).lay_out(&[], &Cancel::default()).expect("it sets");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_project_renamed_during_a_run_stays_a_project_in_the_tools_trials() {
+        let dir = std::env::temp_dir().join(format!("druck-trial-renamed-{}", std::process::id()));
+        let renamed = dir.with_file_name(format!("druck-trial-renamed-{}-new", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("a.md"), "# A\n\nFirst.\n").expect("chapter");
+        std::fs::write(dir.join("druck.yaml"), "chapters:\n  - a.md\n").expect("manifest");
+        let copy = std::env::temp_dir().join(format!("druck-trial-renamed-{}.json", std::process::id()));
+        (Book::open(&dir).expect("the book opens"))
+            .write_copy(&copy)
+            .expect("the copy is written");
+        std::fs::rename(&dir, &renamed).expect("the folder is renamed");
+        let opened = Book::open_copy(&dir, &copy).expect("the copy opens");
+        assert!(matches!(opened.kind, Kind::Project { .. }));
+        assert_eq!(opened.file("a.md").map(|(_, text)| text), Some("# A\n\nFirst.\n"));
+        std::fs::remove_dir_all(&renamed).ok();
+        std::fs::remove_file(&copy).ok();
     }
 
     #[test]
