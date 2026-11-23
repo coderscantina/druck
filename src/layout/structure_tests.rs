@@ -690,12 +690,9 @@ fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the
     };
     let config = config("{}", theme());
 
-    // Without slashes to break after, the long URL of `pdfspec` does not fit a column, which is
-    // reported at the entry in the `.bib` file.
-    let unbreakable = BIB.replace(
-        "com/dc-acrobat-sdk-docs/pdfstandards/",
-        "com.dc-acrobat-sdk-docs.pdfstandards.",
-    );
+    // A word wider than a column, with no place to break, is reported at the entry in the `.bib` file.
+    let digits = "1234567890".repeat(8);
+    let unbreakable = BIB.replace("{{PDF} reference}", &format!("{{{digits}}}"));
     let errors = render_cited(&config, &body(&citations), Some(&unbreakable), &[]).unwrap_err();
     assert_eq!(
         errors[0].source,
@@ -703,10 +700,24 @@ fn the_bibliography_marker_sets_the_section_in_columns_and_entry_errors_name_the
     );
     assert_eq!(errors[0].location, Some((90, 1).into()));
     assert!(
-        errors[0].message.starts_with("entry `pdfspec`: \"https://"),
+        errors[0].message.starts_with(&format!("entry `pdfspec`: \"{digits}")),
         "{}",
         errors[0].message
     );
+
+    // A URL without a slash to break after breaks between characters where it is wider than a column.
+    let slashless = BIB.replace(
+        "com/dc-acrobat-sdk-docs/pdfstandards/",
+        "com.dc-acrobat-sdk-docs.pdfstandards.",
+    );
+    let output = render_cited(&config, &body(&citations), Some(&slashless), &[]).expect("the URL breaks");
+    let lines = all_lines(&output);
+    let start = lines
+        .iter()
+        .position(|line| line.3.contains("https://"))
+        .expect("the URL");
+    assert!(!lines[start].3.contains("PDF32000"), "{:?}", &lines[start..start + 2]);
+    assert!(!lines[start].3.ends_with('-'), "no hyphen is added: {}", lines[start].3);
 
     let fitting: Vec<String> = citations
         .into_iter()

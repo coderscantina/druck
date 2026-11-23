@@ -969,7 +969,7 @@ An entry reads the same in both styles:
    - web resource: the publisher or organization, and after the URL `Accessed 2024-05-05.` (`Abgerufen am`) from `urldate`.
 4. The DOI as a `https://doi.org/` link, else the URL. Web resources show the URL first.
 
-URLs and DOIs break only after a single `/`, without a hyphen, so one with a part wider than the line, which happens most in narrow columns, is an error at its entry. The same holds for link text in the document that spells out its URL.
+URLs and DOIs break after a single `/`, without a hyphen. One with no such slash breaks between any two characters where it is wider than the line, which happens most in narrow columns. One with slashes but a part between them wider than the line is an error at its entry. The same holds for link text in the document that spells out its URL.
 
 ### Entry types and fields
 

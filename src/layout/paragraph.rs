@@ -29,6 +29,9 @@ const SHRINK: f64 = 1.0 / 3.0;
 const RAGGED: f64 = 3.0;
 /// Cost of a break at a hyphenation point or after an explicit hyphen.
 const HYPHEN_COST: f64 = 50.0;
+/// Cost of a break between two characters of a URL without a slash to break after, so it breaks there only
+/// where every other choice is far worse, such as a URL wider than its line.
+const CHARACTER_COST: f64 = 1000.0;
 /// The size of lowercase letters set as capitals, for small capitals in a font that has none.
 const SYNTHETIC_SMALL_CAPS: f64 = 0.8;
 
@@ -65,7 +68,8 @@ struct Fragment {
 enum Breaks {
     /// At hyphenation points and after joining hyphens.
     Prose,
-    /// After a slash between two other characters, without a hyphen: link text that spells its URL.
+    /// After a slash between two other characters, without a hyphen: link text that spells its URL. Without such a
+    /// slash, between any two characters.
     Url,
     /// Nowhere: code, footnote markers, and cross-reference text.
     Never,
@@ -80,6 +84,17 @@ enum Cut {
     Explicit,
     /// After a slash in a URL.
     Url,
+    /// Between two characters of a URL that has no slash to break after.
+    Character,
+}
+
+impl Cut {
+    fn cost(self) -> f64 {
+        match self {
+            Self::Character => CHARACTER_COST,
+            Self::Hyphen | Self::Explicit | Self::Url => HYPHEN_COST,
+        }
+    }
 }
 
 /// Text between two spaces. Style changes inside a word split it into fragments.
@@ -458,8 +473,8 @@ impl Builder<'_> {
             self.items.push(Element::Box(piece));
             self.items.push(Element::Penalty {
                 width: hyphen_width,
-                cost: HYPHEN_COST,
-                flagged: cut != Cut::Url,
+                cost: cut.cost(),
+                flagged: matches!(cut, Cut::Hyphen | Cut::Explicit),
                 at: Mark {
                     at: Cursor {
                         word: index,
@@ -501,7 +516,12 @@ impl Builder<'_> {
             );
         }
         if word.fragments.iter().any(|f| f.breaks == Breaks::Url) {
-            points.extend(hyphenation::url(&text).into_iter().map(|p| (p, Cut::Url)));
+            let slashes = hyphenation::url(&text);
+            if slashes.is_empty() {
+                points.extend(text.char_indices().skip(1).map(|(p, _)| (p, Cut::Character)));
+            } else {
+                points.extend(slashes.into_iter().map(|p| (p, Cut::Url)));
+            }
         }
         points.sort_by_key(|&(offset, _)| offset);
         let mut cuts = Vec::with_capacity(points.len());
@@ -521,7 +541,7 @@ impl Builder<'_> {
                 _ => current.breaks,
             };
             let allowed = match cut {
-                Cut::Url => Breaks::Url,
+                Cut::Url | Cut::Character => Breaks::Url,
                 Cut::Hyphen | Cut::Explicit => Breaks::Prose,
             };
             let has_hyphen = cut != Cut::Hyphen
