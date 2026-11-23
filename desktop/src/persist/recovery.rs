@@ -9,6 +9,8 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -113,6 +115,8 @@ pub struct Recovered {
 pub struct Copies {
     recovery: PathBuf,
     kept: PathBuf,
+    /// How many times every copy was cleared, shared by clones.
+    cleared: Arc<AtomicU64>,
 }
 
 /// The folder in the data folder that holds kept copies, one folder in it per document.
@@ -126,6 +130,7 @@ impl Copies {
         Self {
             recovery: data.join("recovery").join(&document),
             kept: data.join(KEPT_FOLDER).join(document),
+            cleared: Arc::default(),
         }
     }
 
@@ -146,8 +151,24 @@ impl Copies {
         fs::remove_file(self.file_for(path)).ok();
     }
 
-    /// Clears every recovery copy, when the person chose to discard the unsaved text.
+    /// Stores a file's unsaved text as [`Self::store`] does, unless every copy was cleared since [`Self::clears`] said
+    /// `clears`: they are cleared when nothing is unsaved, so the text has reached the disk since. A store on another
+    /// thread that ran after the last save before a quit would otherwise leave a copy of saved text.
+    pub fn store_unless_cleared(&self, clears: u64, path: &Path, base: &str, text: &str) -> io::Result<()> {
+        if self.clears() != clears {
+            return Ok(());
+        }
+        self.store(path, base, text)
+    }
+
+    /// A count of [`Self::clear_all`] calls, for [`Self::store_unless_cleared`].
+    pub fn clears(&self) -> u64 {
+        self.cleared.load(Ordering::SeqCst)
+    }
+
+    /// Clears every recovery copy: nothing is unsaved, or the person chose to discard the unsaved text.
     pub fn clear_all(&self) {
+        self.cleared.fetch_add(1, Ordering::SeqCst);
         fs::remove_dir_all(&self.recovery).ok();
     }
 
@@ -241,6 +262,22 @@ mod tests {
         );
         copies.clear(path);
         assert!(copies.load().is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_store_asked_for_before_every_copy_was_cleared_stores_nothing() {
+        let dir = data("stale");
+        let copies = Copies::new(&dir, Path::new("/books/one"));
+        let path = Path::new("/books/one/a.md");
+        let asked = copies.clears();
+        copies.clone().clear_all();
+        copies.store_unless_cleared(asked, path, "", "saved since").unwrap();
+        assert!(copies.load().is_empty());
+        copies
+            .store_unless_cleared(copies.clears(), path, "", "unsaved")
+            .unwrap();
+        assert_eq!(copies.load().len(), 1);
         fs::remove_dir_all(dir).ok();
     }
 

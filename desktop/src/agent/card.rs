@@ -129,9 +129,9 @@ impl Render for ReviewFoot {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let agent = self.agent.read(cx);
         let (here, elsewhere) = agent.review_counts(cx);
-        let pass = agent.pass_line();
+        let pass = agent.pass_line(cx);
         let running = agent.is_working() && (pass.is_some() || !agent.chat_is_on_screen());
-        let working = running && pass.is_none();
+        let working = running && pass.is_none() && !agent.fix_in_panel(cx);
         let has_next = agent.has_next_change(cx);
         if !agent.is_enabled() || (here + elsewhere == 0 && !working && pass.is_none()) {
             return div().into_any_element();

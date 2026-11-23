@@ -104,7 +104,7 @@ crate::strings! {
         CannotCopy => ("cannot copy {path}: {error}", "{path} lässt sich nicht kopieren: {error}"),
         CannotReadManifest => ("cannot read {manifest}: {error}", "{manifest} lässt sich nicht lesen: {error}"),
         CannotChangeManifest => ("cannot change {manifest} here. Edit the file directly.", "{manifest} lässt sich hier nicht ändern. Bearbeite die Datei direkt."),
-        ManifestChanged => ("{manifest} just changed on disk. Try again.", "{manifest} wurde eben auf der Platte geändert. Versuch es noch einmal."),
+        ManifestChanged => ("{manifest} just changed on disk. Try again.", "{manifest} wurde eben auf der Platte geändert. Versuche es noch einmal."),
         CannotWriteManifest => ("cannot write {manifest}: {error}", "{manifest} lässt sich nicht schreiben: {error}"),
         CannotChangeFrontMatter => ("cannot change the front matter here. Edit it directly.", "Die Front Matter lässt sich hier nicht ändern. Bearbeite sie direkt."),
         OutsideProject => ("{path} is outside the project.", "{path} liegt außerhalb des Projekts."),

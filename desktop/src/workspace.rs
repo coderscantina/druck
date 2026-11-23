@@ -163,6 +163,11 @@ impl<V: 'static> Current<V> {
     }
 }
 
+/// Shows a file of the project in Write, from code that holds no handle to the window.
+pub fn open_file(path: PathBuf, cx: &mut App) {
+    Current::<Workspace>::defer(cx, move |workspace, window, cx| workspace.open_file(&path, window, cx));
+}
+
 impl TextColumn {
     /// The left edge of something `width` wide centred over the text, kept inside the window.
     pub fn centred(cx: &App, width: Pixels) -> Pixels {
@@ -405,8 +410,27 @@ impl Workspace {
         workspace.sync_panels(window, cx);
         workspace.request_pages(cx);
         cx.emit(ModeChanged(Mode::Write));
+        Current::set(&cx.entity(), window, cx);
         crate::gate::apply(&workspace.parts, cx.entity(), window, cx);
         workspace
+    }
+
+    /// Shows a file of the project in Write as its row in the Binder does, finding it first if it is new.
+    pub fn open_file(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let found = self.parts.editor.update(cx, |editor, cx| {
+            editor.update_session(
+                |session| {
+                    session.discover_files();
+                    session.chapter_of_file(path)
+                },
+                window,
+                cx,
+            )
+        });
+        if let Some(id) = found {
+            self.show(Mode::Write, window, cx);
+            self.sidebar_event(&SidebarEvent::Select(id), window, cx);
+        }
     }
 
     pub fn mode(&self) -> Mode {

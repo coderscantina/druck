@@ -102,6 +102,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-tab", FocusPrevious, Some("Workspace")),
         KeyBinding::new("ctrl-tab", FocusNext, Some("Workspace")),
         KeyBinding::new("ctrl-shift-tab", FocusPrevious, Some("Workspace")),
+        KeyBinding::new("tab", FocusNext, Some("Settings")),
+        KeyBinding::new("shift-tab", FocusPrevious, Some("Settings")),
         KeyBinding::new("cmd-h", HideApp, None),
         KeyBinding::new("cmd-alt-h", HideOthers, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),

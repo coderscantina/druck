@@ -130,6 +130,7 @@ impl EventEmitter<SidebarEvent> for SidebarView {}
 enum Fold {
     Notes,
     Research,
+    Passes,
 }
 
 pub struct SidebarView {
@@ -217,17 +218,24 @@ impl SidebarView {
         }
     }
 
-    /// The chapters the arrow keys visit, top to bottom: the book, files not in it, and the notes and research that
-    /// are not folded.
+    /// The chapters the arrow keys visit, top to bottom: the book, files not in it, and the notes, research, and passes
+    /// that are not folded.
     fn visible(&self) -> Vec<Entry> {
         let contents = &self.data.contents;
         let notes = (!self.folded.contains(&Fold::Notes)).then_some(&contents.notes);
         let research = (!self.folded.contains(&Fold::Research)).then_some(&contents.research);
-        let chapters = [Some(&contents.book), Some(&contents.not_in_book), notes, research]
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|row| Entry::Chapter(row.id));
+        let passes = (!self.folded.contains(&Fold::Passes)).then_some(&contents.passes);
+        let chapters = [
+            Some(&contents.book),
+            Some(&contents.not_in_book),
+            notes,
+            research,
+            passes,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|row| Entry::Chapter(row.id));
         (self.data.title_page.map(|_| Entry::TitlePage).into_iter())
             .chain(chapters)
             .collect()
@@ -663,6 +671,14 @@ impl Render for SidebarView {
             )
             .into_any_element()
         });
+        let passes: Vec<_> = (contents.passes.iter())
+            .filter(|_| !self.folded.contains(&Fold::Passes))
+            .map(|row| self.file_row(row, &tokens, cx).into_any_element())
+            .collect();
+        let passes_label = (!contents.passes.is_empty()).then(|| {
+            self.fold_label(Fold::Passes, crate::t!(Key::Passes), contents.passes.len(), &tokens, cx)
+                .into_any_element()
+        });
         let list = div()
             .id("contents")
             .size_full()
@@ -683,7 +699,9 @@ impl Render for SidebarView {
             .children(notes_label)
             .children(notes)
             .children(research_label)
-            .children(research);
+            .children(research)
+            .children(passes_label)
+            .children(passes);
         let problem = self.data.problem.clone().map(SharedString::from);
         let notice = problem.or_else(|| self.notice.clone()).map(|notice| {
             div()

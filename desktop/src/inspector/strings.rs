@@ -7,7 +7,7 @@ crate::strings! {
         TabStyles => ("Styles", "Stile"),
         TabFonts => ("Fonts", "Schriften"),
         TabImages => ("Images", "Bilder"),
-        TabDetails => ("Details", "Details"),
+        TabDetails => ("Details", "Buchdaten"),
         TabProof => ("Proof", "Korrektur"),
         TabGit => ("Git", "Git"),
         TabExport => ("Export", "Export"),
@@ -44,12 +44,12 @@ crate::strings! {
         StyleTocHeading => ("Contents heading", "Inhaltsüberschrift"),
         StyleTocEntry => ("Contents entry", "Inhaltseintrag"),
         StyleBibliography => ("Bibliography", "Literaturverzeichnis"),
-        StyleSceneBreak => ("Scene break", "Szenenwechsel"),
+        StyleSceneBreak => ("Scene break", "Szenenumbruch"),
         StyleIndexLetter => ("Index letter", "Registerbuchstabe"),
         StyleIndexEntry => ("Index entry", "Registereintrag"),
         StyleIndexSubEntry => ("Index sub-entry", "Register-Untereintrag"),
 
-        DetailsTitle => ("Details", "Details"),
+        DetailsTitle => ("Details", "Buchdaten"),
         CoverImageTitle => ("Cover", "Cover"),
         MetaTitle => ("Meta", "Meta"),
         FieldTitle => ("Title", "Titel"),
@@ -252,7 +252,7 @@ crate::strings! {
         SectionChapters => ("Chapter openings", "Kapitelanfänge"),
         SectionContents => ("Contents", "Inhaltsverzeichnis"),
         SectionMatter => ("Page numbering", "Seitenzählung"),
-        SectionSceneBreak => ("Scene break", "Szenenwechsel"),
+        SectionSceneBreak => ("Scene break", "Szenenumbruch"),
         SectionBibliography => ("Bibliography", "Literaturverzeichnis"),
         SectionIndex => ("Index", "Register"),
         SectionFootnotes => ("Footnotes", "Fußnoten"),
@@ -303,7 +303,7 @@ crate::strings! {
         SlotText => ("Text", "Text"),
         SlotHint => (
             "Use {section}, {title}, {page}, {pages}, and {author}.",
-            "Nutze {section}, {title}, {page}, {pages} und {author}."
+            "Möglich sind {section}, {title}, {page}, {pages} und {author}."
         ),
 
         // Picker

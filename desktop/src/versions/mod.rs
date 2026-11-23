@@ -287,8 +287,8 @@ impl Versions {
             cx.subscribe_in(&parts.editor, window, |view, _, _: &TextChanged, window, cx| {
                 view.edited(window, cx);
             }),
-            cx.subscribe_in(&parts.editor, window, |view, _, _: &SessionChanged, _, cx| {
-                view.session_changed(cx);
+            cx.subscribe_in(&parts.editor, window, |view, _, _: &SessionChanged, window, cx| {
+                view.session_changed(window, cx);
             }),
             cx.subscribe(&persist, |view, _, change: &FileChange, cx| {
                 view.outside_change(change, cx)

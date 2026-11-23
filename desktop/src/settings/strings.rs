@@ -45,19 +45,19 @@ crate::strings! {
         CategoryKeys => ("Keys", "Tasten"),
 
         Appearance => ("Appearance", "Erscheinungsbild"),
-        AppearanceHint => ("Follows the system unless you pick one.", "Folgt dem System, wenn du nichts wählst."),
+        AppearanceHint => ("Follows the system unless you pick one.", "Folgt dem System, solange nichts anderes gewählt ist."),
         AppearanceSystem => ("System", "System"),
         AppearanceLight => ("Light", "Hell"),
         AppearanceDark => ("Dark", "Dunkel"),
         Accent => ("Accent color", "Akzentfarbe"),
         AccentHint => (
             "Caret, selection, marks, and the action that moves on.",
-            "Cursor, Auswahl, Markierungen und die Aktion, die weiterführt."
+            "Einfügemarke, Auswahl, Markierungen und die Aktion, die weiterführt."
         ),
         AccentBad => ("Use a color such as #2f8fb8.", "Eine Farbe wie #2f8fb8 verwenden."),
 
         LineLength => ("Line length", "Zeilenlänge"),
-        LineLengthHint => ("The book's measure, or your own.", "Die Satzbreite des Buchs oder deine eigene."),
+        LineLengthHint => ("The book's measure, or your own.", "Die Satzbreite des Buchs oder eine eigene."),
         LineLengthBook => ("Book", "Buch"),
         LineLengthCount => ("{count} characters", "{count} Zeichen"),
         Typewriter => ("Typewriter scrolling", "Schreibmaschinen-Scrollen"),
@@ -67,7 +67,7 @@ crate::strings! {
         SelectionToolbar => ("Toolbar on selection", "Werkzeugleiste bei Auswahl"),
         SelectionToolbarHint => (
             "Marks and lists over selected text. The keys work either way.",
-            "Auszeichnungen und Listen über dem markierten Text. Die Tasten gehen immer."
+            "Auszeichnungen und Listen über dem markierten Text. Die Tasten wirken so oder so."
         ),
         Binder => ("Binder", "Binder"),
         Placeholders => ("Placeholders", "Platzhalter"),
@@ -107,7 +107,7 @@ crate::strings! {
         Agent => ("Writing partner", "Schreibpartner"),
         AgentHint => (
             "Your own agent program on Cmd+J and in editing passes, on this computer. Set it up with an API key. Druck holds no keys and starts nothing while this is off.",
-            "Dein eigenes Agent-Programm auf Cmd+J und in Durchgängen, auf diesem Computer. Mit einem API-Schlüssel einrichten. Druck speichert keine Schlüssel und startet nichts, solange das aus ist."
+            "Ein eigenes Agent-Programm auf Cmd+J und in Durchgängen, auf diesem Computer, mit einem API-Schlüssel eingerichtet. Druck speichert keine Schlüssel und startet nichts, solange das aus ist."
         ),
         AgentCli => ("Agent program", "Agent-Programm"),
         AgentCliHint => (

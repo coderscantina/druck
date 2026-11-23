@@ -290,7 +290,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &menus::FixProof, cx| crate::agent::fix_proof(cx));
     cx.on_action(|_: &menus::FocusEditor, cx| with_hub(cx, Hub::focus_editor));
     cx.on_action(|_: &menus::ShowDiagnostics, cx| {
-        with_hub(cx, |hub, w, cx| hub.show_tab(Tab::Proof, w, cx));
+        with_hub(cx, Hub::show_proof);
     });
     cx.on_action(|_: &menus::NextProblem, cx| with_hub(cx, |hub, w, cx| hub.walk_problems(1, w, cx)));
     cx.on_action(|_: &menus::PreviousProblem, cx| with_hub(cx, |hub, w, cx| hub.walk_problems(-1, w, cx)));
@@ -413,7 +413,7 @@ pub struct Hub {
 
 impl Hub {
     fn new(parts: Parts, workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let diagnostics = cx.new(|_| DiagnosticsPanel::new());
+        let diagnostics = cx.new(DiagnosticsPanel::new);
         let export = cx.new(|cx| ExportPanel::new(window, cx));
         let search = cx.new(|cx| SearchPanel::new(window, cx));
         let find = cx.new(|cx| FindBar::new(parts.editor.clone(), window, cx));
@@ -681,6 +681,12 @@ impl Hub {
     }
 
     // Export
+
+    /// Shows the Proof tab with the keys on its first control, so the run and the list are a key away.
+    fn show_proof(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_tab(Tab::Proof, window, cx);
+        self.diagnostics.update(cx, |panel, cx| panel.take_keys(window, cx));
+    }
 
     /// Goes to Publish, where the rail is, and shows a tab of it.
     fn show_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {

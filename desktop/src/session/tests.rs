@@ -101,6 +101,25 @@ fn a_project_opens_with_its_chapters_and_groups() {
 }
 
 #[test]
+fn the_projects_passes_are_a_group_of_their_own() {
+    let (folder, mut session) = project("passes");
+    folder.write(
+        "passes/titles.md",
+        "---\nname: Titles\nreturns: notes\n---\nCheck the titles.\n",
+    );
+    assert!(session.discover_files());
+    let contents = session.contents();
+    assert_eq!(titles(&contents.passes), ["titles"]);
+    assert!(
+        contents
+            .not_in_book
+            .iter()
+            .chain(&contents.notes)
+            .all(|row| row.title != "titles")
+    );
+}
+
+#[test]
 fn numbers_count_only_numbered_chapters() {
     let (_folder, session) = project("numbers");
     let numbers: Vec<_> = session.contents().book.iter().map(|row| row.number).collect();

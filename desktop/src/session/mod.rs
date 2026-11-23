@@ -50,6 +50,8 @@ use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
 const MANUSCRIPT: &str = "manuscript";
 const NOTES: &str = "notes";
 const RESEARCH: &str = "research";
+/// The folder of the project's own editing passes, as `agent::passes::FOLDER` names it.
+const PASSES: &str = "passes";
 /// A key in the settings that lists chapters.
 const CHAPTERS: &str = "chapters";
 
@@ -79,6 +81,8 @@ pub enum Group {
     NotInBook,
     Notes,
     Research,
+    /// An editing pass of the project's own, in `passes/`.
+    Passes,
     /// `druck.yaml` itself, shown while the book cannot be read from it.
     Manifest,
 }
@@ -225,6 +229,7 @@ pub struct Contents {
     pub not_in_book: Vec<Row>,
     pub notes: Vec<Row>,
     pub research: Vec<Row>,
+    pub passes: Vec<Row>,
     pub manifest: Vec<Row>,
 }
 
@@ -448,6 +453,7 @@ impl Session {
         self.find_files(MANUSCRIPT, Group::NotInBook);
         self.find_files(NOTES, Group::Notes);
         self.find_files(RESEARCH, Group::Research);
+        self.find_files(PASSES, Group::Passes);
         self.show_manifest_if_needed(&manifest);
         self.set_revision_above(before);
         self.refresh_details();
@@ -698,6 +704,7 @@ impl Session {
                 Group::NotInBook => contents.not_in_book.push(row),
                 Group::Notes => contents.notes.push(row),
                 Group::Research => contents.research.push(row),
+                Group::Passes => contents.passes.push(row),
                 Group::Manifest => contents.manifest.push(row),
             }
         }
@@ -767,7 +774,7 @@ impl Session {
                 .unwrap_or_default()
         };
         match chapter.group {
-            Group::Notes | Group::Research => self.note_title(chapter),
+            Group::Notes | Group::Research | Group::Passes => self.note_title(chapter),
             Group::Manifest => MANIFEST.to_owned(),
             Group::Book | Group::NotInBook => match (&outline.title, outline.kind, &self.kind) {
                 (Some(title), ..) => title.clone(),

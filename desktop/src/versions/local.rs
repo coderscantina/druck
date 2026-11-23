@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{App, Context, WeakEntity, Window};
 
-use super::history::{History, Label, Moment, Orphan, now_ms};
+use super::history::{Followed, History, Label, Moment, Orphan, now_ms};
 use super::pacing::{Due, Pacing};
 use super::strings::Key;
 use super::{REFRESH_PAUSE, Versions};
@@ -110,13 +110,22 @@ impl Versions {
             store.thin_daily(now_ms());
             followed
         });
+        self.tell_followed(work, window, cx);
+    }
+
+    /// Says at the foot what following history did, once `work` is done, and offers what it could not place.
+    fn tell_followed(&mut self, work: gpui::Task<Followed>, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |view, cx| {
             let followed = work.await;
             view.update_in(cx, |view, window, cx| {
                 let left = followed.unplaced.len();
-                view.history.unplaced = followed.unplaced.into_iter().collect();
+                view.history.unplaced.extend(followed.unplaced);
+                let name = |path: &PathBuf| path.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 if let Some((from, _)) = followed.moved.first() {
                     let text = crate::t!(Key::HistoryFollowed, from = from.display().to_string());
+                    view.show_note(text, window, cx);
+                } else if let Some((from, to)) = followed.renamed.first() {
+                    let text = crate::t!(Key::HistoryRenamed, name = name(to), from = name(from));
                     view.show_note(text, window, cx);
                 } else if left > 0 {
                     let text = match left {
@@ -214,8 +223,9 @@ impl Versions {
         label_history(self.session(cx), label, cx);
     }
 
-    /// A chapter's file changed name: its log goes along.
-    pub(super) fn session_changed(&mut self, cx: &mut Context<Self>) {
+    /// A chapter's file changed name: its log goes along. A file that came in looks for the history of one that went, as
+    /// after a rename the session saw only as a file gone and a file new.
+    pub(super) fn session_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let now = self.chapter_paths(cx);
         if let Some(store) = self.history.store.clone() {
             let renamed: Vec<(PathBuf, PathBuf)> = (now.iter())
@@ -224,13 +234,18 @@ impl Versions {
                     (before != path).then(|| (before.clone(), path.clone()))
                 })
                 .collect();
-            if !renamed.is_empty() {
-                cx.background_spawn(async move {
+            let came: Vec<PathBuf> = (now.iter())
+                .filter(|(id, _)| !self.history.paths.contains_key(id))
+                .map(|(_, path)| path.clone())
+                .collect();
+            if !renamed.is_empty() || !came.is_empty() {
+                let work = cx.background_spawn(async move {
                     for (from, to) in renamed {
                         store.moved(&from, &to).ok();
                     }
-                })
-                .detach();
+                    store.follow(&came)
+                });
+                self.tell_followed(work, window, cx);
             }
         }
         self.history.paths = now;

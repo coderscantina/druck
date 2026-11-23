@@ -110,6 +110,8 @@ pub struct Orphan {
 pub struct Followed {
     /// The folder that moved and where to, for each move it recognized.
     pub moved: Vec<(PathBuf, PathBuf)>,
+    /// Files that took the history of a gone file with another name, from where to.
+    pub renamed: Vec<(PathBuf, PathBuf)>,
     /// How many files' histories came along.
     pub files: usize,
     /// Files with no history, each with a log that could be theirs by its name alone.
@@ -259,13 +261,13 @@ impl History {
         found
     }
 
-    /// Looks for the history of each of `files` that has none: first the log of a file that is gone and once held this
-    /// exact text, which also shows which folder moved, then logs at the same place under a folder that moved. What is
+    /// Looks for the history of each of `files` that has none: first the log of a file that is gone and last held this
+    /// exact text, which also shows which folder moved or that the file was renamed, then logs at the same place under a folder that moved. What is
     /// left and shares a name comes back as `unplaced`.
     pub fn follow(&self, files: &[PathBuf]) -> Followed {
         let _writing = self.lock();
         let mut followed = Followed::default();
-        let mut lost: Vec<PathBuf> = files
+        let lost: Vec<PathBuf> = files
             .iter()
             .filter(|file| !self.log_of(file).exists())
             .cloned()
@@ -277,32 +279,56 @@ impl History {
         if orphans.is_empty() {
             return followed;
         }
-        // A log goes to a file only by its name and its last text: a file that once held the same text, such as a new
-        // starter chapter or an empty note, is not the one that moved.
+        // A log goes to a file by its name and its last text, or by its last text alone, as after a rename, when no other
+        // gone file ended with that text and no other file here holds it. A file that once held the same text, such as a
+        // new starter chapter, is not the one that moved, and blank text tells nothing.
         let mut last: HashMap<(OsString, String), usize> = HashMap::new();
+        let mut ended: HashMap<String, Vec<usize>> = HashMap::new();
         for (at, orphan) in orphans.iter().enumerate() {
-            if let (Some(name), Some(snapshot)) = (orphan.path.file_name(), read_log(&orphan.log).pop()) {
-                last.insert((name.to_owned(), snapshot.hash), at);
+            if let Some(snapshot) = read_log(&orphan.log).pop() {
+                if let Some(name) = orphan.path.file_name() {
+                    last.insert((name.to_owned(), snapshot.hash.clone()), at);
+                }
+                ended.entry(snapshot.hash).or_default().push(at);
             }
         }
+        let texts: Vec<Option<(String, bool)>> = (lost.iter())
+            .map(|file| {
+                fs::read(file)
+                    .ok()
+                    .map(|bytes| (blob_id(&bytes), bytes.trim_ascii().is_empty()))
+            })
+            .collect();
+        let mut holding: HashMap<&str, usize> = HashMap::new();
+        for (hash, _) in texts.iter().flatten() {
+            *holding.entry(hash.as_str()).or_default() += 1;
+        }
         let mut taken = HashSet::new();
-        lost.retain(|file| {
-            let (Some(name), Ok(bytes)) = (file.file_name(), fs::read(file)) else {
-                return true;
+        let mut left = Vec::new();
+        for (file, text) in lost.iter().zip(&texts) {
+            let found = text.as_ref().and_then(|(hash, blank)| {
+                let by_name = (file.file_name()).and_then(|name| last.get(&(name.to_owned(), hash.clone())).copied());
+                by_name.or_else(|| match ended.get(hash).map(Vec::as_slice) {
+                    Some(&[at]) if !blank && holding.get(hash.as_str()) == Some(&1) => Some(at),
+                    _ => None,
+                })
+            });
+            let Some(at) = found.filter(|at| taken.insert(*at) && self.move_log(&orphans[*at].log, file).is_ok())
+            else {
+                left.push(file.clone());
+                continue;
             };
-            let Some(&at) = last.get(&(name.to_owned(), blob_id(&bytes))) else {
-                return true;
-            };
-            if !taken.insert(at) || self.move_log(&orphans[at].log, file).is_err() {
-                return true;
-            }
             followed.files += 1;
-            let moved = moved_folders(&orphans[at].path, file);
-            if !followed.moved.contains(&moved) {
-                followed.moved.push(moved);
+            if orphans[at].path.file_name() == file.file_name() {
+                let moved = moved_folders(&orphans[at].path, file);
+                if !followed.moved.contains(&moved) {
+                    followed.moved.push(moved);
+                }
+            } else {
+                followed.renamed.push((orphans[at].path.clone(), file.clone()));
             }
-            false
-        });
+        }
+        let mut lost = left;
         let mut at = 0;
         orphans.retain(|_| {
             at += 1;
@@ -684,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_takes_no_log_that_only_once_held_its_text_or_has_another_name() {
+    fn a_file_takes_no_log_that_only_once_held_its_text_or_blank_text() {
         let (dir, history) = store("claim");
         let deleted = dir.join("deleted/book/manuscript/01-first-chapter.md");
         history.snapshot(&deleted, "# The first chapter\n", None, 1).unwrap();
@@ -702,6 +728,35 @@ mod tests {
         assert_eq!(followed.files, 0);
         assert!(history.versions(&starter).is_empty());
         assert!(history.versions(&empty).is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_file_with_a_gone_files_last_text_takes_its_history_under_another_name() {
+        let (dir, history) = store("renamed");
+        let gone = dir.join("manuscript/03-chapter.md");
+        history.snapshot(&gone, "# Draft\n", None, 1).unwrap();
+        history.snapshot(&gone, "# Draft\n\nThe rain.\n", None, 2).unwrap();
+        fs::create_dir_all(dir.join("manuscript")).unwrap();
+        let renamed = dir.join("manuscript/03-the-rain.md");
+        fs::write(&renamed, "# Draft\n\nThe rain.\n").unwrap();
+        let followed = history.follow(std::slice::from_ref(&renamed));
+        assert_eq!(followed.files, 1);
+        assert_eq!(followed.renamed, vec![(gone, renamed.clone())]);
+        assert!(followed.moved.is_empty());
+        assert_eq!(history.versions(&renamed).len(), 2);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_last_text_two_files_hold_gives_neither_the_history() {
+        let (dir, history) = store("ambiguous");
+        history.snapshot(&dir.join("gone.md"), "Twice.\n", None, 1).unwrap();
+        let (one, two) = (dir.join("one.md"), dir.join("two.md"));
+        fs::write(&one, "Twice.\n").unwrap();
+        fs::write(&two, "Twice.\n").unwrap();
+        assert_eq!(history.follow(&[one.clone(), two.clone()]).files, 0);
+        assert!(history.versions(&one).is_empty() && history.versions(&two).is_empty());
         fs::remove_dir_all(dir).ok();
     }
 

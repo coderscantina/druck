@@ -732,11 +732,12 @@ impl PersistView {
             return;
         }
         let lock = self.write_lock.clone();
+        let clears = copies.clears();
         let stored = cx.background_spawn(async move {
             let _writing = lock.lock();
             (unsaved.into_iter())
                 .map(|file| {
-                    let result = copies.store(&file.path, &file.base, &file.text);
+                    let result = copies.store_unless_cleared(clears, &file.path, &file.base, &file.text);
                     (file.path, result.map_err(|error| error.to_string()))
                 })
                 .collect::<Vec<_>>()

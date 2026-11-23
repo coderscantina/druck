@@ -295,7 +295,9 @@ fn family_matches(tag: &Tag, kind: BlockKind) -> bool {
 }
 
 /// A 10,000-word chapter from the real text, or from the samples on other machines. The budget is a frame at 120 Hz,
-/// so this holds in an unoptimized build. The printed numbers are the measurement.
+/// so this holds in an unoptimized build. The printed numbers are the measurement. The budget holds for the 99th
+/// percentile, not the slowest edit: the slowest of a thousand wall-clock samples measures the scheduler on a busy
+/// machine, about 4 ms with other builds running against 0.2 ms idle, and one preempted edit failed a parallel run.
 #[test]
 fn an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame() {
     let mut chapter = String::new();
@@ -313,8 +315,7 @@ fn an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame() {
     let mut blocks = Blocks::parse(buffer.text());
     let full_parse = started.elapsed();
 
-    let mut worst = Duration::ZERO;
-    let mut total = Duration::ZERO;
+    let mut times = Vec::with_capacity(1000);
     let edits = 1000;
     let mut unclosed_worst = Duration::ZERO;
     for _ in 0..20 {
@@ -351,18 +352,19 @@ fn an_edit_resegments_a_ten_thousand_word_chapter_far_below_one_frame() {
             )
             .unwrap_or_else(|error| panic!("{error}"));
         blocks.apply(buffer.text(), splice);
-        let elapsed = started.elapsed();
-        total += elapsed;
-        worst = worst.max(elapsed);
+        times.push(started.elapsed());
     }
+    times.sort_unstable();
+    let p99 = times[times.len() * 99 / 100];
     println!(
-        "resegmentation on {} KB and {} blocks: full parse {:?}, edit mean {:?}, worst {:?}, no-op at start {:?}",
+        "resegmentation on {} KB and {} blocks: full parse {:?}, edit mean {:?}, p99 {:?}, worst {:?}, no-op at start {:?}",
         buffer.len() / 1024,
         blocks.as_slice().len(),
         full_parse,
-        total / edits,
-        worst,
+        times.iter().sum::<Duration>() / edits,
+        p99,
+        times[times.len() - 1],
         unclosed_worst,
     );
-    assert!(worst < Duration::from_millis(8), "worst edit took {worst:?}");
+    assert!(p99 < Duration::from_millis(8), "the 99th percentile edit took {p99:?}");
 }

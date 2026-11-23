@@ -3,9 +3,9 @@
 
 crate::strings! {
     pub enum Key {
-        Commit => ("Commit", "Commit"),
+        Commit => ("Commit", "Committen"),
         CommitLabel => ("Commit", "Commit"),
-        CommitAndPush => ("Commit and push", "Commit und Push"),
+        CommitAndPush => ("Commit and push", "Committen und pushen"),
         Message => ("Message", "Nachricht"),
         NothingChanged => ("Nothing changed since the last commit.", "Seit dem letzten Commit hat sich nichts geändert."),
         Working => ("Working…", "Läuft…"),
@@ -86,14 +86,14 @@ crate::strings! {
         HistoryGroup => ("History", "Verlauf"),
         NoCommits => ("No commits yet.", "Noch keine Commits."),
         NewBranch => ("New branch", "Neuer Branch"),
-        Merge => ("Merge", "Merge"),
+        Merge => ("Merge", "Mergen"),
         MergeAsk => ("Merge now?", "Jetzt mergen?"),
         Switch => ("Switch", "Wechseln"),
         Delete => ("Delete", "Löschen"),
         DeleteUnmerged => ("Not merged. Delete?", "Nicht gemerged. Löschen?"),
         Current => ("current", "aktuell"),
-        Push => ("Push", "Push"),
-        Pull => ("Pull", "Pull"),
+        Push => ("Push", "Pushen"),
+        Pull => ("Pull", "Pullen"),
         AbortMerge => ("Abort merge", "Merge abbrechen"),
         MergingBanner => ("Merging: {message}", "Merge läuft: {message}"),
         ConflictsOnLine => (
@@ -142,6 +142,10 @@ crate::strings! {
         HistoryFollowed => (
             "Local history followed this book from {from}.",
             "Der lokale Verlauf ist diesem Buch aus {from} gefolgt."
+        ),
+        HistoryRenamed => (
+            "Local history followed {name} from {from}.",
+            "Der lokale Verlauf ist {name} von {from} gefolgt."
         ),
         OneHistoryLeft => (
             "1 file here has no local history, but a file with its name does elsewhere. ⌘Y shows it.",

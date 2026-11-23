@@ -66,12 +66,12 @@ crate::strings! {
         UndefinedFootnote => ("footnote [^{label}] has no definition", "Fußnote [^{label}] hat keinen Text"),
         NoBibliography => (
             "a citation needs a bibliography; set `bibliography` to a BibTeX file in the front matter",
-            "ein Zitat braucht ein Literaturverzeichnis; nenne unter `bibliography` eine BibTeX-Datei"
+            "eine Quellenangabe braucht ein Literaturverzeichnis; nenne unter `bibliography` eine BibTeX-Datei"
         ),
         MissingCitation => ("no entry in {file} has the key `{key}`", "kein Eintrag in {file} hat den Schlüssel `{key}`"),
         UnknownStyle => (
             "unknown style \"{name}\"; the theme defines no custom styles",
-            "unbekannter Stil \"{name}\"; das Thema hat keine eigenen Stile"
+            "unbekannter Stil \u{201e}{name}\u{201c}; das Theme hat keine eigenen Stile"
         ),
         ResourceNotFound => (
             "{property}: the file {file} is not there",
@@ -91,7 +91,7 @@ crate::strings! {
         ),
         FinalRefused => (
             "export \"{export}\" is final, but {cause}",
-            "Export \"{export}\" ist final, aber {cause}"
+            "Export \u{201e}{export}\u{201c} ist final, aber {cause}"
         ),
         OpenPlaceholder => ("this placeholder is open: {text}", "dieser Platzhalter ist offen: {text}"),
         ImageMissing => ("this image is not there: {file}", "dieses Bild gibt es nicht: {file}"),
@@ -101,7 +101,7 @@ crate::strings! {
         ),
         UnknownStyleOf => (
             "unknown style \"{name}\"; the theme's custom styles are {known}",
-            "unbekannter Stil \"{name}\"; die eigenen Stile des Themas sind {known}"
+            "unbekannter Stil \u{201e}{name}\u{201c}; die eigenen Stile des Themes sind {known}"
         ),
     }
 }
@@ -320,14 +320,14 @@ mod tests {
         };
         assert_eq!(
             refused(Code::OpenPlaceholder { text: "Jahr".into() }),
-            "Export \"print\" ist final, aber dieser Platzhalter ist offen: Jahr"
+            "Export \u{201e}print\u{201c} ist final, aber dieser Platzhalter ist offen: Jahr"
         );
         assert_eq!(
             refused(Code::MissingCitation {
                 file: Path::new("/books/literatur.bib").to_owned(),
                 key: "x".into(),
             }),
-            "Export \"print\" ist final, aber kein Eintrag in ../literatur.bib hat den Schlüssel `x`"
+            "Export \u{201e}print\u{201c} ist final, aber kein Eintrag in ../literatur.bib hat den Schlüssel `x`"
         );
         let mut isbn = with_code(Code::InvalidIsbn);
         isbn.property = Some("meta.isbn".into());

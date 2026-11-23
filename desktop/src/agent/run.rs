@@ -13,8 +13,9 @@ use super::passes::{self, Listed, Origin, Pass, Returns, Target};
 use super::session::Access;
 use super::strings::{self, Key};
 use super::{AgentView, relative, style_sheet};
+use crate::inspector::Tab;
 use crate::session::Kind;
-use crate::workspace::Current;
+use crate::workspace::{Current, Mode};
 
 /// How long the line at the window's foot says how a run ended.
 const RESULT_SHOWN: Duration = Duration::from_secs(8);
@@ -151,12 +152,10 @@ impl AgentView {
         commands
     }
 
-    /// Copies a built-in pass into the project's `passes/` and opens the copy in the author's editor.
+    /// Copies a built-in pass into the project's `passes/` and opens the copy in the text.
     fn customize_pass(&mut self, slug: &str, cx: &mut Context<Self>) {
         match passes::customize(&self.base, slug) {
-            // A scripted run only wants the copy.
-            Ok(_) if crate::gate::measuring() => {}
-            Ok(file) => cx.open_with_system(&file),
+            Ok(file) => crate::workspace::open_file(file, cx),
             Err(error) => self.say(strings::pass_not_copied(&error.to_string()), cx),
         }
     }
@@ -176,11 +175,18 @@ impl AgentView {
         cx.notify();
     }
 
-    /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended.
-    pub(super) fn pass_line(&self) -> Option<String> {
+    /// What the window's foot says about a pass or the typesetter: where it is, or for a while how it ended. A run of the
+    /// typesetter the Proof panel shows is left to it.
+    pub(super) fn pass_line(&self, cx: &App) -> Option<String> {
         (self.pass_run.as_ref().map(PassRun::progress))
-            .or_else(|| self.fix_line())
+            .or_else(|| self.fix_line().filter(|_| !self.fix_in_panel(cx)))
             .or_else(|| self.pass_result.clone())
+    }
+
+    /// Whether a typesetter run shows in the Proof panel, with its Stop, because Publish has that tab open. The window's
+    /// foot then says nothing of it, so the run shows once.
+    pub(super) fn fix_in_panel(&self, cx: &App) -> bool {
+        self.fixing.is_running() && self.mode == Mode::Publish && self.inspector.read(cx).active() == Tab::Proof
     }
 
     /// Starts a pass, once the CLI has been looked for and unsaved text is written, so the agent reads what is on
