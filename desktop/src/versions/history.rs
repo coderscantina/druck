@@ -261,10 +261,23 @@ impl History {
         found
     }
 
+    /// Starts the history of each of `files` that has none with what it holds now. For files the app made, such as a
+    /// new page from a template or a starter's chapters: they are new, so [`Self::follow`] must never give them the
+    /// history of a gone file that ended with the same text.
+    pub fn begin(&self, files: &[PathBuf], time: i64) -> io::Result<()> {
+        for file in files {
+            if !self.log_of(file).exists() {
+                self.snapshot(file, &fs::read_to_string(file)?, None, time)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Looks for the history of each of `files` that has none: first the log of a file that is gone and last held this
     /// exact text, which also shows which folder moved or that the file was renamed, then logs at the same place under a folder that moved. What is
-    /// left and shares a name comes back as `unplaced`.
-    pub fn follow(&self, files: &[PathBuf]) -> Followed {
+    /// left and shares a name comes back as `unplaced`. `live` is every file of the book now, with history or without,
+    /// so a text another of them holds tells no file apart.
+    pub fn follow(&self, files: &[PathBuf], live: &[PathBuf]) -> Followed {
         let _writing = self.lock();
         let mut followed = Followed::default();
         let lost: Vec<PathBuf> = files
@@ -280,7 +293,7 @@ impl History {
             return followed;
         }
         // A log goes to a file by its name and its last text, or by its last text alone, as after a rename, when no other
-        // gone file ended with that text and no other file here holds it. A file that once held the same text, such as a
+        // gone file ended with that text and no other live file holds it, whether it has history or not. A file that once held the same text, such as a
         // new starter chapter, is not the one that moved, and blank text tells nothing.
         let mut last: HashMap<(OsString, String), usize> = HashMap::new();
         let mut ended: HashMap<String, Vec<usize>> = HashMap::new();
@@ -299,9 +312,12 @@ impl History {
                     .map(|bytes| (blob_id(&bytes), bytes.trim_ascii().is_empty()))
             })
             .collect();
-        let mut holding: HashMap<&str, usize> = HashMap::new();
-        for (hash, _) in texts.iter().flatten() {
-            *holding.entry(hash.as_str()).or_default() += 1;
+        let mut holding: HashMap<String, usize> = HashMap::new();
+        let everyone: HashSet<&PathBuf> = live.iter().chain(&lost).collect();
+        for file in everyone {
+            if let Ok(bytes) = fs::read(file) {
+                *holding.entry(blob_id(&bytes)).or_default() += 1;
+            }
         }
         let mut taken = HashSet::new();
         let mut left = Vec::new();
@@ -309,7 +325,7 @@ impl History {
             let found = text.as_ref().and_then(|(hash, blank)| {
                 let by_name = (file.file_name()).and_then(|name| last.get(&(name.to_owned(), hash.clone())).copied());
                 by_name.or_else(|| match ended.get(hash).map(Vec::as_slice) {
-                    Some(&[at]) if !blank && holding.get(hash.as_str()) == Some(&1) => Some(at),
+                    Some(&[at]) if !blank && holding.get(hash) == Some(&1) => Some(at),
                     _ => None,
                 })
             });
@@ -695,7 +711,7 @@ mod tests {
             new.join("manuscript/c.md"),
             new.join("d.md"),
         ];
-        let followed = history.follow(&files);
+        let followed = history.follow(&files, &files);
         assert_eq!(followed.files, 3);
         assert_eq!(followed.moved, vec![(dir.join("old/shelf"), dir.join("new"))]);
         assert_eq!(history.versions(&files[0]).len(), 1);
@@ -724,7 +740,7 @@ mod tests {
         fs::write(&starter, "# The first chapter\n").unwrap();
         let empty = dir.join("new/manuscript/empty.md");
         fs::write(&empty, "").unwrap();
-        let followed = history.follow(&[starter.clone(), empty.clone()]);
+        let followed = history.follow(&[starter.clone(), empty.clone()], &[]);
         assert_eq!(followed.files, 0);
         assert!(history.versions(&starter).is_empty());
         assert!(history.versions(&empty).is_empty());
@@ -740,7 +756,7 @@ mod tests {
         fs::create_dir_all(dir.join("manuscript")).unwrap();
         let renamed = dir.join("manuscript/03-the-rain.md");
         fs::write(&renamed, "# Draft\n\nThe rain.\n").unwrap();
-        let followed = history.follow(std::slice::from_ref(&renamed));
+        let followed = history.follow(std::slice::from_ref(&renamed), &[]);
         assert_eq!(followed.files, 1);
         assert_eq!(followed.renamed, vec![(gone, renamed.clone())]);
         assert!(followed.moved.is_empty());
@@ -755,8 +771,41 @@ mod tests {
         let (one, two) = (dir.join("one.md"), dir.join("two.md"));
         fs::write(&one, "Twice.\n").unwrap();
         fs::write(&two, "Twice.\n").unwrap();
-        assert_eq!(history.follow(&[one.clone(), two.clone()]).files, 0);
+        assert_eq!(history.follow(&[one.clone(), two.clone()], &[]).files, 0);
         assert!(history.versions(&one).is_empty() && history.versions(&two).is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_last_text_a_file_with_history_holds_gives_a_new_file_nothing() {
+        let (dir, history) = store("held");
+        history.snapshot(&dir.join("gone.md"), "Twice.\n", None, 1).unwrap();
+        let (kept, came) = (dir.join("kept.md"), dir.join("came.md"));
+        fs::write(&kept, "Twice.\n").unwrap();
+        history.snapshot(&kept, "Twice.\n", None, 1).unwrap();
+        fs::write(&came, "Twice.\n").unwrap();
+        assert_eq!(
+            history.follow(std::slice::from_ref(&came), &[kept, came.clone()]).files,
+            0
+        );
+        assert!(history.versions(&came).is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_file_the_app_made_starts_its_own_history() {
+        let (dir, history) = store("made");
+        let gone = dir.join("deleted/dedication.md");
+        history.snapshot(&gone, "Older words.\n", None, 1).unwrap();
+        history.snapshot(&gone, "For someone.\n", None, 2).unwrap();
+        fs::create_dir_all(dir.join("book")).unwrap();
+        let made = dir.join("book/dedication.md");
+        fs::write(&made, "For someone.\n").unwrap();
+        history.begin(std::slice::from_ref(&made), 3).unwrap();
+        let live = [made.clone()];
+        assert_eq!(history.follow(&live, &live).files, 0);
+        assert_eq!(history.versions(&made).len(), 1);
+        assert_eq!(history.versions(&gone).len(), 2);
         fs::remove_dir_all(dir).ok();
     }
 

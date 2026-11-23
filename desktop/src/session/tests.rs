@@ -646,6 +646,9 @@ fn a_new_section_in_a_project_is_a_new_listed_file_after_the_chapter() {
         session.chapter(second).expect("known").path(),
         folder.0.join("manuscript/fresh-start-2.md")
     );
+    // Local history starts the made files' own logs rather than give them a gone file's.
+    assert!(session.made_here(&folder.0.join("manuscript/fresh-start.md")));
+    assert!(!session.made_here(&folder.0.join("manuscript/one.md")));
 }
 
 #[test]

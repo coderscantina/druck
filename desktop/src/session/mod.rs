@@ -299,6 +299,9 @@ pub struct Session {
     /// The made pages' headings as the theme words them, from the last layout. Before one their rows have the app's
     /// words.
     page_titles: Option<PageTitles>,
+    /// Files the app wrote as new pages while the book is open. Local history starts their own logs, so a gone file's
+    /// history never goes to them.
+    made: HashSet<PathBuf>,
 }
 
 /// Orders of the book to go back or forward to.
@@ -345,6 +348,7 @@ impl Session {
             held: HashSet::new(),
             moves: Moves::default(),
             page_titles: None,
+            made: HashSet::new(),
         }
     }
 
@@ -1399,6 +1403,11 @@ impl Session {
         }
     }
 
+    /// Whether the app wrote this file as a new page while the book is open.
+    pub fn made_here(&self, path: &Path) -> bool {
+        self.made.contains(path)
+    }
+
     /// Whether the book has a page that it may have only once, such as its contents.
     pub fn has_page(&self, page: &Page) -> bool {
         match page.once {
@@ -1496,6 +1505,7 @@ impl Session {
             return Err(error);
         }
         self.set_revision_above(before);
+        self.made.insert(path);
         self.active = id;
         Ok(id)
     }
