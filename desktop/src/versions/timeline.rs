@@ -644,9 +644,12 @@ impl Render for Timeline {
             }
         };
         let heading = self.heading();
+        let moment = heading.clone();
         let can_restore = self.point.is_some() && !at_now;
         div()
             .id("timeline")
+            .role(gpui::Role::Group)
+            .aria_label(crate::t!(Key::TimelineStrip))
             .occlude()
             .absolute()
             .top(tokens::TITLEBAR_HEIGHT)
@@ -766,6 +769,9 @@ impl Render for Timeline {
                             .id("timeline-strip")
                             .role(gpui::Role::Slider)
                             .aria_label(crate::t!(Key::TimelineStrip))
+                            .aria_value(moment)
+                            // The strip has the keys while the timeline does, so assistive technology follows the mark.
+                            .aria_active_descendant()
                             .flex_1()
                             .min_w_0()
                             .h_full()
