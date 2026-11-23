@@ -55,7 +55,7 @@ pub use crate::text::{FaceId, Glyph, ShapedRun as Run};
 /// The number of an anchor, which [`Link::Anchor`], [`Item::Anchor`], and [`Layout::anchor`] share.
 pub type AnchorId = usize;
 
-/// How far above the baseline [`Layout::rect`] starts, as a part of the size. What is left of the size goes below.
+/// How far above the baseline the rectangle from [`Layout::locate`] starts, as a part of the size. What is left of the size goes below.
 pub const EM_ABOVE_BASELINE: f64 = 0.8;
 /// A point this many times farther above or below a line than beside it counts as equally far, so a click between
 /// two lines finds the text on the nearer line rather than the nearer end of a word.
