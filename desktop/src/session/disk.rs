@@ -338,8 +338,12 @@ impl Session {
 
     /// Applies edits to a file's text, moving carets and scroll places with the text. The edits refer to the file's text
     /// before them. In a project they are one undo step. In a single file each section takes the part in its range, as
-    /// one step in that section's history, which is the limit of per-section undo.
+    /// one step in that section's history, which is the limit of per-section undo. A change from outside to a single
+    /// file is one step over all its sections instead: see [`super::outside`].
     pub fn apply_to_file(&mut self, path: &Path, edits: &[Edit], kind: EditKind) -> Result<(), EditError> {
+        if kind == EditKind::External && matches!(&self.kind, Kind::Single { path: file } if file == path) {
+            return self.apply_outside(edits);
+        }
         let ids = self.ids_of(path);
         if ids.len() == 1 {
             return self.apply_to_chapter(ids[0], edits.to_vec(), kind);

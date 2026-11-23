@@ -17,6 +17,7 @@ pub mod details;
 pub mod disk;
 mod joined;
 pub mod outline;
+mod outside;
 pub mod parts;
 mod strings;
 pub mod templates;
@@ -296,6 +297,8 @@ pub struct Session {
     /// The book's orders before each move, for undoing moves, and after each undone one, for redoing them. A change to
     /// the manifest from outside clears both.
     moves: Moves,
+    /// A single file's changes from outside, each one undo step over all its sections.
+    outside: outside::Outside,
     /// The made pages' headings as the theme words them, from the last layout. Before one their rows have the app's
     /// words.
     page_titles: Option<PageTitles>,
@@ -344,6 +347,7 @@ impl Session {
             synced: HashMap::new(),
             held: HashSet::new(),
             moves: Moves::default(),
+            outside: outside::Outside::default(),
             page_titles: None,
         }
     }

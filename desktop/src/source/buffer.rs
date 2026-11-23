@@ -239,6 +239,14 @@ impl Buffer {
         Ok(splice)
     }
 
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
     /// Whether the next undo meets a change from outside.
     pub fn undo_is_outside_change(&self) -> bool {
         self.undo.last().is_some_and(|group| group.kind == EditKind::External)

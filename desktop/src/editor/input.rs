@@ -226,6 +226,11 @@ impl EditorView {
 
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
+            if self.session.undo_is_outside_file_change() {
+                self.update_session(Session::undo_outside_file_change, window, cx);
+                cx.emit(ExternalUndo);
+                return;
+            }
             let buffer = self.session.active_buffer_mut();
             let outside = buffer.undo_is_outside_change();
             let restored = buffer.undo();
@@ -238,6 +243,10 @@ impl EditorView {
 
     pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         if self.marked.is_none() {
+            if self.session.redo_is_outside_file_change() {
+                self.update_session(Session::redo_outside_file_change, window, cx);
+                return;
+            }
             let restored = self.session.active_buffer_mut().redo();
             self.restore(restored, window, cx);
         }
