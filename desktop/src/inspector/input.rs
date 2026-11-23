@@ -120,13 +120,20 @@ fn bind(cx: &mut App) {
 pub enum Words {
     Fixed(SharedString),
     Keyed(std::rc::Rc<dyn Fn() -> &'static str>),
+    /// Words put together from the string table at each render, such as a field's place in a list.
+    Made(std::rc::Rc<dyn Fn() -> String>),
 }
 
 impl Words {
+    pub fn made(words: impl Fn() -> String + 'static) -> Self {
+        Words::Made(std::rc::Rc::new(words))
+    }
+
     fn get(&self) -> SharedString {
         match self {
             Words::Fixed(words) => words.clone(),
             Words::Keyed(word) => word().into(),
+            Words::Made(words) => words().into(),
         }
     }
 }

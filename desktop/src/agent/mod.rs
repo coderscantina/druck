@@ -312,7 +312,7 @@ impl AgentView {
             .and_then(|model| backend.models().iter().copied().find(|known| *known == model));
         let prompt = cx.new(|cx| prompt::PromptInput::new(crate::t!(Key::Placeholder), cx));
         let selection_prompt = cx.new(|cx| prompt::PromptInput::one_line(crate::t!(Key::SelectionPlaceholder), cx));
-        let reason = cx.new(|cx| TextInput::new(window, cx));
+        let reason = cx.new(|cx| TextInput::new(window, cx).with_label(Key::ReasonLabel));
         let prompt_focus = prompt.read(cx).focus_handle(cx);
         let theme_model = parts.inspector.read(cx).model().clone();
         let selection_focus = selection_prompt.read(cx).focus_handle(cx);

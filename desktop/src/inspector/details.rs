@@ -151,7 +151,7 @@ impl DetailsPanel {
 
     /// Opens a field for a new row's key. The row is written once the key is entered.
     fn add_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let input = cx.new(|cx| TextInput::new(window, cx).with_label(Key::NewKey));
         self._subscriptions
             .push(cx.subscribe(&input, |panel, _, Committed(key), cx| {
                 panel.new_key = None;

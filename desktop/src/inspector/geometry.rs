@@ -97,7 +97,7 @@ impl GeometryPanel {
         let mut inputs = Vec::new();
         for field in FIELDS {
             let input = cx.new(|cx| {
-                let input = TextInput::new(window, cx);
+                let input = TextInput::new(window, cx).with_label(field.label);
                 if field == TEXT_WIDTH {
                     input.with_placeholder(Key::TextWidthHint)
                 } else {

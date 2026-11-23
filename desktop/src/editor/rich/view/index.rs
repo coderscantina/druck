@@ -61,17 +61,18 @@ impl EditorView {
                 (at, (index::entry_for(text, self.selection), String::new()))
             }
         };
-        let make = |value: String, placeholder: Key, window: &mut Window, cx: &mut Context<Self>| {
+        let make = |value: String, label: Key, placeholder: Key, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| {
                 let mut input = TextInput::new(window, cx)
                     .keep_focus_on_enter()
+                    .with_label(label)
                     .with_placeholder(crate::t!(placeholder));
                 input.set_value(value, true, cx);
                 input
             })
         };
-        let entry = make(entry, Key::IndexEntryPlaceholder, window, cx);
-        let sub = make(sub, Key::IndexSubPlaceholder, window, cx);
+        let entry = make(entry, Key::IndexEntry, Key::IndexEntryPlaceholder, window, cx);
+        let sub = make(sub, Key::IndexSub, Key::IndexSubPlaceholder, window, cx);
         let subscriptions = [&entry, &sub]
             .into_iter()
             .flat_map(|field| {

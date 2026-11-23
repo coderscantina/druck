@@ -107,7 +107,11 @@ impl ThemePicker {
     }
 
     fn start_naming(&mut self, naming: Naming, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let label = match naming {
+            Naming::Create => Key::NewSharedTheme,
+            Naming::Rename(_) => Key::Rename,
+        };
+        let input = cx.new(|cx| TextInput::new(window, cx).with_label(label));
         input.update(cx, |input, cx| input.set_value(text, true, cx));
         self._subscriptions.push(
             cx.subscribe_in(&input, window, |picker, input, _: &Submitted, window, cx| {

@@ -377,6 +377,13 @@ impl Render for PromptInput {
         let tokens = Tokens::get(cx);
         div()
             .id("agent-prompt")
+            .role(if self.bare {
+                gpui::Role::TextInput
+            } else {
+                gpui::Role::MultilineTextInput
+            })
+            .aria_label(self.placeholder.clone())
+            .aria_value(self.buffer.text().to_owned())
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_submit))

@@ -64,6 +64,7 @@ crate::strings! {
         MergeRight => ("Span the next column", "Nächste Spalte mitnehmen"),
         SplitCell => ("Give a column back", "Spalte zurückgeben"),
         CaptionLabel => ("Caption", "Beschriftung"),
+        CellLabel => ("Row {row}, column {column}", "Zeile {row}, Spalte {column}"),
         CaptionPlaceholder => ("No caption", "Keine Beschriftung"),
         LabelLabel => ("Label", "Marke"),
         LabelPlaceholder => ("name", "name"),

@@ -5,7 +5,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, Focusable, SharedString, Subscription, Window, div};
 use serde_json::{Map, Value, json};
 
-use super::input::{Committed, TextInput};
+use super::input::{Committed, TextInput, Words};
 use super::model::ThemeModel;
 use super::strings::Key;
 use super::widgets;
@@ -96,7 +96,15 @@ impl RunningHeads {
         let mut inputs = Vec::new();
         for band in 0..BANDS.len() {
             for group in 0..FIELDS_PER_BAND {
-                let input = cx.new(|cx| TextInput::new(window, cx));
+                let label = Words::made(move || {
+                    format!(
+                        "{}, {} {}",
+                        crate::t!(BANDS[band].1),
+                        crate::t!(Key::SlotText),
+                        group + 1
+                    )
+                });
+                let input = cx.new(|cx| TextInput::new(window, cx).with_label(label));
                 subscriptions.push(cx.subscribe(&input, move |panel, _, Committed(text), cx| {
                     panel.set_text(band, group, text, cx);
                 }));
