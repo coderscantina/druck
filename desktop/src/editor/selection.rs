@@ -61,8 +61,27 @@ impl EditorView {
             Motion::LineStart => self.row_edge(false, window),
             Motion::LineEnd => self.row_edge(true, window),
             Motion::Up | Motion::Down => {
-                let (target, upstream, goal) =
-                    self.vertical_target(matches!(motion_kind, Motion::Down), goal_x, window);
+                let down = matches!(motion_kind, Motion::Down);
+                let (target, upstream, goal) = self.vertical_target(down, goal_x, window);
+                // Down from a code block that ends the text leaves it, as there is no line below.
+                if down
+                    && !extend
+                    && !self.source
+                    && let Some(command) = super::commands::code::leave_at_end(
+                        self.session.active_buffer().text(),
+                        &self.blocks,
+                        head,
+                        target,
+                    )
+                {
+                    if command.edits.is_empty() {
+                        self.set_selection(command.selection, false, window, cx);
+                    } else {
+                        self.run_command(command, window, cx);
+                    }
+                    self.trace.handled(started);
+                    return;
+                }
                 new_goal = Some(goal);
                 (target, upstream)
             }

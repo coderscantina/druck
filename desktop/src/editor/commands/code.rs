@@ -166,6 +166,19 @@ pub fn leave(text: &str, blocks: &Blocks, caret: usize) -> Option<Command> {
     })
 }
 
+/// Down from the caret's last code line, aiming at `target`, in a closed block with only blank lines after it: there is
+/// no line below to go to, so it leaves the block as [`leave`] does. `None` anywhere else.
+pub fn leave_at_end(text: &str, blocks: &Blocks, caret: usize, target: usize) -> Option<Command> {
+    let index = blocks.index_at(caret);
+    let list = blocks.as_slice();
+    let block = &list[index];
+    if block.kind != BlockKind::Code || !list[index + 1..].iter().all(|after| after.kind == BlockKind::Blank) {
+        return None;
+    }
+    let close = fences(&text[block.range.clone()])?.close?;
+    (target >= block.range.start + close.start).then(|| leave(text, blocks, caret))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::applied;
@@ -237,5 +250,22 @@ mod tests {
         );
         let text = "Text\n";
         assert!(leave(text, &Blocks::parse(text), 2).is_none());
+    }
+
+    #[test]
+    fn down_from_the_last_code_line_at_the_end_of_the_text_leaves_the_block() {
+        let text = "A\n\n```\nx\ny\n```\n";
+        let blocks = Blocks::parse(text);
+        let y = text.find('y').unwrap();
+        let close = text.rfind("```").unwrap();
+        let command = leave_at_end(text, &blocks, y, text.len()).expect("a way out");
+        assert_eq!(applied(text, &command.edits), "A\n\n```\nx\ny\n```\n\n");
+        assert_eq!(command.selection.head, text.len() + 1);
+        assert!(leave_at_end(text, &blocks, y, close).is_some());
+        // Down to a code line, or with text after the block, moves as it does elsewhere.
+        assert!(leave_at_end(text, &blocks, text.find('x').unwrap(), y).is_none());
+        let text = "```\nx\n```\n\nB\n";
+        let blocks = Blocks::parse(text);
+        assert!(leave_at_end(text, &blocks, 4, text.len()).is_none());
     }
 }
