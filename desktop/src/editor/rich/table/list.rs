@@ -232,6 +232,10 @@ pub fn read(text: &str, directive: Range<usize>, list: Range<usize>) -> Result<G
             .collect(),
         None => vec![Align::Default; columns],
     };
+    let fills: Vec<bool> = match attribute_value(&directive_line, "widths") {
+        Some(value) => value.split_whitespace().map(|word| word == "*").collect(),
+        None => vec![false; columns],
+    };
     let grid_rows = rows
         .iter()
         .map(|row| {
@@ -260,6 +264,7 @@ pub fn read(text: &str, directive: Range<usize>, list: Range<usize>) -> Result<G
         rows: grid_rows,
         columns,
         aligns,
+        fills,
         caption: super::Caption::default(),
         caption_range: None,
         table_end: close_end,

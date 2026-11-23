@@ -283,22 +283,22 @@ impl EditorView {
     }
 
     fn shape_grid(&self, grid: Rc<Grid>, dim: bool, width: Pixels, window: &Window) -> GridShape {
-        let mut weights = vec![4usize; grid.columns];
-        for row in &grid.rows {
+        // Each column's natural width: its widest cell set on one line, with the cell's padding.
+        let mut natural = vec![px(0.); grid.columns];
+        for (index, row) in grid.rows.iter().enumerate() {
             let mut column = 0;
             for cell in row {
-                if cell.span == 1 && column < weights.len() {
-                    let longest = cell.text.lines().map(|line| line.chars().count()).max().unwrap_or(0);
-                    weights[column] = weights[column].max(longest.min(40));
+                if cell.span == 1 && column < natural.len() {
+                    let layout = self.shape_inline(&cell_at_rest(&cell.text), width, index == 0, None, dim, window);
+                    let widest = (layout.lines.iter())
+                        .map(|line| line.shaped.unwrapped_layout.width)
+                        .fold(px(0.), Pixels::max);
+                    natural[column] = natural[column].max(widest + tokens::CELL_X * 2.);
                 }
                 column += cell.span;
             }
         }
-        let total: usize = weights.iter().sum();
-        let widths: Vec<Pixels> = weights
-            .iter()
-            .map(|weight| width * (*weight as f32 / total as f32))
-            .collect();
+        let widths = column_widths(&natural, &grid.fills, width);
         let lefts: Vec<Pixels> = widths
             .iter()
             .scan(px(0.), |left, width| {
@@ -438,6 +438,39 @@ fn align_rows(layout: &mut BlockLayout, room: Pixels, align: TextAlign) {
     }
 }
 
+/// The width of each column in `width`, as the pages share it: a column that fits its content takes its natural width,
+/// the narrowest first while they are too wide together, and the columns that fill share what is left. With none that
+/// fills, what is left goes to every column by its natural width, so the table spans the text.
+fn column_widths(natural: &[Pixels], fills: &[bool], width: Pixels) -> Vec<Pixels> {
+    let least = tokens::CELL_MIN_WIDTH + tokens::CELL_X * 2.;
+    let natural: Vec<Pixels> = natural.iter().map(|width| (*width).max(least)).collect();
+    let fills = |column: usize| fills.get(column).copied().unwrap_or(false);
+    let filling = (0..natural.len()).filter(|column| fills(*column)).count();
+    let mut fitting: Vec<usize> = (0..natural.len()).filter(|column| !fills(*column)).collect();
+    fitting.sort_by(|a, b| f32::from(natural[*a]).total_cmp(&f32::from(natural[*b])));
+    let mut widths = natural.clone();
+    let mut room = (width - least * filling as f32).max(px(0.));
+    for (at, column) in fitting.iter().enumerate() {
+        let share = room / (fitting.len() - at) as f32;
+        widths[*column] = natural[*column].min(share);
+        room -= widths[*column];
+    }
+    if filling > 0 {
+        let rest = (room + least * filling as f32) / filling as f32;
+        for column in (0..natural.len()).filter(|column| fills(*column)) {
+            widths[column] = rest;
+        }
+    } else {
+        let total: Pixels = widths.iter().copied().fold(px(0.), |a, b| a + b);
+        if total > px(0.) && room > px(0.) {
+            for column_width in &mut widths {
+                *column_width += room * (*column_width / total);
+            }
+        }
+    }
+    widths
+}
+
 /// A cell's text as it shows at rest: attribute lines go, and a list's markers read as bullets.
 fn cell_at_rest(text: &str) -> String {
     text.lines()
@@ -456,4 +489,37 @@ fn cell_at_rest(text: &str) -> String {
 /// A file size for a label, whole numbers.
 pub fn size_label(size: (f32, f32)) -> SharedString {
     crate::t!(Key::ImageSize, width = size.0.round(), height = size.1.round()).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn widths(natural: &[f32], fills: &[bool], width: f32) -> Vec<f32> {
+        let natural: Vec<Pixels> = natural.iter().map(|width| px(*width)).collect();
+        column_widths(&natural, fills, px(width))
+            .into_iter()
+            .map(f32::from)
+            .collect()
+    }
+
+    #[test]
+    fn a_filling_column_takes_what_the_fitting_ones_leave() {
+        assert_eq!(widths(&[80., 60.], &[true, false], 400.), [340., 60.]);
+        assert_eq!(widths(&[80., 60., 40.], &[false, true, true], 400.), [80., 160., 160.]);
+    }
+
+    #[test]
+    fn fitting_columns_too_wide_together_keep_the_narrow_ones_whole() {
+        assert_eq!(widths(&[500., 60.], &[false, false], 400.), [340., 60.]);
+        let least = f32::from(tokens::CELL_MIN_WIDTH + tokens::CELL_X * 2.);
+        assert_eq!(widths(&[500., 60.], &[true, false], 400.), [340., 60.]);
+        assert_eq!(widths(&[60., 500.], &[true, false], 400.), [least, 400. - least]);
+    }
+
+    #[test]
+    fn with_no_filling_column_the_table_spans_the_text_by_natural_widths() {
+        assert_eq!(widths(&[100., 100.], &[], 400.), [200., 200.]);
+        assert_eq!(widths(&[150., 50.], &[false, false], 400.), [300., 100.]);
+    }
 }
