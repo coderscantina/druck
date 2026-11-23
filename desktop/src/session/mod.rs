@@ -354,20 +354,19 @@ impl Session {
         session.synced.insert(path.to_owned(), Synced::new(&text, true));
         session.split_into_sections(&text);
         // A file opens on its first text, not on a section that holds only its settings.
-        let holds_text = |id: &&ChapterId| {
-            session.chapters.get(id).is_some_and(|chapter| {
-                let blocks = crate::source::Blocks::parse(chapter.text());
-                (blocks.as_slice().iter()).any(|block| {
-                    !matches!(
-                        block.kind,
-                        crate::source::BlockKind::FrontMatter | crate::source::BlockKind::Blank
-                    )
-                })
-            })
-        };
-        session.active = *session.book.iter().find(holds_text).unwrap_or(&session.book[0]);
+        session.active = *(session.book.iter())
+            .find(|id| session.holds_text(**id))
+            .unwrap_or(&session.book[0]);
         session.refresh_details();
         Ok(session)
+    }
+
+    /// Whether a section holds more than settings and blank lines.
+    fn holds_text(&self, id: ChapterId) -> bool {
+        self.chapters.get(&id).is_some_and(|chapter| {
+            let blocks = Blocks::parse(chapter.text());
+            (blocks.as_slice().iter()).any(|block| !matches!(block.kind, BlockKind::FrontMatter | BlockKind::Blank))
+        })
     }
 
     /// Makes one chapter per section of `text`.
@@ -943,9 +942,12 @@ impl Session {
     }
 
     /// Opens at the place the author left: the chapter of `file` with the caret at `offset`, scrolled to `scroll`. A
-    /// place the book no longer has leaves it as it opened.
+    /// place the book no longer has leaves it as it opened, and so does a single file's settings, left from its title
+    /// page.
     pub fn start_at(&mut self, file: &Path, offset: usize, scroll: Option<(usize, f32)>) {
-        if let Some((id, at)) = self.locate(file, offset) {
+        if let Some((id, at)) = self.locate(file, offset)
+            && (matches!(self.kind, Kind::Project { .. }) || self.holds_text(id))
+        {
             self.set_active(id);
             self.known_mut(id).view = ChapterView {
                 selection: Selection::caret(at),

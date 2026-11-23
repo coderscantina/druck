@@ -224,6 +224,18 @@ fn a_book_opens_again_where_the_author_left_it() {
 }
 
 #[test]
+fn a_single_file_left_on_its_settings_opens_on_its_first_text() {
+    let folder = Folder::new("left-settings");
+    folder.write("book.md", "---\ntitle: A book\n---\n\n# One\n\nText.\n");
+    let file = folder.0.join("book.md");
+    let mut session = Session::open(&file).expect("opens");
+    let text = session.book()[1];
+    assert_eq!(session.active(), text);
+    session.start_at(&file, 0, None);
+    assert_eq!(session.active(), text);
+}
+
+#[test]
 fn the_joined_text_follows_the_engines_rule() {
     let (_folder, session) = project("joined");
     let joined = session.joined();
