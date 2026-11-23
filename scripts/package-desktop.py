@@ -250,10 +250,11 @@ def sign_bundle(app: Path, identity: str) -> None:
 
 
 def sign(path: Path, identity: str) -> None:
-    """Signs with the hardened runtime. No identity means ad hoc (`-`), which has no timestamp."""
-    command = ["codesign", "--force", "--options", "runtime", "--sign", identity or "-"]
+    """Signs with the hardened runtime and a timestamp. No identity means ad hoc (`-`), with neither: the runtime's
+    library validation refuses an ad-hoc framework, since it has no team, and only notarization needs the runtime."""
+    command = ["codesign", "--force", "--sign", identity or "-"]
     if identity:
-        command += ["--timestamp"]
+        command += ["--options", "runtime", "--timestamp"]
     if path.suffix == ".app":
         command += ["--entitlements", ENTITLEMENTS]
     run(*command, path)
