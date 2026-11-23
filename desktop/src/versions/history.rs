@@ -293,7 +293,11 @@ impl History {
             }
         }
         let texts: Vec<Option<(String, bool)>> = (lost.iter())
-            .map(|file| fs::read(file).ok().map(|bytes| (blob_id(&bytes), bytes.trim_ascii().is_empty())))
+            .map(|file| {
+                fs::read(file)
+                    .ok()
+                    .map(|bytes| (blob_id(&bytes), bytes.trim_ascii().is_empty()))
+            })
             .collect();
         let mut holding: HashMap<&str, usize> = HashMap::new();
         for (hash, _) in texts.iter().flatten() {
@@ -309,7 +313,8 @@ impl History {
                     _ => None,
                 })
             });
-            let Some(at) = found.filter(|at| taken.insert(*at) && self.move_log(&orphans[*at].log, file).is_ok()) else {
+            let Some(at) = found.filter(|at| taken.insert(*at) && self.move_log(&orphans[*at].log, file).is_ok())
+            else {
                 left.push(file.clone());
                 continue;
             };

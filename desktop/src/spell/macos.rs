@@ -196,7 +196,9 @@ fn candidates(book: &str, system: &[String]) -> Vec<String> {
 /// so a region such as `de-AT` stays.
 fn chosen(book: &str, best: Option<(&str, f64)>) -> String {
     match best {
-        Some((language, sure)) if sure >= SURE && !base(language).eq_ignore_ascii_case(base(book)) => language.to_owned(),
+        Some((language, sure)) if sure >= SURE && !base(language).eq_ignore_ascii_case(base(book)) => {
+            language.to_owned()
+        }
         _ => book.to_owned(),
     }
 }

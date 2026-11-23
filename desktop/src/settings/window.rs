@@ -204,10 +204,7 @@ impl gpui::Global for Open {}
 pub fn open(category: Option<&str>, cx: &mut App) {
     let measuring = crate::gate::measuring();
     if let Some(open) = cx.try_global::<Open>().copied()
-        && open
-            .0
-            .update(cx, |_, window, _| window.activate_window())
-            .is_ok()
+        && open.0.update(cx, |_, window, _| window.activate_window()).is_ok()
     {
         return;
     }

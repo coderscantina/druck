@@ -274,7 +274,9 @@ mod tests {
         copies.clone().clear_all();
         copies.store_unless_cleared(asked, path, "", "saved since").unwrap();
         assert!(copies.load().is_empty());
-        copies.store_unless_cleared(copies.clears(), path, "", "unsaved").unwrap();
+        copies
+            .store_unless_cleared(copies.clears(), path, "", "unsaved")
+            .unwrap();
         assert_eq!(copies.load().len(), 1);
         fs::remove_dir_all(dir).ok();
     }
