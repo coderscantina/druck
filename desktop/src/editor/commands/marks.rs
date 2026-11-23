@@ -17,7 +17,7 @@ use std::ops::Range;
 use pulldown_cmark::{Event, Parser, Tag};
 
 use super::{Bias, Command, applied, moved, normalized, selection_after};
-use crate::source::inline::{InlineSpan, SpanKind, has_inline, inline_spans, line_markers};
+use crate::source::inline::{InlineSpan, SpanKind, has_inline, inline_spans, line_markers, trailing_attribute};
 use crate::source::{BlockKind, Blocks, Edit, Selection, motion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,21 +132,6 @@ fn is_opaque(kind: SpanKind) -> bool {
             | SpanKind::Todo
             | SpanKind::Index
     )
-}
-
-/// Trailing `{#id .style placement=top}` or `{-}`, which belongs to the block and not to its text.
-fn trailing_attribute(text: &str) -> Option<usize> {
-    let body = text.trim_end();
-    if !body.ends_with('}') {
-        return None;
-    }
-    let open = body.rfind('{')?;
-    let inner = &body[open + 1..body.len() - 1];
-    let is_attribute = !inner.is_empty()
-        && inner
-            .split_whitespace()
-            .all(|word| word.starts_with(['.', '#']) || word == "-" || word.contains('='));
-    is_attribute.then_some(open)
 }
 
 /// `{...}` groups, such as placeholders and index marks. A selection edge never lands inside one.

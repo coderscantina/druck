@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use super::words::{Hunk, hunks, passages};
-use crate::source::inline::{SpanKind, inline_spans, line_markers};
+use crate::source::inline::{SpanKind, inline_spans, line_markers, trailing_attribute};
 use crate::source::{BlockKind, Blocks, Edit};
 
 /// How a stretch of a shown block differs from now. The version holds what is `Removed`, and now holds what is `Added`.
@@ -131,6 +131,13 @@ fn shown_block(kind: BlockKind, range: Range<usize>, merged: &str, stretches: &[
     if kind == BlockKind::Comment {
         hidden.extend(comment_markup(source));
     }
+    // A label or style closing a heading or paragraph stays out of sight, as in the text, with the space before it.
+    if matches!(kind, BlockKind::Heading { .. } | BlockKind::Paragraph)
+        && let Some(open) = trailing_attribute(source)
+    {
+        let from = source[..open].trim_end().len();
+        hidden.push(from..source.len());
+    }
     let mut bold = Vec::new();
     let mut italic = Vec::new();
     for span in &spans {
@@ -223,6 +230,14 @@ mod tests {
         );
         assert!(texts[0].contains("note"), "what changed in it still shows: {texts:?}");
         assert_eq!(texts[1], "Text  here.");
+    }
+
+    #[test]
+    fn a_closing_label_stays_out_of_sight() {
+        let text = "# The first chapter {#sec:first}\n\nA line. {.lead}\n";
+        let shown = build(text, text);
+        let texts: Vec<&str> = shown.blocks.iter().map(|block| block.text.as_str()).collect();
+        assert_eq!(texts, ["The first chapter", "A line."]);
     }
 
     #[test]
