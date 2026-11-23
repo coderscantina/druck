@@ -1356,7 +1356,8 @@ impl Session {
             }
             Some(RowKind::Contents) => self.holds_directive("toc"),
             Some(RowKind::Index) => self.holds_directive("index"),
-            _ => false,
+            Some(kind) => (self.book.iter()).any(|id| self.known(*id).outline.kind == kind),
+            None => false,
         }
     }
 

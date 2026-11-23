@@ -209,7 +209,7 @@ pub const PAGES: &[Page] = &[
         slug: "imprint",
         name: Key::CopyrightName,
         place: Place::Opening(1),
-        once: None,
+        once: Some(RowKind::Copyright),
     },
     Page {
         slug: "dedication",
