@@ -209,8 +209,7 @@ fn taking_theirs_keeps_a_copy_of_mine_and_undo_brings_mine_back() {
     assert!(!fixture.session.is_dirty(), "the file already holds it");
     assert_eq!(fixture.kept(), vec![mine.clone()]);
     let buffer = fixture.session.active_buffer_mut();
-    assert!(buffer.undo().is_none());
-    buffer.undo();
+    assert!(buffer.undo().is_some());
     assert_eq!(buffer.text(), mine);
 }
 
@@ -398,7 +397,7 @@ fn git_putting_an_older_version_back_is_taken_as_it_is() {
 }
 
 #[test]
-fn an_outside_change_is_one_undo_step_that_stops_first() {
+fn an_outside_change_is_one_undo_step() {
     let mut fixture = Fixture::new();
     fixture.type_in(ONE, "First line.", "Typed.");
     fixture.save();
@@ -408,8 +407,6 @@ fn an_outside_change_is_one_undo_step_that_stops_first() {
 
     let buffer = fixture.session.active_buffer_mut();
     assert!(buffer.undo_is_outside_change());
-    assert!(buffer.undo().is_none());
-    assert_eq!(buffer.text(), new, "the first undo only stops");
     assert!(buffer.undo().is_some());
     assert_eq!(buffer.text(), typed);
     buffer.redo();

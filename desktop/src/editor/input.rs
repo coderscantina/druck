@@ -226,10 +226,8 @@ impl EditorView {
             let buffer = self.session.active_buffer_mut();
             let outside = buffer.undo_is_outside_change();
             let restored = buffer.undo();
-            if outside {
-                cx.emit(ExternalUndo {
-                    done: restored.is_some(),
-                });
+            if outside && restored.is_some() {
+                cx.emit(ExternalUndo);
             }
             self.restore(restored, window, cx);
         }

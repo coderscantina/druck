@@ -188,10 +188,8 @@ pub struct SaveRequested;
 
 impl EventEmitter<SaveRequested> for EditorView {}
 
-/// An undo reached a change that came from outside. `done` says whether it took it back, or stopped there first.
-pub struct ExternalUndo {
-    pub done: bool,
-}
+/// An undo took back a change that came from outside.
+pub struct ExternalUndo;
 
 impl EventEmitter<ExternalUndo> for EditorView {}
 
