@@ -32,13 +32,15 @@ use crate::preview::slip::Directive;
 use crate::preview::slip::{ProofSlip, SlipEvent};
 use crate::preview::slip_control;
 use crate::preview::{
-    Ahead, BookType, DetailsWanted, PageClicked, PreviewView, ProblemsWanted, TextPlaceWanted, TypeRead, Typeset,
+    Ahead, BookType, DetailsWanted, PageClicked, PreviewView, PrintedPage, ProblemsWanted, TextPlaceWanted, TypeRead,
+    Typeset,
 };
-use crate::session::{Group, Session};
+use crate::session::{ChapterId, Group, RowKind, Session};
 use crate::settings;
 use crate::shell::text::Key;
 use crate::sidebar::dialogs::{DialogEvent, SectionDialog};
 use crate::sidebar::ticks::TicksView;
+use crate::sidebar::title_page::{TitlePageEvent, TitlePageView};
 use crate::sidebar::{SidebarData, SidebarEvent, SidebarView};
 use crate::theme_file::blocks::Target;
 use crate::tokens::{self, Tokens};
@@ -218,6 +220,13 @@ pub struct Workspace {
     parts: Parts,
     details: Entity<DetailsPanel>,
     dialog: Entity<SectionDialog>,
+    /// The title page, edited in place of the text.
+    title_view: Entity<TitlePageView>,
+    /// A project's title page shows in place of the text while the session's active chapter is this one, the chapter
+    /// that was active when it was chosen. A single file's shows while its section is the active one.
+    title_page: Option<ChapterId>,
+    /// For each page of the last layout, where its first text is written and the number printed on it.
+    printed: Vec<PrintedPage>,
     slots: Slots,
     /// Waits out a pause in typing. Replaced by every edit.
     refresh: Task<()>,
@@ -263,6 +272,7 @@ impl Workspace {
         let model = inspector.read(cx).model().clone();
         let details = cx.new(|cx| DetailsPanel::new(window, cx));
         let dialog = cx.new(|cx| SectionDialog::new(window, cx));
+        let title_view = cx.new(|cx| TitlePageView::new(window, cx));
         inspector.update(cx, |inspector, _| inspector.mount(Tab::Details, details.clone().into()));
         let subscriptions = vec![
             cx.subscribe_in(&editor, window, |workspace, _, _: &TextChanged, window, cx| {
@@ -294,6 +304,7 @@ impl Workspace {
                 workspace.show_fonts(cx);
                 workspace.jump_to_style(window, cx);
                 workspace.ready_pages(window, cx);
+                workspace.read_printed(window, cx);
                 slip_control::sync(&workspace.parts, cx);
             }),
             cx.observe_global_in::<settings::Store>(window, |_, _, cx| cx.notify()),
@@ -346,6 +357,7 @@ impl Workspace {
             cx.subscribe_in(&shelf, window, Self::shelf_event),
             cx.subscribe_in(&details, window, Self::details_event),
             cx.subscribe_in(&dialog, window, Self::dialog_event),
+            cx.subscribe_in(&title_view, window, Self::title_page_event),
         ];
         let parts = Parts {
             editor,
@@ -365,6 +377,9 @@ impl Workspace {
             parts,
             details,
             dialog,
+            title_view,
+            title_page: None,
+            printed: Vec::new(),
             slots,
             refresh: Task::ready(()),
             requested: None,
@@ -419,6 +434,9 @@ impl Workspace {
     /// Gives the keys to what the mode is about.
     pub fn focus_main(&self, window: &mut Window, cx: &mut Context<Self>) {
         match self.mode {
+            Mode::Write if self.showing_title_page(cx) => {
+                self.title_view.update(cx, |view, cx| view.take_keys(window, cx));
+            }
             Mode::Write => window.focus(&self.parts.editor.focus_handle(cx), cx),
             Mode::Publish => window.focus(&self.parts.preview.focus_handle(cx), cx),
         }
@@ -439,12 +457,83 @@ impl Workspace {
         }
     }
 
-    /// Opens the dialog for a new section.
+    /// Opens the gallery of pages to add, which leads on to a new section from a template.
     pub fn new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let theme = self.parts.editor.read(cx).session().theme_setting();
+        let session = self.parts.editor.read(cx).session();
+        let theme = session.theme_setting();
         let offered = crate::session::templates_for(theme.as_deref());
+        let pages = (crate::session::PAGES.iter())
+            .filter(|page| !session.has_page(page))
+            .collect();
+        let moves = matches!(session.kind(), crate::session::Kind::Project { .. });
         self.dialog
-            .update(cx, |dialog, cx| dialog.open_new_section(offered, window, cx));
+            .update(cx, |dialog, cx| dialog.open_add_page(pages, offered, moves, window, cx));
+    }
+
+    /// Whether the title page shows in place of the text.
+    fn showing_title_page(&self, cx: &App) -> bool {
+        let session = self.parts.editor.read(cx).session();
+        let active = session.active();
+        match session.kind() {
+            crate::session::Kind::Project { .. } => self.title_page == Some(active) && session.title_page_row(),
+            crate::session::Kind::Single { .. } => session
+                .chapter(active)
+                .is_some_and(|chapter| chapter.kind() == RowKind::TitlePage),
+        }
+    }
+
+    /// Shows the title page in place of the text, with the keys if `focus`.
+    fn show_title_page(&mut self, focus: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.title_page = Some(self.parts.editor.read(cx).session().active());
+        self.sync_panels(window, cx);
+        if focus {
+            self.focus_main(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Reads the pages' printed numbers from a fresh layout, for the Binder.
+    fn read_printed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let printed = self.parts.preview.read(cx).printed_pages();
+        if printed != self.printed {
+            self.printed = printed;
+            self.sync_panels(window, cx);
+        }
+    }
+
+    fn title_page_event(
+        &mut self,
+        _: &Entity<TitlePageView>,
+        event: &TitlePageEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TitlePageEvent::Write(line, value) => {
+                let (line, value) = (*line, value.clone());
+                self.change(move |session| line.write(session, &value), window, cx);
+                // A single file's settings split off as the title page's section once they give a title.
+                let editor = self.parts.editor.clone();
+                editor.update(cx, |editor, cx| {
+                    editor.update_session(
+                        |session| {
+                            if session.resplit()
+                                && let Some(&first) = session.book().first()
+                            {
+                                session.set_active(first);
+                            }
+                        },
+                        window,
+                        cx,
+                    )
+                });
+                self.title_page = Some(self.parts.editor.read(cx).session().active());
+            }
+            TitlePageEvent::Back => {
+                window.focus(&self.parts.sidebar.focus_handle(cx), cx);
+                cx.notify();
+            }
+        }
     }
 
     /// While the pages are not on screen, has what Publish would show ready, for a window this size.
@@ -476,16 +565,40 @@ impl Workspace {
 
     /// Gives the side panels what the session says now.
     fn sync_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let showing_title_page = self.showing_title_page(cx);
         let session = self.parts.editor.read(cx).session();
         let details = session.details().clone();
+        // A row's number is the one printed on the first page its text shows on, and none when that page has none.
+        let mut firsts = std::collections::HashMap::new();
+        for page in &self.printed {
+            if let Some((id, _)) = (page.first.as_ref()).and_then(|(file, offset)| session.locate(file, *offset)) {
+                firsts.entry(id).or_insert_with(|| page.number.clone());
+            }
+        }
+        let pages = (firsts.into_iter())
+            .filter_map(|(id, number)| Some((id, number?)))
+            .collect();
+        let title_row = session.title_page_row();
         let data = SidebarData {
             title: details.title.clone(),
             authors: details.authors.clone(),
             cover: session.cover_file(),
             contents: session.contents(),
-            active: Some(session.active()),
+            active: (!(title_row && showing_title_page)).then_some(session.active()),
             problem: session.problem().map(str::to_owned),
+            pages,
+            title_page: title_row.then_some(showing_title_page),
         };
+        let written_title = (session.settings())
+            .and_then(|settings| settings.title.clone())
+            .unwrap_or_default();
+        let zoom = self.parts.editor.read(cx).zoom();
+        let book_type = self.book_type.clone();
+        self.title_view.update(cx, |view, cx| {
+            view.set_type(book_type, zoom, cx);
+            view.set_details(&details, &written_title, window, cx);
+        });
+        let session = self.parts.editor.read(cx).session();
         let cover = data.cover.clone();
         let title = session.window_title();
         if window.window_title() != title {
@@ -750,8 +863,11 @@ impl Workspace {
         match event {
             SidebarEvent::Select(id) => {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
+                self.title_page = None;
+                self.sync_panels(window, cx);
                 self.focus_main(window, cx);
             }
+            SidebarEvent::TitlePage(focus) => self.show_title_page(*focus, window, cx),
             SidebarEvent::Jump(id, offset) => {
                 editor.update(cx, |editor, cx| editor.show_heading(*id, *offset, window, cx));
                 self.focus_main(window, cx);
@@ -759,6 +875,8 @@ impl Workspace {
             SidebarEvent::FocusText => self.focus_main(window, cx),
             SidebarEvent::Browse(id) => {
                 editor.update(cx, |editor, cx| editor.show_chapter(*id, window, cx));
+                self.title_page = None;
+                self.sync_panels(window, cx);
             }
             SidebarEvent::Move(id, to) => {
                 let (id, to) = (*id, *to);
@@ -823,6 +941,16 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match event {
+            DialogEvent::AddPage(page) => {
+                let page = *page;
+                let added = self.change(move |session| session.add_page(page).map(drop), window, cx);
+                if added && page.once == Some(RowKind::TitlePage) {
+                    self.show_title_page(true, window, cx);
+                } else if added {
+                    self.title_page = None;
+                    window.focus(&self.parts.editor.focus_handle(cx), cx);
+                }
+            }
             DialogEvent::Insert(template, name) => {
                 let (template, name) = (*template, name.clone());
                 let inserted = self.change(
@@ -1120,6 +1248,10 @@ impl Render for Workspace {
             .relative()
             .map(|centre| match self.mode {
                 // The text ends above the foot line, so nothing of it shows beside what the line says.
+                Mode::Write if self.showing_title_page(cx) => centre
+                    .pb(tokens::FOOTER_HEIGHT)
+                    .child(self.title_view.clone())
+                    .when(!binder_on, |centre| centre.child(self.parts.ticks.clone())),
                 Mode::Write => centre
                     .pb(tokens::FOOTER_HEIGHT)
                     .child(self.parts.editor.clone())

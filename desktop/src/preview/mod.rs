@@ -97,6 +97,13 @@ struct Placed {
 /// New pages were published, with the theme's type they were set in.
 pub struct Typeset(pub BookType);
 
+/// A page of a layout as the Binder reads it: where its first text is written, and the number printed on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrintedPage {
+    pub first: Option<(PathBuf, usize)>,
+    pub number: Option<String>,
+}
+
 /// The theme's type, read without pages after a layout failed.
 pub struct TypeRead(pub BookType);
 
@@ -543,6 +550,26 @@ impl PreviewView {
             .as_ref()
             .map(|layout| proof::pages_by_file(&layout.laid))
             .unwrap_or_default()
+    }
+
+    /// Each page of the last layout, with the written place of its first text and the number printed on it: its
+    /// place in the file in a book without parts, and none before the first part.
+    pub fn printed_pages(&self) -> Vec<PrintedPage> {
+        let Some(layout) = self.layout.as_ref() else {
+            return Vec::new();
+        };
+        let laid = &layout.laid;
+        let physical = laid.page_numbers().is_empty();
+        (0..laid.pages().len())
+            .map(|page| PrintedPage {
+                first: proof::first_place(laid, page),
+                number: if physical {
+                    Some((page + 1).to_string())
+                } else {
+                    status::printed_label(laid, page)
+                },
+            })
+            .collect()
     }
 
     /// The page a run of text containing `needle` is on, and shows it.

@@ -6,14 +6,16 @@
 pub mod dialogs;
 mod strings;
 pub mod ticks;
+pub mod title_page;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, ElementId, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton, ObjectFit, Role,
-    ScrollHandle, SharedString, Window, div, img, svg,
+    Context, ElementId, EventEmitter, FocusHandle, Focusable, FontFeatures, FontWeight, KeyDownEvent, MouseButton,
+    ObjectFit, Role, ScrollHandle, SharedString, Window, div, img, svg,
 };
 
 use self::strings::Key;
@@ -53,6 +55,10 @@ pub(crate) fn mark_dot(tokens: &Tokens, mark: Option<Mark>) -> Option<gpui::Div>
 
 /// The number or icon a row starts with.
 pub(crate) fn row_lead(tokens: &Tokens, row: &Row, plain_file: bool, selected: bool) -> gpui::Div {
+    lead(tokens, row.number, row.kind, plain_file, selected)
+}
+
+fn lead(tokens: &Tokens, number: Option<u32>, kind: RowKind, plain_file: bool, selected: bool) -> gpui::Div {
     let color = if selected { tokens.text } else { tokens.text_faint };
     let lead = div()
         .flex_none()
@@ -60,14 +66,19 @@ pub(crate) fn row_lead(tokens: &Tokens, row: &Row, plain_file: bool, selected: b
         .flex()
         .items_center()
         .text_color(color);
-    if let Some(number) = row.number {
+    if let Some(number) = number {
         return lead.child(number.to_string());
     }
-    let icon = match row.kind {
+    let icon = match kind {
         _ if plain_file => "icons/file.svg",
+        RowKind::TitlePage => "icons/title.svg",
+        RowKind::Copyright => "icons/copyright.svg",
+        RowKind::Dedication => "icons/dedication.svg",
         RowKind::Contents => "icons/contents.svg",
+        RowKind::Index => "icons/index.svg",
+        RowKind::Bibliography => "icons/bibliography.svg",
         RowKind::Unnumbered | RowKind::Numbered => "icons/book.svg",
-        RowKind::Plain => "icons/title.svg",
+        RowKind::Plain => "icons/file.svg",
     };
     lead.child(svg().path(icon).size(tokens::ICON_SIZE).text_color(color))
 }
@@ -82,10 +93,16 @@ pub struct SidebarData {
     pub active: Option<ChapterId>,
     /// Why the document's settings cannot be read.
     pub problem: Option<String>,
+    /// The printed number of the page each row of the book starts on, from the last layout.
+    pub pages: HashMap<ChapterId, String>,
+    /// A project's Title page row before its chapters, and whether it is the one shown.
+    pub title_page: Option<bool>,
 }
 
 pub enum SidebarEvent {
     Select(ChapterId),
+    /// Show a project's title page, giving it the keys when true, or keeping them in the Binder.
+    TitlePage(bool),
     /// Open a chapter with the caret at an offset of its text, for a heading of the outline.
     Jump(ChapterId, usize),
     /// Give the keys back to the text.
@@ -153,9 +170,16 @@ impl Render for DraggedRow {
     }
 }
 
-/// The chapter a navigation key moves to from `current`: one step up or down, or the first or last of `ids`. Going
-/// past either end stays on it.
-fn neighbour(ids: &[ChapterId], current: Option<ChapterId>, key: &str) -> Option<ChapterId> {
+/// A row the arrow keys visit: a project's title page, or a chapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    TitlePage,
+    Chapter(ChapterId),
+}
+
+/// The row a navigation key moves to from `current`: one step up or down, or the first or last of `ids`. Going past
+/// either end stays on it.
+fn neighbour<T: Copy + PartialEq>(ids: &[T], current: Option<T>, key: &str) -> Option<T> {
     let at = current.and_then(|current| ids.iter().position(|id| *id == current));
     let target = match (key, at) {
         ("home", _) => 0,
@@ -195,16 +219,26 @@ impl SidebarView {
 
     /// The chapters the arrow keys visit, top to bottom: the book, files not in it, and the notes and research that
     /// are not folded.
-    fn visible(&self) -> Vec<ChapterId> {
+    fn visible(&self) -> Vec<Entry> {
         let contents = &self.data.contents;
         let notes = (!self.folded.contains(&Fold::Notes)).then_some(&contents.notes);
         let research = (!self.folded.contains(&Fold::Research)).then_some(&contents.research);
-        [Some(&contents.book), Some(&contents.not_in_book), notes, research]
+        let chapters = [Some(&contents.book), Some(&contents.not_in_book), notes, research]
             .into_iter()
             .flatten()
             .flatten()
-            .map(|row| row.id)
+            .map(|row| Entry::Chapter(row.id));
+        (self.data.title_page.map(|_| Entry::TitlePage).into_iter())
+            .chain(chapters)
             .collect()
+    }
+
+    /// The row that is selected.
+    fn current(&self) -> Option<Entry> {
+        match self.data.title_page {
+            Some(true) => Some(Entry::TitlePage),
+            _ => self.data.active.map(Entry::Chapter),
+        }
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -225,11 +259,11 @@ impl SidebarView {
                     cx.emit(SidebarEvent::Move(id, place));
                 }
             }
-            "enter" | "escape" => {
-                if let Some(id) = self.data.active {
-                    cx.emit(SidebarEvent::Select(id));
-                }
-            }
+            "enter" | "escape" => match self.current() {
+                Some(Entry::TitlePage) => cx.emit(SidebarEvent::TitlePage(true)),
+                Some(Entry::Chapter(id)) => cx.emit(SidebarEvent::Select(id)),
+                None => {}
+            },
             key @ ("up" | "down" | "home" | "end") => {
                 let target = if event.keystroke.modifiers.platform && key == "up" {
                     "home"
@@ -238,8 +272,10 @@ impl SidebarView {
                 } else {
                     key
                 };
-                if let Some(id) = neighbour(&ids, self.data.active, target) {
-                    cx.emit(SidebarEvent::Browse(id));
+                match neighbour(&ids, self.current(), target) {
+                    Some(Entry::TitlePage) => cx.emit(SidebarEvent::TitlePage(false)),
+                    Some(Entry::Chapter(id)) => cx.emit(SidebarEvent::Browse(id)),
+                    None => {}
                 }
             }
             _ => return,
@@ -346,7 +382,78 @@ impl SidebarView {
             .text_color(color)
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(SidebarEvent::Select(id))))
             .child(row_lead(tokens, row, plain_file, selected))
-            .child(div().flex_1().min_w_0().truncate().child(row.title.clone()))
+            .child(Self::name(
+                tokens,
+                row.title.clone(),
+                !plain_file && row.kind.is_made(),
+                (!plain_file).then(|| self.data.pages.get(&id).cloned()).flatten(),
+            ))
+    }
+
+    /// A row's name, the faint mark of a page Druck makes after it, and the printed number of its first page at the end.
+    fn name(tokens: &Tokens, title: String, made: bool, page: Option<String>) -> gpui::Div {
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(tokens::SPACE_2)
+            .child(div().min_w_0().truncate().child(title))
+            .when(made, |name| {
+                name.child(
+                    svg()
+                        .flex_none()
+                        .path("icons/made.svg")
+                        .size(tokens::CHECK_SMALL)
+                        .text_color(tokens.text_faint),
+                )
+            })
+            .child(div().flex_1())
+            .children(page.map(|page| {
+                div()
+                    .flex_none()
+                    .pr(tokens::SPACE_2)
+                    .text_size(tokens::TEXT_SMALL)
+                    .text_color(tokens.text_faint)
+                    .font_features(FontFeatures(Arc::new(vec![("tnum".into(), 1)])))
+                    .child(page)
+            }))
+    }
+
+    /// A project's Title page row, before its chapters. It does not move and has no edit button.
+    fn title_page_row(&self, selected: bool, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let keyed = selected && self.keyed;
+        let title = crate::session::role_name(RowKind::TitlePage);
+        div()
+            .id("title-page")
+            .role(Role::ListItem)
+            .aria_label(title)
+            .aria_selected(selected)
+            .flex_none()
+            .h(tokens::LIST_ROW_HEIGHT)
+            .pl(tokens::SPACE_3)
+            .pr(tokens::SPACE_1)
+            .flex()
+            .items_center()
+            .relative()
+            .when(selected, |row| row.bg(tokens.raised))
+            .when(keyed, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .w(tokens::KEY_BAR)
+                        .bg(tokens.accent),
+                )
+            })
+            .hover(|row| row.bg(tokens.raised))
+            .cursor_pointer()
+            .text_color(if selected { tokens.text } else { tokens.text_quiet })
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::TitlePage(true))))
+            .child(lead(tokens, None, RowKind::TitlePage, false, selected))
+            .child(Self::name(tokens, title.to_owned(), false, None))
     }
 
     /// A row in the book: it drags, takes a dragged row above it, and opens its edit dialog.
@@ -500,9 +607,24 @@ impl Render for SidebarView {
                             .child(self.data.authors.clone()),
                     ),
             );
-        let book: Vec<_> = (contents.book.iter().enumerate())
-            .map(|(place, row)| self.book_row(row, place, &tokens, cx).into_any_element())
-            .collect();
+        // The book's rows in their groups, with a gap where one group ends and the next starts.
+        let group_gap = || {
+            div()
+                .flex_none()
+                .h(tokens::SPACE_2 + tokens::HAIR_GAP)
+                .into_any_element()
+        };
+        let mut book: Vec<gpui::AnyElement> = vec![group_gap()];
+        book.extend(
+            (self.data.title_page).map(|selected| self.title_page_row(selected, &tokens, cx).into_any_element()),
+        );
+        for (place, row) in contents.book.iter().enumerate() {
+            let matter = contents.matter.get(place);
+            if place > 0 && matter != contents.matter.get(place - 1) {
+                book.push(group_gap());
+            }
+            book.push(self.book_row(row, place, &tokens, cx).into_any_element());
+        }
         let end = contents.book.len();
         let accent = tokens.accent;
         let drop_at_end = div()
@@ -552,7 +674,6 @@ impl Render for SidebarView {
                 list.child(Self::label(&tokens, crate::t!(Key::Manifest)))
                     .children(manifest)
             })
-            .child(Self::label(&tokens, crate::t!(Key::Contents)))
             .children(book)
             .child(drop_at_end)
             .when(!unlisted.is_empty(), |list| {
@@ -654,6 +775,6 @@ mod tests {
         assert_eq!(neighbour(&ids, Some(ids[0]), "up"), Some(ids[0]));
         assert_eq!(neighbour(&ids, Some(ids[1]), "end"), Some(ids[2]));
         assert_eq!(neighbour(&ids, None, "down"), Some(ids[0]));
-        assert_eq!(neighbour(&[], None, "home"), None);
+        assert_eq!(neighbour::<ChapterId>(&[], None, "home"), None);
     }
 }

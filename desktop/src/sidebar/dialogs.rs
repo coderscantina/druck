@@ -1,4 +1,5 @@
-//! The two dialogs of the contents list: a new section from a template, and renaming or removing a chapter.
+//! The dialogs of the contents list: a page from the gallery, a new section from a template, and renaming or removing
+//! a chapter.
 
 use gpui::prelude::*;
 use gpui::{
@@ -10,11 +11,13 @@ use super::strings::Key;
 use crate::a11y::Control as _;
 use crate::inspector::input::{Cancelled, Submitted, TextInput};
 use crate::session::templates::Group;
-use crate::session::{ChapterId, Template};
+use crate::session::{ChapterId, Page, Template};
 use crate::tokens::{self, Tokens};
 use crate::workspace::{FocusNext, FocusPrevious};
 
 pub enum DialogEvent {
+    /// Add a page from the gallery where books have it.
+    AddPage(&'static Page),
     Insert(&'static Template, String),
     Rename(ChapterId, String),
     Remove(ChapterId),
@@ -22,9 +25,18 @@ pub enum DialogEvent {
 
 impl EventEmitter<DialogEvent> for SectionDialog {}
 
+/// The gallery of pages: a row of sheets, and a sheet's size and the step between the lines drawn on it.
+const GALLERY_COLUMNS: usize = 4;
+const GALLERY_WIDTH: gpui::Pixels = gpui::px(500.);
+const SHEET_WIDTH: gpui::Pixels = gpui::px(62.);
+const SHEET_HEIGHT: gpui::Pixels = gpui::px(86.);
+const SHEET_LINE_STEP: gpui::Pixels = gpui::px(5.);
+
 #[derive(Clone)]
 enum State {
     Closed,
+    /// The gallery of pages, with the sheet that has the keys.
+    AddPage(usize),
     NewSection,
     Edit {
         id: ChapterId,
@@ -43,6 +55,10 @@ pub struct SectionDialog {
     templates: ScrollHandle,
     /// The templates the open dialog lists, which follow the book's theme.
     offered: Vec<&'static Template>,
+    /// The pages the gallery offers: those the book may have again.
+    pages: Vec<&'static Page>,
+    /// Whether the Binder's rows can be dragged, which the gallery's foot then says.
+    moves: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -66,15 +82,165 @@ impl SectionDialog {
             before: None,
             templates: ScrollHandle::new(),
             offered: Vec::new(),
+            pages: Vec::new(),
+            moves: false,
             _subscriptions: subscriptions,
         }
     }
 
-    pub fn open_new_section(&mut self, offered: Vec<&'static Template>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the gallery of pages. `offered` is for its way on to a new section from a template.
+    pub fn open_add_page(
+        &mut self,
+        pages: Vec<&'static Page>,
+        offered: Vec<&'static Template>,
+        moves: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pages = pages;
         self.offered = offered;
+        self.moves = moves;
         self.remember_keys(window, cx);
+        self.state = State::AddPage(0);
+        self.card.focus(window, cx);
+        cx.notify();
+    }
+
+    fn open_new_section(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = State::NewSection;
         self.open_name(String::new(), window, cx);
+    }
+
+    /// Adds the page of the sheet at `at`.
+    fn add_page(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(page) = self.pages.get(at).copied() {
+            self.close(window, cx);
+            cx.emit(DialogEvent::AddPage(page));
+        }
+    }
+
+    /// Arrows move between the gallery's sheets, a row of them at a time up and down, and Return adds the page.
+    fn gallery_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let State::AddPage(at) = self.state else {
+            return;
+        };
+        let last = self.pages.len().saturating_sub(1);
+        let to = match event.keystroke.key.as_str() {
+            "left" => at.saturating_sub(1),
+            "right" => (at + 1).min(last),
+            "up" => at.checked_sub(GALLERY_COLUMNS).unwrap_or(at),
+            "down" => Some(at + GALLERY_COLUMNS).filter(|to| *to <= last).unwrap_or(at),
+            "enter" => {
+                cx.stop_propagation();
+                return self.add_page(at, window, cx);
+            }
+            _ => return,
+        };
+        cx.stop_propagation();
+        self.state = State::AddPage(to);
+        cx.notify();
+    }
+
+    /// A page of the gallery: a small sheet showing its shape, and its name.
+    fn sheet(
+        page: &'static Page,
+        at: usize,
+        chosen: bool,
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let line = |width: f32, dark: bool, centred: bool| {
+            div()
+                .flex_none()
+                .h(tokens::HAIR_GAP)
+                .w(gpui::relative(width))
+                .rounded(tokens::HAIRLINE)
+                .when(centred, |line| line.mx_auto())
+                .map(|line| {
+                    if dark {
+                        line.bg(tokens.text_quiet)
+                    } else {
+                        line.bg(tokens.text_faint).opacity(tokens::SKETCH_OPACITY)
+                    }
+                })
+        };
+        let gap = |lines: f32| div().flex_none().h(SHEET_LINE_STEP * lines);
+        let marks: Vec<gpui::AnyElement> = match page.slug {
+            "title-page" => vec![
+                gap(4.).into_any_element(),
+                line(0.8, true, true).into_any_element(),
+                line(0.5, false, true).into_any_element(),
+                gap(3.).into_any_element(),
+                line(0.4, false, true).into_any_element(),
+            ],
+            "imprint" => vec![
+                div().flex_1().into_any_element(),
+                line(1., false, false).into_any_element(),
+                line(0.9, false, false).into_any_element(),
+                line(0.7, false, false).into_any_element(),
+            ],
+            "dedication" => vec![
+                gap(6.).into_any_element(),
+                line(0.7, false, true).into_any_element(),
+                line(0.45, false, true).into_any_element(),
+            ],
+            "epigraph" => vec![
+                gap(4.).into_any_element(),
+                line(0.7, false, false).into_any_element(),
+                line(0.8, false, false).into_any_element(),
+                line(0.4, true, false).into_any_element(),
+            ],
+            "contents" => [line(0.55, true, false), gap(1.)]
+                .into_iter()
+                .map(IntoElement::into_any_element)
+                .chain((0..5).map(|_| line(1., false, false).into_any_element()))
+                .collect(),
+            "index" => [line(0.4, true, false), gap(1.)]
+                .into_iter()
+                .map(IntoElement::into_any_element)
+                .chain([0.45, 0.38, 0.48, 0.35, 0.44, 0.4].map(|width| line(width, false, false).into_any_element()))
+                .collect(),
+            _ => [line(0.72, true, false), gap(1.)]
+                .into_iter()
+                .map(IntoElement::into_any_element)
+                .chain([1., 0.92, 0.6].map(|width| line(width, false, false).into_any_element()))
+                .collect(),
+        };
+        let name = crate::t!(page.name);
+        div()
+            .id(page.slug)
+            .button(tokens, name)
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(tokens::SPACE_2)
+            .px(tokens::SPACE_1)
+            .pt(tokens::SPACE_2)
+            .pb(tokens::SPACE_2)
+            .rounded(tokens::RADIUS)
+            .cursor_pointer()
+            .text_size(tokens::TEXT_SMALL)
+            .text_color(if chosen { tokens.text } else { tokens.text_quiet })
+            .when(chosen, |cell| cell.bg(tokens.raised))
+            .hover(|cell| cell.bg(tokens.raised))
+            .on_click(cx.listener(move |dialog, _, window, cx| dialog.add_page(at, window, cx)))
+            .child(
+                div()
+                    .flex_none()
+                    .w(SHEET_WIDTH)
+                    .h(SHEET_HEIGHT)
+                    .px(tokens::SPACE_2)
+                    .py(tokens::SPACE_2 + tokens::HAIRLINE)
+                    .flex()
+                    .flex_col()
+                    .gap(SHEET_LINE_STEP - tokens::HAIR_GAP)
+                    .bg(tokens.sheet)
+                    .border_1()
+                    .border_color(tokens.divider)
+                    .rounded(tokens::HAIR_GAP)
+                    .children(marks),
+            )
+            .child(div().max_w_full().truncate().child(name))
     }
 
     pub fn open_edit(
@@ -187,8 +353,10 @@ impl Render for SectionDialog {
         }
         let heading: SharedString = match &state {
             State::Edit { title, .. } => crate::t!(Key::EditSection, title = title).into(),
+            State::AddPage(_) => crate::t!(Key::AddPage).into(),
             _ => crate::t!(Key::NewSection).into(),
         };
+        let gallery = matches!(state, State::AddPage(_));
         let name_row = div()
             .px(tokens::SPACE_3)
             .pb(tokens::SPACE_3)
@@ -208,6 +376,50 @@ impl Render for SectionDialog {
             cx.on_next_frame(window, |_, _, cx| cx.notify());
         }
         let body = match state {
+            State::AddPage(chosen) => {
+                let sheets: Vec<_> = (self.pages.iter().enumerate())
+                    .map(|(at, page)| Self::sheet(page, at, at == chosen, &tokens, cx).into_any_element())
+                    .collect();
+                let foot = if self.moves {
+                    format!(
+                        "{}{}",
+                        crate::t!(Key::PlacedWhereBooksHaveIt),
+                        crate::t!(Key::DragToMove)
+                    )
+                } else {
+                    crate::t!(Key::PlacedWhereBooksHaveIt).to_owned()
+                };
+                div()
+                    .px(tokens::SPACE_3)
+                    .pb(tokens::SPACE_3)
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::SPACE_3)
+                    .child(
+                        div()
+                            .grid()
+                            .grid_cols(GALLERY_COLUMNS as u16)
+                            .gap(tokens::SPACE_3)
+                            .children(sheets),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(tokens::SPACE_3)
+                            .text_size(tokens::TEXT_SMALL)
+                            .text_color(tokens.text_faint)
+                            .child(div().flex_1().min_w_0().child(foot))
+                            .child(
+                                Self::button(&tokens, "other-sections", crate::t!(Key::OtherSections))
+                                    .flex_none()
+                                    .h(tokens::SMALL_BUTTON_HEIGHT)
+                                    .text_color(tokens.text_quiet)
+                                    .on_click(cx.listener(|dialog, _, window, cx| dialog.open_new_section(window, cx))),
+                            ),
+                    )
+                    .into_any_element()
+            }
             State::NewSection => {
                 let offered = self.offered.clone();
                 let groups = Group::ALL.iter().filter_map(|&group| {
@@ -272,14 +484,21 @@ impl Render for SectionDialog {
                 .into_any_element(),
             State::Closed => div().into_any_element(),
         };
+        let width = if gallery {
+            let left = crate::workspace::TextColumn::asking(cx, GALLERY_WIDTH);
+            GALLERY_WIDTH.min(window.viewport_size().width - left - tokens::SPACE_4)
+        } else {
+            tokens::DIALOG_WIDTH
+        };
         let card = div()
             .id("dialog")
             .track_focus(&self.card)
+            .on_key_down(cx.listener(Self::gallery_key))
             .occlude()
             .absolute()
             .top(tokens::SPACE_4 * 3.)
-            .left(crate::workspace::TextColumn::asking(cx, tokens::DIALOG_WIDTH))
-            .w(tokens::DIALOG_WIDTH)
+            .left(crate::workspace::TextColumn::asking(cx, width))
+            .w(width)
             .flex()
             .flex_col()
             .bg(tokens.panel)
@@ -311,7 +530,7 @@ impl Render for SectionDialog {
                             ),
                     ),
             )
-            .child(name_row)
+            .when(!gallery, |card| card.child(name_row))
             .child(body);
         div()
             .id("dialog-backdrop")

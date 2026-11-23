@@ -18,8 +18,12 @@ crate::strings! {
             "Copyright and edition, at the bottom of the page",
             "Copyright und Auflage, unten auf der Seite"
         ),
+        CopyrightName => ("Copyright", "Impressum"),
+        PlainPage => ("Page", "Seite"),
         DedicationName => ("Dedication", "Widmung"),
         DedicationDescription => ("A line for someone, on its own page", "Eine Zeile für jemanden, auf eigener Seite"),
+        EpigraphName => ("Epigraph", "Motto"),
+        EpigraphDescription => ("A quotation that sets the tone", "Ein Zitat, das den Ton setzt"),
         ContentsName => ("Contents", "Inhalt"),
         ContentsDescription => (
             "The table of contents, built from the headings",
@@ -38,6 +42,10 @@ crate::strings! {
             "An unnumbered heading that opens a part",
             "Eine Überschrift ohne Nummer, die einen Teil öffnet"
         ),
+        AcknowledgmentsName => ("Acknowledgments", "Danksagung"),
+        AcknowledgmentsDescription => ("Thanks to those who helped", "Dank an alle, die geholfen haben"),
+        AboutAuthorName => ("About the author", "Über den Autor"),
+        AboutAuthorDescription => ("A few lines on who wrote the book", "Ein paar Zeilen zu dem, der es schrieb"),
         BibliographyName => ("Bibliography", "Literatur"),
         BibliographyDescription => (
             "The works cited, placed here instead of at the end",
@@ -80,10 +88,6 @@ crate::strings! {
             "Eine einzelne Datei hat keine Kapitelliste: Ihre Reihenfolge ist ihr Text."
         ),
         OnlyBookChaptersMove => ("Only a chapter in the book can move.", "Nur ein Kapitel im Buch lässt sich verschieben."),
-        PartsKeepTheirOrder => (
-            "Front matter, main matter, and back matter have to stay in that order.",
-            "Vorspann, Hauptteil und Anhang müssen in dieser Reihenfolge bleiben."
-        ),
         OnlyBookChaptersHaveStatus => ("Only a chapter in the book has a state.", "Nur ein Kapitel im Buch hat einen Stand."),
         UnknownStatus => ("That state is not one of the book's statuses.", "Diesen Stand kennt das Buch nicht."),
         StatusDraft => ("Draft", "Entwurf"),

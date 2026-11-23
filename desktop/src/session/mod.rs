@@ -17,6 +17,7 @@ pub mod details;
 pub mod disk;
 mod joined;
 pub mod outline;
+pub mod parts;
 mod strings;
 pub mod templates;
 #[cfg(test)]
@@ -40,7 +41,7 @@ pub use self::outline::Kind as RowKind;
 pub use self::outline::heading_text;
 use self::outline::{Outline, outline, sections, slug, title_from_file};
 use self::strings::Key;
-pub use self::templates::{STARTERS, Starter, TEMPLATES, Template, templates_for};
+pub use self::templates::{PAGES, Page, STARTERS, Starter, TEMPLATES, Template, templates_for};
 use crate::persist::atomic;
 use crate::source::buffer::EditError;
 use crate::source::{BlockKind, Blocks, Buffer, Edit, EditKind, Selection};
@@ -50,8 +51,6 @@ const NOTES: &str = "notes";
 const RESEARCH: &str = "research";
 /// A key in the settings that lists chapters.
 const CHAPTERS: &str = "chapters";
-/// The title of a single file's text before its first level 1 heading.
-const FRONT_MATTER: &str = "Front matter";
 
 /// A chapter, for as long as the session lives. Moving it in the book does not change it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -173,6 +172,11 @@ impl Chapter {
         self.buffer.text()
     }
 
+    /// What the page is, as its row shows it.
+    pub fn kind(&self) -> RowKind {
+        self.outline.kind
+    }
+
     /// The first heading's words, without their Markdown.
     pub fn heading(&self) -> Option<&str> {
         self.outline.title.as_deref()
@@ -215,6 +219,8 @@ pub struct Row {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Contents {
     pub book: Vec<Row>,
+    /// The group each row of the book stands in, in the same order.
+    pub matter: Vec<parts::Matter>,
     pub not_in_book: Vec<Row>,
     pub notes: Vec<Row>,
     pub research: Vec<Row>,
@@ -236,6 +242,19 @@ impl Kind {
             Self::Single { path } => path.parent().map(Path::to_owned).unwrap_or_default(),
         }
     }
+}
+
+/// What a page is called in the Binder by its role, when its text has no heading to name it.
+pub fn role_name(kind: RowKind) -> &'static str {
+    crate::t!(match kind {
+        RowKind::TitlePage => Key::TitlePageName,
+        RowKind::Copyright => Key::CopyrightName,
+        RowKind::Dedication => Key::DedicationName,
+        RowKind::Contents => Key::ContentsName,
+        RowKind::Index => Key::IndexName,
+        RowKind::Bibliography => Key::BibliographyName,
+        RowKind::Unnumbered | RowKind::Numbered | RowKind::Plain => Key::PlainPage,
+    })
 }
 
 /// How the app names a writing state: the default ones in the app's language, a book's own as written.
@@ -669,6 +688,7 @@ impl Session {
                     row
                 })
                 .collect(),
+            matter: parts::matters(&self.book_texts()),
             ..Contents::default()
         };
         for (id, chapter) in &self.chapters {
@@ -690,6 +710,41 @@ impl Session {
             .get(&id)
             .map(|chapter| self.title(chapter, &chapter.current_outline()))
             .unwrap_or_default()
+    }
+
+    /// The texts of the book's chapters, in reading order.
+    fn book_texts(&self) -> Vec<&str> {
+        self.book.iter().map(|id| self.known(*id).text()).collect()
+    }
+
+    /// Whether the Binder shows a Title page row before a project's chapters: its theme sets a title page or its
+    /// details give a title. A single file's title page is a section of its own.
+    pub fn title_page_row(&self) -> bool {
+        let (Kind::Project { .. }, Ok(settings)) = (&self.kind, &self.settings) else {
+            return false;
+        };
+        settings.title.is_some()
+            || settings.title_page.unwrap_or_else(|| {
+                (self.theme_json()).is_some_and(|theme| theme.pointer("/document/title-page") == Some(&true.into()))
+            })
+    }
+
+    /// The theme file the document names, read as JSON.
+    fn theme_json(&self) -> Option<serde_json::Value> {
+        serde_json::from_str(&fs::read_to_string(self.theme_file()?).ok()?).ok()
+    }
+
+    /// Whether the book has a directive at the top level of its text, such as a `::: toc`.
+    pub fn holds_directive(&self, name: &str) -> bool {
+        self.book_texts().iter().any(|text| {
+            let blocks = Blocks::parse(text);
+            let list = blocks.as_slice();
+            (list.iter().zip(outline::depths(text, list))).any(|(block, depth)| {
+                depth == 0
+                    && block.kind == BlockKind::Directive
+                    && outline::directive_name(&text[block.range.clone()]) == name
+            })
+        })
     }
 
     fn row(&self, id: ChapterId, chapter: &Chapter) -> Row {
@@ -714,10 +769,13 @@ impl Session {
         match chapter.group {
             Group::Notes | Group::Research => self.note_title(chapter),
             Group::Manifest => MANIFEST.to_owned(),
-            Group::Book | Group::NotInBook => match (&outline.title, &self.kind) {
-                (Some(title), _) => title.clone(),
-                (None, Kind::Single { .. }) => FRONT_MATTER.to_owned(),
-                (None, Kind::Project { .. }) => title_from_file(&stem()),
+            Group::Book | Group::NotInBook => match (&outline.title, outline.kind, &self.kind) {
+                (Some(title), ..) => title.clone(),
+                (None, RowKind::Plain, Kind::Single { .. }) => {
+                    (outline.words.clone()).unwrap_or_else(|| crate::t!(Key::PlainPage).to_owned())
+                }
+                (None, RowKind::Plain, Kind::Project { .. }) => title_from_file(&stem()),
+                (None, kind, _) => role_name(kind).to_owned(),
             },
         }
     }
@@ -1074,37 +1132,10 @@ impl Session {
         let order = self.book.clone();
         self.book.remove(from);
         self.book.insert(target, id);
-        if self.parts_in_order(&order) && !self.parts_in_order(&self.book) {
-            self.book = order;
-            return Err(crate::t!(Key::PartsKeepTheirOrder).to_owned());
-        }
         self.write_chapter_list().inspect_err(|_| self.book = order.clone())?;
         self.moves.undo.push(order);
         self.moves.redo.clear();
-        Ok(())
-    }
-
-    /// Whether front, main, and back matter open in that order when the chapters stand as `order` lists them.
-    fn parts_in_order(&self, order: &[ChapterId]) -> bool {
-        let rank = |line: &str| {
-            ["front-matter", "main-matter", "back-matter"]
-                .iter()
-                .position(|part| line.trim_start_matches(':').trim() == *part)
-        };
-        let mut last = None;
-        for chapter in order.iter().filter_map(|id| self.chapters.get(id)) {
-            let text = chapter.text();
-            let blocks = crate::source::Blocks::parse(text);
-            let directives =
-                (blocks.as_slice().iter()).filter(|block| block.kind == crate::source::BlockKind::Directive);
-            for found in directives.filter_map(|block| rank(text[block.range.clone()].trim_end())) {
-                if last.is_some_and(|last| found <= last) {
-                    return false;
-                }
-                last = Some(found);
-            }
-        }
-        true
+        self.keep_parts()
     }
 
     /// Puts the book back in its order before the last move, returning whether there was one to undo.
@@ -1154,7 +1185,27 @@ impl Session {
             &mut self.moves.undo
         };
         stack.push(back);
+        self.keep_parts()?;
         Ok(forth)
+    }
+
+    /// Makes the part lines agree with the order of the book's pages after the app changed its structure, see
+    /// [`parts::part_edits`]. Each chapter it changes takes the change as one undo step. Never run on typing.
+    fn keep_parts(&mut self) -> Result<(), String> {
+        let edits = parts::part_edits(&self.book_texts());
+        if edits.is_empty() {
+            return Ok(());
+        }
+        let ids = self.book.clone();
+        let mut by_section: BTreeMap<usize, Vec<Edit>> = BTreeMap::new();
+        for (section, edit) in edits {
+            by_section.entry(section).or_default().push(edit);
+        }
+        for (section, edits) in by_section {
+            (self.edit_chapter(ids[section], edits, EditKind::Discrete)).map_err(|error| error.to_string())?;
+        }
+        self.resplit();
+        Ok(())
     }
 
     /// The book's writing states in order of progress: its own `statuses`, or the default ones.
@@ -1210,7 +1261,7 @@ impl Session {
         }
         self.known_mut(id).group = Group::NotInBook;
         self.set_revision_above(before);
-        Ok(())
+        self.keep_parts()
     }
 
     /// Adds a file from "Not in book" at the end of the book.
@@ -1293,11 +1344,74 @@ impl Session {
     ) -> Result<ChapterId, String> {
         let name = name.map(str::trim).filter(|name| !name.is_empty());
         let markdown = self.fill_missing(template.markdown(name));
+        let at = (self.book.iter().position(|other| *other == after)).map_or(self.book.len(), |at| at + 1);
+        self.insert_page(&markdown, name.unwrap_or(template.slug), at)
+    }
+
+    /// Whether the book has a page that it may have only once, such as its contents.
+    pub fn has_page(&self, page: &Page) -> bool {
+        match page.once {
+            Some(RowKind::TitlePage) => {
+                self.title_page_row() || (self.book.iter()).any(|id| self.known(*id).outline.kind == RowKind::TitlePage)
+            }
+            Some(RowKind::Contents) => self.holds_directive("toc"),
+            Some(RowKind::Index) => self.holds_directive("index"),
+            _ => false,
+        }
+    }
+
+    /// Adds a page where books have it, see [`parts::place`], keeps the part lines in step, and makes it active.
+    pub fn add_page(&mut self, page: &Page) -> Result<ChapterId, String> {
+        if page.once == Some(RowKind::TitlePage) {
+            return self.add_title_page();
+        }
+        let template = page.template();
+        let markdown = self.fill_missing(template.markdown(None));
+        let at = parts::place(page.place, &self.book_texts());
+        self.insert_page(&markdown, template.slug, at)?;
+        self.keep_parts()?;
+        Ok(self.active)
+    }
+
+    /// Gives the book the title page the engine sets from its details: a title, if it has none, and `title-page` on
+    /// where the theme does not set one. In a single file the settings then stand as the title page's section.
+    fn add_title_page(&mut self) -> Result<ChapterId, String> {
+        if self.settings.as_ref().is_ok_and(|settings| settings.title.is_none()) {
+            let title = self.details.title.clone();
+            self.set_field(Field::Title, &title)?;
+        }
+        let theme_sets =
+            (self.theme_json()).is_some_and(|theme| theme.pointer("/document/title-page") == Some(&true.into()));
+        if !theme_sets {
+            self.write_settings(
+                |text| yaml::set(text, "title-page", "true", details::ORDER).map(Some),
+                |settings| settings.title_page == Some(true),
+            )?;
+        }
+        if matches!(self.kind, Kind::Single { .. }) {
+            self.resplit();
+            self.active = self.book[0];
+        }
+        Ok(self.active)
+    }
+
+    /// Puts a page's Markdown at place `at` of the book, with the page breaks it needs to stand on a page of its own,
+    /// and makes it active. A project's page is a new file named after `base`.
+    fn insert_page(&mut self, markdown: &str, base: &str, at: usize) -> Result<ChapterId, String> {
         let Kind::Project { dir } = self.kind.clone() else {
-            return self.insert_in_file(&markdown, after);
+            let (id, offset) = match at.checked_sub(1) {
+                Some(previous) => (self.book[previous], self.known(self.book[previous]).buffer.len()),
+                None => (self.book[0], parts::after_settings(self.known(self.book[0]).text())),
+            };
+            let joined = self.joined().text;
+            let (_, position) = self.file_position(id, offset).unwrap_or_default();
+            let page = parts::on_its_own_page(markdown, &joined[..position], &joined[position..]);
+            return self.insert_in_file(&page, id, offset);
         };
+        let texts = self.book_texts();
+        let markdown = parts::on_its_own_page(markdown, &texts[..at].join("\n"), &texts[at..].join("\n"));
         let folder = dir.join(MANUSCRIPT);
-        let base = slug(name.unwrap_or(template.slug));
+        let base = slug(base);
         let (path, listed) = (1..)
             .map(|attempt| {
                 let file = if attempt == 1 {
@@ -1321,11 +1435,6 @@ impl Session {
             Buffer::new(markdown),
             Read::Done,
         ));
-        let at = self
-            .book
-            .iter()
-            .position(|other| *other == after)
-            .map_or(self.book.len(), |at| at + 1);
         self.book.insert(at, id);
         if let Err(error) = self.write_chapter_list() {
             self.book.remove(at);
@@ -1354,7 +1463,24 @@ impl Session {
                 markdown = markdown.replace(placeholder, words);
             }
         }
-        markdown
+        // A paragraph whose style the theme lacks is set in italics instead, since the engine rejects the style.
+        let theme = self.theme_json();
+        let styles = theme.as_ref().and_then(|theme| theme.get("custom-styles")?.as_object());
+        let lines: Vec<String> = (markdown.lines())
+            .map(|line| {
+                match line
+                    .trim_end()
+                    .strip_suffix('}')
+                    .and_then(|line| line.rsplit_once(" {."))
+                {
+                    Some((words, class)) if !styles.is_some_and(|styles| styles.contains_key(class)) => {
+                        format!("*{words}*")
+                    }
+                    _ => line.to_owned(),
+                }
+            })
+            .collect();
+        lines.join("\n") + if markdown.ends_with('\n') { "\n" } else { "" }
     }
 
     fn move_synced(&mut self, from: &Path, to: &Path) {
@@ -1363,25 +1489,29 @@ impl Session {
         }
     }
 
-    fn insert_in_file(&mut self, markdown: &str, after: ChapterId) -> Result<ChapterId, String> {
-        let text = self.buffer(after).text();
-        let lead = if text.is_empty() || text.ends_with("\n\n") {
+    /// Inserts a page's Markdown into a single file's section at `offset`, between blank lines, and makes the page the
+    /// active section once the file splits again.
+    fn insert_in_file(&mut self, markdown: &str, id: ChapterId, offset: usize) -> Result<ChapterId, String> {
+        let text = self.buffer(id).text();
+        let (head, tail) = text.split_at(offset);
+        let lead = if head.is_empty() || head.ends_with("\n\n") {
             ""
-        } else if text.ends_with('\n') {
+        } else if head.ends_with('\n') {
             "\n"
         } else {
             "\n\n"
         };
-        let end = text.len();
-        let caret = end + lead.len();
+        let last = tail.is_empty() && self.book.last() == Some(&id);
+        let trail = if last || tail.starts_with('\n') { "" } else { "\n" };
+        let caret = offset + lead.len();
         self.edit_chapter(
-            after,
-            vec![Edit::new(end..end, format!("{lead}{markdown}"))],
+            id,
+            vec![Edit::new(offset..offset, format!("{lead}{markdown}{trail}"))],
             EditKind::Discrete,
         )
         .map_err(|error| error.to_string())?;
-        self.active = after;
-        self.known_mut(after).view.selection = Selection::caret(caret);
+        self.active = id;
+        self.known_mut(id).view.selection = Selection::caret(caret);
         self.resplit();
         Ok(self.active)
     }

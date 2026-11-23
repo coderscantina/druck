@@ -169,11 +169,11 @@ fn a_single_file_splits_in_view_and_joins_to_the_same_bytes() {
     let text = "---\ntitle: Whole\n---\n\nIntro.\n\n# One\n\nText.\n\n<!-- about two -->\n\n# Two\n\nMore.\n";
     let path = folder.write("whole.md", text);
     let mut session = Session::open(&path).expect("opens");
-    assert_eq!(titles(&session.contents().book), [FRONT_MATTER, "One", "Two"]);
+    assert_eq!(titles(&session.contents().book), ["Title page", "Intro.", "One", "Two"]);
     assert_eq!(session.joined().text, text);
     assert!(!session.is_dirty());
 
-    let two = session.book()[2];
+    let two = session.book()[3];
     assert!(session.buffer(two).text().starts_with("<!-- about two -->"));
     let end = session.buffer(two).len();
     typing(&mut session, two, end, "Added.\n");
@@ -591,7 +591,7 @@ fn a_new_section_in_a_single_file_is_text_undo_takes_back() {
     assert_eq!(titles(&session.contents().book), ["One", "Middle", "Two"]);
     assert_eq!(
         session.joined().text,
-        "# One\n\nText.\n\n# Middle\n\nStart writing here.\n# Two\n\nMore.\n"
+        "# One\n\nText.\n\n# Middle\n\nStart writing here.\n\n# Two\n\nMore.\n"
     );
     assert_eq!(session.active(), session.book()[1]);
 
@@ -627,11 +627,10 @@ fn minimal_project(name: &str, text: &str) -> (Folder, Session) {
 #[test]
 fn every_template_renders_in_the_bundled_theme() {
     for template in TEMPLATES {
-        let text = format!(
-            "{}\n# After\n\nA paragraph with a mark{{^term}}.\n",
-            template.markdown(None)
-        );
-        let (_folder, session) = minimal_project(&format!("template-{}", template.slug), &text);
+        let text = "# After\n\nA paragraph with a mark{^term}.\n";
+        let (_folder, mut session) = minimal_project(&format!("template-{}", template.slug), text);
+        let first = session.book()[0];
+        session.new_section(template, None, first).expect("adds");
         let laid = layout(&session);
         assert!(!laid.pages().is_empty(), "{}", template.slug);
         assert!(page_text(&laid).contains("After"), "{}", template.slug);
@@ -657,7 +656,7 @@ fn a_section_written_out_has_no_placeholder_the_document_lacks() {
     let id = session.new_section(template("title-page"), None, first).expect("adds");
     assert_eq!(
         session.buffer(id).text(),
-        "**{title}**\n\nSubtitle\n\nAuthor\n\n::: page-break\n"
+        "::: page-break\n\n**{title}**\n\nSubtitle\n\nAuthor\n"
     );
     assert!(page_text(&layout(&session)).contains("Set"));
 }
@@ -977,4 +976,40 @@ fn a_title_comes_from_the_text_as_it_is_now() {
         )
         .expect("edit");
     assert_eq!(session.title_of(two), "Typed title");
+}
+
+/// The gallery's page with this template.
+fn page(slug: &str) -> &'static Page {
+    PAGES.iter().find(|page| page.slug == slug).expect("a page")
+}
+
+#[test]
+fn an_added_page_goes_where_books_have_it_and_the_parts_follow() {
+    let folder = Folder::new("add-page");
+    let text = "---\ntitle: T\n---\n\nFor you.\n\n::: front-matter\n\n# Preface {-}\n\nText\n\n::: main-matter\n\n# One\n\nText\n";
+    let path = folder.write("book.md", text);
+    let mut session = Session::open(&path).expect("opens");
+    session.add_page(page("epigraph")).expect("adds");
+    let joined = session.joined().text;
+    let want = "For you.\n\n::: page-break\n\n*A line from another book that sets the tone for this one.*\n\nIts author\n\n::: front-matter\n\n# Preface {-}";
+    assert!(joined.contains(want), "{joined}");
+    assert!(session.active_chapter().text().contains("Its author"));
+    assert!(session.has_page(page("title-page")) && !session.has_page(page("contents")));
+}
+
+#[test]
+fn a_page_added_after_the_last_chapter_opens_the_back_matter() {
+    let folder = Folder::new("add-back");
+    let dir = folder.0.join("project");
+    STARTERS[0].create(&dir, Language::English).expect("creates");
+    let mut session = Session::open(&dir).expect("opens");
+    let id = session.add_page(page("about-the-author")).expect("adds");
+    assert_eq!(session.book().last(), Some(&id));
+    assert!(
+        session
+            .buffer(id)
+            .text()
+            .starts_with("::: back-matter\n\n# About the author {-}")
+    );
+    assert_eq!(session.contents().matter.last(), Some(&parts::Matter::Back));
 }
