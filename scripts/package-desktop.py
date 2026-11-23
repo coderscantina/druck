@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """Build Druck.app and a DMG for the desktop app on macOS.
 
-Usage: python3 scripts/package-desktop.py [--binary PATH] [--outdir DIR]
+Usage: python3 scripts/package-desktop.py [--binary PATH] [--outdir DIR] [--appcast NOTES.md]
 
-Builds `druck-desktop` in release mode (or takes --binary), writes OUTDIR/Druck.app, signs it, and packs
-OUTDIR/druck-desktop-VERSION-HASH-TARGET.dmg with a .sha256 file. VERSION is the root Cargo.toml's, HASH the short
+Builds `druck-desktop` in release mode (or takes --binary), writes OUTDIR/Druck.app with Sparkle in it, signs it, and
+packs OUTDIR/druck-desktop-VERSION-HASH-TARGET.dmg with a .sha256 file. VERSION is the root Cargo.toml's, HASH the short
 commit hash, as in `scripts/package.py`. Standard library plus the tools macOS ships: codesign, hdiutil, iconutil,
-xcrun. Nothing here publishes, tags, or pushes.
+tar, xcrun. Nothing here publishes, tags, or pushes.
+
+Sparkle is downloaded at the pinned version and checked against its SHA-256, so the repository holds no framework.
+With --appcast, Sparkle's generate_appcast also writes OUTDIR/appcast.xml for the release tag vVERSION-HASH, with
+NOTES.md as the release notes, and signs the DMG and the feed with the EdDSA private key in DRUCK_SPARKLE_KEY.
 
 Signing reads two environment variables, and the repository holds no secret:
 
   DRUCK_SIGN_IDENTITY   a "Developer ID Application: Name (TEAMID)" identity in a keychain codesign can reach
   DRUCK_NOTARY_PROFILE  a keychain profile made with `xcrun notarytool store-credentials`
+  DRUCK_NOTARY_KEYCHAIN the keychain file holding that profile, when it is not the login keychain (in CI)
 
 With neither, the bundle is signed ad hoc and the script says so. It runs here and on the same Mac only after a
 right-click Open. With an identity and no profile it is signed but not notarized. With both, the app and then the
@@ -33,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import urllib.request
 import zlib
 from pathlib import Path
 
@@ -42,6 +48,15 @@ EXECUTABLE = "Druck"
 TARGET = "aarch64-apple-darwin"
 COPYRIGHT = "© 2026 Michael Wallner, Coders Cantina. MIT licensed."
 ENTITLEMENTS = ROOT / "scripts" / "desktop.entitlements"
+REPOSITORY = "https://github.com/coderscantina/druck"
+# The latest release's appcast. GitHub redirects it to the asset, and Sparkle's URL session follows the redirect.
+FEED_URL = f"{REPOSITORY}/releases/latest/download/appcast.xml"
+SPARKLE_VERSION = "2.10.1"
+SPARKLE_URL = f"https://github.com/sparkle-project/Sparkle/releases/download/{SPARKLE_VERSION}/Sparkle-{SPARKLE_VERSION}.tar.xz"
+SPARKLE_SHA256 = "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27"
+# The public half of the owner's EdDSA key, as Sparkle's `generate_keys -p` prints it. It is not secret, and it must
+# not change once a build has shipped, or the builds in use refuse every later update. While empty, the bundle has no updater.
+SPARKLE_PUBLIC_KEY = ""
 # Shipped beside the app: the notices the licenses of the crates and fonts require, and Druck's own license.
 RESOURCES = {
     "THIRD_PARTY_NOTICES.md": "desktop/THIRD_PARTY_NOTICES.md",
@@ -57,34 +72,44 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build Druck.app and a DMG.")
     parser.add_argument("--binary", type=Path, help="a built druck-desktop to use instead of building one")
     parser.add_argument("--outdir", type=Path, default=ROOT / "dist-desktop")
+    parser.add_argument("--appcast", type=Path, metavar="NOTES", help="also write appcast.xml with these release notes")
     args = parser.parse_args()
+    if args.appcast and not (SPARKLE_PUBLIC_KEY and os.environ.get("DRUCK_SPARKLE_KEY", "").strip()):
+        print("--appcast needs SPARKLE_PUBLIC_KEY in this script and the private key in DRUCK_SPARKLE_KEY", file=sys.stderr)
+        return 2
 
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
     commit = run("git", "rev-parse", "--short=7", "HEAD", cwd=ROOT).strip()
+    build_number = commit_count()
     binary = args.binary or build()
     outdir = args.outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    app = outdir / "Druck.app"
-    shutil.rmtree(app, ignore_errors=True)
-    assemble(app, binary, version)
-
     identity = os.environ.get("DRUCK_SIGN_IDENTITY", "").strip()
     profile = os.environ.get("DRUCK_NOTARY_PROFILE", "").strip()
-    sign(app, identity)
-    if identity and profile:
-        notarize(app, profile, archive=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        # Without the public key Sparkle would refuse to start, so such a build has no updater at all.
+        sparkle = fetch_sparkle(Path(scratch)) if SPARKLE_PUBLIC_KEY else None
+        app = outdir / "Druck.app"
+        shutil.rmtree(app, ignore_errors=True)
+        assemble(app, binary, version, build_number, sparkle)
 
-    dmg = outdir / f"druck-desktop-{version}-{commit}-{TARGET}.dmg"
-    make_dmg(app, dmg)
-    if identity:
-        sign(dmg, identity)
-        if profile:
-            notarize(dmg, profile, archive=False)
+        sign_bundle(app, identity)
+        if identity and profile:
+            notarize(app, profile, archive=True)
 
-    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
-    (outdir / (dmg.name + ".sha256")).write_text(f"{digest}  {dmg.name}\n")
-    report(app, dmg, digest, bool(identity), bool(profile))
+        dmg = outdir / f"druck-desktop-{version}-{commit}-{TARGET}.dmg"
+        make_dmg(app, dmg)
+        if identity:
+            sign(dmg, identity)
+            if profile:
+                notarize(dmg, profile, archive=False)
+
+        digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+        (outdir / (dmg.name + ".sha256")).write_text(f"{digest}  {dmg.name}\n")
+        if args.appcast and sparkle:
+            write_appcast(sparkle, dmg, args.appcast, f"v{version}-{commit}", outdir / "appcast.xml")
+    report(app, dmg, digest, bool(identity), bool(profile), build_number)
     return 0
 
 
@@ -102,6 +127,29 @@ def build() -> Path:
     return Path(meta["target_directory"]) / "release" / "druck-desktop"
 
 
+def commit_count() -> str:
+    """CFBundleVersion: the number of commits up to HEAD. Each release commit descends from the one before, so the
+    number only rises, also for two releases on one day. A shallow clone would give a wrong, small count."""
+    if run("git", "rev-parse", "--is-shallow-repository", cwd=ROOT).strip() == "true":
+        raise SystemExit("the clone is shallow, so its commit count is wrong: fetch the whole history")
+    return run("git", "rev-list", "--count", "HEAD", cwd=ROOT).strip()
+
+
+def fetch_sparkle(scratch: Path) -> Path:
+    """Downloads the pinned Sparkle release, checks its digest, and unpacks it into a folder that holds
+    `Sparkle.framework`, `bin/`, and `LICENSE`."""
+    archive = scratch / "sparkle.tar.xz"
+    with urllib.request.urlopen(SPARKLE_URL) as response:
+        archive.write_bytes(response.read())
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != SPARKLE_SHA256:
+        raise SystemExit(f"Sparkle {SPARKLE_VERSION} has SHA-256 {digest}, expected {SPARKLE_SHA256}")
+    unpacked = scratch / "sparkle"
+    unpacked.mkdir()
+    run("tar", "-xf", archive, "-C", unpacked)
+    return unpacked
+
+
 def minimum_macos(binary: Path) -> str:
     """The system version the binary was built for, which is the lowest it can run on."""
     lines = run("otool", "-l", binary).splitlines()
@@ -113,7 +161,7 @@ def minimum_macos(binary: Path) -> str:
     raise SystemExit(f"{binary} names no minimum macOS version")
 
 
-def assemble(app: Path, binary: Path, version: str) -> None:
+def assemble(app: Path, binary: Path, version: str, build_number: str, sparkle: Path | None) -> None:
     contents = app / "Contents"
     for folder in ("MacOS", "Resources"):
         (contents / folder).mkdir(parents=True)
@@ -130,7 +178,10 @@ def assemble(app: Path, binary: Path, version: str) -> None:
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleShortVersionString": version,
-        "CFBundleVersion": version,
+        "CFBundleVersion": build_number,
+        # Sparkle's windows take the system's language when it is one of these.
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": ["en", "de"],
         "LSMinimumSystemVersion": minimum_macos(binary),
         "LSApplicationCategoryType": "public.app-category.productivity",
         "NSHighResolutionCapable": True,
@@ -162,8 +213,40 @@ def assemble(app: Path, binary: Path, version: str) -> None:
             }
         ],
     }
+    if sparkle:
+        embed_sparkle(contents, sparkle)
+        # Check once a day without asking first, and install only after the author says yes. The feed and its release
+        # notes carry the EdDSA signature as well as the update.
+        plist |= {
+            "SUFeedURL": FEED_URL,
+            "SUPublicEDKey": SPARKLE_PUBLIC_KEY,
+            "SUEnableAutomaticChecks": True,
+            "SUScheduledCheckInterval": 86400,
+            "SUAllowsAutomaticUpdates": False,
+            "SUVerifyUpdateBeforeExtraction": True,
+            "SURequireSignedFeed": True,
+        }
     with (contents / "Info.plist").open("wb") as out:
         plistlib.dump(plist, out)
+
+
+def embed_sparkle(contents: Path, sparkle: Path) -> None:
+    """Copies the framework into `Contents/Frameworks`, where the app loads it from, and its license beside the others."""
+    framework = contents / "Frameworks" / "Sparkle.framework"
+    framework.parent.mkdir()
+    # ditto keeps the framework's symlinks. Its XPC services serve sandboxed apps only, and Druck is not sandboxed.
+    run("ditto", sparkle / "Sparkle.framework", framework)
+    shutil.rmtree(framework / "Versions" / "B" / "XPCServices")
+    (framework / "XPCServices").unlink()
+    shutil.copy2(sparkle / "LICENSE", contents / "Resources" / "Sparkle-LICENSE.txt")
+
+
+def sign_bundle(app: Path, identity: str) -> None:
+    """Signs inside out, in the order Sparkle's documentation gives: its helpers, the framework, then the app."""
+    framework = app / "Contents" / "Frameworks" / "Sparkle.framework"
+    parts = [framework / "Versions/B/Autoupdate", framework / "Versions/B/Updater.app", framework] if framework.exists() else []
+    for part in [*parts, app]:
+        sign(part, identity)
 
 
 def sign(path: Path, identity: str) -> None:
@@ -179,12 +262,16 @@ def sign(path: Path, identity: str) -> None:
 
 def notarize(path: Path, profile: str, archive: bool) -> None:
     """Submits the app (as a zip) or the DMG, waits for the verdict, and staples the ticket to it."""
+    keychain = os.environ.get("DRUCK_NOTARY_KEYCHAIN", "").strip()
     with tempfile.TemporaryDirectory() as scratch:
         upload = path
         if archive:
             upload = Path(scratch) / (path.name + ".zip")
             run("ditto", "-c", "-k", "--keepParent", path, upload)
-        verdict = run("xcrun", "notarytool", "submit", upload, "--keychain-profile", profile, "--wait", check=False)
+        command = ["xcrun", "notarytool", "submit", upload, "--keychain-profile", profile, "--wait"]
+        if keychain:
+            command += ["--keychain", keychain]
+        verdict = run(*command, check=False)
         print(verdict)
         if "status: Accepted" not in verdict:
             raise SystemExit(f"notarization of {path.name} was not accepted")
@@ -203,9 +290,33 @@ def make_dmg(app: Path, dmg: Path) -> None:
         run("hdiutil", "create", "-volname", "Druck", "-srcfolder", staging, "-format", "UDZO", "-ov", dmg)
 
 
-def report(app: Path, dmg: Path, digest: str, signed: bool, notarized: bool) -> None:
+def write_appcast(sparkle: Path, dmg: Path, notes: Path, tag: str, target: Path) -> None:
+    """Has generate_appcast write a one-item feed for the DMG on the release `tag`, with the notes embedded, and sign
+    the update and the feed. The private key goes in on standard input, never on a command line."""
+    with tempfile.TemporaryDirectory() as scratch:
+        folder = Path(scratch)
+        shutil.copy2(dmg, folder / dmg.name)
+        shutil.copy2(notes, folder / (dmg.stem + ".md"))
+        command = [
+            sparkle / "bin" / "generate_appcast",
+            "--ed-key-file", "-",
+            "--download-url-prefix", f"{REPOSITORY}/releases/download/{tag}/",
+            "--embed-release-notes",
+            "--link", REPOSITORY,
+            folder,
+        ]
+        key = os.environ["DRUCK_SPARKLE_KEY"]
+        done = subprocess.run([str(part) for part in command], input=key, capture_output=True, text=True)
+        if done.returncode != 0:
+            print(f"generate_appcast failed:\n{done.stdout}{done.stderr}", file=sys.stderr)
+            raise SystemExit(1)
+        shutil.copy2(folder / "appcast.xml", target)
+    print(f"{target}: the feed for {tag}")
+
+
+def report(app: Path, dmg: Path, digest: str, signed: bool, notarized: bool, build_number: str) -> None:
     size = lambda path: sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / 1e6 if path.is_dir() else path.stat().st_size / 1e6
-    print(f"{app}: {size(app):.1f} MB")
+    print(f"{app}: {size(app):.1f} MB, build {build_number}")
     print(f"{dmg}: {size(dmg):.1f} MB, sha256 {digest}")
     if notarized:
         print("Signed with your identity, notarized, and stapled.")
@@ -214,6 +325,8 @@ def report(app: Path, dmg: Path, digest: str, signed: bool, notarized: bool) -> 
     else:
         print("AD-HOC SIGNED, not notarized: no DRUCK_SIGN_IDENTITY was set.")
         print("This build runs on this Mac. On another Mac, Gatekeeper refuses it until it is opened with right-click, Open.")
+    if not SPARKLE_PUBLIC_KEY:
+        print("NO UPDATER: SPARKLE_PUBLIC_KEY in this script is empty, so the bundle has no Sparkle.")
 
 
 # The placeholder icon: a white page with a folded corner and three lines of text on a dark blue rounded square.
