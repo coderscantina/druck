@@ -18,12 +18,14 @@ mod gutter;
 mod input;
 mod keys;
 mod layout;
+mod made;
 mod margin;
 mod picks;
 mod place;
 pub(crate) mod placeholders;
 pub mod review;
 pub(crate) mod rich;
+mod scene;
 pub(crate) mod scrollbar;
 mod selection;
 mod spelling;
@@ -262,6 +264,8 @@ pub struct EditorView {
     trace: Trace,
     /// What the rich blocks know of the book. See [`rich`].
     rich: rich::Rich,
+    /// What the last layout printed on the pages Druck makes.
+    made: made::Made,
     /// Waits out a pause before reading the book again. Replaced by every edit.
     rich_pause: Task<()>,
     /// Reads the engine's text for chips, off the main thread.
@@ -446,6 +450,7 @@ impl EditorView {
             _focus_subscriptions: focus_subscriptions,
             trace: Trace::from_env(),
             rich: rich::Rich::default(),
+            made: made::Made::default(),
             rich_pause: Task::ready(()),
             rich_labels: Task::ready(()),
             writing: Writing::of(cx),
@@ -1157,6 +1162,8 @@ impl EditorView {
         let block = &self.blocks.as_slice()[index];
         let estimate = if let Some(kind) = self.standalone_at_rest(index) {
             self.standalone_room(kind)
+        } else if let Some(room) = self.scene_break_room(index).filter(|room| room.at_rest) {
+            room.around * 2.
         } else if self.takes_no_room(index) {
             px(0.)
         } else {
@@ -1364,13 +1371,14 @@ impl EditorView {
             .clone();
         let collapsed = self.takes_no_room(index);
         let standalone = self.standalone_at_rest(index);
+        let scene = self.scene_break_room(index);
         let whole_atom = self
             .rich_atom(index)
             .filter(|atom| !collapsed && !self.source && atom.first == index && self.atom_is_whole(atom))
             .cloned();
         let hidden = if self.source {
             Vec::new()
-        } else if collapsed || whole_atom.is_some() || standalone.is_some() {
+        } else if collapsed || whole_atom.is_some() || standalone.is_some() || scene.is_some_and(|room| room.at_rest) {
             let whole = 0..block_text.len();
             vec![whole]
         } else {
@@ -1452,8 +1460,9 @@ impl EditorView {
         let below = self.review_room(index)
             + self.note_room_at(index)
             + standalone.map_or(px(0.), |kind| self.standalone_room(kind))
+            + scene.map_or(px(0.), |room| room.around)
             + ghost_room;
-        let above = self.opening_room(index);
+        let above = self.opening_room(index) + scene.map_or(px(0.), |room| room.around);
         let dim = self.is_dimmed(index);
         let separator = !self.source && block.kind == BlockKind::Blank && motion::is_separator(text, block.range.start);
         let list = self.blocks.as_slice();

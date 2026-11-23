@@ -67,12 +67,9 @@ impl Kind {
         )
     }
 
-    /// Whether the pages start a new one here.
-    pub fn starts_page(self) -> bool {
-        matches!(
-            self,
-            Self::PageBreak | Self::FrontMatter | Self::MainMatter | Self::BackMatter
-        )
+    /// Whether it opens a part of the book. The Binder writes these, and Write never shows them.
+    pub fn is_part(self) -> bool {
+        self.matter().is_some()
     }
 
     fn matter(self) -> Option<u8> {
@@ -290,6 +287,15 @@ impl Structure {
             .map(|(_, region)| *region)
     }
 
+    /// Whether block `block` is a directive line that takes no room and no caret in Write: a fence line of a region
+    /// whose text shows, or a part's line, which the Binder shows instead. A table shows whole in its place.
+    pub fn hides_line(&self, block: usize) -> bool {
+        self.fence(block).is_some_and(|region| {
+            let kind = self.regions[region].kind;
+            kind != Kind::Table && (kind.has_body() || kind.is_part())
+        })
+    }
+
     /// The regions directly inside `region`.
     pub fn children(&self, region: usize) -> impl Iterator<Item = usize> + '_ {
         (0..self.regions.len()).filter(move |&index| self.regions[index].parent == Some(region))
@@ -353,6 +359,27 @@ mod tests {
             .iter()
             .map(|region| (region.kind, region.depth))
             .collect()
+    }
+
+    #[test]
+    fn part_lines_and_fence_lines_are_hidden_and_marks_are_not() {
+        let text = "::: front-matter\n\n::: toc\n\n::: main-matter\n\n::: keep\nText\n:::\n\n::: back-matter\n";
+        let blocks = Blocks::parse(text);
+        let structure = read(text, &blocks);
+        let hidden: Vec<&str> = (0..blocks.as_slice().len())
+            .filter(|&block| structure.hides_line(block))
+            .map(|block| text[blocks.as_slice()[block].range.clone()].trim_end())
+            .collect();
+        assert_eq!(
+            hidden,
+            [
+                "::: front-matter",
+                "::: main-matter",
+                "::: keep",
+                ":::",
+                "::: back-matter"
+            ]
+        );
     }
 
     #[test]

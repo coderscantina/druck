@@ -358,6 +358,20 @@ pub(super) fn paint_gutter(frame: &Frame, window: &mut Window, cx: &mut gpui::Ap
         window
             .paint_svg(bounds, icon.into(), None, TransformationMatrix::unit(), color, cx)
             .ok();
+        // A block that starts on a new page says so one step left of its icon.
+        if block.new_page {
+            let step = tokens::GUTTER_ICON + tokens::SPACE_1;
+            window
+                .paint_svg(
+                    Bounds::new(point(bounds.left() - step, bounds.top()), bounds.size),
+                    "icons/page-new.svg".into(),
+                    None,
+                    TransformationMatrix::unit(),
+                    frame.faint,
+                    cx,
+                )
+                .ok();
+        }
     }
     for marker in &frame.markers {
         window

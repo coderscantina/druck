@@ -50,39 +50,8 @@ pub enum Standalone {
     Index,
     /// A `::: table` of rows from a list.
     ListTable,
-    /// A part of a book by its directive's name, such as `front-matter`.
-    Part(&'static str),
     /// A comment, which the pages leave out.
     Comment,
-}
-
-/// The parts of a book, in the order the engine wants them.
-pub const PARTS: [&str; 3] = ["front-matter", "main-matter", "back-matter"];
-
-/// The parts a text starts, each with where its line begins.
-pub fn parts_in(text: &str) -> Vec<(&'static str, usize)> {
-    let blocks = Blocks::parse(text);
-    (blocks.as_slice().iter())
-        .filter(|block| block.kind == BlockKind::Directive)
-        .filter_map(|block| {
-            let name = text[block.range.clone()].trim_start_matches(':').trim();
-            let part = PARTS.iter().find(|part| **part == name)?;
-            Some((*part, block.range.start))
-        })
-        .collect()
-}
-
-/// The parts that may start at the caret. `placed` is every part the book has, with whether it stands before the
-/// caret: each part appears once, and they keep their order.
-pub fn parts_offered(placed: &[(&str, bool)]) -> Vec<&'static str> {
-    let order = |name: &str| PARTS.iter().position(|part| *part == name);
-    (PARTS.iter().enumerate())
-        .filter(|(at, _)| {
-            (placed.iter())
-                .all(|(other, before)| order(other).is_none_or(|other| other != *at && (other < *at) == *before))
-        })
-        .map(|(_, name)| *name)
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +63,28 @@ pub struct Item {
     pub group: Option<&'static str>,
     pub icon: &'static str,
     pub action: Action,
+    /// One line under the label saying what it makes, for the entries that shape the book's pages.
+    pub description: Option<&'static str>,
+    /// The group of the menu it stands in under a name.
+    pub section: Option<Section>,
+}
+
+/// A named group of the menu's entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    /// Contents, index, and bibliography.
+    Made,
+    /// What sets how text stands on the pages.
+    OnThePage,
+}
+
+impl Section {
+    pub fn label(self) -> &'static str {
+        crate::t!(match self {
+            Self::Made => Key::SectionMade,
+            Self::OnThePage => Key::SectionOnThePage,
+        })
+    }
 }
 
 /// What the menu needs to know of the document to offer only what is valid.
@@ -115,8 +106,6 @@ pub struct Context {
     pub block: Option<BlockKind>,
     /// The theme the book's manifest names, which decides the new sections offered.
     pub theme: Option<String>,
-    /// The parts of a book that may start here, see [`parts_offered`].
-    pub parts: Vec<&'static str>,
 }
 
 /// Where a slash opens the menu: in running text, at the start of a word.
@@ -193,6 +182,13 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         group: None,
         icon,
         action,
+        description: None,
+        section: None,
+    };
+    let described = |key: Key, about: Key, section: Section, icon, action| Item {
+        description: Some(about.text(language)),
+        section: Some(section),
+        ..label(key, icon, action)
     };
     for target in [
         BlockType::Heading(1),
@@ -215,6 +211,8 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             group: None,
             icon: type_icon(target),
             action: Action::Turn(target),
+            description: None,
+            section: None,
         });
     }
     items.push(label(
@@ -236,48 +234,76 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
         ));
     }
     items.push(label(Key::Image, "icons/images.svg", Action::OpenImage));
+    if open.is_empty() && !context.has_toc {
+        items.push(described(
+            Key::Toc,
+            Key::AboutToc,
+            Section::Made,
+            "icons/contents.svg",
+            Action::Insert(Standalone::Toc),
+        ));
+    }
+    if !held && !context.has_index {
+        items.push(described(
+            Key::IndexHere,
+            Key::AboutIndex,
+            Section::Made,
+            "icons/page-index.svg",
+            Action::Insert(Standalone::Index),
+        ));
+    }
+    if !held && context.has_works && !context.has_bibliography {
+        items.push(described(
+            Key::Bibliography,
+            Key::AboutBibliography,
+            Section::Made,
+            "icons/page-bibliography.svg",
+            Action::Insert(Standalone::Bibliography),
+        ));
+    }
+    if !held {
+        items.push(described(
+            Key::PageBreak,
+            Key::AboutPageBreak,
+            Section::OnThePage,
+            "icons/page-new.svg",
+            Action::Insert(Standalone::PageBreak),
+        ));
+    }
     if open.is_empty() {
-        items.push(label(
+        items.push(described(
+            Key::Bottom,
+            Key::AboutBottom,
+            Section::OnThePage,
+            "icons/directive-bottom.svg",
+            Action::Wrap("bottom"),
+        ));
+    }
+    if !held {
+        items.push(described(
+            Key::Keep,
+            Key::AboutKeep,
+            Section::OnThePage,
+            "icons/directive-keep.svg",
+            Action::Wrap("keep"),
+        ));
+    }
+    if open.is_empty() {
+        items.push(described(
             Key::Columns,
+            Key::AboutColumns,
+            Section::OnThePage,
             "icons/directive-columns.svg",
             Action::Wrap("columns"),
         ));
     }
     if open.last().is_some_and(|name| name == "columns") {
-        items.push(label(
+        items.push(described(
             Key::FullWidth,
+            Key::AboutFullWidth,
+            Section::OnThePage,
             "icons/directive-full-width.svg",
             Action::Wrap("full-width"),
-        ));
-    }
-    if !held {
-        items.push(label(Key::Keep, "icons/directive-keep.svg", Action::Wrap("keep")));
-    }
-    if open.is_empty() {
-        items.push(label(Key::Bottom, "icons/directive-bottom.svg", Action::Wrap("bottom")));
-    }
-    if !held {
-        items.push(label(
-            Key::PageBreak,
-            "icons/directive-page-break.svg",
-            Action::Insert(Standalone::PageBreak),
-        ));
-    }
-    if open.is_empty() && !context.has_toc {
-        items.push(label(Key::Toc, "icons/contents.svg", Action::Insert(Standalone::Toc)));
-    }
-    if !held && context.has_works && !context.has_bibliography {
-        items.push(label(
-            Key::Bibliography,
-            "icons/book.svg",
-            Action::Insert(Standalone::Bibliography),
-        ));
-    }
-    if !held && !context.has_index {
-        items.push(label(
-            Key::IndexHere,
-            "icons/book.svg",
-            Action::Insert(Standalone::Index),
         ));
     }
     let in_note = context.block == Some(BlockKind::FootnoteDefinition);
@@ -294,16 +320,6 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             "icons/block-reference.svg",
             Action::OpenReference,
         ));
-    }
-    if open.is_empty() {
-        for part in &context.parts {
-            let key = match *part {
-                "front-matter" => Key::PartFront,
-                "main-matter" => Key::PartMain,
-                _ => Key::PartBack,
-            };
-            items.push(label(key, "icons/book.svg", Action::Insert(Standalone::Part(part))));
-        }
     }
     if !in_heading {
         items.push(label(Key::Todo, "icons/pencil.svg", Action::Todo));
@@ -330,6 +346,8 @@ pub fn items(context: &Context, language: Language) -> Vec<Item> {
             group: Some(Key::NewSection.text(language)),
             icon: template.icon,
             action: Action::Section(template.slug),
+            description: None,
+            section: None,
         });
     }
     items
@@ -360,9 +378,6 @@ pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'
                 .then_some(Key::IndexTaken)
                 .or(held.then_some(Key::IndexHeld)),
         ),
-        (Key::PartFront, part_refused(context, "front-matter")),
-        (Key::PartMain, part_refused(context, "main-matter")),
-        (Key::PartBack, part_refused(context, "back-matter")),
     ];
     let query = query.trim().to_lowercase();
     let named = |key: Key| {
@@ -378,10 +393,6 @@ pub fn withheld(context: &Context, query: &str, language: Language) -> Option<&'
         })
         .flatten()
         .map(|why| why.text(language))
-}
-
-fn part_refused(context: &Context, part: &str) -> Option<Key> {
-    (!context.open_directives.is_empty() || !context.parts.contains(&part)).then_some(Key::PartRefused)
 }
 
 /// The entries matching a query: all its words in either language's label or the group, the ones starting with it first.
@@ -515,11 +526,6 @@ fn template(action: &Action, language: Language, eol: &str) -> Option<(String, R
         }
         Action::Insert(Standalone::Index) => {
             let text = "::: index".to_owned();
-            let end = text.len();
-            (text, end..end)
-        }
-        Action::Insert(Standalone::Part(name)) => {
-            let text = format!("::: {name}");
             let end = text.len();
             (text, end..end)
         }
@@ -759,7 +765,6 @@ mod tests {
             (Action::Wrap("keep"), "::: keep\nText\n:::\n", "Text"),
             (Action::Insert(Standalone::SceneBreak), "***\n", ""),
             (Action::Insert(Standalone::PageBreak), "::: page-break\n", ""),
-            (Action::Insert(Standalone::Part("back-matter")), "::: back-matter\n", ""),
             (Action::Insert(Standalone::Comment), "<!-- Comment -->\n", "Comment"),
             (Action::Insert(Standalone::Toc), "::: toc\n", ""),
             (
@@ -813,15 +818,17 @@ mod tests {
 
     #[test]
     fn the_list_offers_only_what_is_valid_here() {
+        // New sections are named by the page they start, so they are left out here.
         let labels = |context: &Context| -> Vec<&'static str> {
             items(context, Language::English)
                 .into_iter()
+                .filter(|item| item.group.is_none())
                 .map(|item| item.label)
                 .collect()
         };
         let free = Context::default();
         let all = labels(&free);
-        assert!(all.contains(&"Table of contents") && all.contains(&"Two columns"));
+        assert!(all.contains(&"Contents") && all.contains(&"Two columns"));
         assert!(all.contains(&"Image") && !all.contains(&"Citation") && !all.contains(&"Cross-reference"));
 
         let kept = Context {
@@ -830,11 +837,11 @@ mod tests {
         };
         let inside = labels(&kept);
         for absent in [
-            "Table of contents",
+            "Contents",
             "Two columns",
-            "Keep together",
-            "Bottom of page",
-            "Page break",
+            "Keep on one page",
+            "Foot of the page",
+            "New page",
         ] {
             assert!(!inside.contains(&absent), "{absent}");
         }
@@ -842,7 +849,7 @@ mod tests {
             has_toc: true,
             ..Context::default()
         };
-        assert!(!labels(&toc).contains(&"Table of contents"));
+        assert!(!labels(&toc).contains(&"Contents"));
         let list_table = Context {
             open_directives: vec!["table".to_owned()],
             ..Context::default()
@@ -853,23 +860,6 @@ mod tests {
             ..Context::default()
         };
         assert!(!labels(&note).contains(&"Footnote"));
-    }
-
-    #[test]
-    fn a_part_is_offered_once_and_in_its_order() {
-        assert_eq!(parts_offered(&[]), PARTS);
-        assert_eq!(parts_offered(&[("front-matter", true)]), ["main-matter", "back-matter"]);
-        assert_eq!(parts_offered(&[("main-matter", true)]), ["back-matter"]);
-        assert_eq!(parts_offered(&[("main-matter", false)]), ["front-matter"]);
-        assert!(parts_offered(&[("front-matter", true), ("back-matter", true)]).is_empty());
-        let context = Context {
-            parts: vec!["back-matter"],
-            ..Context::default()
-        };
-        let labels: Vec<_> = (items(&context, Language::English).into_iter())
-            .map(|item| item.label)
-            .collect();
-        assert!(labels.contains(&"Back matter") && !labels.contains(&"Front matter"));
     }
 
     #[test]

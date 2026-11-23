@@ -60,6 +60,9 @@ pub const TOOLBAR_SEPARATOR: Pixels = px(9.);
 pub const MENU_WIDTH: Pixels = px(248.);
 pub const MENU_ROW_HEIGHT: Pixels = px(28.);
 pub const MENU_MAX_ROWS: usize = 10;
+/// The slash menu while its rows describe what they make, and such a row with its line of description.
+pub const MENU_DESCRIBED_WIDTH: Pixels = px(320.);
+pub const MENU_DESCRIBED_ROW_HEIGHT: Pixels = px(46.);
 pub const LINK_POPUP_WIDTH: Pixels = px(320.);
 /// Room kept between something floating and what it belongs to, or the window's edge.
 pub const FLOAT_GAP: Pixels = px(6.);
@@ -471,9 +474,6 @@ pub const REGION_DROP_TINT: f32 = 0.07;
 pub const BRACKET_END_INSET: Pixels = px(3.);
 /// Each of two columns holds at least this many characters of body text, or the text shows one column.
 pub const COLUMN_MIN_CHARACTERS: u32 = 24;
-/// A new page's gap between two sheet edges, in body lines, and the tint between the edges.
-pub const PAGE_GAP_LINES: f32 = 2.5;
-pub const SHEET_GAP_TINT: f32 = 0.04;
 /// A region's menu under its grip, and the ghost table's options.
 pub const OPTIONS_WIDTH: Pixels = px(262.);
 /// The kinds Turn into lists beside a region's menu.

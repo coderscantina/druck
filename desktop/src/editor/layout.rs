@@ -236,11 +236,12 @@ impl GalleyStyle {
             },
         };
         match kind {
-            BlockKind::FrontMatter
-            | BlockKind::Directive
-            | BlockKind::Comment
-            | BlockKind::SceneBreak
-            | BlockKind::Raw => LineStyle {
+            // A scene break's source shows while the caret is on it, quiet, as a heading's marker does.
+            BlockKind::SceneBreak => LineStyle {
+                color: self.quiet,
+                ..themed
+            },
+            BlockKind::FrontMatter | BlockKind::Directive | BlockKind::Comment | BlockKind::Raw => LineStyle {
                 font: self.mono.clone(),
                 size: px(self.book.code.size * self.scale()),
                 leading: self.book.code.line_height,

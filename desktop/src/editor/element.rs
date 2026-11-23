@@ -79,6 +79,8 @@ pub(super) struct FrameBlock {
     pub layout: Rc<BlockLayout>,
     pub hovered: bool,
     pub icon: Option<&'static str>,
+    /// It starts on a new page: a `::: page-break` stands directly before it.
+    pub new_page: bool,
 }
 
 pub struct Frame {
@@ -110,6 +112,8 @@ pub struct Frame {
     images: Vec<AnyElement>,
     /// The directives' brackets, sheet gaps, and ghost.
     directives: Marks,
+    /// The scene breaks' rules.
+    rules: Vec<Bounds<Pixels>>,
     /// The chapter's notes, drawn inside the same bounds, so they scroll under the title bar with the text.
     margin: Option<AnyElement>,
     /// A passage's buttons and the agent's notes, drawn inside the same bounds for the same reason.
@@ -125,7 +129,7 @@ pub struct Frame {
     body_size: Pixels,
     body_font: gpui::Font,
     accent: Hsla,
-    faint: Hsla,
+    pub(super) faint: Hsla,
     /// How placeholders' values show.
     placeholders: Display,
     /// The value of the placeholder the caret is in, over where it stands.
@@ -216,6 +220,7 @@ impl Element for Galley {
             let margin = view.margin_element();
             let mut rows = view.review_rows(cx);
             rows.extend(view.chapter_label_element(cx));
+            rows.extend(view.made_buttons(cx));
             rows.extend(view.pin_markers(cx));
             let mut advice = view.advice_elements(window, cx);
             advice.extend(view.comment_notes(window, cx));
@@ -341,6 +346,9 @@ impl Element for Galley {
             }
             for block in &frame.blocks {
                 paint_block_text(block, frame, window, cx);
+            }
+            for rule in &frame.rules {
+                window.paint_quad(fill(*rule, frame.rule));
             }
             paint_marks(&frame.directives, frame, window, cx);
             for word in &frame.misspelled {
@@ -649,6 +657,15 @@ impl EditorView {
                 layout,
                 hovered: self.hovered == Some(index),
                 icon,
+                new_page: !self.source
+                    && block.kind != BlockKind::Directive
+                    && super::directives::edits::page_setting(
+                        &self.blocks,
+                        &self.directives.structure,
+                        index,
+                        super::directives::edits::PageSetting::NewPage,
+                    )
+                    .is_some(),
             });
         }
         let selection = self.range_rectangles(self.selection.range(), &blocks, false);
@@ -699,6 +716,7 @@ impl EditorView {
         let hint = self.placeholder_hint(&blocks);
         let indices: Vec<usize> = self.visible.iter().map(|(index, _)| *index).collect();
         let directives = self.directive_marks(&blocks, &indices, window, cx);
+        let rules = self.scene_rules(&blocks);
         // After the brackets, whose names on the same row the style's name ends before.
         // Only while the text has the keys, so it never stands beside a card that covers its block.
         let style_name = (self.style_name_at_caret(&blocks))
@@ -734,6 +752,7 @@ impl EditorView {
             scrollbar_strong: self.thumb_hovered || self.thumb_grab.is_some(),
             images: Vec::new(),
             directives,
+            rules,
             margin: None,
             review: Vec::new(),
             source: self.source,

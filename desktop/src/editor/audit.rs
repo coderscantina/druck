@@ -7,7 +7,7 @@ use gpui::Action as _;
 
 use super::commands::convert::{BlockType, Callout, TARGETS};
 use super::commands::marks::Mark;
-use super::commands::slash::{self, Action, Context, PARTS, Standalone};
+use super::commands::slash::{self, Action, Context, Standalone};
 use super::directives::Kind;
 use super::directives::edits::wraps_offered;
 use super::directives::structure::Structure;
@@ -39,6 +39,8 @@ enum Path {
     LinkField,
     /// The engine does not render it, so Write offers no way to make one.
     NotRendered,
+    /// The Binder writes it from where a page stands in the book, so it never shows in the text.
+    Binder,
 }
 
 fn block_paths(kind: BlockKind) -> Vec<Path> {
@@ -93,9 +95,7 @@ fn directive_paths(kind: Kind) -> Vec<Path> {
         Kind::Toc => vec![Path::Slash(Action::Insert(Standalone::Toc))],
         Kind::Bibliography => vec![Path::Slash(Action::Insert(Standalone::Bibliography))],
         Kind::Index => vec![Path::Slash(Action::Section("index"))],
-        Kind::FrontMatter => vec![Path::Slash(Action::Insert(Standalone::Part(PARTS[0])))],
-        Kind::MainMatter => vec![Path::Slash(Action::Insert(Standalone::Part(PARTS[1])))],
-        Kind::BackMatter => vec![Path::Slash(Action::Insert(Standalone::Part(PARTS[2])))],
+        Kind::FrontMatter | Kind::MainMatter | Kind::BackMatter => vec![Path::Binder],
     }
 }
 
@@ -145,14 +145,13 @@ fn style_paths() -> Vec<Path> {
 fn broken(path: &Path) -> Option<String> {
     let plain = "Text\n";
     match path {
-        Path::Typing | Path::Details | Path::LinkField | Path::NotRendered => None,
+        Path::Typing | Path::Details | Path::LinkField | Path::NotRendered | Path::Binder => None,
         Path::Slash(action) => {
-            // Every entry is offered somewhere: in plain text of a book with works, labels, and no parts yet, or for
-            // Full width inside columns.
+            // Every entry is offered somewhere: in plain text of a book with works and labels, or for Full width inside
+            // columns.
             let free = Context {
                 has_works: true,
                 has_labels: true,
-                parts: PARTS.to_vec(),
                 ..Context::default()
             };
             let in_columns = Context {

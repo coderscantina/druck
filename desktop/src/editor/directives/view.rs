@@ -1,4 +1,4 @@
-//! What the directives draw: brackets with their names in the left margin, a new page's sheet edges, the options under
+//! What the directives draw: brackets with their names in the left margin, a new page's quiet line, the options under
 //! a lit name, and the slash menu's ghost of the directive it would insert.
 
 use std::rc::Rc;
@@ -20,19 +20,18 @@ use super::{
 use crate::editor::commands::slash::{Action, Standalone};
 use crate::editor::element::{Frame, FrameBlock};
 use crate::editor::float::Spot;
+use crate::editor::made::{MadeShape, is_made, paint_made};
 use crate::editor::rich::view::shapes::Whole;
 use crate::editor::rich::{Atom, AtomKind};
 use crate::editor::{EditorView, Float};
 use crate::source::{BlockKind, Blocks};
 use crate::tokens::{self, Tokens};
 
-/// A bracket beside a directive's text, or a short line beside one standing alone.
+/// A bracket beside a directive's text.
 pub(in crate::editor) struct Bracket {
     x: Pixels,
     top: Pixels,
     bottom: Pixels,
-    /// Stands alone: a short line across instead of a bracket.
-    tick: bool,
     name: Option<(ShapedLine, Point<Pixels>)>,
     lit: bool,
     /// A dragged block would drop into it.
@@ -44,8 +43,10 @@ pub(in crate::editor) struct Bracket {
 #[derive(Default)]
 pub(in crate::editor) struct Marks {
     brackets: Vec<Bracket>,
-    /// The gaps between two sheet edges, and whether each is a ghost.
-    sheets: Vec<(Bounds<Pixels>, bool)>,
+    /// Each new page's line across the text, with its words, and whether it is a ghost.
+    page_lines: Vec<PageLine>,
+    /// Each page Druck makes, with its top left.
+    made: Vec<(MadeShape, Point<Pixels>)>,
     /// The slash menu's ghost text, and a table it would insert.
     ghost_text: Option<(ShapedLine, Point<Pixels>, Pixels)>,
     ghost_whole: Option<(Rc<Whole>, Point<Pixels>)>,
@@ -55,6 +56,13 @@ pub(in crate::editor) struct Marks {
     repairs: Vec<(ShapedLine, Point<Pixels>)>,
     washes: Vec<(Bounds<Pixels>, f32)>,
     drop_label: Option<(ShapedLine, Point<Pixels>)>,
+}
+
+/// A new page: one centred line across the text, a hairline either side of its icon and words.
+pub(in crate::editor) struct PageLine {
+    bounds: Bounds<Pixels>,
+    words: ShapedLine,
+    ghost: bool,
 }
 
 /// The slash menu's chosen directive, drawn into the text before Return inserts it.
@@ -274,25 +282,31 @@ impl EditorView {
                 let wash = Bounds::new(point(wash_left, top), size(wash_width, bottom - top));
                 marks.washes.push((wash, tokens::REGION_DROP_TINT));
             }
-            let standalone = !region.kind.has_body();
-            if standalone
-                && region.kind.starts_page()
-                && let Some(block) = shown(region.open)
-                && self.standalone_at_rest(region.open).is_some()
-            {
-                marks.sheets.push((
-                    Bounds::new(
+            // A mark shows what it makes in the text, so it has no bracket or name.
+            if !region.kind.has_body() {
+                if region.kind == Kind::PageBreak
+                    && let Some(block) = shown(region.open)
+                    && self.standalone_at_rest(region.open).is_some()
+                {
+                    let bounds = Bounds::new(
                         point(self.block_left(region.open), block.top),
                         size(block.width, block.layout.height),
-                    ),
-                    false,
-                ));
+                    );
+                    marks.page_lines.push(page_line(bounds, false, window, cx));
+                }
+                if is_made(region.kind)
+                    && let Some(block) = shown(region.open)
+                    && self.standalone_at_rest(region.open).is_some()
+                {
+                    let shape = self.made_shape(region.kind, block.width, false, window, cx);
+                    marks.made.push((shape, point(self.block_left(region.open), block.top)));
+                }
+                continue;
             }
             marks.brackets.push(Bracket {
                 x,
                 top,
                 bottom,
-                tick: standalone,
                 name,
                 lit: is_lit,
                 accent: into,
@@ -383,10 +397,13 @@ impl EditorView {
                         marks.ghost_whole = Some((whole, point(left, top)));
                     }
                 }
-                kind if kind.starts_page() => {
-                    marks
-                        .sheets
-                        .push((Bounds::new(point(left, top), size(block.width, bottom - top)), true));
+                Kind::PageBreak => {
+                    let bounds = Bounds::new(point(left, top), size(block.width, bottom - top));
+                    marks.page_lines.push(page_line(bounds, true, window, cx));
+                }
+                kind if is_made(kind) => {
+                    let shape = self.made_shape(kind, block.width, true, window, cx);
+                    marks.made.push((shape, point(left, top)));
                 }
                 kind if kind.has_body() => {
                     let placeholder = crate::t!(crate::editor::strings::Key::PlaceholderText);
@@ -409,6 +426,10 @@ impl EditorView {
                 _ => {}
             }
         }
+        // A mark's ghost is what it makes, with no bracket or name.
+        if !ghost.kind.has_body() {
+            return;
+        }
         let faint: Hsla = colors.text_faint.into();
         let line = ui_line(ghost.kind.label(), faint.opacity(tokens::GHOST_OPACITY), window);
         let name_left = name_right - line.width;
@@ -425,7 +446,6 @@ impl EditorView {
             x,
             top,
             bottom,
-            tick: !ghost.kind.has_body(),
             name,
             lit: false,
             accent: false,
@@ -969,20 +989,11 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
     for (bounds, tint) in &marks.washes {
         window.paint_quad(fill(*bounds, accent.opacity(*tint)).corner_radii(tokens::RADIUS));
     }
-    for (bounds, ghost) in &marks.sheets {
-        let opacity = if *ghost { tokens::GHOST_OPACITY } else { 1. };
-        let height = bounds.size.height;
-        let top = bounds.top() + height * 0.3;
-        let band = Bounds::new(point(bounds.left(), top), size(bounds.size.width, height * 0.4));
-        let text: Hsla = colors.text.into();
-        window.paint_quad(fill(band, text.opacity(tokens::SHEET_GAP_TINT * opacity)));
-        let rule = frame.rule.opacity(opacity);
-        for y in [band.top(), band.bottom() - tokens::HAIRLINE] {
-            window.paint_quad(fill(
-                Bounds::new(point(band.left(), y), size(band.size.width, tokens::HAIRLINE)),
-                rule,
-            ));
-        }
+    for line in &marks.page_lines {
+        paint_page_line(line, frame.rule, faint, window, cx);
+    }
+    for (shape, at) in &marks.made {
+        paint_made(shape, *at, window, cx);
     }
     if let Some((line, at, height)) = &marks.ghost_text {
         line.paint(*at, *height, TextAlign::Left, None, window, cx).ok();
@@ -1004,26 +1015,17 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
             color
         };
         let hair = tokens::HAIRLINE;
-        if bracket.tick {
-            let y = bracket.top + tokens::TEXT_SMALL * 0.75;
-            let y = y.min(bracket.bottom);
+        let top = bracket.top + tokens::BRACKET_END_INSET;
+        let bottom = (bracket.bottom - tokens::BRACKET_END_INSET).max(top + hair);
+        window.paint_quad(fill(
+            Bounds::new(point(bracket.x, top), size(hair, bottom - top)),
+            color,
+        ));
+        for y in [top, bottom - hair] {
             window.paint_quad(fill(
-                Bounds::new(point(bracket.x, y), size(tokens::BRACKET_TICK * 4., hair)),
+                Bounds::new(point(bracket.x, y), size(tokens::BRACKET_TICK, hair)),
                 color,
             ));
-        } else {
-            let top = bracket.top + tokens::BRACKET_END_INSET;
-            let bottom = (bracket.bottom - tokens::BRACKET_END_INSET).max(top + hair);
-            window.paint_quad(fill(
-                Bounds::new(point(bracket.x, top), size(hair, bottom - top)),
-                color,
-            ));
-            for y in [top, bottom - hair] {
-                window.paint_quad(fill(
-                    Bounds::new(point(bracket.x, y), size(tokens::BRACKET_TICK, hair)),
-                    color,
-                ));
-            }
         }
         if let Some((name, at)) = &bracket.name {
             name.paint(*at, tokens::TEXT_SMALL * 1.5, TextAlign::Left, None, window, cx)
@@ -1059,4 +1061,51 @@ pub(in crate::editor) fn paint_marks(marks: &Marks, frame: &Frame, window: &mut 
             .paint(*at, tokens::TEXT_SMALL * 1.5, TextAlign::Left, None, window, cx)
             .ok();
     }
+}
+
+/// A new page's line in `bounds`, its words shaped in the faint colour.
+fn page_line(bounds: Bounds<Pixels>, ghost: bool, window: &Window, cx: &App) -> PageLine {
+    let faint: Hsla = Tokens::get(cx).text_faint.into();
+    let opacity = if ghost { tokens::GHOST_OPACITY } else { 1. };
+    PageLine {
+        bounds,
+        words: ui_line(Kind::PageBreak.label(), faint.opacity(opacity), window),
+        ghost,
+    }
+}
+
+/// A hairline either side of the new-page icon and words, centred across the text at the middle of the line's room.
+fn paint_page_line(line: &PageLine, rule: Hsla, faint: Hsla, window: &mut Window, cx: &mut App) {
+    let opacity = if line.ghost { tokens::GHOST_OPACITY } else { 1. };
+    let bounds = line.bounds;
+    let middle = bounds.top() + bounds.size.height * 0.5;
+    let icon = tokens::NOTE_ICON;
+    let label = icon + tokens::SPACE_1 + line.words.width;
+    let start = bounds.left() + (bounds.size.width - label) * 0.5;
+    let rule = rule.opacity(opacity);
+    for (from, to) in [
+        (bounds.left(), start - tokens::SPACE_3),
+        (start + label + tokens::SPACE_3, bounds.right()),
+    ] {
+        if to > from {
+            window.paint_quad(fill(
+                Bounds::new(point(from, middle), size(to - from, tokens::HAIRLINE)),
+                rule,
+            ));
+        }
+    }
+    let icon_bounds = Bounds::new(point(start, middle - icon * 0.5), size(icon, icon));
+    window
+        .paint_svg(
+            icon_bounds,
+            "icons/page-new.svg".into(),
+            None,
+            TransformationMatrix::unit(),
+            faint.opacity(opacity),
+            cx,
+        )
+        .ok();
+    let height = tokens::TEXT_SMALL * 1.5;
+    let at = point(start + icon + tokens::SPACE_1, middle - height * 0.5);
+    line.words.paint(at, height, TextAlign::Left, None, window, cx).ok();
 }

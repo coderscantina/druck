@@ -167,8 +167,12 @@ impl EditorView {
             } else {
                 return (0, false, goal);
             }
-            // A mark's line is hidden, but it is a stop: the caret landing on it selects the mark.
-            if !current.lines[line_index].skipped || self.marker_at(block).is_some() {
+            // A mark's line is hidden, but it is a stop: the caret landing on it selects the mark. A scene break's line
+            // shows its source once the caret is there.
+            if !current.lines[line_index].skipped
+                || self.marker_at(block).is_some()
+                || self.scene_break_room(block).is_some()
+            {
                 break;
             }
         }

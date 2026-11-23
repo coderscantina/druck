@@ -290,6 +290,9 @@ impl Workspace {
             }),
             cx.subscribe_in(&preview, window, |workspace, _, Typeset(book_type), window, cx| {
                 workspace.set_type(book_type, cx);
+                if let Some(layout) = workspace.parts.preview.read(cx).laid() {
+                    (workspace.parts.editor).update(cx, |editor, cx| editor.take_layout(&layout.laid, cx));
+                }
                 workspace.show_caret(cx);
                 workspace.show_fonts(cx);
                 workspace.jump_to_style(window, cx);
