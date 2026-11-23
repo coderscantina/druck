@@ -64,8 +64,31 @@ impl Float {
 
 pub(super) struct Menu {
     kind: MenuKind,
+    /// The chosen row, counted among the rows shown.
     selected: usize,
     scroll: ScrollHandle,
+    /// What was typed to narrow the block menu or a list.
+    filter: Option<Filter>,
+}
+
+/// A query typed into a menu, and the rows it leaves by their place in the whole menu.
+struct Filter {
+    query: String,
+    rows: Vec<usize>,
+}
+
+/// The rows whose label holds every word of `query`, by their place in `labels`. Case does not count.
+fn matching<'a>(labels: impl Iterator<Item = &'a str>, query: &str) -> Vec<usize> {
+    let query = query.to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    labels
+        .enumerate()
+        .filter(|(_, label)| {
+            let label = label.to_lowercase();
+            words.iter().all(|word| label.contains(word))
+        })
+        .map(|(at, _)| at)
+        .collect()
 }
 
 enum MenuKind {
@@ -101,7 +124,29 @@ enum MenuKind {
 }
 
 impl Menu {
+    fn new(kind: MenuKind, selected: usize, scroll: ScrollHandle) -> Self {
+        Self {
+            kind,
+            selected,
+            scroll,
+            filter: None,
+        }
+    }
+
+    /// The place in the whole menu of the row shown at `shown`.
+    fn row(&self, shown: usize) -> usize {
+        self.filter.as_ref().map_or(shown, |filter| filter.rows[shown])
+    }
+
+    /// The block menu and the lists narrow as the author types. The slash menu reads its query from the text.
+    fn filters(&self) -> bool {
+        matches!(self.kind, MenuKind::Convert { .. } | MenuKind::Pick { .. })
+    }
+
     fn len(&self) -> usize {
+        if let Some(filter) = &self.filter {
+            return filter.rows.len();
+        }
         match &self.kind {
             MenuKind::Slash { items, .. } => items.len(),
             MenuKind::Convert {
@@ -230,7 +275,7 @@ struct MenuRow {
     description: Option<&'static str>,
     /// A divider stands above it, and the name of the group it starts.
     divider: bool,
-    section: Option<&'static str>,
+    section: Option<SharedString>,
 }
 
 impl MenuRow {
@@ -257,7 +302,7 @@ impl MenuRow {
         } else {
             px(0.)
         };
-        let section = self.section.map_or(px(0.), |_| tokens::MENU_ROW_HEIGHT);
+        let section = self.section.as_ref().map_or(px(0.), |_| tokens::MENU_ROW_HEIGHT);
         own + divider + section
     }
 }
@@ -641,15 +686,15 @@ impl EditorView {
         if all.is_empty() {
             return;
         }
-        self.float = Float::Menu(Menu {
-            kind: MenuKind::Slash {
+        self.float = Float::Menu(Menu::new(
+            MenuKind::Slash {
                 start: at,
                 items: all.clone(),
                 all,
             },
-            selected: 0,
-            scroll: ScrollHandle::new(),
-        });
+            0,
+            ScrollHandle::new(),
+        ));
         cx.notify();
     }
 
@@ -759,9 +804,11 @@ impl EditorView {
         if self.accept_completion(window, cx) {
             return;
         }
-        if let Float::Menu(menu) = &self.float {
-            let selected = menu.selected;
-            self.choose(selected, window, cx);
+        if let Float::Menu(menu) = &self.float
+            && menu.len() > 0
+        {
+            let row = menu.row(menu.selected);
+            self.choose(row, window, cx);
         }
     }
 
@@ -842,11 +889,11 @@ impl EditorView {
 
     /// Opens the menu of suggestions under a word.
     pub(super) fn open_spelling_menu(&mut self, word: Range<usize>, suggestions: Vec<String>, cx: &mut Context<Self>) {
-        self.float = Float::Menu(Menu {
-            kind: MenuKind::Spelling { word, suggestions },
-            selected: 0,
-            scroll: ScrollHandle::new(),
-        });
+        self.float = Float::Menu(Menu::new(
+            MenuKind::Spelling { word, suggestions },
+            0,
+            ScrollHandle::new(),
+        ));
         cx.notify();
     }
 
@@ -965,8 +1012,8 @@ impl EditorView {
         if targets.is_empty() && wraps.is_empty() && extras.is_empty() && pages.is_empty() {
             return false;
         }
-        self.float = Float::Menu(Menu {
-            kind: MenuKind::Convert {
+        self.float = Float::Menu(Menu::new(
+            MenuKind::Convert {
                 block,
                 targets,
                 wraps,
@@ -975,9 +1022,9 @@ impl EditorView {
                 blocks,
                 anchor,
             },
-            selected: 0,
-            scroll: ScrollHandle::new(),
-        });
+            0,
+            ScrollHandle::new(),
+        ));
         cx.notify();
         true
     }
@@ -991,11 +1038,7 @@ impl EditorView {
         // The list shows ten rows, so a choice further down is brought into view by the rows' fixed height.
         let above = selected.saturating_sub(tokens::MENU_MAX_ROWS / 2);
         scroll.set_offset(point(px(0.), -tokens::MENU_ROW_HEIGHT * above as f32));
-        self.float = Float::Menu(Menu {
-            kind: MenuKind::Pick { rows, anchor },
-            selected,
-            scroll,
-        });
+        self.float = Float::Menu(Menu::new(MenuKind::Pick { rows, anchor }, selected, scroll));
         cx.notify();
     }
 
@@ -1010,7 +1053,7 @@ impl EditorView {
                         MenuRow {
                             description: item.description,
                             divider: starts,
-                            section: item.section.filter(|_| at == 0 || starts).map(slash::Section::label),
+                            section: (item.section.filter(|_| at == 0 || starts)).map(|section| section.label().into()),
                             ..MenuRow::new(item.label, item.group.map(SharedString::from), item.icon)
                         }
                     })
@@ -1064,10 +1107,10 @@ impl EditorView {
 
     /// The list's size: its rows' heights up to ten plain rows, which it scrolls past, and wider while rows describe
     /// what they make.
-    fn menu_size(rows: &[MenuRow]) -> Size<Pixels> {
+    fn menu_size<'a>(rows: impl Iterator<Item = &'a MenuRow> + Clone) -> Size<Pixels> {
         let most = tokens::MENU_ROW_HEIGHT * tokens::MENU_MAX_ROWS as f32;
-        let height = rows.iter().fold(px(0.), |sum, row| sum + row.height()).min(most);
-        let described = rows.iter().any(|row| row.description.is_some());
+        let height = rows.clone().fold(px(0.), |sum, row| sum + row.height()).min(most);
+        let described = rows.into_iter().any(|row| row.description.is_some());
         size(
             if described {
                 tokens::MENU_DESCRIBED_WIDTH
@@ -1078,16 +1121,91 @@ impl EditorView {
         )
     }
 
+    /// The rows that show, with their place in the whole menu. A typed query stands over the first of them.
+    fn shown_rows(&self, menu: &Menu) -> Vec<(usize, MenuRow)> {
+        let rows = self.menu_rows(menu).into_iter().enumerate();
+        let Some(filter) = &menu.filter else {
+            return rows.collect();
+        };
+        let mut shown: Vec<(usize, MenuRow)> = rows
+            .filter(|(index, _)| filter.rows.contains(index))
+            .map(|(index, row)| {
+                let row = MenuRow {
+                    divider: false,
+                    section: None,
+                    ..row
+                };
+                (index, row)
+            })
+            .collect();
+        if let Some((_, first)) = shown.first_mut() {
+            first.section = Some(filter.query.clone().into());
+        }
+        shown
+    }
+
+    /// Narrows an open block menu or list by what was typed, and says whether the menu took it. A query that leaves no
+    /// row is not taken, so the list never empties.
+    pub(super) fn type_into_menu(&mut self, typed: &str, cx: &mut Context<Self>) -> bool {
+        let Float::Menu(menu) = &self.float else {
+            return false;
+        };
+        if !menu.filters() {
+            return false;
+        }
+        let query = format!(
+            "{}{typed}",
+            menu.filter.as_ref().map_or("", |filter| filter.query.as_str())
+        );
+        if query.trim().is_empty() {
+            return true;
+        }
+        let labels: Vec<SharedString> = self.menu_rows(menu).into_iter().map(|row| row.label).collect();
+        let rows = matching(labels.iter().map(SharedString::as_ref), &query);
+        if !rows.is_empty()
+            && let Float::Menu(menu) = &mut self.float
+        {
+            menu.filter = Some(Filter { query, rows });
+            menu.selected = 0;
+            menu.scroll.set_offset(point(px(0.), px(0.)));
+            cx.notify();
+        }
+        true
+    }
+
+    /// Takes the last typed letter off a menu's query, and says whether there was one.
+    pub(super) fn erase_menu_query(&mut self, cx: &mut Context<Self>) -> bool {
+        let Float::Menu(menu) = &self.float else {
+            return false;
+        };
+        let Some(query) = menu.filter.as_ref().map(|filter| filter.query.clone()) else {
+            return false;
+        };
+        let mut query = query;
+        query.pop();
+        let rows = (!query.trim().is_empty()).then(|| {
+            let labels: Vec<SharedString> = self.menu_rows(menu).into_iter().map(|row| row.label).collect();
+            matching(labels.iter().map(SharedString::as_ref), &query)
+        });
+        if let Float::Menu(menu) = &mut self.float {
+            menu.filter = rows.map(|rows| Filter { query, rows });
+            menu.selected = 0;
+            menu.scroll.set_offset(point(px(0.), px(0.)));
+            cx.notify();
+        }
+        true
+    }
+
     fn menu_element(&self, menu: &Menu, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tokens = Tokens::get(cx).clone();
-        let rows = self.menu_rows(menu);
-        let wanted = Self::menu_size(&rows);
+        let shown = self.shown_rows(menu);
+        let wanted = Self::menu_size(shown.iter().map(|(_, row)| row));
         let selected = menu.selected;
-        let rows: Vec<_> = rows
+        let rows: Vec<_> = shown
             .into_iter()
             .enumerate()
-            .map(|(index, row)| {
-                let chosen = index == selected;
+            .map(|(at, (index, row))| {
+                let chosen = at == selected;
                 let MenuRow {
                     label,
                     end,
@@ -1428,7 +1546,7 @@ impl EditorView {
                             .iter()
                             .any(|item| super::directives::ghost_kind(&item.action).is_some()) =>
                     {
-                        let wanted = Self::menu_size(&self.menu_rows(menu));
+                        let wanted = Self::menu_size(self.menu_rows(menu).iter());
                         let (width, height) = (f32::from(wanted.width), f32::from(wanted.height));
                         let gap = f32::from(tokens::FLOAT_GAP);
                         let (x, _) = place::at_caret(rect(target), width, height, area, gap);
@@ -1523,7 +1641,7 @@ fn tracked(label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::tracked;
+    use super::{matching, tracked};
 
     #[test]
     fn tracks_letters_and_keeps_numbers_tight() {
@@ -1532,5 +1650,14 @@ mod tests {
             tracked("KAPITEL 11"),
             "K\u{2009}A\u{2009}P\u{2009}I\u{2009}T\u{2009}E\u{2009}L 11"
         );
+    }
+
+    #[test]
+    fn a_query_keeps_the_rows_that_hold_each_of_its_words() {
+        let labels = ["Plain text", "JavaScript", "TypeScript", "Python"];
+        assert_eq!(matching(labels.into_iter(), "script"), [1, 2]);
+        assert_eq!(matching(labels.into_iter(), "TYPE s"), [2]);
+        assert_eq!(matching(labels.into_iter(), "text plain"), [0]);
+        assert!(matching(labels.into_iter(), "rust").is_empty());
     }
 }
