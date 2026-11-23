@@ -533,7 +533,12 @@ impl Timeline {
             .line_height(DefiniteLength::from(px(text_size * face.line_height)))
             .font_weight(FontWeight(f32::from(face.weight)))
             .when(face.italic, |text| text.italic())
-            .text_color(tokens.text)
+            // Running text a step softer than headings, as Write shows it.
+            .text_color(if matches!(block.kind, BlockKind::Heading { .. }) {
+                tokens.text
+            } else {
+                tokens.writing
+            })
             .when(
                 block.kind == BlockKind::Comment || block.kind == BlockKind::FrontMatter,
                 |text| text.text_color(tokens.text_quiet),
