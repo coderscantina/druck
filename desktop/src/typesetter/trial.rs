@@ -78,9 +78,10 @@ impl Book {
         crate::persist::atomic::write(file, copy.to_string().as_bytes())
     }
 
-    /// The book at `path` with the texts of a copy [`Book::write_copy`] wrote. A project's chapters are the copy's
-    /// alone, so a chapter that left the book during the run, or changed on disk, is still the text the run began
-    /// with. A theme or manifest the copy lacks is read from disk.
+    /// The book at `path` with the texts of a copy [`Book::write_copy`] wrote, built from the copy alone: no chapter is
+    /// read from disk, so a chapter that left the book during the run, or changed or broke on disk, is still the text
+    /// the run began with. A project's manifest the copy lacks is read from disk. A theme the copy lacks is none to
+    /// change, as the app saw it; the layout still reads the theme the text names, and its fonts and images, from disk.
     pub fn open_copy(path: &Path, copy: &Path) -> Result<Self, String> {
         let unreadable = |error: String| format!("the app's copy of the book cannot be read: {error}");
         let text = std::fs::read_to_string(copy).map_err(|error| unreadable(error.to_string()))?;
@@ -92,18 +93,32 @@ impl Book {
         let chapters: Option<Vec<(PathBuf, String)>> =
             (copy["chapters"].as_array()).and_then(|chapters| chapters.iter().map(pair).collect());
         let chapters = chapters.ok_or_else(|| unreadable("it lists no chapters".to_owned()))?;
-        let mut book = Self::open(path)?;
-        book.joined = match (&book.kind, &chapters[..]) {
-            (Kind::Single { .. }, [(_, text)]) => Joined {
-                text: text.clone(),
-                ..book.joined
-            },
-            (Kind::Single { .. }, _) => return Err(unreadable("a single file is one chapter".to_owned())),
-            (Kind::Project { .. }, _) => Joined::of_files(&chapters, book.joined.revision),
+        let working_dir = std::env::current_dir().map_err(|error| error.to_string())?;
+        let path = normalize(&working_dir.join(path));
+        let kind = match path.parent() {
+            _ if path.is_dir() => Kind::Project { dir: path },
+            Some(dir) if path.file_name().is_some_and(|name| name == druck::input::MANIFEST) => {
+                Kind::Project { dir: dir.to_owned() }
+            }
+            _ => Kind::Single { path },
         };
-        book.theme = pair(&copy["theme"]).or(book.theme);
-        book.manifest = pair(&copy["manifest"]).or(book.manifest);
-        Ok(book)
+        let (joined, manifest) = match (&kind, &chapters[..]) {
+            (Kind::Single { .. }, [(_, text)]) => (Joined::single(text.clone(), 0), None),
+            (Kind::Single { .. }, _) => return Err(unreadable("a single file is one chapter".to_owned())),
+            (Kind::Project { dir }, _) => {
+                let manifest = pair(&copy["manifest"]).or_else(|| {
+                    let file = dir.join(druck::input::MANIFEST);
+                    Some((file.clone(), std::fs::read_to_string(&file).ok()?))
+                });
+                (Joined::of_files(&chapters, 0), manifest)
+            }
+        };
+        Ok(Self {
+            kind,
+            joined,
+            theme: pair(&copy["theme"]),
+            manifest,
+        })
     }
 
     fn base(&self) -> PathBuf {
@@ -797,6 +812,23 @@ mod tests {
         assert!(opened.joined.text.contains("Typed words."));
         assert_eq!(opened.theme, on_screen.theme);
         assert!(std::fs::read_to_string(&file).expect("file").contains("Saved words."));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_tool_opens_the_copy_when_the_live_file_is_no_longer_text() {
+        let dir = std::env::temp_dir().join(format!("druck-trial-broken-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("book.md");
+        std::fs::write(&file, "# One\n\nSaved words.\n").expect("file");
+        let copy = dir.join("copy.json");
+        (Book::open(&file).expect("the book opens"))
+            .write_copy(&copy)
+            .expect("the copy is written");
+        std::fs::write(&file, [0xff, 0xfe, 0x00]).expect("the file is replaced");
+        let opened = Book::open_copy(&file, &copy).expect("the copy opens");
+        assert_eq!(opened.joined.text, "# One\n\nSaved words.\n");
+        Bench::new(opened).lay_out(&[], &Cancel::default()).expect("it sets");
         std::fs::remove_dir_all(&dir).ok();
     }
 

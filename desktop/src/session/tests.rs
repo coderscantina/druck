@@ -1336,6 +1336,49 @@ fn undoing_a_move_leaves_a_part_line_the_author_moved_since() {
 }
 
 #[test]
+fn undoing_a_move_leaves_a_part_line_the_author_moved_across_a_comment() {
+    let files = [
+        ("preface.md", "::: front-matter\n\n# Preface {-}\n"),
+        ("one.md", "::: main-matter\n\n# One\n"),
+        ("two.md", "<!-- note -->\n\n# Two\n"),
+    ];
+    let (_folder, mut session) = book_of("move-across-comment", &files);
+    let [_, one, two] = session.book()[..] else {
+        panic!("three chapters")
+    };
+    session.move_chapter(one, 3).expect("moves");
+    let left = "<!-- note -->\n\n::: main-matter\n\n# Two\n";
+    assert_eq!(session.buffer(two).text(), left);
+    let moved = "::: main-matter\n\n<!-- note -->\n\n# Two\n";
+    (session.edit_chapter(two, vec![Edit::new(0..left.len(), moved)], EditKind::Typing)).expect("valid");
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(session.book()[1], one);
+    assert_eq!(session.buffer(one).text(), "# One\n");
+    assert_eq!(session.buffer(two).text(), moved);
+}
+
+#[test]
+fn undoing_a_move_puts_a_part_line_back_where_it_stood_around_comments() {
+    let files = [
+        ("preface.md", "::: front-matter\n\n# Preface {-}\n"),
+        ("one.md", "::: main-matter\n\n<!-- draft -->\n\n# One\n"),
+        ("two.md", "# Two\n"),
+        ("three.md", "<!-- end -->\n::: back-matter\n\n# Three\n"),
+    ];
+    let (_folder, mut session) = book_of("move-back-exactly", &files);
+    let order = session.book().to_vec();
+    session.move_chapter(order[1], 4).expect("moves");
+    session.move_chapter(order[3], 1).expect("moves");
+    assert!(!session.buffer(order[3]).text().contains("back-matter"));
+    assert!(session.undo_move().expect("undoes"));
+    assert!(session.undo_move().expect("undoes"));
+    assert_eq!(session.book(), order);
+    for (id, (_, text)) in order.iter().zip(files) {
+        assert_eq!(session.buffer(*id).text(), text);
+    }
+}
+
+#[test]
 fn a_part_line_never_goes_into_a_chapter_gone_from_disk() {
     let files = [
         ("one.md", "::: main-matter\n\n# One\n"),

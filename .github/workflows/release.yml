@@ -166,7 +166,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist-desktop
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" ./*.dmg ./*.dmg.sha256
+          # A rerun finds the DMG and its checksum from the first run and replaces them with the same build's, so it
+          # reaches the feed instead of failing on their names.
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber ./*.dmg ./*.dmg.sha256
           if ! gh release view appcast --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release create appcast --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title "Desktop update feed" --notes "The feed the desktop app checks for updates. Each release replaces appcast.xml."

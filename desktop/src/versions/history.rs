@@ -246,12 +246,14 @@ impl History {
         fs::remove_file(log)
     }
 
-    /// Every log whose path holds no file any more.
+    /// Every log whose path holds no file any more. A log [`Self::begin`] set aside is none: it still names the path a
+    /// new page took, so it is never followed or offered, and only thinning clears it.
     fn orphans(&self) -> Vec<Orphan> {
         let mut found = Vec::new();
         for entry in fs::read_dir(self.files()).into_iter().flatten().flatten() {
             let log = entry.path();
             if let Some(path) = read_path(&log)
+                && log == self.log_of(&path)
                 && !path.exists()
             {
                 found.push(Orphan { path, log });
@@ -831,6 +833,24 @@ mod tests {
         assert_eq!(versions[0].time, 3);
         let logs = fs::read_dir(history.files()).unwrap().count();
         assert_eq!(logs, 2, "the deleted page's log is set aside, not removed");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_set_aside_log_is_never_followed() {
+        let (dir, history) = store("set-aside");
+        let page = dir.join("dedication.md");
+        history.snapshot(&page, "For someone.\n", None, 1).unwrap();
+        fs::write(&page, "For someone.\n").unwrap();
+        history.begin(std::slice::from_ref(&page), 2).unwrap();
+        let renamed = dir.join("thanks.md");
+        fs::rename(&page, &renamed).unwrap();
+        let live = [renamed.clone()];
+        let followed = history.follow(&live, &live);
+        assert_eq!(followed.files, 1);
+        assert!(followed.unplaced.is_empty());
+        let versions = history.versions(&renamed);
+        assert_eq!(versions.iter().map(|version| version.time).collect::<Vec<_>>(), [2]);
         fs::remove_dir_all(dir).ok();
     }
 
