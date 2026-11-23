@@ -5,6 +5,8 @@
 //! time, at most a page of lines ahead. A page costs the penalty of its break plus how far its
 //! content falls short of the bottom after the space between blocks has stretched within bounds.
 //! The final page and pages ending at an explicit break may be short at no cost.
+//! A page that ends before a block taller than its room costs only in proportion to how short it is,
+//! so the pages before it fill rather than share its gap.
 //!
 //! Footnotes are placed while breaks are chosen, so their height moves the break. A note starts on
 //! the page of its reference. Only the last note on a page may continue on the next one, where a
@@ -717,6 +719,15 @@ impl<'a> Composer<'a> {
         to <= from + 1 || self.switches[to - 1] == self.switches[from]
     }
 
+    /// The height of the lines from `start` to the first a page may end after, with the space above them:
+    /// what the next page has to start with when a page ends before `start`.
+    fn next_chunk(&self, start: usize) -> f64 {
+        let end = (start..self.body.len())
+            .find(|&index| self.body[index].after.ends_page())
+            .map_or(self.body.len(), |index| index + 1);
+        self.top[end] - self.top[start]
+    }
+
     /// The height of the header row set above line `index` when a page or column starts there.
     fn repeat(&self, index: usize) -> f64 {
         self.headers[index].map_or(0.0, |header| header.height)
@@ -1063,7 +1074,13 @@ impl<'a> Composer<'a> {
                         let used = short.min(page_stretch);
                         let ratio = if page_stretch > 0.0 { used / page_stretch } else { 0.0 };
                         let lines = (short - used + deficit) / self.line;
-                        (STRETCHED * ratio.powi(3) + SHORT * lines * lines, ratio, lines)
+                        // A page that ends before a block taller than the room it leaves is short because of
+                        // that block. Lines from the pages before would not close the gap, only spread it, so
+                        // its shortfall costs in proportion: moving lines onto it never pays. A page ending in
+                        // columns has room in its shorter column too.
+                        let blocked = lines > 1.0 && self.next_chunk(end) > short + deficit;
+                        let missing = if blocked { lines } else { lines * lines };
+                        (STRETCHED * ratio.powi(3) + SHORT * missing, ratio, lines)
                     };
                     let (rules, flaws) = self.page_rules(state, (start, end), (lines, free), continues, verso);
                     let split = self.notes.split(from, placed, max);
@@ -1738,6 +1755,21 @@ mod tests {
             .expect("breaks exist");
         let pages: Vec<_> = plans.into_iter().map(|plan| (plan.lines, plan.notes)).collect();
         assert_eq!(pages, vec![(0..8, 0..0), (8..14, 0..4)]);
+    }
+
+    #[test]
+    fn a_page_left_short_by_the_block_after_it_takes_no_lines_from_the_page_before() {
+        // The second page holds four lines and cannot take the eight that must stay together after them.
+        let mut body = paragraph(10);
+        body.extend(paragraph(4));
+        let mut block = loose(8, &[]);
+        for flow_line in &mut block[..7] {
+            flow_line.after = Break::Never;
+        }
+        body.extend(block);
+        body.extend(paragraph(2));
+        // Three lines moved over would leave both pages three short, which only spreads the gap.
+        assert_eq!(body_pages(&body), vec![0..10, 10..14, 14..24]);
     }
 
     #[test]

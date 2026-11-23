@@ -74,7 +74,7 @@ A keep group taller than a page cannot be honoured. Druck does not split it sile
 
 Paragraphs that follow one another are separated by an indent, not by space, so a page of plain prose has no room to stretch. Its last line ends wherever the line grid ends, at most one line short of the bottom. Pages with headings, lists, quotations, or code have space between blocks, and that space can grow a little to bring the last line to the bottom.
 
-The growth is bounded. Each space may grow by half of its natural height and no more. A page that would need more than that runs short instead, and the cost of running short grows with the square of the missing height, so the search prefers several pages that are each slightly short over one page with a large gap.
+The growth is bounded. Each space may grow by half of its natural height and no more. A page that would need more than that runs short instead, and the cost of running short grows with the square of the missing height, so the search prefers several pages that are each slightly short over one page with a large gap. The exception is a page that ends before a block too tall for the room it has left: lines from the pages before could not close that gap, only spread it, so they stay where they are.
 
 > A quotation is set apart by space above and below it. That space is one of the places where a page can absorb a difference in height without anyone noticing.
 
