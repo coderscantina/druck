@@ -323,17 +323,16 @@ fn notes_from_each_column_go_to_the_margin_beside_it() {
 }
 
 #[test]
-fn notes_beside_columns_need_room_in_the_inner_margin() {
+fn notes_from_the_inner_column_stay_outside_where_the_inner_margin_is_too_narrow() {
     let config = config(json!({"version": 1, "page": {"margins": {"inner": "15mm"}}}));
     let columns = "::: columns\nText.[^a]\n:::\n\n[^a]: {-} Note.\n";
-    let errors = try_render(&config, columns, &[]).expect_err("no inner room");
-    assert!(
-        errors[0].message.contains("page.margins.inner"),
-        "{}",
-        errors[0].message
-    );
-    // Without a columns section the notes stay in the outer margin.
-    assert!(try_render(&config, "Text.[^a]\n\n[^a]: {-} Note.\n", &[]).is_ok());
+    let output = render(&config, columns, &[]);
+    let [aside] = output.asides.as_slice() else {
+        panic!("one note")
+    };
+    let page = &config.page;
+    let outer = page.margin_inner.0 + page.prose_width.0 + config.margin_notes.gap.0;
+    assert!(close(aside.rect.x.0, outer), "{aside:?}");
 }
 
 #[test]

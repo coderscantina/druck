@@ -525,7 +525,7 @@ Gutenberg printed about 180 copies.[^copies]
 
 - The outer side is on the right of odd pages and on the left of even pages, or always on the right when the theme keeps margins the same on every page. A note referenced in a table cell stands beside the line of its cell.
 - Notes that would overlap stack downward. If the last note of a page would run past the bottom of the text area, the notes of the page move up together as far as needed, so a note may start above its line. Page breaks take the notes into account, so the notes of a page always fit.
-- In a two-column section, a note stands in the margin nearest its column: notes from the left column in the left margin and notes from the right column in the right margin, each beside its line. Notes in a `full-width` block stand in the outer margin.
+- In a two-column section, a note stands in the margin nearest its column: notes from the left column in the left margin and notes from the right column in the right margin, each beside its line. Where the inner margin is too narrow for the note column, as in a layout with a wide outer margin for notes, notes from the inner column stand in the outer margin too. Notes in a `full-width` block stand in the outer margin.
 - Margin notes follow all footnote rules: one reference per note, no reference inside a footnote, no definition without a reference. Footnote numbers skip them. Write `\{-}` for a footnote that starts with those characters.
 - A note too tall for the page, or notes that cannot share a page with the lines they belong to, are errors that name the note's line.
 
@@ -567,7 +567,7 @@ Text in a `columns` section is set in two columns of equal width with `column-ga
 
 When a section ends, its last columns are balanced: the column break goes where both columns are most even, and the next block starts below the taller column. A `full-width` block inside a section does the same before it, runs across the text area, and the columns resume below it. Changing between one and two columns never starts a new page by itself. At least `column-gap` separates the columns from the full-width text above and below them.
 
-Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, a table breaks between rows with its header repeated, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order. Margin notes stand in the margin nearest their column, beside their lines.
+Columns follow the same rules as pages. A heading stays at the top of its text, a `keep` group stays in one column, a table breaks between rows with its header repeated, and a paragraph's first or last line is not left alone at the foot or top of a column if a break one line less even avoids it. A keep group taller than a column is an error at its directive. So is a code line or word wider than a column, at its line. Footnotes referenced in either column go to the shared note area at the foot of the page, in reference order. Margin notes stand in the margin nearest their column, beside their lines, see [margin notes](#margin-notes).
 
 `page-break` inside a section ends the page. The columns above it are balanced, and the section continues in two columns on the next page.
 

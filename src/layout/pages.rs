@@ -1256,6 +1256,9 @@ fn render(
     // The column each body line is set in, whose notes stand in the margin beside it; `None` across the prose,
     // whose notes stand in the outer margin.
     let mut sides = vec![None; tops.len()];
+    // Notes from the inner column stay in the outer margin where the inner one is too narrow for them.
+    let note_room = config.margin_notes.gap.0 + config.margin_notes.width.0;
+    let inner_room = note_room <= geometry.margin_inner.0 + 1e-6;
     let mut referenced = margin.references.iter().enumerate().peekable();
     let mut issues = Vec::new();
     for plan in plans {
@@ -1448,7 +1451,8 @@ fn render(
         // The notes beside this page's lines, each wanting its first baseline on its reference's.
         let mut wanted = Vec::new();
         while let Some((note, &(line, offset))) = referenced.next_if(|(_, (line, _))| plan.lines.contains(line)) {
-            let side = sides[line].unwrap_or_else(|| geometry.outer_side(index));
+            let outer = geometry.outer_side(index);
+            let side = sides[line].filter(|&side| side == outer || inner_room).unwrap_or(outer);
             wanted.push((note, tops[line] + offset, side));
         }
         let first_aside = asides.len();

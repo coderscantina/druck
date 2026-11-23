@@ -1,5 +1,5 @@
 //! Margin notes and sidenotes: notes set in a column beside the prose, on the outer side of the page, or in a
-//! columns section on the side of their column.
+//! columns section on the side of their column where the inner margin has room.
 //!
 //! A margin note is a footnote whose definition starts with `{-}`. With `margin-notes.sidenotes`, numbered
 //! footnotes go to the same column instead of the foot of the page. Notes are set at the column width in
@@ -11,7 +11,7 @@ use super::{FlowLine, Frame, NoteRef};
 use crate::config::resolved::Config;
 use crate::config::source::InputSource;
 use crate::diagnostic::Diagnostic;
-use crate::document::{Block, Document, Footnote};
+use crate::document::{Document, Footnote};
 use crate::output::NoteKind;
 use crate::tags::Kind;
 
@@ -27,16 +27,10 @@ pub(super) fn check(document: &Document, config: &Config, source: &InputSource) 
     let need = notes.gap.0 + notes.width.0;
     let room = page.outer_room();
     let free = page.text_width().0 - page.prose_width.0;
-    let inner = page.margin_inner.0;
     let message = if need > room + 1e-6 {
         format!(
             "the margin note column needs {need:.1}pt beside the prose (margin-notes.gap and margin-notes.width), but \
              only {room:.1}pt are left to the edge of the page"
-        )
-    } else if need > inner + 1e-6 && has_columns(&document.blocks) {
-        format!(
-            "notes from the inner column of a columns section stand in the inner margin and need {need:.1}pt there \
-             (margin-notes.gap and margin-notes.width), but page.margins.inner is {inner:.1}pt"
         )
     } else if notes.gap.0 < free - 1e-6 && !page.wide.is_empty() {
         format!(
@@ -48,17 +42,6 @@ pub(super) fn check(document: &Document, config: &Config, source: &InputSource) 
         return Ok(());
     };
     Err(vec![Diagnostic::new(Some(source.clone()), message)])
-}
-
-/// Whether `blocks` hold a columns section, whose notes from one column stand in the inner margin.
-fn has_columns(blocks: &[Block]) -> bool {
-    blocks.iter().any(|block| match block {
-        Block::Columns { .. } => true,
-        Block::Quote { blocks, .. } | Block::Callout { blocks, .. } | Block::Bottom { blocks, .. } => {
-            has_columns(blocks)
-        }
-        _ => false,
-    })
 }
 
 impl<'a> super::Flow<'a> {
