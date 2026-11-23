@@ -34,7 +34,7 @@ crate::strings! {
         KindHeading => ("Heading", "Überschrift"),
         KindFigure => ("Figure", "Abbildung"),
         KindTable => ("Table", "Tabelle"),
-        AlignDefault => ("Align column as the theme does", "Spalte wie im Theme ausrichten"),
+        AlignDefault => ("Align column by theme", "Wie im Theme ausrichten"),
         AlignLeft => ("Align column left", "Spalte links ausrichten"),
         AlignCenter => ("Center column", "Spalte zentrieren"),
         AlignRight => ("Align column right", "Spalte rechts ausrichten"),

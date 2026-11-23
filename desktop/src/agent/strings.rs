@@ -167,10 +167,10 @@ crate::strings! {
         BeforePass => ("Before {pass}", "Vor {pass}"),
         FixProof => ("Fix the proof", "Satzwarnungen beheben"),
         FixReading => ("Fix the proof \u{b7} reading the pages", "Satzwarnungen beheben \u{b7} Seiten werden gelesen"),
-        FixTrying => ("Fix the proof \u{b7} trying fixes", "Satzwarnungen beheben \u{b7} Korrekturen werden probiert"),
+        FixTrying => ("Fix the proof \u{b7} trying fixes", "Satzwarnungen beheben \u{b7} testet Korrekturen"),
         FixTryingKept => (
             "Fix the proof \u{b7} trying fixes \u{b7} {kept} kept",
-            "Satzwarnungen beheben \u{b7} Korrekturen werden probiert \u{b7} {kept} behalten"
+            "Satzwarnungen beheben \u{b7} testet Korrekturen \u{b7} {kept} behalten"
         ),
         FixDoneNone => ("Fix the proof is done: no fix helped.", "Satzwarnungen beheben ist fertig: Keine Satzkorrektur half."),
         FixDoneOne => (
