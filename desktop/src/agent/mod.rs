@@ -499,6 +499,12 @@ impl AgentView {
                         .update(cx, |persist, cx| persist.show_note(note, window, cx));
                 }
                 view.cli = Some(cli);
+                // The prompt shows only once the CLI is found, so a card opened before that gets the keys now, unless
+                // the author took them elsewhere meanwhile.
+                let editor = view.editor.read(cx).focus_handle(cx);
+                if view.chat_open && view.cli_usable() && window.focused(cx).is_none_or(|focused| focused == editor) {
+                    window.focus(&view.prompt.read(cx).focus_handle(cx), cx);
+                }
                 if let Some((slug, scope)) = view.pass_asked.take() {
                     view.run_pass(&slug, scope, window, cx);
                 }
