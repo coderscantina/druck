@@ -99,6 +99,12 @@ Everything only a person can do or decide, most important first. Run the app wit
 
 ## Resume note
 
+### Special pages note
+
+On 2026-11-23, on branch `special-pages`, the book's structure moved out of the text and into the Binder, from the owner's [ratings](DESIGN.md#special-page-ratings-2026-11-23), see [the decision](DECISIONS.md#2026-11-23-pages-in-the-binder-writing-in-the-text). Checks: `cargo test -p druck-desktop` (922 passed), clippy and fmt clean. Not merged into `main`.
+
+Open: a real mouse and drag in the Binder, a bibliography page on screen, and moves in single files. The starters keep the copyright, dedication, and contents in one front file, so a new novel shows one "Front" row where the sample shows three. Index marks (‸) after many words crowd running text. The engine does not expose the contents depth or the made pages' titles to the app.
+
 ### Region editing note
 
 On 2026-11-19, on branch `region-editing`, marks, region edges, malformed regions, and front matter were reworked after a council review, see [the decision](DECISIONS.md#2026-11-19-marks-and-region-edges). Checks: `cargo test -p druck-desktop` (896 passed), `cargo clippy -p druck-desktop --all-targets --no-deps -- -D warnings`, and `cargo fmt --all --check`, all clean. Key runs in a debug build with `DRUCK_GATE=2`, keys by PID, comparing the file after each step: marks, typing and undo at a mark, edits across a fence, Remove line, Select All, pasted regions, and Left and redo beside hidden fence lines.
