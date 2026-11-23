@@ -207,7 +207,11 @@ impl AgentView {
             self.pass_run.is_some(),
             self.fixing.is_running(),
             (self.fixes().iter())
-                .map(|entry| format!("{} ({})", entry.title(), super::strings::fix_counts(&entry.counts).join("; ")))
+                .map(|entry| format!(
+                    "{} ({})",
+                    entry.title(),
+                    super::strings::fix_counts(&entry.counts).join("; ")
+                ))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.warnings_to_fix(cx),
