@@ -8,6 +8,7 @@ mod strings;
 #[cfg(test)]
 mod tests;
 
+use std::num::NonZeroUsize;
 use std::ops::Range;
 
 use druck::editor::placeholders::{self as engine, Date, Placeholder, Statistics};
@@ -74,7 +75,8 @@ const NAMES: [(&str, Group); 18] = [
     ("draft", Group::Book),
     ("year", Group::Date),
     ("build-date", Group::Date),
-    // Never listed: the page placeholders are for headers and footers. They stand here so a lookup names them.
+    // Never listed: the page placeholders take their value from the page they land on. They stand here so a lookup
+    // names them.
     ("page", Group::Book),
     ("section", Group::Book),
 ];
@@ -91,7 +93,7 @@ pub enum Lookup {
     /// Known, and not counted yet.
     Counting,
     Unknown,
-    /// `{page}` and its kind, which only headers and footers have.
+    /// `{page}` and its kind, whose value is the page's the placeholder lands on.
     PageDependent,
 }
 
@@ -108,6 +110,8 @@ pub struct Values {
     draft: bool,
     meta: Vec<(String, String)>,
     statistics: Option<Statistics>,
+    /// Words a minute for `{reading-time}`, from the settings and the language.
+    speed: Option<NonZeroUsize>,
     today: Option<Date>,
 }
 
@@ -117,6 +121,7 @@ impl Values {
         let mut values = Self {
             lang: if lang == "de" { "de" } else { "en" }.to_owned(),
             statistics,
+            speed: Some(engine::words_per_minute(settings, lang)),
             today: engine::today(),
             ..Self::default()
         };
@@ -169,7 +174,7 @@ impl Values {
                     Placeholder::Figures => count(|s| s.figures),
                     Placeholder::Tables => count(|s| s.tables),
                     _ => (self.statistics.as_ref())
-                        .map(|statistics| engine::count(engine::reading_time(statistics, &self.lang), &self.lang)),
+                        .map(|statistics| engine::count(statistics.reading_time(self.reading_speed()), &self.lang)),
                 };
                 return counted.map_or(Lookup::Counting, Lookup::Value);
             }
@@ -191,9 +196,9 @@ impl Values {
         names
     }
 
-    /// Words a minute for `{reading-time}` in this book's language, which the card says.
-    pub fn reading_speed(&self) -> usize {
-        engine::words_per_minute(&self.lang)
+    /// Words a minute for `{reading-time}`: the book's `meta.reading-speed`, else its language's. The card says it.
+    pub fn reading_speed(&self) -> NonZeroUsize {
+        (self.speed).unwrap_or_else(|| engine::words_per_minute(None, &self.lang))
     }
 }
 
@@ -261,7 +266,7 @@ pub fn shown(lookup: &Lookup) -> String {
         Lookup::NoValue => crate::t!(Key::NoValue).to_owned(),
         Lookup::Counting => crate::t!(Key::Counting).to_owned(),
         Lookup::Unknown => crate::t!(Key::Unknown).to_owned(),
-        Lookup::PageDependent => crate::t!(Key::OnlyInBands).to_owned(),
+        Lookup::PageDependent => crate::t!(Key::OnItsPage).to_owned(),
     }
 }
 
@@ -288,7 +293,8 @@ pub fn filled(line: &str, values: &Values) -> String {
 const KEEP_TOGETHER: usize = 32;
 
 /// The chips of a block's placeholders and todos. A placeholder the caret stands inside shows its source, so it can be
-/// typed in. One without a value, with an unknown name, or in a heading shows its source in the accent color.
+/// typed in. A page placeholder shows its source as a value, since its value is the page's it lands on. One without a
+/// value, with an unknown name, or in a heading shows its source in the accent color.
 pub fn chips(
     kind: BlockKind,
     text: &str,
@@ -314,7 +320,8 @@ pub fn chips(
                 let (shown, look) = match lookup {
                     Lookup::Value(value) => (value, ChipLook::Value),
                     Lookup::Counting => ("…".to_owned(), ChipLook::Value),
-                    _ => (written.to_owned(), ChipLook::Open),
+                    Lookup::PageDependent => (written.to_owned(), ChipLook::Value),
+                    Lookup::NoValue | Lookup::Unknown => (written.to_owned(), ChipLook::Open),
                 };
                 let shown = if shown.chars().count() <= KEEP_TOGETHER {
                     shown.replace(' ', "\u{a0}")

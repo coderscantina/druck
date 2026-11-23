@@ -32,6 +32,7 @@ use std::time::Instant;
 use druck::editor::engine;
 use druck::editor::resolved_config::{ChapterEntry, DEFAULT_STATUSES, FrontMatter};
 use druck::input::{MANIFEST, ThemeDirs};
+use druck::output::PageTitles;
 use druck::resource::{FileResolver, Origin, Resolver, normalize};
 
 pub use self::details::{Details, Field, LANGUAGES, MetaRow};
@@ -295,6 +296,9 @@ pub struct Session {
     /// The book's orders before each move, for undoing moves, and after each undone one, for redoing them. A change to
     /// the manifest from outside clears both.
     moves: Moves,
+    /// The made pages' headings as the theme words them, from the last layout. Before one their rows have the app's
+    /// words.
+    page_titles: Option<PageTitles>,
 }
 
 /// Orders of the book to go back or forward to.
@@ -340,6 +344,7 @@ impl Session {
             synced: HashMap::new(),
             held: HashSet::new(),
             moves: Moves::default(),
+            page_titles: None,
         }
     }
 
@@ -708,6 +713,8 @@ impl Session {
                 Group::Manifest => contents.manifest.push(row),
             }
         }
+        // A pass made in the app comes after the ones read at opening; the Binder lists them by name all the same.
+        (contents.passes).sort_by_cached_key(|row| row.title.to_lowercase());
         contents
     }
 
@@ -782,9 +789,34 @@ impl Session {
                     (outline.words.clone()).unwrap_or_else(|| crate::t!(Key::PlainPage).to_owned())
                 }
                 (None, RowKind::Plain, Kind::Project { .. }) => title_from_file(&stem()),
-                (None, kind, _) => role_name(kind).to_owned(),
+                (None, kind, _) => self.page_title(kind).unwrap_or_else(|| role_name(kind)).to_owned(),
             },
         }
+    }
+
+    /// The heading the last layout gave the made page of `kind`, as the theme words it. Other pages have none.
+    pub fn page_title(&self, kind: RowKind) -> Option<&str> {
+        let titles = self.page_titles.as_ref()?;
+        match kind {
+            RowKind::Contents => Some(&titles.contents),
+            RowKind::Index => Some(&titles.index),
+            RowKind::Bibliography => Some(&titles.bibliography),
+            _ => None,
+        }
+    }
+
+    /// The made pages' headings the last layout gave.
+    pub fn page_titles(&self) -> Option<&PageTitles> {
+        self.page_titles.as_ref()
+    }
+
+    /// Takes the made pages' headings of a fresh layout. Whether they changed, so the rows are named again.
+    pub fn set_page_titles(&mut self, titles: &PageTitles) -> bool {
+        let changed = self.page_titles.as_ref() != Some(titles);
+        if changed {
+            self.page_titles = Some(titles.clone());
+        }
+        changed
     }
 
     /// A note's name: its path below its folder, without the extension.

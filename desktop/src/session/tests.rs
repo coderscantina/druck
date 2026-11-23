@@ -108,8 +108,14 @@ fn the_projects_passes_are_a_group_of_their_own() {
         "---\nname: Titles\nreturns: notes\n---\nCheck the titles.\n",
     );
     assert!(session.discover_files());
+    folder.write("passes/consistency.md", "Check the names.\n");
+    assert!(session.discover_files());
     let contents = session.contents();
-    assert_eq!(titles(&contents.passes), ["titles"]);
+    assert_eq!(
+        titles(&contents.passes),
+        ["consistency", "titles"],
+        "by name, not by when they came"
+    );
     assert!(
         contents
             .not_in_book
@@ -198,6 +204,39 @@ fn a_single_file_splits_in_view_and_joins_to_the_same_bytes() {
     typing(&mut session, two, end, "Added.\n");
     assert_eq!(session.save(), Ok(1));
     assert_eq!(folder.read("whole.md"), format!("{text}Added.\n"));
+}
+
+#[test]
+fn a_change_to_a_single_file_names_the_section_it_is_in() {
+    let folder = Folder::new("changed-section");
+    let text = "---\ntitle: Whole\n---\n\n# One\n\nText.\n\n# Two\n\nMore.\n";
+    let path = folder.write("whole.md", text);
+    let session = Session::open(&path).expect("opens");
+    let changed = text.replace("More.", "More, and again.");
+    let section = session.changed_section(&path, text, &changed);
+    assert_eq!(section.map(|id| session.title_of(id)).as_deref(), Some("Two"));
+}
+
+#[test]
+fn a_made_pages_row_takes_the_title_the_layout_gives_it() {
+    let folder = Folder::new("page-titles");
+    let path = folder.write("whole.md", "---\nlang: de\n---\n\n::: toc\n\n# One\n\nText.\n");
+    let mut session = Session::open(&path).expect("opens");
+    assert!(
+        titles(&session.contents().book).contains(&"Contents"),
+        "the app's words before a layout"
+    );
+    let laid = layout(&session);
+    assert!(session.set_page_titles(laid.page_titles()));
+    assert!(
+        !session.set_page_titles(laid.page_titles()),
+        "the same titles change nothing"
+    );
+    assert!(
+        titles(&session.contents().book).contains(&"Inhalt"),
+        "{:?}",
+        titles(&session.contents().book)
+    );
 }
 
 #[test]

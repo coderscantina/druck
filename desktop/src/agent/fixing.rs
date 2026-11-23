@@ -91,6 +91,9 @@ impl Entry {
             Fix::Placement(_, Placement::Top) => crate::t!(Key::FixPlacementTop).to_owned(),
             Fix::Placement(_, Placement::Bottom) => crate::t!(Key::FixPlacementBottom).to_owned(),
             Fix::Placement(_, Placement::Here) => crate::t!(Key::FixPlacementHere).to_owned(),
+            Fix::TablePlacement(_, Placement::Top) => crate::t!(Key::FixTableTop).to_owned(),
+            Fix::TablePlacement(_, Placement::Bottom) => crate::t!(Key::FixTableBottom).to_owned(),
+            Fix::TablePlacement(_, Placement::Here) => crate::t!(Key::FixTableHere).to_owned(),
             Fix::Theme { property, value } => crate::t!(Key::FixTheme, property = property, value = value),
         }
     }
@@ -272,7 +275,7 @@ fn kept_of(bench: &Bench, tried: Tried) -> Kept {
         .and_then(|(before, after)| Some((paint(&tried.before, before)?, paint(&tried.after, after)?)));
     let anchor = tried.fix.place().and_then(|place| {
         let (_, text) = bench.book().file(&place.file)?;
-        let block = fix::block_at(text, place.line).ok()?;
+        let block = fix::block_of(text, &tried.fix).ok()?;
         Some((text[block.clone()].lines().next()?.to_owned(), block.start))
     });
     Kept {
@@ -711,17 +714,7 @@ fn located(entry: &Entry, text: &str) -> Option<Fix> {
         return Some(entry.fix.clone());
     };
     let start = trial::nearest(text, words, *near)?;
-    Some(fix_at(&entry.fix, fix::line_of(text, start)))
-}
-
-/// The same fix at another line of its file.
-fn fix_at(fix: &Fix, line: usize) -> Fix {
-    let mut moved = fix.clone();
-    match &mut moved {
-        Fix::PageBreak(place) | Fix::Keep(place) | Fix::Placement(place, _) => place.line = line,
-        Fix::Theme { .. } => {}
-    }
-    moved
+    Some(entry.fix.at_line(fix::line_of(text, start)))
 }
 
 #[cfg(test)]

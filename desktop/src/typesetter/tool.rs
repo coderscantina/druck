@@ -34,9 +34,10 @@ pub fn definition() -> Value {
                         "properties": {
                             "kind": {
                                 "type": "string",
-                                "enum": ["page-break", "keep", "placement", "theme"],
+                                "enum": ["page-break", "keep", "placement", "table-placement", "theme"],
                                 "description": "page-break: a page break before the block. keep: the block is not \
-                                    split across pages. placement: where a figure goes. theme: one book-wide value.",
+                                    split across pages. placement: where a figure goes. table-placement: where a \
+                                    table goes, at any line of the table. theme: one book-wide value.",
                             },
                             "file": {"type": "string", "description": "The chapter's file, relative to the project folder. Not for theme."},
                             "line": {"type": "integer", "description": "The line the block starts on in that file as it is on disk. Not for theme."},
@@ -44,7 +45,7 @@ pub fn definition() -> Value {
                                 "type": "string",
                                 "description": "For theme: typesetting.hyphen-fragments, styles.<style>.tracking, or styles.<style>.hyphenate.",
                             },
-                            "value": {"description": "For placement: top, bottom, or here. For theme: the value, such as [2, 2], 0.01, or true."},
+                            "value": {"description": "For placement and table-placement: top, bottom, or here. For theme: the value, such as [2, 2], 0.01, or true."},
                         },
                         "required": ["kind"],
                     },
@@ -262,7 +263,9 @@ pub fn prompt(book: &Book, warnings: &[Warning], limit: Option<usize>) -> String
          - chapter-end-short: a page-break before the block ahead of that page's first block, both named in the list, \
          so the last page holds more. A break before the first block itself changes no page and is not kept.\n\
          - page-short, page-uneven: a page break cannot mend these, since it only excuses the page before it, and that \
-         does not count as clearing. Leave them unless a fix for another warning clears them.\n\
+         does not count as clearing. Where a figure or a table on the next page left the page short, try its \
+         placement as top or bottom: placement for a figure, table-placement for a table, at its line. Leave the \
+         others unless a fix for another warning clears them.\n\
          - loose-line, too-many-hyphens, short-last-line: only a theme value moves these without changing words. Try \
          typesetting.hyphen-fragments as [2, 2] and [2, 3], styles.body.tracking between -0.02 and 0.02, and \
          styles.body.hyphenate as true in case the theme turned hyphenation off. A theme value changes every page, so \

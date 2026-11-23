@@ -433,12 +433,13 @@ impl AgentView {
         };
         // Prose changes inside a line, which two whole lines show as the same text: a chapter's row counts lines, and Show
         // goes to the words in the text.
+        // A long line is cut to the words around its change, as the approval card cuts it.
         let lines = if can_show { &[][..] } else { &hunk.lines[..] };
-        let shown: Vec<_> = lines
-            .iter()
-            .filter(|line| line.mark != Mark::Context)
+        let marks: Vec<(Mark, &str)> = lines.iter().map(|line| (line.mark, line.text.as_str())).collect();
+        let shown: Vec<_> = (lines.iter().zip(super::diff::cut(&marks)))
+            .filter(|(line, _)| line.mark != Mark::Context)
             .take(4)
-            .map(|line| {
+            .map(|(line, text)| {
                 let (sign, color) = if line.mark == Mark::Added {
                     ("+", tokens.added)
                 } else {
@@ -451,7 +452,7 @@ impl AgentView {
                     .text_size(tokens::TEXT_SMALL)
                     .text_color(color)
                     .child(div().flex_none().child(sign))
-                    .child(div().min_w_0().flex_1().truncate().child(line.text.clone()))
+                    .child(div().min_w_0().flex_1().truncate().child(text))
             })
             .collect();
         let id = tracked.id;

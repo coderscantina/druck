@@ -11,7 +11,7 @@ crate::strings! {
         NoValue => ("no value", "kein Wert"),
         Counting => ("counting", "wird gezählt"),
         Unknown => ("Unknown placeholder", "Unbekannter Platzhalter"),
-        OnlyInBands => ("Only in headers and footers", "Nur in Kopf- und Fußzeilen"),
+        OnItsPage => ("From the page it stands on", "Von der Seite, auf der er steht"),
         NotInHeading => ("Not in a heading", "Nicht in Überschriften"),
         Writes => ("Writes", "Schreibt"),
         Insert => ("Insert", "Einfügen"),

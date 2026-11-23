@@ -374,38 +374,17 @@ impl EditorView {
         );
     }
 
-    /// Where the table is placed now: `top`, `bottom`, or empty.
-    fn placement_of(grid: &Grid, text: &str) -> String {
-        if grid.caption.placement.is_empty() {
-            grid.directive_placement(text).unwrap_or("").to_owned()
-        } else {
-            grid.caption.placement.clone()
-        }
-    }
-
     /// Sets the table's placement, or with none named steps to the next one.
     fn grid_set_placement(&mut self, placement: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         self.grid_change(
             |grid, text, _, _| {
-                let now = Self::placement_of(grid, text);
+                let now = grid.placement(text);
                 let placement = placement.unwrap_or(match now.as_str() {
                     "" => "top",
                     "top" => "bottom",
                     _ => "",
                 });
-                // A list table's placement is an option of its directive, so it needs no caption. A caption that
-                // already holds the placement keeps it, since the engine takes one placement for a table.
-                if grid.is_list() && grid.caption.placement.is_empty() {
-                    return Ok(grid.set_directive_placement(text, placement).into_iter().collect());
-                }
-                if grid.caption.text.is_empty() {
-                    return Err(Key::PlacementNeedsCaption);
-                }
-                let caption = Caption {
-                    placement: placement.to_owned(),
-                    ..grid.caption.clone()
-                };
-                Ok(grid.set_caption(text, &caption).into_iter().collect())
+                grid.set_placement(text, placement)
             },
             |row, cell| (row, cell),
             window,
@@ -598,7 +577,7 @@ impl EditorView {
         let column = column_of(&grid, row, cell);
         let align = grid.aligns.get(column).copied().unwrap_or_default();
         let fills = grid.fills(text, column);
-        let placement = Self::placement_of(&grid, text);
+        let placement = grid.placement(text);
         let table = "icons/block-table.svg";
         let mut rows = Vec::new();
         let mut add = |key: Key, icon: &'static str, on: bool, act: TableAct| {

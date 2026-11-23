@@ -848,9 +848,11 @@ impl PersistView {
     }
 
     fn tell(&mut self, change: FileChange, window: &mut Window, cx: &mut Context<Self>) {
-        let name = change
-            .chapter
-            .map_or_else(|| file_name(&change.path), |chapter| self.session(cx).title_of(chapter));
+        let session = self.session(cx);
+        let chapter = (change.theirs.as_deref())
+            .and_then(|theirs| session.changed_section(&change.path, &change.base, theirs))
+            .or(change.chapter);
+        let name = chapter.map_or_else(|| file_name(&change.path), |chapter| session.title_of(chapter));
         let updated = |source: &Source| match source {
             Source::Elsewhere => crate::t!(Key::Reloaded).to_owned(),
             Source::Agent => crate::t!(Key::ReloadedAgent).to_owned(),

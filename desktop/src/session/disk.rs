@@ -178,6 +178,13 @@ impl Session {
         None
     }
 
+    /// The section of a file that holds the first place where `after`, the file's text as the buffers hold it now,
+    /// differs from `before`. A change to a single file is named by the section it is in, not by the file's first.
+    pub fn changed_section(&self, path: &Path, before: &str, after: &str) -> Option<ChapterId> {
+        let at = (before.bytes().zip(after.bytes())).take_while(|(a, b)| a == b).count();
+        self.place_in_file(path, at).map(|(id, _)| id)
+    }
+
     pub fn file_base(&self, path: &Path) -> Option<FileBase> {
         let synced = self.synced.get(path)?;
         Some(FileBase {

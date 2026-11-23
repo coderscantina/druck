@@ -90,6 +90,13 @@ const RULES: &[(&str, Category)] = &[
     ("punctuation", Category::Punctuation),
 ];
 
+/// Rust's grammar gives its primitive types and `Self` the scope of `let` and `const`, `storage.type.rust`, so there the
+/// word tells a type from a keyword.
+const RUST_PRIMITIVES: &[&str] = &[
+    "bool", "char", "str", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+    "f32", "f64", "Self",
+];
+
 /// Language names that are not a name or file extension in the syntax set.
 const ALIASES: &[(&str, &str)] = &[
     ("shell", "sh"),
@@ -154,6 +161,7 @@ pub fn highlight(language: &str, lines: &[String]) -> Option<Vec<Vec<Span>>> {
     if syntax.name == "Plain Text" {
         return None;
     }
+    let rust = syntax.name == "Rust";
 
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -167,6 +175,10 @@ pub fn highlight(language: &str, lines: &[String]) -> Option<Vec<Vec<Span>>> {
         for (at, op) in ops.iter().chain([&(text.len(), ScopeStackOp::Noop)]) {
             let end = (*at).min(line.len());
             if let (Some(category), true) = (category, start < end) {
+                let category = match category {
+                    Category::Keyword if rust && RUST_PRIMITIVES.contains(&&line[start..end]) => Category::Type,
+                    other => other,
+                };
                 match spans.last_mut() {
                     Some((range, last)) if *last == category && range.end == start => range.end = end,
                     _ => spans.push((start..end, category)),
@@ -208,6 +220,23 @@ mod tests {
             ("Vec", "type"),
             ("42", "number"),
             ("\"hi\"", "string"),
+        ] {
+            assert!(found.contains(&expected), "{expected:?} missing from {found:?}");
+        }
+    }
+
+    #[test]
+    fn rusts_primitive_types_and_self_are_types_and_let_a_keyword() {
+        let code = lines("fn new(x: f64) -> Self { let n: u8 = 1; const C: bool = true; }");
+        let spans = highlight("rust", &code).expect("rust is known");
+        let found = tokens(&code[0], &spans[0]);
+        for expected in [
+            ("f64", "type"),
+            ("Self", "type"),
+            ("u8", "type"),
+            ("bool", "type"),
+            ("let", "keyword"),
+            ("const", "keyword"),
         ] {
             assert!(found.contains(&expected), "{expected:?} missing from {found:?}");
         }

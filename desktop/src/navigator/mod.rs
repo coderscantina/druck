@@ -15,6 +15,7 @@ mod strings;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use druck::output::PageTitles;
 use gpui::prelude::*;
 use gpui::{
     App, Context, FocusHandle, Focusable, KeyBinding, MouseButton, SharedString, Subscription, Task, WeakEntity,
@@ -129,7 +130,8 @@ pub struct Navigator {
     focus: FocusHandle,
     book: Rc<Book>,
     /// The session's revision and the open chapter's that `book` was read at.
-    read_at: Option<(u64, u64)>,
+    /// The revisions the book was read at, and the made pages' titles a layout gave, which name rows too.
+    read_at: Option<(u64, u64, Option<PageTitles>)>,
     place: Option<Place>,
     /// Where the caret is in the open chapter.
     caret: usize,
@@ -193,8 +195,12 @@ impl Navigator {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let session = self.parts.editor.read(cx).session();
         let active = session.active();
-        let key = (session.revision(), session.buffer(active).revision());
-        if self.read_at != Some(key) {
+        let key = (
+            session.revision(),
+            session.buffer(active).revision(),
+            session.page_titles().cloned(),
+        );
+        if self.read_at.as_ref() != Some(&key) {
             self.book = Rc::new(Book::read(session));
             self.read_at = Some(key);
             self.book_changed();
