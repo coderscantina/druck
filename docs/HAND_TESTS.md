@@ -51,7 +51,7 @@ Japanese, then German dead keys (`¨` + `a`, `´` + `e`). Composition shows in p
 ## 5. Menus and quitting
 
 - [ ] The menu bar in English and German: the Insert menu, "Check for updates…" (only in a bundle with Sparkle), and "Report a problem…".
-- [ ] "Report a problem…" opens the browser on a prefilled issue and shows `druck.log` in the Finder. Send nothing.
+- [ ] "Report a problem…" opens the browser on an issue prefilled with the versions only, no log lines, and shows `druck.log` in the Finder. Send nothing.
 - [ ] `Cmd+Q` right after an alert, with the real keyboard.
 
 ## 6. Dialogs
