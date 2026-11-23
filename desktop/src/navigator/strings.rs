@@ -2,7 +2,7 @@
 
 crate::strings! {
     pub enum Key {
-        FrontMatter => ("Front matter", "Vorspann"),
+        FrontMatter => ("Front matter", "Titelei"),
         BackMatter => ("Back matter", "Anhang"),
         Chapters => ("Chapters", "Kapitel"),
         BeforeParts => ("Before the parts", "Vor den Teilen"),

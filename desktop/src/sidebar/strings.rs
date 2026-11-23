@@ -8,8 +8,8 @@ crate::strings! {
         Research => ("Research", "Recherche"),
         Passes => ("Passes", "Durchgänge"),
 
-        NewSection => ("New section", "Neuer Abschnitt"),
-        Details => ("Details", "Angaben"),
+        NewSection => ("New section", "Abschnitt hinzufügen"),
+        Details => ("Details", "Buchdaten"),
         CloseDialog => ("Close", "Schließen"),
         TheContents => ("Contents", "Inhalt"),
         EditSection => ("Edit \"{title}\"", "\u{201e}{title}\u{201c} bearbeiten"),
@@ -27,6 +27,6 @@ crate::strings! {
         AddPage => ("Add a page", "Seite hinzufügen"),
         PlacedWhereBooksHaveIt => ("Druck puts it where books have it.", "Druck setzt sie, wo Bücher sie haben."),
         DragToMove => (" Drag it in the list to move it.", " Zum Verschieben in der Liste ziehen."),
-        OtherSections => ("New section", "Neuer Abschnitt"),
+        OtherSections => ("New section", "Abschnitt hinzufügen"),
     }
 }

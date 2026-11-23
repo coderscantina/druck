@@ -28,11 +28,11 @@ crate::strings! {
         ModelDefault => ("Default", "Standard"),
         Placeholder => ("Ask about the book\u{2026}", "Frag etwas zum Buch\u{2026}"),
         Send => ("Send", "Senden"),
-        Stop => ("Stop", "Stopp"),
+        Stop => ("Stop", "Anhalten"),
         Checking => ("Looking for {cli}\u{2026}", "Suche nach {cli}\u{2026}"),
         Stopped => ("Stopped.", "Angehalten."),
         Working => ("Working\u{2026}", "Arbeitet\u{2026}"),
-        Stopping => ("Stopping\u{2026}", "Halte an\u{2026}"),
+        Stopping => ("Stopping\u{2026}", "Wird angehalten\u{2026}"),
         Resumed => (
             "This project has an earlier conversation. {cli} keeps it, so the next prompt continues it.",
             "Dieses Projekt hat eine frühere Unterhaltung. {cli} bewahrt sie auf, der nächste Prompt setzt sie fort."

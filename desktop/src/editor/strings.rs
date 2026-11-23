@@ -69,7 +69,7 @@ crate::strings! {
         Todo => ("To-do note", "Offener Punkt"),
         Comment => ("Comment", "Kommentar"),
         NewSection => ("New section", "Neuer Abschnitt"),
-        AddToWords => ("Add to the project's words", "Zu den Wörtern des Projekts"),
+        AddToWords => ("Add to the project's words", "Zu den Wörtern des Projekts hinzufügen"),
         NotesRefused => (
             "A note cannot hold -->, which would end it.",
             "Eine Notiz kann --> nicht enthalten, das würde sie beenden."
@@ -87,9 +87,9 @@ crate::strings! {
         PlaceholderFootnote => ("Footnote text.", "Text der Fußnote."),
         SectionMade => ("Pages Druck makes", "Seiten, die Druck macht"),
         SectionOnThePage => ("On the page", "Auf der Seite"),
-        AboutToc => ("Your chapters with their page numbers", "Deine Kapitel mit ihren Seitenzahlen"),
+        AboutToc => ("Your chapters with their page numbers", "Die Kapitel mit ihren Seitenzahlen"),
         AboutIndex => ("Every word you marked, with its pages", "Jedes markierte Wort mit seinen Seiten"),
-        AboutBibliography => ("The works you cite", "Die Werke, die du zitierst"),
+        AboutBibliography => ("The works you cite", "Die zitierten Werke"),
         AboutPageBreak => ("What follows starts on a fresh page", "Was folgt, beginnt auf einer neuen Seite"),
         AboutBottom => ("Sits at the bottom, like a copyright note", "Steht unten, wie ein Copyright-Vermerk"),
         AboutKeep => ("Never split across two pages", "Nie auf zwei Seiten geteilt"),

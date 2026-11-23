@@ -4,13 +4,13 @@ crate::strings! {
     pub enum Key {
         NotAThemeName => (
             "\"{name}\" is not a theme name: use letters, digits, hyphens, and underscores",
-            "\"{name}\" ist kein Theme-Name: erlaubt sind Buchstaben, Ziffern, Binde- und Unterstriche"
+            "\u{201e}{name}\u{201c} ist kein Theme-Name: erlaubt sind Buchstaben, Ziffern, Binde- und Unterstriche"
         ),
-        ThemeExists => ("a theme named \"{name}\" already exists", "ein Theme namens \"{name}\" gibt es schon"),
-        NoSharedTheme => ("no shared theme named \"{name}\"", "kein gemeinsames Theme namens \"{name}\""),
+        ThemeExists => ("a theme named \"{name}\" already exists", "ein Theme namens \u{201e}{name}\u{201c} gibt es schon"),
+        NoSharedTheme => ("no shared theme named \"{name}\"", "kein gemeinsames Theme namens \u{201e}{name}\u{201c}"),
         ProjectHasTheme => (
             "the project already has a theme named \"{name}\"",
-            "das Projekt hat schon ein Theme namens \"{name}\""
+            "das Projekt hat schon ein Theme namens \u{201e}{name}\u{201c}"
         ),
         NoProject => ("there is no project to copy the theme into", "es gibt kein Projekt, in das sich das Theme kopieren lässt"),
         CannotCreate => ("cannot create {path}: {error}", "{path} lässt sich nicht anlegen: {error}"),
@@ -24,11 +24,11 @@ crate::strings! {
             "{path} is not an OpenType or TrueType font",
             "{path} ist keine OpenType- oder TrueType-Schrift"
         ),
-        StyleExists => ("a style named \"{name}\" already exists", "einen Stil namens \"{name}\" gibt es schon"),
-        TokenExists => ("a token named \"{name}\" already exists", "ein Token namens \"{name}\" gibt es schon"),
+        StyleExists => ("a style named \"{name}\" already exists", "einen Stil namens \u{201e}{name}\u{201c} gibt es schon"),
+        TokenExists => ("a token named \"{name}\" already exists", "ein Token namens \u{201e}{name}\u{201c} gibt es schon"),
         NotATokenName => (
             "\"{name}\" is not a token name: use letters, digits, and hyphens",
-            "\"{name}\" ist kein Token-Name: erlaubt sind Buchstaben, Ziffern und Bindestriche"
+            "\u{201e}{name}\u{201c} ist kein Token-Name: erlaubt sind Buchstaben, Ziffern und Bindestriche"
         ),
     }
 }
