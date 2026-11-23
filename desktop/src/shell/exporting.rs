@@ -253,6 +253,7 @@ impl Hub {
                     Target::Pdf => "PDF".to_owned(),
                     Target::Epub => "EPUB".to_owned(),
                 };
+                crate::report::error(&format!("export {name} failed with {} errors", errors.len()));
                 self.exports.failure = Some((name, errors));
                 let preview = self.parts.preview.read(cx);
                 self.exports.failed_with = Some(seen(preview.diagnostics(), preview.warnings()));

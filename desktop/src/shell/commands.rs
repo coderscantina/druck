@@ -14,6 +14,7 @@ use crate::editor::{
 };
 use crate::material::{JumpToMaterial, ShowLibrary, ToggleMaterial};
 use crate::persist::ShowKeptCopies;
+use crate::report::ReportProblem;
 use crate::versions::{ShowCommitCard, ShowGitPanel, ShowTimeline};
 use crate::workspace::{NewSection, ShowPublish, ShowWrite, ZoomIn, ZoomOut, ZoomReset};
 
@@ -137,6 +138,7 @@ pub fn all() -> Vec<Command> {
         command(Key::ClearRecent, Anywhere, ClearRecent),
         command(Key::About, Anywhere, About),
         command(Key::HelpWeb, Anywhere, OpenHelp),
+        command(Key::ReportProblem, Anywhere, ReportProblem),
         command(Key::HideApp, Anywhere, HideApp),
         command(Key::HideOthers, Anywhere, HideOthers),
         command(Key::Minimize, Anywhere, MinimizeWindow),

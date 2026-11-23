@@ -34,6 +34,7 @@ use self::watch::{Ready, Signal, Waiting, Watcher};
 use crate::a11y::Control as _;
 use crate::editor::{EditorView, ExternalUndo, SaveRequested, SessionChanged, TextChanged};
 use crate::inspector::{InspectorView, ThemeModel, ThemeSwitched};
+use crate::report::strings::Key as ReportKey;
 use crate::session::disk::Outgoing;
 use crate::session::{Kind, Session};
 use crate::tokens::{self, Tokens};
@@ -158,6 +159,8 @@ pub struct PersistView {
     note: Option<SharedString>,
     /// A kept copy the note is about, which Show in Finder shows.
     note_file: Option<PathBuf>,
+    /// The last run ended in a panic, and the foot offers the report until the author answers.
+    panic_notice: bool,
     note_task: Task<()>,
     gone_task: Option<Task<()>>,
     /// A Git command is moving the files, and what they hold now is not for taking in yet.
@@ -287,6 +290,7 @@ impl PersistView {
             theme,
             note: None,
             note_file: None,
+            panic_notice: crate::report::take_panic_notice(),
             note_task: Task::ready(()),
             gone_task: None,
             holding_outside: false,
@@ -1119,6 +1123,36 @@ impl Render for PersistView {
                 .text_color(tokens.text_quiet)
                 .child(div().min_w_0().truncate().child(note.clone()))
                 .children(reveal)
+                .into_any_element();
+        }
+        if self.panic_notice {
+            let link = |id: &'static str, label: ReportKey, text: gpui::Rgba| {
+                div()
+                    .id(id)
+                    .control(&tokens, gpui::Role::Button, crate::t!(label))
+                    .flex_none()
+                    .cursor_pointer()
+                    .text_color(text)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(crate::t!(label))
+            };
+            let report =
+                link("report-panic", ReportKey::Report, tokens.text).on_click(cx.listener(|view, _, _, cx| {
+                    view.panic_notice = false;
+                    crate::report::open(cx);
+                    cx.notify();
+                }));
+            let dismiss =
+                link("dismiss-panic", ReportKey::Dismiss, tokens.text_quiet).on_click(cx.listener(|view, _, _, cx| {
+                    view.panic_notice = false;
+                    cx.notify();
+                }));
+            return root
+                .flex_1()
+                .text_color(tokens.text_quiet)
+                .child(div().min_w_0().truncate().child(crate::t!(ReportKey::Panicked)))
+                .child(report)
+                .child(dismiss)
                 .into_any_element();
         }
         // All is well, so there is nothing to say.

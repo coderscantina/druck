@@ -194,6 +194,7 @@ impl Conversation {
 
     /// Something went wrong before the CLI could be asked: a missing program, a closed pipe.
     pub fn fail(&mut self, message: String) {
+        crate::report::error(&format!("agent: {message}"));
         self.entries.push(Entry::Error(message));
         self.status = Status::Idle;
         self.approvals.clear();
@@ -320,7 +321,10 @@ impl Conversation {
                     effects.push(Effect::SessionId(session_id));
                 }
             }
-            Event::Error(message) => self.entries.push(Entry::Error(message)),
+            Event::Error(message) => {
+                crate::report::error(&format!("agent: {message}"));
+                self.entries.push(Entry::Error(message));
+            }
             Event::Exited(stderr) => {
                 self.status = Status::Idle;
                 self.approvals.clear();
