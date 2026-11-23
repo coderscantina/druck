@@ -112,7 +112,9 @@ Not verified: veraPDF on the patched catalog (not installed), the Linux memory m
 
 Follow-ups from wave 1: the app's placeholder chips still treat page placeholders as open and ignore `meta.reading-speed`; the app should read `Layout::contents_depth` and `Layout::page_titles` (wave 2). A `{pages}` near a page boundary may not settle in 5 passes. After an outside change to a single file the foot named the title page instead of the chapter. The turn summary's diff rows cut long lines from the start. The palette may run past the window's right edge with the Binder open. New pass files list after older ones, not by name. `AUTHORING.md` has no typesetter section, and a table's placement is no fix kind. `f64` and `Self` highlight as keywords in Rust.
 
-Next: CI on the pushed branch, then wave 2.
+Wave 2 built these follow-ups on its own branch, see [the decision](DECISIONS.md#2026-11-23-beta-polish-wave-2-follow-ups). The `{pages}` case did not occur in about 7,000 generated documents, so the loop is unchanged. Not verified on screen: the turn summary's cut rows and a table placement in a real agent turn (unit tests only), and Rust colors in a rendered PDF.
+
+Next: CI on the pushed branch, then the rest of wave 2.
 
 ### Special pages note
 

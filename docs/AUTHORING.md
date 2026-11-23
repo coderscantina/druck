@@ -1099,6 +1099,23 @@ The consistency pass records what it decides in `passes/style-sheet.md`, one lin
 
 Every later pass reads this file and follows it. Change a line, add your own, or write the file before the first run to set the rules yourself. Other text in the file is left as you wrote it.
 
+### Fixing the proof
+
+The pages of a book break some [typesetting rules](#typesetting-warnings), and the Proof tab in Publish lists each warning. With the agent on, "Fix the proof" in that tab or the palette asks the agent for fixes. It changes no words and writes nothing: it tries each fix on a copy of the book and keeps the ones that help, for you to review. Unsaved text is saved before it starts.
+
+A fix is one of these:
+
+- a page break before a block, `::: page-break`
+- a keep around a block, `::: keep`, so it is not split across pages
+- the [placement](#placement) of a figure or a table: top or bottom of its page, or where it is written
+- one book-wide theme value: `typesetting.hyphen-fragments`, `styles.<style>.tracking` within 0.02 em of zero, or `styles.<style>.hyphenate`
+
+There is no setting for a single paragraph, and a fix never lowers a limit a warning is measured against, such as `typesetting.heading-lines`, since that would clear warnings without moving a line.
+
+A directive is kept when it clears at least one warning and causes none. A theme value changes every page, so it is weighed: it is kept when it clears more warnings than it causes, and its entry names both counts and the pages of the new warnings. A break after which every page starts where it did moved nothing and is not kept. "Clears 3 warnings" counts those a page break excuses too, and says how many of them are on the page the break ends, since that page may still end short.
+
+Kept fixes wait in a queue above the list, each with the page before and after. Accept writes one, Reject drops it, and Accept all and Reject all do the whole queue. Nothing is written before Accept, an accepted directive is one undo step in its chapter, and local history is labelled before the first one. After each Accept or Reject, and after any change to the theme, the fixes left are tried again on the book as it is then, so what an entry says is what accepting it does now. A new run waits until the queue is empty.
+
 ### Setting up the agent
 
 Druck runs an agent program that is installed on your computer: Claude Code or Codex. Settings, Agent, "Agent program" chooses which. Druck holds no keys and handles no login.
