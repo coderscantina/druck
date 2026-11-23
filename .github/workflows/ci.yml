@@ -75,8 +75,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked
+      # 100 pages in under 2 s and 150 MB. Ignored in debug builds, so it runs here, on the release profile.
+      - name: Performance limits
+        run: cargo test --release --locked --test performance -- --nocapture
       - name: Render samples
         run: scripts/render-samples.sh target/release/druck "$RUNNER_TEMP/pdfs"
+      # The offline check blocks the binary with a Windows Firewall rule, which
+      # denies nothing while the firewall is off. The runner is thrown away after.
+      - name: Turn on Windows Firewall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+      - name: Render offline
+        if: runner.os == 'Windows'
+        run: scripts/check-offline.sh target/release/druck
       - uses: actions/upload-artifact@v4
         with:
           name: pdfs-${{ matrix.os }}
