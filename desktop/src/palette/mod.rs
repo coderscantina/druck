@@ -38,6 +38,11 @@ fn open(kind: Kind, cx: &mut App) {
     Current::<Palette>::defer(cx, move |palette, window, cx| palette.open(kind, window, cx));
 }
 
+/// Whether the palette is open, so what floats over the text, such as the selection toolbar, steps aside.
+pub fn is_open(cx: &App) -> bool {
+    Current::<Palette>::view(cx).is_some_and(|palette| palette.read(cx).kind.is_some())
+}
+
 /// Mounts the palette as a layer over the window.
 pub fn mount(parts: &Parts, slots: &mut Slots, window: &mut Window, cx: &mut Context<Workspace>) {
     let workspace = cx.entity().downgrade();
@@ -172,6 +177,7 @@ impl Palette {
         self.input.read(cx).focus_handle(cx).focus(window, cx);
         self.filter(cx);
         self.select_active_chapter(cx);
+        self.parts.editor.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
 
@@ -188,6 +194,7 @@ impl Palette {
                 }
             }
         }
+        self.parts.editor.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
 
@@ -197,6 +204,7 @@ impl Palette {
         let files = (contents.not_in_book.iter())
             .chain(&contents.notes)
             .chain(&contents.research)
+            .chain(&contents.passes)
             .map(|row| (row, true));
         in_book
             .chain(files)

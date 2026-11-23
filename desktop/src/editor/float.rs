@@ -1383,6 +1383,7 @@ impl EditorView {
                 }
                 if let Some(target) = Self::selection_box(selection)
                     && self.toolbar_wanted()
+                    && !crate::palette::is_open(cx)
                 {
                     // Inside the text column, so it never stands over the margin.
                     let column = Rect {
