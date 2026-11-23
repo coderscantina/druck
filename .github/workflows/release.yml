@@ -213,4 +213,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           awk '/^## /{n++; next} n==1' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "Druck $GITHUB_REF_NAME" --notes-file notes.md
+          # A rerun of the whole workflow finds the release made the first time and replaces its files.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "Druck $GITHUB_REF_NAME" --notes-file notes.md
+          fi
